@@ -135,3 +135,23 @@ export function unresolveComment(
     return match;
   });
 }
+
+export function editComment(
+  rawMarkdown: string,
+  commentId: string,
+  newText: string
+): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.id === commentId) {
+        data.text = newText;
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}

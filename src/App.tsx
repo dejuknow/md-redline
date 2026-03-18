@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
-import { parseComments, insertComment, removeComment, resolveComment, unresolveComment } from './lib/comment-parser';
+import { parseComments, insertComment, removeComment, resolveComment, unresolveComment, editComment } from './lib/comment-parser';
 import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { CommentSidebar } from './components/CommentSidebar';
@@ -119,6 +119,13 @@ export default function App() {
       if (activeCommentId === id) setActiveCommentId(null);
     },
     [rawMarkdown, updateAndSave, activeCommentId]
+  );
+
+  const handleEdit = useCallback(
+    (id: string, newText: string) => {
+      updateAndSave(editComment(rawMarkdown, id, newText));
+    },
+    [rawMarkdown, updateAndSave]
   );
 
   const handleHighlightClick = useCallback(
@@ -316,6 +323,7 @@ export default function App() {
                   onResolve={handleResolve}
                   onUnresolve={handleUnresolve}
                   onDelete={handleDelete}
+                  onEdit={handleEdit}
                 />
               </div>
             </div>
