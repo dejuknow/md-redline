@@ -8,6 +8,7 @@ import { CommentSidebar } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { FileBrowser } from './components/FileBrowser';
+import { useRecentFiles } from './hooks/useRecentFiles';
 
 export default function App() {
   const {
@@ -25,6 +26,7 @@ export default function App() {
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [inputPath, setInputPath] = useState('');
+  const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,9 +63,10 @@ export default function App() {
       if (path.trim()) {
         setInputPath(path);
         loadFile(path.trim());
+        addRecentFile(path.trim());
       }
     },
-    [loadFile]
+    [loadFile, addRecentFile]
   );
 
   const handleChangeFile = useCallback(() => {
@@ -180,6 +183,39 @@ export default function App() {
 
             {error && (
               <p className="mt-2 text-sm text-red-500">{error}</p>
+            )}
+
+            {/* Recent files */}
+            {recentFiles.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-slate-500">
+                    Recent files
+                  </p>
+                  <button
+                    onClick={clearRecentFiles}
+                    className="text-xs text-slate-400 hover:text-red-500 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {recentFiles.map((file) => (
+                    <button
+                      key={file.path}
+                      onClick={() => handleOpenFile(file.path)}
+                      className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-indigo-50 transition-colors group"
+                    >
+                      <span className="font-medium text-slate-700 group-hover:text-indigo-600">
+                        {file.name}
+                      </span>
+                      <span className="block text-xs text-slate-400 truncate">
+                        {file.path}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* File browser */}
