@@ -210,7 +210,10 @@ export default function App() {
         isLoading={isLoading}
         commentCount={comments.filter((c) => !c.resolved).length}
         viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        onViewModeChange={(mode) => {
+          setViewMode(mode);
+          if (mode === 'raw') clearSelection();
+        }}
         onReload={reloadFile}
         onChangeFile={handleChangeFile}
       />
@@ -254,8 +257,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Floating comment form */}
-      {selection && (
+      {/* Floating comment form (disabled in raw view) */}
+      {selection && viewMode === 'rendered' && (
         <CommentForm
           selection={selection}
           onSubmit={handleAddComment}
