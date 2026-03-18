@@ -1,0 +1,50 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Comment highlight styles */
+mark.comment-highlight {
+  background-color: #fef3c7;
+  border-bottom: 2px solid #f59e0b;
+  padding: 1px 0;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background-color 0.15s ease;
+}
+
+mark.comment-highlight:hover {
+  background-color: #fde68a;
+}
+
+mark.comment-highlight-active {
+  background-color: #fde68a;
+  border-bottom-color: #d97706;
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.3);
+}
+
+/* Smooth scrolling for the viewer */
+.overflow-y-auto {
+  scroll-behavior: smooth;
+}
+
+/* Pending selection highlight (applied in useLayoutEffect alongside comment highlights) */
+mark.selection-highlight {
+  background-color: #dbeafe;
+  border-radius: 2px;
+  padding: 1px 0;
+}
+
+/* Browser native selection color while actively dragging */
+::selection {
+  background-color: #c7d2fe;
+  color: inherit;
+}
+
+/* Textarea focus reset */
+textarea:focus {
+  outline: none;
+}
+
+/* Reset body margin */
+body {
+  margin: 0;
+}
