@@ -5,7 +5,6 @@ interface Props {
   isLoading: boolean;
   commentCount: number;
   onReload: () => void;
-  onChangeFile: () => void;
 }
 
 export function Toolbar({
@@ -15,7 +14,6 @@ export function Toolbar({
   isLoading,
   commentCount,
   onReload,
-  onChangeFile,
 }: Props) {
   const fileName = filePath.split('/').pop() || filePath;
 
@@ -76,15 +74,6 @@ export function Toolbar({
             Saved {lastSaved.toLocaleTimeString()}
           </span>
         )}
-
-        {/* Open file button */}
-        <button
-          onClick={onChangeFile}
-          className="text-xs px-2.5 py-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors font-medium"
-          title="Open a different file"
-        >
-          Open file
-        </button>
 
         {/* Reload button */}
         <button
