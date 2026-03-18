@@ -1,9 +1,13 @@
+export type ViewMode = 'rendered' | 'raw';
+
 interface Props {
   filePath: string;
   lastSaved: Date | null;
   error: string | null;
   isLoading: boolean;
   commentCount: number;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
   onReload: () => void;
   onChangeFile: () => void;
 }
@@ -14,6 +18,8 @@ export function Toolbar({
   error,
   isLoading,
   commentCount,
+  viewMode,
+  onViewModeChange,
   onReload,
   onChangeFile,
 }: Props) {
@@ -76,6 +82,32 @@ export function Toolbar({
             Saved {lastSaved.toLocaleTimeString()}
           </span>
         )}
+
+        {/* View mode toggle */}
+        <div className="flex items-center bg-slate-100 rounded-md p-0.5">
+          <button
+            onClick={() => onViewModeChange('rendered')}
+            className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
+              viewMode === 'rendered'
+                ? 'bg-white text-slate-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+            title="Rendered view"
+          >
+            Rendered
+          </button>
+          <button
+            onClick={() => onViewModeChange('raw')}
+            className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
+              viewMode === 'raw'
+                ? 'bg-white text-slate-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+            title="Raw markdown"
+          >
+            Raw
+          </button>
+        </div>
 
         {/* Open file button */}
         <button

@@ -6,7 +6,7 @@ import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { CommentSidebar } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
-import { Toolbar } from './components/Toolbar';
+import { Toolbar, type ViewMode } from './components/Toolbar';
 import { FileBrowser } from './components/FileBrowser';
 
 export default function App() {
@@ -25,6 +25,7 @@ export default function App() {
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [inputPath, setInputPath] = useState('');
+  const [viewMode, setViewMode] = useState<ViewMode>('rendered');
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -208,6 +209,8 @@ export default function App() {
         error={error}
         isLoading={isLoading}
         commentCount={comments.filter((c) => !c.resolved).length}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
         onReload={reloadFile}
         onChangeFile={handleChangeFile}
       />
@@ -216,14 +219,18 @@ export default function App() {
         {/* Markdown viewer */}
         <div ref={containerRef} className="flex-1 overflow-y-auto px-8 py-6 lg:px-12 xl:px-16">
           <div className="max-w-3xl mx-auto">
-            <MarkdownViewer
-              ref={viewerRef}
-              html={html}
-              comments={comments}
-              activeCommentId={activeCommentId}
-              selectionText={selection?.text ?? null}
-              onHighlightClick={handleHighlightClick}
-            />
+            {viewMode === 'raw' ? (
+              <pre className="text-sm text-slate-700 whitespace-pre-wrap break-words font-mono leading-relaxed">{rawMarkdown}</pre>
+            ) : (
+              <MarkdownViewer
+                ref={viewerRef}
+                html={html}
+                comments={comments}
+                activeCommentId={activeCommentId}
+                selectionText={selection?.text ?? null}
+                onHighlightClick={handleHighlightClick}
+              />
+            )}
           </div>
         </div>
 
