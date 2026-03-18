@@ -7,7 +7,7 @@ import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { CommentSidebar } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
-import { Toolbar } from './components/Toolbar';
+import { Toolbar, type ViewMode } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
 import { FileBrowser } from './components/FileBrowser';
 
@@ -32,6 +32,7 @@ export default function App() {
   const [inputPath, setInputPath] = useState('');
   const [showBrowser, setShowBrowser] = useState(false);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
+  const [viewMode, setViewMode] = useState<ViewMode>('rendered');
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -260,6 +261,11 @@ export default function App() {
         error={error}
         isLoading={isLoading}
         commentCount={comments.filter((c) => !c.resolved).length}
+        viewMode={viewMode}
+        onViewModeChange={(mode) => {
+          setViewMode(mode);
+          if (mode === 'raw') clearSelection();
+        }}
         onReload={reloadFile}
       />
       <TabBar
@@ -280,14 +286,18 @@ export default function App() {
             {/* Markdown viewer */}
             <div ref={containerRef} className="flex-1 overflow-y-auto px-8 py-6 lg:px-12 xl:px-16">
               <div className="max-w-3xl mx-auto">
-                <MarkdownViewer
-                  ref={viewerRef}
-                  html={html}
-                  comments={comments}
-                  activeCommentId={activeCommentId}
-                  selectionText={selection?.text ?? null}
-                  onHighlightClick={handleHighlightClick}
-                />
+                {viewMode === 'raw' ? (
+                  <pre className="text-sm text-slate-700 whitespace-pre-wrap break-words font-mono leading-relaxed">{rawMarkdown}</pre>
+                ) : (
+                  <MarkdownViewer
+                    ref={viewerRef}
+                    html={html}
+                    comments={comments}
+                    activeCommentId={activeCommentId}
+                    selectionText={selection?.text ?? null}
+                    onHighlightClick={handleHighlightClick}
+                  />
+                )}
               </div>
             </div>
 
@@ -311,8 +321,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Floating comment form */}
-          {selection && (
+          {/* Floating comment form (disabled in raw view) */}
+          {selection && viewMode === 'rendered' && (
             <CommentForm
               selection={selection}
               onSubmit={handleAddComment}

@@ -1,9 +1,13 @@
+export type ViewMode = 'rendered' | 'raw';
+
 interface Props {
   filePath: string;
   lastSaved: Date | null;
   error: string | null;
   isLoading: boolean;
   commentCount: number;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
   onReload: () => void;
 }
 
@@ -13,6 +17,8 @@ export function Toolbar({
   error,
   isLoading,
   commentCount,
+  viewMode,
+  onViewModeChange,
   onReload,
 }: Props) {
   const fileName = filePath.split('/').pop() || filePath;
@@ -74,6 +80,21 @@ export function Toolbar({
             Saved {lastSaved.toLocaleTimeString()}
           </span>
         )}
+
+        {/* Raw markdown toggle */}
+        <button
+          onClick={() => onViewModeChange(viewMode === 'raw' ? 'rendered' : 'raw')}
+          className={`p-1 rounded transition-colors ${
+            viewMode === 'raw'
+              ? 'text-indigo-600 bg-indigo-50'
+              : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+          }`}
+          title={viewMode === 'raw' ? 'Switch to rendered view' : 'View raw markdown'}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+          </svg>
+        </button>
 
         {/* Reload button */}
         <button
