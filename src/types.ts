@@ -5,6 +5,8 @@ export interface MdComment {
   author: string;
   timestamp: string;
   resolved: boolean;
+  /** Character offset of the anchor's start position in the clean markdown. Computed at parse time, not stored in the file. */
+  cleanOffset?: number;
 }
 
 export interface ParseResult {
