@@ -71,11 +71,39 @@ export function insertComment(
   // Find the anchor text in the CLEAN markdown (no comment markers),
   // then map the position back to the raw markdown.
   const { cleanMarkdown, cleanToRawOffset } = parseComments(rawMarkdown);
+
+  let insertionCleanOffset: number | null = null;
+
+  // Try exact match first
   const cleanIdx = cleanMarkdown.indexOf(anchor);
-  if (cleanIdx === -1) return rawMarkdown;
+  if (cleanIdx !== -1) {
+    insertionCleanOffset = cleanIdx + anchor.length;
+  } else {
+    // Flexible match for cross-element selections: the anchor (from rendered text)
+    // may contain newlines between block elements, while the markdown source has
+    // syntax chars (e.g. "# ") and different whitespace. Split anchor by newlines
+    // and find each segment in order within the clean markdown.
+    const segments = anchor.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    if (segments.length > 0) {
+      let searchFrom = 0;
+      let lastEnd = -1;
+      let allFound = true;
+      for (const segment of segments) {
+        const idx = cleanMarkdown.indexOf(segment, searchFrom);
+        if (idx === -1) { allFound = false; break; }
+        lastEnd = idx + segment.length;
+        searchFrom = lastEnd;
+      }
+      if (allFound && lastEnd !== -1) {
+        insertionCleanOffset = lastEnd;
+      }
+    }
+  }
+
+  if (insertionCleanOffset === null) return rawMarkdown;
 
   // Insert right after the anchor text in the raw markdown
-  const rawInsertionPoint = cleanToRawOffset(cleanIdx + anchor.length);
+  const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
   return (
