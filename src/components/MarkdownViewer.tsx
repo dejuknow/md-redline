@@ -174,6 +174,10 @@ function wrapText(
   // Wrap matched portions — process in reverse to avoid invalidating earlier nodes
   for (let i = wraps.length - 1; i >= 0; i--) {
     const { node: tn, start, end } = wraps[i];
+    // Skip whitespace-only portions (e.g. newline nodes between block elements)
+    // — wrapping these creates visible styled blocks that cause layout shifts
+    const slice = tn.textContent?.slice(start, end) || '';
+    if (!slice.trim()) continue;
     const range = document.createRange();
     range.setStart(tn, start);
     range.setEnd(tn, end);
