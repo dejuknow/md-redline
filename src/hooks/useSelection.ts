@@ -23,6 +23,8 @@ export function useSelection(
       requestAnimationFrame(() => {
         if (lockedRef.current) return;
         if ((e.target as Element)?.closest?.('[data-comment-form]')) return;
+        if ((e.target as Element)?.closest?.('[data-drag-handle]')) return;
+        if (document.body.classList.contains('anchor-dragging')) return;
         if (!containerRef.current) return;
 
         const info = resolveSelection(containerRef.current);

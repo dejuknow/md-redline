@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
-import { parseComments, insertComment, removeComment, resolveComment, unresolveComment, editComment } from './lib/comment-parser';
+import { parseComments, insertComment, removeComment, resolveComment, unresolveComment, editComment, updateCommentAnchor } from './lib/comment-parser';
 import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { CommentSidebar } from './components/CommentSidebar';
@@ -10,6 +10,8 @@ import { CommentForm } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
 import { FileBrowser } from './components/FileBrowser';
+import { DragHandles } from './components/DragHandles';
+import { useDragHandles } from './hooks/useDragHandles';
 
 export default function App() {
   const {
@@ -142,6 +144,25 @@ export default function App() {
     },
     []
   );
+
+  const handleAnchorChange = useCallback(
+    (commentIds: string[], newAnchor: string) => {
+      let newRaw = rawMarkdown;
+      for (const id of commentIds) {
+        newRaw = updateCommentAnchor(newRaw, id, newAnchor);
+      }
+      updateAndSave(newRaw);
+    },
+    [rawMarkdown, updateAndSave]
+  );
+
+  const { handlePositions, onHandleMouseDown } = useDragHandles({
+    viewerRef,
+    scrollContainerRef: containerRef,
+    activeCommentId,
+    comments,
+    onAnchorChange: handleAnchorChange,
+  });
 
   const fileBrowserContent = (
     <div className="w-full max-w-lg">
@@ -291,19 +312,26 @@ export default function App() {
         <>
           <div className="flex-1 flex min-h-0">
             {/* Markdown viewer */}
-            <div ref={containerRef} className="flex-1 overflow-y-auto px-8 py-6 lg:px-12 xl:px-16">
+            <div ref={containerRef} className="flex-1 overflow-y-auto px-8 py-6 lg:px-12 xl:px-16 relative">
               <div className="max-w-3xl mx-auto">
                 {viewMode === 'raw' ? (
                   <pre className="text-sm text-slate-700 whitespace-pre-wrap break-words font-mono leading-relaxed">{rawMarkdown}</pre>
                 ) : (
-                  <MarkdownViewer
-                    ref={viewerRef}
-                    html={html}
-                    comments={comments}
-                    activeCommentId={activeCommentId}
-                    selectionText={selection?.text ?? null}
-                    onHighlightClick={handleHighlightClick}
-                  />
+                  <>
+                    <MarkdownViewer
+                      ref={viewerRef}
+                      html={html}
+                      comments={comments}
+                      activeCommentId={activeCommentId}
+                      selectionText={selection?.text ?? null}
+                      onHighlightClick={handleHighlightClick}
+                    />
+                    <DragHandles
+                      startPos={handlePositions?.start ?? null}
+                      endPos={handlePositions?.end ?? null}
+                      onMouseDown={onHandleMouseDown}
+                    />
+                  </>
                 )}
               </div>
             </div>

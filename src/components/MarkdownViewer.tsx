@@ -12,6 +12,7 @@ interface Props {
 export interface MarkdownViewerHandle {
   getContainer: () => HTMLElement | null;
   scrollToComment: (commentId: string) => void;
+  getActiveMark: () => HTMLElement | null;
 }
 
 // React.memo prevents re-renders from parent state changes (e.g. saveFile → setLastSaved)
@@ -22,6 +23,7 @@ export interface MarkdownViewerHandle {
 export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
   function MarkdownViewer({ html, comments, activeCommentId, selectionText, onHighlightClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const activeMarkRef = useRef<HTMLElement | null>(null);
 
     useImperativeHandle(ref, () => ({
       getContainer: () => containerRef.current,
@@ -33,6 +35,7 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
           mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       },
+      getActiveMark: () => activeMarkRef.current,
     }));
 
     // Apply all highlights after React commits the innerHTML.
@@ -80,6 +83,9 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
           mark.className = 'selection-highlight';
         });
       }
+
+      // Store reference to the active mark for drag handles
+      activeMarkRef.current = container.querySelector('mark.comment-highlight-active') as HTMLElement | null;
     }, [html, comments, activeCommentId, selectionText]);
 
     const handleClick = (e: React.MouseEvent) => {
