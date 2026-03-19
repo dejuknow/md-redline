@@ -4,11 +4,13 @@
 /* Comment highlight styles */
 mark.comment-highlight {
   background-color: #fef3c7;
-  border-bottom: 2px solid #f59e0b;
+  text-decoration: underline 2px #f59e0b;
+  text-underline-offset: 2px;
   padding: 1px 0;
   cursor: pointer;
   border-radius: 2px;
   transition: background-color 0.15s ease;
+  line-height: inherit;
 }
 
 mark.comment-highlight:hover {
@@ -17,7 +19,7 @@ mark.comment-highlight:hover {
 
 mark.comment-highlight-active {
   background-color: #fde68a;
-  border-bottom-color: #d97706;
+  text-decoration-color: #d97706;
   box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.3);
 }
 
@@ -31,6 +33,7 @@ mark.selection-highlight {
   background-color: #dbeafe;
   border-radius: 2px;
   padding: 1px 0;
+  line-height: inherit;
 }
 
 /* Browser native selection color while actively dragging */
