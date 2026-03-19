@@ -117,36 +117,115 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
   }
 ));
 
-/** Find the first occurrence of `text` in the container's text nodes and wrap it in a <mark>. */
+/** Find the first occurrence of `text` in the container's text nodes and wrap it in <mark> elements.
+ *  Handles text that spans multiple DOM elements (e.g. header → paragraph). */
 function wrapText(
   container: HTMLElement,
   text: string,
   configure: (mark: HTMLElement) => void
 ) {
+  // Collect all text nodes, skipping ones already inside marks
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
   let node: Text | null;
-
   while ((node = walker.nextNode() as Text | null)) {
-    // Skip nodes already inside a highlight mark
     if ((node.parentElement as Element)?.closest?.('mark')) continue;
+    textNodes.push(node);
+  }
+  if (textNodes.length === 0) return;
 
-    const nodeText = node.textContent || '';
-    const idx = nodeText.indexOf(text);
-    if (idx === -1) continue;
+  // Build concatenated text with position tracking
+  const nodeInfo: { node: Text; globalStart: number; length: number }[] = [];
+  let pos = 0;
+  for (const tn of textNodes) {
+    const len = tn.textContent?.length || 0;
+    nodeInfo.push({ node: tn, globalStart: pos, length: len });
+    pos += len;
+  }
+  const fullText = textNodes.map(n => n.textContent || '').join('');
 
+  // Find the match — try exact match first, then flexible whitespace match
+  let matchStart: number;
+  let matchEnd: number;
+  const exactIdx = fullText.indexOf(text);
+  if (exactIdx !== -1) {
+    matchStart = exactIdx;
+    matchEnd = exactIdx + text.length;
+  } else {
+    const result = flexibleSearch(fullText, text);
+    if (!result) return;
+    matchStart = result.start;
+    matchEnd = result.end;
+  }
+
+  // Determine which text nodes the match spans and their local offsets
+  const wraps: { node: Text; start: number; end: number }[] = [];
+  for (const info of nodeInfo) {
+    const nodeEnd = info.globalStart + info.length;
+    if (nodeEnd <= matchStart || info.globalStart >= matchEnd) continue;
+    const localStart = Math.max(0, matchStart - info.globalStart);
+    const localEnd = Math.min(info.length, matchEnd - info.globalStart);
+    if (localStart < localEnd) {
+      wraps.push({ node: info.node, start: localStart, end: localEnd });
+    }
+  }
+  if (wraps.length === 0) return;
+
+  // Wrap matched portions — process in reverse to avoid invalidating earlier nodes
+  for (let i = wraps.length - 1; i >= 0; i--) {
+    const { node: tn, start, end } = wraps[i];
+    // Skip whitespace-only portions (e.g. newline nodes between block elements)
+    // — wrapping these creates visible styled blocks that cause layout shifts
+    const slice = tn.textContent?.slice(start, end) || '';
+    if (!slice.trim()) continue;
     const range = document.createRange();
-    range.setStart(node, idx);
-    range.setEnd(node, idx + text.length);
-
+    range.setStart(tn, start);
+    range.setEnd(tn, end);
     const mark = document.createElement('mark');
     configure(mark);
-
     try {
       range.surroundContents(mark);
     } catch {
-      continue;
+      // Skip if wrapping fails
     }
-
-    return; // Only highlight first occurrence
   }
+}
+
+/**
+ * Search for `needle` in `haystack` with flexible whitespace matching.
+ * Whitespace runs in the needle can match zero or more whitespace chars in the haystack,
+ * handling cross-element selections where sel.toString() adds newlines that aren't in text nodes.
+ */
+function flexibleSearch(
+  haystack: string,
+  needle: string
+): { start: number; end: number } | null {
+  const parts = needle.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) {
+    const idx = haystack.indexOf(parts[0]);
+    return idx === -1 ? null : { start: idx, end: idx + parts[0].length };
+  }
+
+  let searchFrom = 0;
+  while (searchFrom < haystack.length) {
+    const firstIdx = haystack.indexOf(parts[0], searchFrom);
+    if (firstIdx === -1) return null;
+
+    let pos = firstIdx + parts[0].length;
+    let matched = true;
+    for (let i = 1; i < parts.length; i++) {
+      // Skip optional whitespace between segments
+      while (pos < haystack.length && /\s/.test(haystack[pos])) pos++;
+      if (haystack.startsWith(parts[i], pos)) {
+        pos += parts[i].length;
+      } else {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return { start: firstIdx, end: pos };
+    searchFrom = firstIdx + 1;
+  }
+  return null;
 }

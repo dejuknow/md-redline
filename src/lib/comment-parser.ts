@@ -71,11 +71,40 @@ export function insertComment(
   // Find the anchor text in the CLEAN markdown (no comment markers),
   // then map the position back to the raw markdown.
   const { cleanMarkdown, cleanToRawOffset } = parseComments(rawMarkdown);
+
+  let insertionCleanOffset: number | null = null;
+
+  // Try exact match first
   const cleanIdx = cleanMarkdown.indexOf(anchor);
-  if (cleanIdx === -1) return rawMarkdown;
+  if (cleanIdx !== -1) {
+    insertionCleanOffset = cleanIdx + anchor.length;
+  }
+
+  // Flexible match for cross-element selections: split anchor by newlines
+  // and tabs (tables use \t between cells in sel.toString()) and find each
+  // segment in order. First try against clean markdown directly, then against
+  // a formatting-stripped version (handles **bold**, *italic*, etc.)
+  if (insertionCleanOffset === null) {
+    const segments = anchor.split(/[\n\t]+/).map(s => s.trim()).filter(Boolean);
+    if (segments.length > 0) {
+      // Try direct segment search in clean markdown
+      insertionCleanOffset = findSegments(cleanMarkdown, segments);
+
+      // If that fails, try in formatting-stripped text and map back
+      if (insertionCleanOffset === null) {
+        const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
+        const plainOffset = findSegments(plain, segments);
+        if (plainOffset !== null) {
+          insertionCleanOffset = toCleanOffset(plainOffset);
+        }
+      }
+    }
+  }
+
+  if (insertionCleanOffset === null) return rawMarkdown;
 
   // Insert right after the anchor text in the raw markdown
-  const rawInsertionPoint = cleanToRawOffset(cleanIdx + anchor.length);
+  const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
   return (
@@ -174,4 +203,84 @@ export function updateCommentAnchor(
     }
     return match;
   });
+}
+
+/** Search for ordered segments in text, return the end offset of the last segment or null. */
+function findSegments(text: string, segments: string[]): number | null {
+  let searchFrom = 0;
+  let lastEnd = -1;
+  for (const segment of segments) {
+    const idx = text.indexOf(segment, searchFrom);
+    if (idx === -1) return null;
+    lastEnd = idx + segment.length;
+    searchFrom = lastEnd;
+  }
+  return lastEnd === -1 ? null : lastEnd;
+}
+
+/**
+ * Strip inline markdown formatting (**, *, __, `, ~~) and block-level markers
+ * (# headings, - lists, 1. lists) to produce plain text that matches rendered output.
+ * Returns a position map to convert plain-text offsets back to clean-markdown offsets.
+ */
+function stripInlineFormatting(md: string): {
+  plain: string;
+  toCleanOffset: (off: number) => number;
+} {
+  const map: number[] = [];
+  let plain = '';
+  let i = 0;
+  const len = md.length;
+  const atLineStart = (pos: number) => pos === 0 || md[pos - 1] === '\n';
+
+  while (i < len) {
+    // Heading markers at line start
+    if (atLineStart(i) && md[i] === '#') {
+      while (i < len && md[i] === '#') i++;
+      if (i < len && md[i] === ' ') i++;
+      continue;
+    }
+
+    // List markers at line start: - item, * item, N. item
+    if (atLineStart(i)) {
+      if ((md[i] === '-' || md[i] === '*') && md[i + 1] === ' ') {
+        i += 2;
+        continue;
+      }
+      if (/\d/.test(md[i])) {
+        let j = i;
+        while (j < len && /\d/.test(md[j])) j++;
+        if (md[j] === '.' && md[j + 1] === ' ') {
+          i = j + 2;
+          continue;
+        }
+      }
+    }
+
+    // Inline formatting: * _ — skip unless flanked by spaces on both sides
+    // (space-flanked * and _ are literal, not formatting)
+    if (md[i] === '*' || md[i] === '_') {
+      const prev = i > 0 ? md[i - 1] : ' ';
+      const next = i < len - 1 ? md[i + 1] : ' ';
+      if (!(/\s/.test(prev) && /\s/.test(next))) {
+        i++;
+        continue;
+      }
+    }
+
+    // Backticks and tildes — always formatting
+    if (md[i] === '`' || md[i] === '~') {
+      i++;
+      continue;
+    }
+
+    map.push(i);
+    plain += md[i];
+    i++;
+  }
+
+  return {
+    plain,
+    toCleanOffset: (off: number) => (off >= map.length ? md.length : map[off]),
+  };
 }
