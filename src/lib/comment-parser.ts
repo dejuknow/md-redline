@@ -81,10 +81,11 @@ export function insertComment(
   }
 
   // Flexible match for cross-element selections: split anchor by newlines
-  // and find each segment in order. First try against clean markdown directly,
-  // then against a formatting-stripped version (handles **bold**, *italic*, etc.)
+  // and tabs (tables use \t between cells in sel.toString()) and find each
+  // segment in order. First try against clean markdown directly, then against
+  // a formatting-stripped version (handles **bold**, *italic*, etc.)
   if (insertionCleanOffset === null) {
-    const segments = anchor.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    const segments = anchor.split(/[\n\t]+/).map(s => s.trim()).filter(Boolean);
     if (segments.length > 0) {
       // Try direct segment search in clean markdown
       insertionCleanOffset = findSegments(cleanMarkdown, segments);
