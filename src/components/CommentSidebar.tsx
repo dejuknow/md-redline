@@ -9,6 +9,7 @@ interface Props {
   onResolve: (id: string) => void;
   onUnresolve: (id: string) => void;
   onDelete: (id: string) => void;
+  onEdit: (id: string, newText: string) => void;
 }
 
 export function CommentSidebar({
@@ -18,6 +19,7 @@ export function CommentSidebar({
   onResolve,
   onUnresolve,
   onDelete,
+  onEdit,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +72,7 @@ export function CommentSidebar({
               onResolve={onResolve}
               onUnresolve={onUnresolve}
               onDelete={onDelete}
+              onEdit={onEdit}
             />
           </div>
         ))}
@@ -95,6 +98,7 @@ export function CommentSidebar({
                   onResolve={onResolve}
                   onUnresolve={onUnresolve}
                   onDelete={onDelete}
+                  onEdit={onEdit}
                 />
               </div>
             ))}
