@@ -155,3 +155,23 @@ export function editComment(
     return match;
   });
 }
+
+export function updateCommentAnchor(
+  rawMarkdown: string,
+  commentId: string,
+  newAnchor: string
+): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.id === commentId) {
+        data.anchor = newAnchor;
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}

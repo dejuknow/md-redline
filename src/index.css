@@ -39,6 +39,39 @@ mark.selection-highlight {
   color: inherit;
 }
 
+/* Drag handles for resizing comment highlights */
+.drag-handle {
+  width: 4px;
+  background-color: #d97706;
+  border-radius: 2px;
+  cursor: ew-resize;
+  z-index: 10;
+  position: absolute;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+/* Larger click target via pseudo-element */
+.drag-handle::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: -8px;
+  right: -8px;
+}
+
+.drag-handle:hover {
+  background-color: #b45309;
+  transform: scaleX(1.5);
+}
+
+/* During drag, lock cursor across entire page */
+body.anchor-dragging,
+body.anchor-dragging * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* Textarea focus reset */
 textarea:focus {
   outline: none;
