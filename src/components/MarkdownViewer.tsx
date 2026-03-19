@@ -59,22 +59,24 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
       container.normalize();
 
       // --- Comment highlights ---
-      const anchorGroups = new Map<string, string[]>();
+      // Group comments that share the same anchor AND cleanOffset (exact same highlight)
+      const highlightGroups = new Map<string, { ids: string[]; anchor: string; cleanOffset?: number }>();
       for (const comment of comments) {
         if (comment.resolved) continue;
-        const ids = anchorGroups.get(comment.anchor) || [];
-        ids.push(comment.id);
-        anchorGroups.set(comment.anchor, ids);
+        const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
+        const group = highlightGroups.get(key) || { ids: [], anchor: comment.anchor, cleanOffset: comment.cleanOffset };
+        group.ids.push(comment.id);
+        highlightGroups.set(key, group);
       }
 
-      for (const [anchor, ids] of anchorGroups) {
+      for (const { anchor, ids, cleanOffset } of highlightGroups.values()) {
         wrapText(container, anchor, (mark) => {
           mark.className = 'comment-highlight';
           mark.dataset.commentIds = ids.join(',');
           if (ids.includes(activeCommentId || '')) {
             mark.classList.add('comment-highlight-active');
           }
-        });
+        }, cleanOffset);
       }
 
       // --- Selection highlight ---
@@ -117,50 +119,70 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
   }
 ));
 
-/** Find the first occurrence of `text` in the container's text nodes and wrap it in <mark> elements.
+/** Find an occurrence of `text` in the container's text nodes and wrap it in <mark> elements.
+ *  When `cleanOffset` is provided, uses it to find the correct occurrence (supports overlapping).
  *  Handles text that spans multiple DOM elements (e.g. header → paragraph). */
 function wrapText(
   container: HTMLElement,
   text: string,
-  configure: (mark: HTMLElement) => void
+  configure: (mark: HTMLElement) => void,
+  cleanOffset?: number
 ) {
-  // Collect all text nodes, skipping ones already inside marks
+  // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const textNodes: Text[] = [];
+  const allTextNodes: Text[] = [];
   let node: Text | null;
   while ((node = walker.nextNode() as Text | null)) {
-    if ((node.parentElement as Element)?.closest?.('mark')) continue;
-    textNodes.push(node);
+    allTextNodes.push(node);
   }
-  if (textNodes.length === 0) return;
+  if (allTextNodes.length === 0) return;
 
-  // Build concatenated text with position tracking
-  const nodeInfo: { node: Text; globalStart: number; length: number }[] = [];
-  let pos = 0;
-  for (const tn of textNodes) {
+  // Build concatenated text with position tracking (all nodes, for offset-based matching)
+  const allNodeInfo: { node: Text; globalStart: number; length: number }[] = [];
+  let allPos = 0;
+  for (const tn of allTextNodes) {
     const len = tn.textContent?.length || 0;
-    nodeInfo.push({ node: tn, globalStart: pos, length: len });
-    pos += len;
+    allNodeInfo.push({ node: tn, globalStart: allPos, length: len });
+    allPos += len;
   }
-  const fullText = textNodes.map(n => n.textContent || '').join('');
+  const fullText = allTextNodes.map(n => n.textContent || '').join('');
 
-  // Find the match — try exact match first, then flexible whitespace match
+  // Find the match
   let matchStart: number;
   let matchEnd: number;
-  const exactIdx = fullText.indexOf(text);
-  if (exactIdx !== -1) {
-    matchStart = exactIdx;
-    matchEnd = exactIdx + text.length;
+
+  if (cleanOffset != null) {
+    // Position-based: use cleanOffset to find the right occurrence.
+    // The rendered text may differ from clean markdown (no ## / ** etc),
+    // so search for the anchor text near the expected position.
+    const exactIdx = fullText.indexOf(text, Math.max(0, cleanOffset - 20));
+    if (exactIdx !== -1 && exactIdx <= cleanOffset + 20) {
+      matchStart = exactIdx;
+      matchEnd = exactIdx + text.length;
+    } else {
+      // Flexible fallback near the offset
+      const result = flexibleSearch(fullText, text, Math.max(0, cleanOffset - 50));
+      if (!result) return;
+      matchStart = result.start;
+      matchEnd = result.end;
+    }
   } else {
-    const result = flexibleSearch(fullText, text);
-    if (!result) return;
-    matchStart = result.start;
-    matchEnd = result.end;
+    // No offset — first occurrence (used for selection highlights)
+    const exactIdx = fullText.indexOf(text);
+    if (exactIdx !== -1) {
+      matchStart = exactIdx;
+      matchEnd = exactIdx + text.length;
+    } else {
+      const result = flexibleSearch(fullText, text);
+      if (!result) return;
+      matchStart = result.start;
+      matchEnd = result.end;
+    }
   }
 
   // Determine which text nodes the match spans and their local offsets
   const wraps: { node: Text; start: number; end: number }[] = [];
-  for (const info of nodeInfo) {
+  for (const info of allNodeInfo) {
     const nodeEnd = info.globalStart + info.length;
     if (nodeEnd <= matchStart || info.globalStart >= matchEnd) continue;
     const localStart = Math.max(0, matchStart - info.globalStart);
@@ -175,7 +197,6 @@ function wrapText(
   for (let i = wraps.length - 1; i >= 0; i--) {
     const { node: tn, start, end } = wraps[i];
     // Skip whitespace-only portions (e.g. newline nodes between block elements)
-    // — wrapping these creates visible styled blocks that cause layout shifts
     const slice = tn.textContent?.slice(start, end) || '';
     if (!slice.trim()) continue;
     const range = document.createRange();
@@ -198,16 +219,17 @@ function wrapText(
  */
 function flexibleSearch(
   haystack: string,
-  needle: string
+  needle: string,
+  startFrom: number = 0
 ): { start: number; end: number } | null {
   const parts = needle.split(/\s+/).filter(Boolean);
   if (parts.length === 0) return null;
   if (parts.length === 1) {
-    const idx = haystack.indexOf(parts[0]);
+    const idx = haystack.indexOf(parts[0], startFrom);
     return idx === -1 ? null : { start: idx, end: idx + parts[0].length };
   }
 
-  let searchFrom = 0;
+  let searchFrom = startFrom;
   while (searchFrom < haystack.length) {
     const firstIdx = haystack.indexOf(parts[0], searchFrom);
     if (firstIdx === -1) return null;
