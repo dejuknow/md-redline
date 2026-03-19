@@ -33,17 +33,30 @@ export function parseComments(rawMarkdown: string): ParseResult {
   }
   cleanMarkdown += rawMarkdown.slice(lastEnd);
 
+  // Compute each comment's cleanOffset — the position in clean markdown
+  // where the marker was. Since markers are placed BEFORE the anchor text,
+  // this is the start of the anchor text in the clean content.
+  let cumShift = 0;
+  for (let i = 0; i < strippedRegions.length; i++) {
+    const region = strippedRegions[i];
+    const cleanPos = region.rawStart - cumShift;
+    if (comments[i]) {
+      comments[i].cleanOffset = cleanPos;
+    }
+    cumShift += region.rawEnd - region.rawStart;
+  }
+
   // Offset mapping: clean position → raw position
   function cleanToRawOffset(cleanOffset: number): number {
-    let cumShift = 0;
+    let shift = 0;
     for (const region of strippedRegions) {
-      const regionCleanStart = region.rawStart - cumShift;
+      const regionCleanStart = region.rawStart - shift;
       if (cleanOffset < regionCleanStart) {
-        return cleanOffset + cumShift;
+        return cleanOffset + shift;
       }
-      cumShift += region.rawEnd - region.rawStart;
+      shift += region.rawEnd - region.rawStart;
     }
-    return cleanOffset + cumShift;
+    return cleanOffset + shift;
   }
 
   return { cleanMarkdown, comments, cleanToRawOffset };
@@ -77,7 +90,7 @@ export function insertComment(
   // Try exact match first
   const cleanIdx = cleanMarkdown.indexOf(anchor);
   if (cleanIdx !== -1) {
-    insertionCleanOffset = cleanIdx + anchor.length;
+    insertionCleanOffset = cleanIdx;
   }
 
   // Flexible match for cross-element selections: split anchor by newlines
@@ -87,15 +100,22 @@ export function insertComment(
   if (insertionCleanOffset === null) {
     const segments = anchor.split(/[\n\t]+/).map(s => s.trim()).filter(Boolean);
     if (segments.length > 0) {
-      // Try direct segment search in clean markdown
-      insertionCleanOffset = findSegments(cleanMarkdown, segments);
+      // Try direct segment search in clean markdown — findSegments returns end offset,
+      // so subtract anchor length to get start
+      const endOffset = findSegments(cleanMarkdown, segments);
+      if (endOffset !== null) {
+        insertionCleanOffset = endOffset - anchor.length;
+        // For cross-element anchors the length may not match exactly, find start of first segment
+        const firstIdx = cleanMarkdown.indexOf(segments[0]);
+        if (firstIdx !== -1) insertionCleanOffset = firstIdx;
+      }
 
       // If that fails, try in formatting-stripped text and map back
       if (insertionCleanOffset === null) {
         const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
-        const plainOffset = findSegments(plain, segments);
-        if (plainOffset !== null) {
-          insertionCleanOffset = toCleanOffset(plainOffset);
+        const plainIdx = plain.indexOf(segments[0]);
+        if (plainIdx !== -1) {
+          insertionCleanOffset = toCleanOffset(plainIdx);
         }
       }
     }
@@ -103,7 +123,7 @@ export function insertComment(
 
   if (insertionCleanOffset === null) return rawMarkdown;
 
-  // Insert right after the anchor text in the raw markdown
+  // Insert marker BEFORE the anchor text in the raw markdown
   const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
