@@ -24,6 +24,7 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
     rect,
     contextBefore,
     contextAfter,
+    offset: selStart,
   };
 }
 

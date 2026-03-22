@@ -7,6 +7,7 @@ interface Props {
   comments: MdComment[];
   activeCommentId: string | null;
   selectionText: string | null;
+  selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
 }
 
@@ -22,7 +23,7 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, comments, activeCommentId, selectionText, onHighlightClick },
+    { html, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -94,16 +95,21 @@ export const MarkdownViewer = memo(
 
       // --- Selection highlight ---
       if (selectionText) {
-        wrapText(container, selectionText, (mark) => {
-          mark.className = 'selection-highlight';
-        });
+        wrapText(
+          container,
+          selectionText,
+          (mark) => {
+            mark.className = 'selection-highlight';
+          },
+          selectionOffset ?? undefined,
+        );
       }
 
       // Store reference to the active mark for drag handles
       activeMarkRef.current = container.querySelector(
         'mark.comment-highlight-active',
       ) as HTMLElement | null;
-    }, [html, comments, activeCommentId, selectionText]);
+    }, [html, comments, activeCommentId, selectionText, selectionOffset]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
