@@ -29,10 +29,10 @@ export function useRecentFiles() {
     setRecentFiles((prev) => {
       const name = path.split('/').pop() || path;
       const filtered = prev.filter((f) => f.path !== path);
-      const next = [
-        { path, name, openedAt: new Date().toISOString() },
-        ...filtered,
-      ].slice(0, MAX_RECENT);
+      const next = [{ path, name, openedAt: new Date().toISOString() }, ...filtered].slice(
+        0,
+        MAX_RECENT,
+      );
       saveToStorage(next);
       return next;
     });

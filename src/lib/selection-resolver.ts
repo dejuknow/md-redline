@@ -1,8 +1,6 @@
 import type { SelectionInfo } from '../types';
 
-export function resolveSelection(
-  containerEl: HTMLElement
-): SelectionInfo | null {
+export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed) return null;
 
@@ -14,17 +12,10 @@ export function resolveSelection(
 
   // Get surrounding context from the rendered text
   const fullText = containerEl.textContent || '';
-  const selStart = getTextOffset(
-    containerEl,
-    range.startContainer,
-    range.startOffset
-  );
+  const selStart = getTextOffset(containerEl, range.startContainer, range.startOffset);
 
   const contextBefore = fullText.slice(Math.max(0, selStart - 40), selStart);
-  const contextAfter = fullText.slice(
-    selStart + text.length,
-    selStart + text.length + 40
-  );
+  const contextAfter = fullText.slice(selStart + text.length, selStart + text.length + 40);
 
   const rect = range.getBoundingClientRect();
 
@@ -36,11 +27,7 @@ export function resolveSelection(
   };
 }
 
-function getTextOffset(
-  root: Node,
-  targetNode: Node,
-  offset: number
-): number {
+function getTextOffset(root: Node, targetNode: Node, offset: number): number {
   let total = 0;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node: Node | null;

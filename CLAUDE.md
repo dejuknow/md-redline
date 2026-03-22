@@ -16,9 +16,9 @@ npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
 - **Frontend**: React 19 + TypeScript + Tailwind CSS v4 + Vite 8
 - **Backend**: Hono server at `server/index.ts` — exposes `/api/file` (GET/PUT), `/api/browse`, `/api/files`, `/api/config`
 - **Markdown pipeline**: `src/markdown/pipeline.ts` — unified + remark-parse + remark-rehype + rehype-raw + rehype-stringify
-- **Comment storage**: End-of-file comment block in the `.md` file: `<!-- @comments\n{JSON}\n{JSON}\n-->`
-- **Comment parser**: `src/lib/comment-parser.ts` — extracts, inserts, removes, resolves, edits comments. Auto-migrates old inline `<!-- @comment{...} -->` format on first parse.
-- **Highlighting**: Done in `useLayoutEffect` inside `MarkdownViewer.tsx` using DOM manipulation (`surroundContents`). The component uses `dangerouslySetInnerHTML` for the markdown and `React.memo` to prevent unwanted re-renders.
+- **Comment storage**: Inline comment markers in the `.md` file: `<!-- @comment{JSON} -->`
+- **Comment parser**: `src/lib/comment-parser.ts` — extracts, inserts, removes, resolves, edits, replies, bulk operations on comments
+- **Highlighting**: Done in `useLayoutEffect` inside `MarkdownViewer.tsx` using ref-based innerHTML (React never manages the container's children) + DOM manipulation (`surroundContents` with `extractContents` fallback). `React.memo` prevents unnecessary re-renders.
 
 ## Key design decisions
 
@@ -26,24 +26,52 @@ npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
 - Comment markers are placed **before** their anchor text — the marker's physical position in the file IS the comment's position, enabling precise matching and overlapping comments
 - The `anchor` field stores the originally selected text for agent readability and as a fallback for re-matching
 - Overlapping comments are allowed — multiple comments can reference overlapping text regions since each marker has a unique position
-- `MarkdownViewer` is wrapped in `React.memo` because `dangerouslySetInnerHTML` + `useLayoutEffect` DOM modifications create a fragile interaction where unrelated re-renders can destroy highlights
+- `MarkdownViewer` uses ref-based innerHTML (not `dangerouslySetInnerHTML`) so React's reconciliation never interferes with highlight DOM modifications
+- Comments have a `status` field (`open` | `addressed` | `accepted` | `reopened`) alongside the legacy `resolved` boolean for backward compatibility
+- Comments support threaded replies via a `replies` array
+
+## Comment statuses
+
+- **open** — initial state when a comment is created
+- **addressed** — the AI agent (or PM) has addressed the feedback, pending review
+- **accepted** — the PM confirmed the fix (equivalent to old "resolved"). Highlights are hidden.
+- **reopened** — the PM rejected the fix
+
+Status transitions in the UI:
+- Open/Reopened: Edit, Address, Resolve, Delete
+- Addressed: Accept, Reopen, Delete
+- Accepted: Reopen, Delete
 
 ## Known issues to fix
 
-1. **Highlight persistence after adding comments** — The primary open bug. After adding a new comment, existing comment highlights disappear from the viewer. Root cause: React's reconciliation detects that the DOM was modified by `useLayoutEffect` and replaces `innerHTML` on the next render, but the effect doesn't re-run because deps are unchanged. `React.memo` mitigates this for unrelated re-renders but doesn't fully solve it for all state-change paths. The proper fix likely involves either (a) moving away from `dangerouslySetInnerHTML` to a ref-based innerHTML approach, or (b) using `rehype-react` to render the markdown as React components with highlights built into the virtual DOM.
-
-2. **Vite file watch** — Saving `.md` files in the project directory can trigger Vite reloads. The `vite.config.ts` has `watch.ignored: [/\.md$/]` but this doesn't fully suppress it.
+1. **Vite file watch** — Saving `.md` files in the project directory can trigger Vite reloads. The `vite.config.ts` has `watch.ignored: [/\.md$/]` but this doesn't fully suppress it.
 
 ## Comment format reference
 
 Comment markers are placed **before** the text they refer to:
 
 ```
-Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment text","author":"User","timestamp":"ISO-8601","resolved":false} -->highlighted text continues here.
+Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment text","author":"User","timestamp":"ISO-8601","resolved":false,"status":"open","replies":[]} -->highlighted text continues here.
 ```
 
 - The marker sits immediately before the anchor text in the file
 - `anchor` is the originally selected text — tells you what the comment refers to
 - `text` is the reviewer's feedback
+- `status` tracks the comment lifecycle: `open` → `addressed` → `accepted` (or `reopened`)
+- `replies` is an array of `{id, text, author, timestamp}` objects for threaded discussion
+- `resolved` is `true` when status is `accepted`, `false` otherwise (backward compat)
 - Strip all `<!-- @comment{...} -->` markers to get the clean content
 - The marker's position disambiguates when the same text appears multiple times
+
+## Parser API
+
+Key functions in `src/lib/comment-parser.ts`:
+- `parseComments(raw)` — extract comments, return clean markdown + comment array
+- `insertComment(raw, anchor, text, author?)` — add new comment
+- `removeComment(raw, id)` — delete comment
+- `setCommentStatus(raw, id, status)` — change status (also sets `resolved`)
+- `editComment(raw, id, newText)` — update comment text
+- `addReply(raw, id, text, author?)` — add threaded reply
+- `resolveAllComments(raw)` — bulk resolve all open comments
+- `removeResolvedComments(raw)` — delete all accepted comments
+- `updateCommentAnchor(raw, id, newAnchor)` — change anchor text (drag-resize)

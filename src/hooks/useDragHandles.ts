@@ -29,26 +29,36 @@ interface UseDragHandlesReturn {
 
 function caretFromPoint(x: number, y: number): { node: Node; offset: number } | null {
   if ('caretPositionFromPoint' in document) {
-    const pos = (document as any).caretPositionFromPoint(x, y);
+    const pos = (
+      document as unknown as {
+        caretPositionFromPoint(x: number, y: number): { offsetNode: Node; offset: number } | null;
+      }
+    ).caretPositionFromPoint(x, y);
     if (pos) return { node: pos.offsetNode, offset: pos.offset };
   }
   if ('caretRangeFromPoint' in document) {
-    const range = (document as any).caretRangeFromPoint(x, y);
+    const range = document.caretRangeFromPoint(x, y);
     if (range) return { node: range.startContainer, offset: range.startOffset };
   }
   return null;
 }
 
 function computePositions(
-  markEl: HTMLElement,
-  scrollContainer: HTMLElement
+  markEls: HTMLElement[],
+  scrollContainer: HTMLElement,
 ): HandlePositions | null {
-  const rects = markEl.getClientRects();
-  if (rects.length === 0) return null;
+  const allRects: DOMRect[] = [];
+  for (const markEl of markEls) {
+    const rects = markEl.getClientRects();
+    for (let i = 0; i < rects.length; i++) {
+      allRects.push(rects[i]);
+    }
+  }
+  if (allRects.length === 0) return null;
 
   const containerRect = scrollContainer.getBoundingClientRect();
-  const firstRect = rects[0];
-  const lastRect = rects[rects.length - 1];
+  const firstRect = allRects[0];
+  const lastRect = allRects[allRects.length - 1];
 
   return {
     start: {
@@ -76,21 +86,6 @@ function getContainerTextOffset(container: HTMLElement, targetNode: Node, offset
   return total;
 }
 
-/** Find text node + local offset from a container-relative text offset */
-function nodeFromContainerOffset(container: HTMLElement, targetOffset: number): { node: Text; offset: number } | null {
-  let total = 0;
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) {
-    const len = node.textContent?.length || 0;
-    if (total + len >= targetOffset) {
-      return { node, offset: targetOffset - total };
-    }
-    total += len;
-  }
-  return null;
-}
-
 export function useDragHandles({
   viewerRef,
   scrollContainerRef,
@@ -109,18 +104,24 @@ export function useDragHandles({
     // Container-relative text offsets for the fixed boundary
     fixedStartOffset: number;
     fixedEndOffset: number;
-    markEl: HTMLElement;
+    // Current text offsets (updated during drag)
+    currentStartOffset: number;
+    currentEndOffset: number;
+    markEls: HTMLElement[];
   } | null>(null);
+
+  // Store drag listener cleanup so we can call it on unmount
+  const dragCleanupRef = useRef<(() => void) | null>(null);
 
   // Compute handle positions when active comment changes
   const updatePositions = useCallback(() => {
-    const markEl = viewerRef.current?.getActiveMark();
+    const markEls = viewerRef.current?.getActiveMarks() || [];
     const scrollContainer = scrollContainerRef.current;
-    if (!markEl || !scrollContainer) {
+    if (markEls.length === 0 || !scrollContainer) {
       setHandlePositions(null);
       return;
     }
-    setHandlePositions(computePositions(markEl, scrollContainer));
+    setHandlePositions(computePositions(markEls, scrollContainer));
   }, [viewerRef, scrollContainerRef]);
 
   // Recalculate positions when activeCommentId or comments change
@@ -147,162 +148,219 @@ export function useDragHandles({
     };
   }, [activeCommentId, scrollContainerRef, updatePositions]);
 
-  const onHandleMouseDown = useCallback((handle: 'start' | 'end') => {
-    const markEl = viewerRef.current?.getActiveMark();
-    const container = viewerRef.current?.getContainer();
-    if (!markEl || !container) return;
+  const onHandleMouseDown = useCallback(
+    (handle: 'start' | 'end') => {
+      const markEls = viewerRef.current?.getActiveMarks() || [];
+      const container = viewerRef.current?.getContainer();
+      if (markEls.length === 0 || !container) return;
 
-    const commentIds = markEl.dataset.commentIds?.split(',') || [];
-    const originalAnchor = markEl.textContent || '';
+      const commentIds = markEls[0].dataset.commentIds?.split(',') || [];
 
-    // Find the mark's text boundaries in container-relative offsets
-    const markWalker = document.createTreeWalker(markEl, NodeFilter.SHOW_TEXT);
-    const firstTextNode = markWalker.nextNode() as Text | null;
-    let lastTextNode = firstTextNode;
-    let tn: Text | null;
-    while ((tn = markWalker.nextNode() as Text | null)) {
-      lastTextNode = tn;
-    }
+      // Find the mark's text boundaries across ALL active marks
+      const firstMark = markEls[0];
+      const lastMark = markEls[markEls.length - 1];
 
-    if (!firstTextNode || !lastTextNode) return;
+      const firstWalker = document.createTreeWalker(firstMark, NodeFilter.SHOW_TEXT);
+      const firstTextNode = firstWalker.nextNode() as Text | null;
 
-    const startOffset = getContainerTextOffset(container, firstTextNode, 0);
-    const endOffset = getContainerTextOffset(container, lastTextNode, lastTextNode.textContent?.length || 0);
-
-    dragRef.current = {
-      handle,
-      commentIds,
-      originalAnchor,
-      fixedStartOffset: startOffset,
-      fixedEndOffset: endOffset,
-      markEl,
-    };
-
-    setIsDragging(true);
-    document.body.classList.add('anchor-dragging');
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-
-      const caret = caretFromPoint(e.clientX, e.clientY);
-      if (!caret || !container.contains(caret.node)) return;
-
-      // Don't allow dragging into another comment's mark
-      const parentMark = (caret.node.parentElement as Element)?.closest?.('mark');
-      if (parentMark && !drag.markEl.contains(caret.node) && parentMark !== drag.markEl) {
-        return;
+      const lastWalker = document.createTreeWalker(lastMark, NodeFilter.SHOW_TEXT);
+      let lastTextNode: Text | null = null;
+      let tn: Text | null;
+      while ((tn = lastWalker.nextNode() as Text | null)) {
+        lastTextNode = tn;
       }
+      if (!lastTextNode) lastTextNode = firstTextNode;
 
-      const caretOffset = getContainerTextOffset(container, caret.node, caret.offset);
+      if (!firstTextNode || !lastTextNode) return;
 
-      let newStartOffset: number;
-      let newEndOffset: number;
+      const startOffset = getContainerTextOffset(container, firstTextNode, 0);
+      const endOffset = getContainerTextOffset(
+        container,
+        lastTextNode,
+        lastTextNode.textContent?.length || 0,
+      );
+      const originalAnchor = (container.textContent || '').slice(startOffset, endOffset);
 
-      if (drag.handle === 'start') {
-        newStartOffset = caretOffset;
-        newEndOffset = drag.fixedEndOffset;
-      } else {
-        newStartOffset = drag.fixedStartOffset;
-        newEndOffset = caretOffset;
-      }
+      dragRef.current = {
+        handle,
+        commentIds,
+        originalAnchor,
+        fixedStartOffset: startOffset,
+        fixedEndOffset: endOffset,
+        currentStartOffset: startOffset,
+        currentEndOffset: endOffset,
+        markEls,
+      };
 
-      // Ensure valid range
-      if (newStartOffset >= newEndOffset) return;
+      setIsDragging(true);
+      document.body.classList.add('anchor-dragging');
 
-      const startInfo = nodeFromContainerOffset(container, newStartOffset);
-      const endInfo = nodeFromContainerOffset(container, newEndOffset);
-      if (!startInfo || !endInfo) return;
+      const handleMouseMove = (e: MouseEvent) => {
+        const drag = dragRef.current;
+        if (!drag) return;
 
-      // Build a range and check text length
-      const range = document.createRange();
-      try {
-        range.setStart(startInfo.node, startInfo.offset);
-        range.setEnd(endInfo.node, endInfo.offset);
-      } catch {
-        return;
-      }
+        const caret = caretFromPoint(e.clientX, e.clientY);
+        if (!caret || !container.contains(caret.node)) return;
 
-      const newText = range.toString();
-      if (newText.length < 2) return;
-
-      // Unwrap the old mark, preserving its children
-      const oldMark = container.querySelector('mark.comment-highlight-active');
-      if (oldMark) {
-        const parent = oldMark.parentNode;
-        if (parent) {
-          while (oldMark.firstChild) parent.insertBefore(oldMark.firstChild, oldMark);
-          parent.removeChild(oldMark);
+        // Don't allow dragging into another comment's mark
+        const parentMark = (caret.node.parentElement as Element)?.closest?.('mark');
+        if (
+          parentMark &&
+          !drag.markEls.some((m) => m.contains(caret.node)) &&
+          !drag.markEls.includes(parentMark as HTMLElement)
+        ) {
+          return;
         }
-        container.normalize();
-      }
 
-      // Re-find positions after normalize (text nodes may have merged)
-      const newStart = nodeFromContainerOffset(container, newStartOffset);
-      const newEnd = nodeFromContainerOffset(container, newEndOffset);
-      if (!newStart || !newEnd) return;
+        const caretOffset = getContainerTextOffset(container, caret.node, caret.offset);
 
-      const newRange = document.createRange();
-      try {
-        newRange.setStart(newStart.node, newStart.offset);
-        newRange.setEnd(newEnd.node, newEnd.offset);
-      } catch {
-        return;
-      }
+        let newStartOffset: number;
+        let newEndOffset: number;
 
-      // Wrap in a new mark
-      try {
-        const newMark = document.createElement('mark');
-        newMark.className = 'comment-highlight comment-highlight-active';
-        newMark.dataset.commentIds = drag.commentIds.join(',');
-        newRange.surroundContents(newMark);
-        drag.markEl = newMark;
-      } catch {
-        // Cross-element boundary — ignore this position
-        return;
-      }
-
-      // Update handle positions
-      const scrollContainer = scrollContainerRef.current;
-      if (scrollContainer && drag.markEl) {
-        const positions = computePositions(drag.markEl, scrollContainer);
-        if (positions) setHandlePositions(positions);
-      }
-    };
-
-    const handleMouseUp = () => {
-      const drag = dragRef.current;
-      if (drag) {
-        const newAnchor = drag.markEl.textContent || '';
-        if (newAnchor.length >= 2 && newAnchor !== drag.originalAnchor) {
-          onAnchorChange(drag.commentIds, newAnchor);
+        if (drag.handle === 'start') {
+          newStartOffset = caretOffset;
+          newEndOffset = drag.fixedEndOffset;
+        } else {
+          newStartOffset = drag.fixedStartOffset;
+          newEndOffset = caretOffset;
         }
-      }
 
-      dragRef.current = null;
-      setIsDragging(false);
-      document.body.classList.remove('anchor-dragging');
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
+        // Ensure valid range
+        if (newStartOffset >= newEndOffset) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+        // Pre-validate text length before modifying DOM
+        const fullText = container.textContent || '';
+        const newText = fullText.slice(newStartOffset, newEndOffset);
+        if (newText.length < 2) return;
+
+        // Unwrap all active marks, preserving their children
+        const oldMarks = container.querySelectorAll('mark.comment-highlight-active');
+        oldMarks.forEach((oldMark) => {
+          const parent = oldMark.parentNode;
+          if (parent) {
+            while (oldMark.firstChild) parent.insertBefore(oldMark.firstChild, oldMark);
+            parent.removeChild(oldMark);
+          }
+        });
+        if (oldMarks.length > 0) container.normalize();
+
+        // Collect text node positions after normalize
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        const nodeInfos: { node: Text; globalStart: number; length: number }[] = [];
+        let pos = 0;
+        let textNode: Text | null;
+        while ((textNode = walker.nextNode() as Text | null)) {
+          const len = textNode.textContent?.length || 0;
+          nodeInfos.push({ node: textNode, globalStart: pos, length: len });
+          pos += len;
+        }
+
+        // Find text nodes that overlap the new range
+        const wraps: { node: Text; start: number; end: number }[] = [];
+        for (const info of nodeInfos) {
+          const nodeEnd = info.globalStart + info.length;
+          if (nodeEnd <= newStartOffset || info.globalStart >= newEndOffset) continue;
+          const localStart = Math.max(0, newStartOffset - info.globalStart);
+          const localEnd = Math.min(info.length, newEndOffset - info.globalStart);
+          if (localStart < localEnd) {
+            const slice = info.node.textContent?.slice(localStart, localEnd) || '';
+            if (slice.trim()) {
+              wraps.push({ node: info.node, start: localStart, end: localEnd });
+            }
+          }
+        }
+
+        if (wraps.length === 0) return;
+
+        // Wrap each portion in reverse order to avoid invalidating earlier nodes
+        const newMarks: HTMLElement[] = [];
+        for (let i = wraps.length - 1; i >= 0; i--) {
+          const { node, start, end } = wraps[i];
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          const mark = document.createElement('mark');
+          mark.className = 'comment-highlight comment-highlight-active';
+          mark.dataset.commentIds = drag.commentIds.join(',');
+          try {
+            range.surroundContents(mark);
+            newMarks.unshift(mark);
+          } catch {
+            // Skip if wrapping fails
+          }
+        }
+
+        if (newMarks.length > 0) {
+          drag.markEls = newMarks;
+          drag.currentStartOffset = newStartOffset;
+          drag.currentEndOffset = newEndOffset;
+        }
+
+        // Update handle positions
+        const scrollContainer = scrollContainerRef.current;
+        if (scrollContainer && drag.markEls.length > 0) {
+          const positions = computePositions(drag.markEls, scrollContainer);
+          if (positions) setHandlePositions(positions);
+        }
+      };
+
+      const handleMouseUp = () => {
+        const drag = dragRef.current;
+        if (drag) {
+          // Use container text offsets to get the full anchor including whitespace
+          // between styled elements that weren't wrapped in marks
+          const newAnchor = (container.textContent || '').slice(
+            drag.currentStartOffset,
+            drag.currentEndOffset,
+          );
+          if (newAnchor.length >= 2 && newAnchor !== drag.originalAnchor) {
+            onAnchorChange(drag.commentIds, newAnchor);
+          }
+        }
+
         dragRef.current = null;
         setIsDragging(false);
         document.body.classList.remove('anchor-dragging');
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
         document.removeEventListener('keydown', handleKeyDown);
-        updatePositions();
-      }
-    };
+        dragCleanupRef.current = null;
+      };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('keydown', handleKeyDown);
-  }, [viewerRef, scrollContainerRef, onAnchorChange, updatePositions]);
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          dragRef.current = null;
+          setIsDragging(false);
+          document.body.classList.remove('anchor-dragging');
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+          document.removeEventListener('keydown', handleKeyDown);
+          dragCleanupRef.current = null;
+          updatePositions();
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.addEventListener('keydown', handleKeyDown);
+
+      dragCleanupRef.current = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('keydown', handleKeyDown);
+        document.body.classList.remove('anchor-dragging');
+        dragRef.current = null;
+      };
+    },
+    [viewerRef, scrollContainerRef, onAnchorChange, updatePositions],
+  );
+
+  // Clean up drag listeners on unmount
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
 
   return {
     handlePositions: activeCommentId ? handlePositions : null,

@@ -1,8 +1,8 @@
-import type { MdComment, ParseResult } from '../types';
+import type { MdComment, ParseResult, CommentStatus, CommentReply } from '../types';
 
-// Match <!-- @comment{...JSON...} --> — use a greedy match up to " -->"
-// since JSON values won't contain the literal " -->" sequence.
-const COMMENT_PATTERN = /<!-- @comment(\{.*?\}) -->/g;
+// Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
+// newlines in string values is matched correctly.
+const COMMENT_PATTERN = /<!-- @comment(\{.*?\}) -->/gs;
 
 export function parseComments(rawMarkdown: string): ParseResult {
   const comments: MdComment[] = [];
@@ -46,6 +46,26 @@ export function parseComments(rawMarkdown: string): ParseResult {
     cumShift += region.rawEnd - region.rawStart;
   }
 
+  // Fuzzy re-matching: for comments whose anchor is no longer found at their
+  // cleanOffset, use contextBefore/contextAfter to locate the new position.
+  for (const comment of comments) {
+    if (comment.cleanOffset === undefined) continue;
+    // Check if anchor is found at its expected position
+    const atOffset = cleanMarkdown.slice(
+      comment.cleanOffset,
+      comment.cleanOffset + comment.anchor.length,
+    );
+    if (atOffset === comment.anchor) continue; // exact match — no need to re-match
+    // Also check if anchor exists anywhere
+    if (cleanMarkdown.includes(comment.anchor)) continue;
+    // Anchor is missing — try fuzzy re-match using context
+    if (!comment.contextBefore && !comment.contextAfter) continue;
+    const newOffset = fuzzyReMatch(cleanMarkdown, comment);
+    if (newOffset !== null) {
+      comment.cleanOffset = newOffset;
+    }
+  }
+
   // Offset mapping: clean position → raw position
   function cleanToRawOffset(cleanOffset: number): number {
     let shift = 0;
@@ -62,15 +82,63 @@ export function parseComments(rawMarkdown: string): ParseResult {
   return { cleanMarkdown, comments, cleanToRawOffset };
 }
 
+/**
+ * Fuzzy re-match: use contextBefore and contextAfter to find where a comment's
+ * anchor region now sits in the clean markdown, even if the anchor text has been rewritten.
+ * Returns the new cleanOffset or null if not found.
+ */
+function fuzzyReMatch(cleanMarkdown: string, comment: MdComment): number | null {
+  const { contextBefore, contextAfter } = comment;
+
+  // Try matching with both context strings
+  if (contextBefore && contextAfter) {
+    const beforeIdx = cleanMarkdown.indexOf(contextBefore);
+    if (beforeIdx !== -1) {
+      const anchorStart = beforeIdx + contextBefore.length;
+      const afterIdx = cleanMarkdown.indexOf(contextAfter, anchorStart);
+      if (afterIdx !== -1) {
+        // The region between contextBefore and contextAfter is the new anchor area
+        const gap = afterIdx - anchorStart;
+        if (gap > 0 && gap < 500) return anchorStart;
+      }
+    }
+  }
+
+  // Fallback: try contextBefore only
+  if (contextBefore && contextBefore.length >= 10) {
+    const beforeIdx = cleanMarkdown.indexOf(contextBefore);
+    if (beforeIdx !== -1) {
+      return beforeIdx + contextBefore.length;
+    }
+  }
+
+  // Fallback: try contextAfter only
+  if (contextAfter && contextAfter.length >= 10) {
+    const afterIdx = cleanMarkdown.indexOf(contextAfter);
+    if (afterIdx !== -1 && afterIdx > 0) {
+      // Estimate: anchor was just before contextAfter, use original anchor length as hint
+      const estimatedStart = Math.max(0, afterIdx - comment.anchor.length);
+      return estimatedStart;
+    }
+  }
+
+  return null;
+}
+
 export function serializeComment(comment: MdComment): string {
-  return `<!-- @comment${JSON.stringify(comment)} -->`;
+  // Strip cleanOffset — it's computed at parse time, not persisted
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { cleanOffset, ...data } = comment;
+  return `<!-- @comment${JSON.stringify(data)} -->`;
 }
 
 export function insertComment(
   rawMarkdown: string,
   anchor: string,
   commentText: string,
-  author: string = 'User'
+  author: string = 'User',
+  contextBefore?: string,
+  contextAfter?: string,
 ): string {
   const comment: MdComment = {
     id: crypto.randomUUID(),
@@ -79,6 +147,9 @@ export function insertComment(
     author,
     timestamp: new Date().toISOString(),
     resolved: false,
+    status: 'open',
+    ...(contextBefore ? { contextBefore } : {}),
+    ...(contextAfter ? { contextAfter } : {}),
   };
 
   // Find the anchor text in the CLEAN markdown (no comment markers),
@@ -98,7 +169,10 @@ export function insertComment(
   // segment in order. First try against clean markdown directly, then against
   // a formatting-stripped version (handles **bold**, *italic*, etc.)
   if (insertionCleanOffset === null) {
-    const segments = anchor.split(/[\n\t]+/).map(s => s.trim()).filter(Boolean);
+    const segments = anchor
+      .split(/[\n\t]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (segments.length > 0) {
       // Try direct segment search in clean markdown — findSegments returns end offset,
       // so subtract anchor length to get start
@@ -127,11 +201,7 @@ export function insertComment(
   const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
-  return (
-    rawMarkdown.slice(0, rawInsertionPoint) +
-    marker +
-    rawMarkdown.slice(rawInsertionPoint)
-  );
+  return rawMarkdown.slice(0, rawInsertionPoint) + marker + rawMarkdown.slice(rawInsertionPoint);
 }
 
 export function removeComment(rawMarkdown: string, commentId: string): string {
@@ -147,16 +217,14 @@ export function removeComment(rawMarkdown: string, commentId: string): string {
   });
 }
 
-export function resolveComment(
-  rawMarkdown: string,
-  commentId: string
-): string {
+export function resolveComment(rawMarkdown: string, commentId: string): string {
   const regex = new RegExp(COMMENT_PATTERN);
   return rawMarkdown.replace(regex, (match, json) => {
     try {
       const data = JSON.parse(json) as MdComment;
       if (data.id === commentId) {
         data.resolved = true;
+        data.status = 'accepted';
         return serializeComment(data);
       }
     } catch {
@@ -166,16 +234,14 @@ export function resolveComment(
   });
 }
 
-export function unresolveComment(
-  rawMarkdown: string,
-  commentId: string
-): string {
+export function unresolveComment(rawMarkdown: string, commentId: string): string {
   const regex = new RegExp(COMMENT_PATTERN);
   return rawMarkdown.replace(regex, (match, json) => {
     try {
       const data = JSON.parse(json) as MdComment;
       if (data.id === commentId) {
         data.resolved = false;
+        data.status = 'open';
         return serializeComment(data);
       }
     } catch {
@@ -185,11 +251,7 @@ export function unresolveComment(
   });
 }
 
-export function editComment(
-  rawMarkdown: string,
-  commentId: string,
-  newText: string
-): string {
+export function editComment(rawMarkdown: string, commentId: string, newText: string): string {
   const regex = new RegExp(COMMENT_PATTERN);
   return rawMarkdown.replace(regex, (match, json) => {
     try {
@@ -208,7 +270,7 @@ export function editComment(
 export function updateCommentAnchor(
   rawMarkdown: string,
   commentId: string,
-  newAnchor: string
+  newAnchor: string,
 ): string {
   const regex = new RegExp(COMMENT_PATTERN);
   return rawMarkdown.replace(regex, (match, json) => {
@@ -218,6 +280,85 @@ export function updateCommentAnchor(
         data.anchor = newAnchor;
         return serializeComment(data);
       }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
+export function setCommentStatus(
+  rawMarkdown: string,
+  commentId: string,
+  status: CommentStatus,
+): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.id === commentId) {
+        data.status = status;
+        data.resolved = status === 'accepted';
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
+export function addReply(
+  rawMarkdown: string,
+  commentId: string,
+  text: string,
+  author: string = 'User',
+): string {
+  const reply: CommentReply = {
+    id: crypto.randomUUID(),
+    text,
+    author,
+    timestamp: new Date().toISOString(),
+  };
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.id === commentId) {
+        if (!data.replies) data.replies = [];
+        data.replies.push(reply);
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
+export function resolveAllComments(rawMarkdown: string): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (!data.resolved) {
+        data.resolved = true;
+        data.status = 'accepted';
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
+export function removeResolvedComments(rawMarkdown: string): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.resolved) return '';
     } catch {
       // Keep malformed comments
     }

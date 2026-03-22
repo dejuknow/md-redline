@@ -41,7 +41,7 @@ export function useFile() {
         setError(err instanceof Error ? err.message : 'Failed to save file');
       }
     },
-    [filePath]
+    [filePath],
   );
 
   const reloadFile = useCallback(async () => {

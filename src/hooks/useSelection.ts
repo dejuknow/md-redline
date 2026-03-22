@@ -2,9 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { resolveSelection } from '../lib/selection-resolver';
 import type { SelectionInfo } from '../types';
 
-export function useSelection(
-  containerRef: React.RefObject<HTMLElement | null>
-) {
+export function useSelection(containerRef: React.RefObject<HTMLElement | null>) {
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const lockedRef = useRef(false);
 
