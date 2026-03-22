@@ -22,7 +22,11 @@ export function DragHandles({ startPos, endPos, onMouseDown }: DragHandlesProps)
           left: startPos.left - 2,
           height: startPos.height,
         }}
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onMouseDown('start'); }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onMouseDown('start');
+        }}
         data-drag-handle
       />
       <div
@@ -32,7 +36,11 @@ export function DragHandles({ startPos, endPos, onMouseDown }: DragHandlesProps)
           left: endPos.left - 2,
           height: endPos.height,
         }}
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onMouseDown('end'); }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onMouseDown('end');
+        }}
         data-drag-handle
       />
     </>

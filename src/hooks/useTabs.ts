@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
 
-interface TabState {
+export interface TabState {
   filePath: string;
   rawMarkdown: string;
   isLoading: boolean;
@@ -28,93 +28,87 @@ export function useTabs() {
     });
   }, []);
 
-  const openTab = useCallback(
-    async (path: string) => {
-      // If already open, just switch to it
-      if (tabDataRef.current.has(path)) {
-        setActiveFilePath(path);
-        return;
-      }
-
-      // Create placeholder tab and activate it
-      const newTab: TabState = {
-        filePath: path,
-        rawMarkdown: '',
-        isLoading: true,
-        error: null,
-        lastSaved: null,
-      };
-      setTabData((prev) => new Map(prev).set(path, newTab));
-      setTabOrder((prev) => [...prev, path]);
+  const openTab = useCallback(async (path: string) => {
+    // If already open, just switch to it
+    if (tabDataRef.current.has(path)) {
       setActiveFilePath(path);
+      return;
+    }
 
-      // Fetch file content
-      try {
-        const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        setTabData((prev) => {
-          const next = new Map(prev);
-          next.set(path, {
-            filePath: data.path,
-            rawMarkdown: data.content,
-            isLoading: false,
-            error: null,
-            lastSaved: new Date(),
-          });
-          return next;
-        });
-      } catch (err) {
-        setTabData((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(path);
-          if (existing) {
-            next.set(path, {
-              ...existing,
-              isLoading: false,
-              error: err instanceof Error ? err.message : 'Failed to load file',
-            });
-          }
-          return next;
-        });
-      }
-    },
-    []
-  );
+    // Create placeholder tab and activate it
+    const newTab: TabState = {
+      filePath: path,
+      rawMarkdown: '',
+      isLoading: true,
+      error: null,
+      lastSaved: null,
+    };
+    setTabData((prev) => new Map(prev).set(path, newTab));
+    setTabOrder((prev) => [...prev, path]);
+    setActiveFilePath(path);
 
-  const closeTab = useCallback(
-    (path: string) => {
-      setTabOrder((prev) => {
-        const idx = prev.indexOf(path);
-        const next = prev.filter((p) => p !== path);
-
-        // If closing the active tab, switch to an adjacent one
-        setActiveFilePath((currentActive) => {
-          if (path !== currentActive) return currentActive;
-          if (next.length === 0) return null;
-          return next[Math.min(idx, next.length - 1)];
-        });
-
-        return next;
-      });
+    // Fetch file content
+    try {
+      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setTabData((prev) => {
         const next = new Map(prev);
-        next.delete(path);
+        next.set(path, {
+          filePath: data.path,
+          rawMarkdown: data.content,
+          isLoading: false,
+          error: null,
+          lastSaved: new Date(),
+        });
         return next;
       });
-    },
-    []
-  );
+    } catch (err) {
+      setTabData((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(path);
+        if (existing) {
+          next.set(path, {
+            ...existing,
+            isLoading: false,
+            error: err instanceof Error ? err.message : 'Failed to load file',
+          });
+        }
+        return next;
+      });
+    }
+  }, []);
+
+  const closeTab = useCallback((path: string) => {
+    setTabOrder((prev) => {
+      const idx = prev.indexOf(path);
+      const next = prev.filter((p) => p !== path);
+
+      // If closing the active tab, switch to an adjacent one
+      setActiveFilePath((currentActive) => {
+        if (path !== currentActive) return currentActive;
+        if (next.length === 0) return null;
+        return next[Math.min(idx, next.length - 1)];
+      });
+
+      return next;
+    });
+    setTabData((prev) => {
+      const next = new Map(prev);
+      next.delete(path);
+      return next;
+    });
+  }, []);
 
   const switchTab = useCallback((path: string) => {
     setActiveFilePath(path);
   }, []);
 
-  const activeTab = activeFilePath ? tabData.get(activeFilePath) ?? null : null;
+  const activeTab = activeFilePath ? (tabData.get(activeFilePath) ?? null) : null;
 
   const tabs = useMemo(
     () => tabOrder.map((p) => tabData.get(p)).filter((t): t is TabState => !!t),
-    [tabOrder, tabData]
+    [tabOrder, tabData],
   );
 
   // Active tab delegates
@@ -128,7 +122,7 @@ export function useTabs() {
     (content: string) => {
       if (activeFilePath) updateTab(activeFilePath, { rawMarkdown: content });
     },
-    [activeFilePath, updateTab]
+    [activeFilePath, updateTab],
   );
 
   const saveFile = useCallback(
@@ -149,7 +143,7 @@ export function useTabs() {
         });
       }
     },
-    [activeFilePath, updateTab]
+    [activeFilePath, updateTab],
   );
 
   const reloadFile = useCallback(async () => {

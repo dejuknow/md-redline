@@ -1,5 +1,6 @@
 import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
 import type { MdComment } from '../types';
+import { getEffectiveStatus } from '../types';
 
 interface Props {
   html: string;
@@ -13,70 +14,82 @@ export interface MarkdownViewerHandle {
   getContainer: () => HTMLElement | null;
   scrollToComment: (commentId: string) => void;
   getActiveMark: () => HTMLElement | null;
+  getActiveMarks: () => HTMLElement[];
 }
 
-// React.memo prevents re-renders from parent state changes (e.g. saveFile → setLastSaved)
-// that don't affect our props. Without this, React would re-render the component,
-// detect that dangerouslySetInnerHTML's DOM was modified by our useLayoutEffect marks,
-// replace the entire innerHTML, and our marks would be destroyed — but the effect
-// wouldn't re-run because its deps haven't changed.
-export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
-  function MarkdownViewer({ html, comments, activeCommentId, selectionText, onHighlightClick }, ref) {
+// React.memo prevents re-renders from parent state changes that don't affect our props.
+// Combined with ref-based innerHTML (no dangerouslySetInnerHTML), React never touches
+// the container's children — our useLayoutEffect is the sole DOM manager.
+export const MarkdownViewer = memo(
+  forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
+    { html, comments, activeCommentId, selectionText, onHighlightClick },
+    ref,
+  ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const activeMarkRef = useRef<HTMLElement | null>(null);
 
     useImperativeHandle(ref, () => ({
       getContainer: () => containerRef.current,
       scrollToComment: (commentId: string) => {
-        const mark = containerRef.current?.querySelector(
-          `mark[data-comment-id="${commentId}"]`
+        if (!containerRef.current) return;
+        const marks = containerRef.current.querySelectorAll('mark.comment-highlight');
+        const mark = Array.from(marks).find((m) =>
+          (m as HTMLElement).dataset.commentIds?.split(',').includes(commentId),
         );
         if (mark) {
           mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       },
       getActiveMark: () => activeMarkRef.current,
+      getActiveMarks: () => {
+        if (!containerRef.current) return [];
+        return Array.from(
+          containerRef.current.querySelectorAll('mark.comment-highlight-active'),
+        ) as HTMLElement[];
+      },
     }));
 
-    // Apply all highlights after React commits the innerHTML.
-    // This runs AFTER React's DOM update, so we're working with fresh nodes.
+    // Set innerHTML and apply highlights after React commits.
+    // We manage innerHTML ourselves (no dangerouslySetInnerHTML) so React's
+    // reconciliation never interferes with our DOM modifications.
     useLayoutEffect(() => {
       const container = containerRef.current;
       if (!container) return;
 
-      // --- Clear all previous highlights ---
-      // React may not replace innerHTML if the html prop hasn't changed,
-      // so stale marks from the last effect run can linger.
-      container.querySelectorAll('mark.comment-highlight, mark.selection-highlight').forEach((mark) => {
-        const parent = mark.parentNode;
-        if (!parent) return;
-        while (mark.firstChild) {
-          parent.insertBefore(mark.firstChild, mark);
-        }
-        parent.removeChild(mark);
-      });
-      // Merge adjacent text nodes that were split by the old marks
-      container.normalize();
+      // Set innerHTML from scratch — guarantees a clean starting state
+      container.innerHTML = html;
 
       // --- Comment highlights ---
       // Group comments that share the same anchor AND cleanOffset (exact same highlight)
-      const highlightGroups = new Map<string, { ids: string[]; anchor: string; cleanOffset?: number }>();
+      const highlightGroups = new Map<
+        string,
+        { ids: string[]; anchor: string; cleanOffset?: number }
+      >();
       for (const comment of comments) {
-        if (comment.resolved) continue;
+        if (getEffectiveStatus(comment) === 'accepted') continue;
         const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
-        const group = highlightGroups.get(key) || { ids: [], anchor: comment.anchor, cleanOffset: comment.cleanOffset };
+        const group = highlightGroups.get(key) || {
+          ids: [],
+          anchor: comment.anchor,
+          cleanOffset: comment.cleanOffset,
+        };
         group.ids.push(comment.id);
         highlightGroups.set(key, group);
       }
 
       for (const { anchor, ids, cleanOffset } of highlightGroups.values()) {
-        wrapText(container, anchor, (mark) => {
-          mark.className = 'comment-highlight';
-          mark.dataset.commentIds = ids.join(',');
-          if (ids.includes(activeCommentId || '')) {
-            mark.classList.add('comment-highlight-active');
-          }
-        }, cleanOffset);
+        wrapText(
+          container,
+          anchor,
+          (mark) => {
+            mark.className = 'comment-highlight';
+            mark.dataset.commentIds = ids.join(',');
+            if (ids.includes(activeCommentId || '')) {
+              mark.classList.add('comment-highlight-active');
+            }
+          },
+          cleanOffset,
+        );
       }
 
       // --- Selection highlight ---
@@ -87,12 +100,14 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
       }
 
       // Store reference to the active mark for drag handles
-      activeMarkRef.current = container.querySelector('mark.comment-highlight-active') as HTMLElement | null;
+      activeMarkRef.current = container.querySelector(
+        'mark.comment-highlight-active',
+      ) as HTMLElement | null;
     }, [html, comments, activeCommentId, selectionText]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
-        'mark.comment-highlight'
+        'mark.comment-highlight',
       ) as HTMLElement | null;
       if (mark?.dataset.commentIds) {
         const ids = mark.dataset.commentIds.split(',');
@@ -103,30 +118,28 @@ export const MarkdownViewer = memo(forwardRef<MarkdownViewerHandle, Props>(
     return (
       <div
         ref={containerRef}
-        className="prose prose-slate max-w-none prose-headings:scroll-mt-4
-          prose-h1:text-2xl prose-h1:font-bold prose-h1:border-b prose-h1:border-slate-200 prose-h1:pb-2
+        className="prose max-w-none prose-headings:scroll-mt-4
+          prose-h1:text-2xl prose-h1:font-bold prose-h1:border-b prose-h1:pb-2
           prose-h2:text-xl prose-h2:font-semibold prose-h2:mt-8
           prose-h3:text-lg prose-h3:font-medium
           prose-p:leading-relaxed
           prose-table:text-sm
-          prose-th:bg-slate-50 prose-th:font-semibold
-          prose-td:border-slate-200
-          prose-code:text-indigo-600 prose-code:bg-indigo-50 prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:font-normal prose-code:before:content-none prose-code:after:content-none"
-        dangerouslySetInnerHTML={{ __html: html }}
+          prose-th:font-semibold
+          prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:font-normal prose-code:before:content-none prose-code:after:content-none"
         onClick={handleClick}
       />
     );
-  }
-));
+  }),
+);
 
 /** Find an occurrence of `text` in the container's text nodes and wrap it in <mark> elements.
  *  When `cleanOffset` is provided, uses it to find the correct occurrence (supports overlapping).
- *  Handles text that spans multiple DOM elements (e.g. header → paragraph). */
+ *  Handles text that spans multiple DOM elements (e.g. header -> paragraph). */
 function wrapText(
   container: HTMLElement,
   text: string,
   configure: (mark: HTMLElement) => void,
-  cleanOffset?: number
+  cleanOffset?: number,
 ) {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -145,7 +158,7 @@ function wrapText(
     allNodeInfo.push({ node: tn, globalStart: allPos, length: len });
     allPos += len;
   }
-  const fullText = allTextNodes.map(n => n.textContent || '').join('');
+  const fullText = allTextNodes.map((n) => n.textContent || '').join('');
 
   // Find the match
   let matchStart: number;
@@ -207,7 +220,14 @@ function wrapText(
     try {
       range.surroundContents(mark);
     } catch {
-      // Skip if wrapping fails
+      // Fallback for cross-element edge cases: extract and re-insert
+      try {
+        const fragment = range.extractContents();
+        mark.appendChild(fragment);
+        range.insertNode(mark);
+      } catch {
+        // Skip if all wrapping fails
+      }
     }
   }
 }
@@ -220,7 +240,7 @@ function wrapText(
 function flexibleSearch(
   haystack: string,
   needle: string,
-  startFrom: number = 0
+  startFrom: number = 0,
 ): { start: number; end: number } | null {
   const parts = needle.split(/\s+/).filter(Boolean);
   if (parts.length === 0) return null;

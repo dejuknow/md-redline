@@ -1,10 +1,366 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* Comment highlight styles */
+/* ========== Semantic Color Tokens ========== */
+@theme {
+  /* Surfaces */
+  --color-surface: var(--theme-bg);
+  --color-surface-secondary: var(--theme-bg-secondary);
+  --color-surface-raised: var(--theme-bg-raised);
+  --color-surface-inset: var(--theme-bg-inset);
+
+  /* Borders */
+  --color-border: var(--theme-border);
+  --color-border-subtle: var(--theme-border-subtle);
+
+  /* Text content */
+  --color-content: var(--theme-text);
+  --color-content-secondary: var(--theme-text-secondary);
+  --color-content-muted: var(--theme-text-muted);
+  --color-content-faint: var(--theme-text-faint);
+
+  /* Primary accent */
+  --color-primary: var(--theme-accent);
+  --color-primary-hover: var(--theme-accent-hover);
+  --color-primary-bg: var(--theme-accent-bg);
+  --color-primary-bg-strong: var(--theme-accent-bg-strong);
+  --color-primary-text: var(--theme-accent-text);
+  --color-primary-border: var(--theme-accent-border);
+  --color-primary-ring: var(--theme-accent-ring);
+  --color-on-primary: var(--theme-on-accent);
+
+  /* Danger */
+  --color-danger: var(--theme-danger);
+  --color-danger-bg: var(--theme-danger-bg);
+  --color-danger-text: var(--theme-danger-text);
+
+  /* Success */
+  --color-success: var(--theme-success);
+  --color-success-bg: var(--theme-success-bg);
+  --color-success-text: var(--theme-success-text);
+
+  /* Warning */
+  --color-warning: var(--theme-warning);
+  --color-warning-bg: var(--theme-warning-bg);
+  --color-warning-text: var(--theme-warning-text);
+
+  /* Status badges */
+  --color-status-open-bg: var(--theme-status-open-bg);
+  --color-status-open-text: var(--theme-status-open-text);
+  --color-status-addressed-bg: var(--theme-status-addressed-bg);
+  --color-status-addressed-text: var(--theme-status-addressed-text);
+  --color-status-accepted-bg: var(--theme-status-accepted-bg);
+  --color-status-accepted-text: var(--theme-status-accepted-text);
+  --color-status-reopened-bg: var(--theme-status-reopened-bg);
+  --color-status-reopened-text: var(--theme-status-reopened-text);
+
+  /* Comment anchors */
+  --color-comment-anchor-bg: var(--theme-comment-anchor-bg);
+  --color-comment-anchor-text: var(--theme-comment-anchor-text);
+  --color-comment-anchor-border: var(--theme-comment-anchor-border);
+
+  /* Diff */
+  --color-diff-added-bg: var(--theme-diff-added-bg);
+  --color-diff-added-text: var(--theme-diff-added-text);
+  --color-diff-removed-bg: var(--theme-diff-removed-bg);
+  --color-diff-removed-text: var(--theme-diff-removed-text);
+
+  /* Gradient */
+  --color-gradient-from: var(--theme-gradient-from);
+  --color-gradient-to: var(--theme-gradient-to);
+}
+
+/* ========== Light Theme (default) ========== */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --theme-bg: #ffffff;
+  --theme-bg-secondary: #f8fafc;
+  --theme-bg-raised: #ffffff;
+  --theme-bg-inset: #f1f5f9;
+  --theme-border: #e2e8f0;
+  --theme-border-subtle: #f1f5f9;
+  --theme-text: #1e293b;
+  --theme-text-secondary: #475569;
+  --theme-text-muted: #94a3b8;
+  --theme-text-faint: #cbd5e1;
+  --theme-accent: #4f46e5;
+  --theme-accent-hover: #4338ca;
+  --theme-accent-bg: #eef2ff;
+  --theme-accent-bg-strong: #e0e7ff;
+  --theme-accent-text: #4f46e5;
+  --theme-accent-border: #a5b4fc;
+  --theme-accent-ring: #c7d2fe;
+  --theme-on-accent: #ffffff;
+  --theme-danger: #ef4444;
+  --theme-danger-bg: #fef2f2;
+  --theme-danger-text: #dc2626;
+  --theme-success: #10b981;
+  --theme-success-bg: #ecfdf5;
+  --theme-success-text: #059669;
+  --theme-warning: #f59e0b;
+  --theme-warning-bg: #fffbeb;
+  --theme-warning-text: #d97706;
+  --theme-status-open-bg: #dbeafe;
+  --theme-status-open-text: #1d4ed8;
+  --theme-status-addressed-bg: #fef3c7;
+  --theme-status-addressed-text: #b45309;
+  --theme-status-accepted-bg: #d1fae5;
+  --theme-status-accepted-text: #047857;
+  --theme-status-reopened-bg: #ffedd5;
+  --theme-status-reopened-text: #c2410c;
+  --theme-comment-anchor-bg: #fffbeb;
+  --theme-comment-anchor-text: #b45309;
+  --theme-comment-anchor-border: #fde68a;
+  --theme-comment-bg: #fef3c7;
+  --theme-comment-bg-hover: #fde68a;
+  --theme-comment-underline: #f59e0b;
+  --theme-comment-underline-active: #d97706;
+  --theme-comment-ring: rgba(217, 119, 6, 0.3);
+  --theme-selection-bg: #dbeafe;
+  --theme-native-selection: #c7d2fe;
+  --theme-drag-handle: #d97706;
+  --theme-drag-handle-hover: #b45309;
+  --theme-diff-added-bg: #ecfdf5;
+  --theme-diff-added-text: #065f46;
+  --theme-diff-removed-bg: #fef2f2;
+  --theme-diff-removed-text: #991b1b;
+  --theme-gradient-from: #f8fafc;
+  --theme-gradient-to: rgba(238, 242, 255, 0.3);
+}
+
+/* ========== Dark Theme ========== */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --theme-bg: #0f172a;
+  --theme-bg-secondary: #1e293b;
+  --theme-bg-raised: #1e293b;
+  --theme-bg-inset: #0f172a;
+  --theme-border: #334155;
+  --theme-border-subtle: #1e293b;
+  --theme-text: #f1f5f9;
+  --theme-text-secondary: #cbd5e1;
+  --theme-text-muted: #64748b;
+  --theme-text-faint: #475569;
+  --theme-accent: #818cf8;
+  --theme-accent-hover: #a5b4fc;
+  --theme-accent-bg: rgba(99, 102, 241, 0.15);
+  --theme-accent-bg-strong: rgba(99, 102, 241, 0.25);
+  --theme-accent-text: #a5b4fc;
+  --theme-accent-border: rgba(99, 102, 241, 0.4);
+  --theme-accent-ring: rgba(99, 102, 241, 0.3);
+  --theme-on-accent: #ffffff;
+  --theme-danger: #f87171;
+  --theme-danger-bg: rgba(239, 68, 68, 0.15);
+  --theme-danger-text: #f87171;
+  --theme-success: #34d399;
+  --theme-success-bg: rgba(16, 185, 129, 0.15);
+  --theme-success-text: #34d399;
+  --theme-warning: #fbbf24;
+  --theme-warning-bg: rgba(245, 158, 11, 0.15);
+  --theme-warning-text: #fbbf24;
+  --theme-status-open-bg: rgba(59, 130, 246, 0.2);
+  --theme-status-open-text: #93c5fd;
+  --theme-status-addressed-bg: rgba(245, 158, 11, 0.2);
+  --theme-status-addressed-text: #fcd34d;
+  --theme-status-accepted-bg: rgba(16, 185, 129, 0.2);
+  --theme-status-accepted-text: #6ee7b7;
+  --theme-status-reopened-bg: rgba(249, 115, 22, 0.2);
+  --theme-status-reopened-text: #fdba74;
+  --theme-comment-anchor-bg: rgba(245, 158, 11, 0.15);
+  --theme-comment-anchor-text: #fcd34d;
+  --theme-comment-anchor-border: rgba(245, 158, 11, 0.3);
+  --theme-comment-bg: rgba(245, 158, 11, 0.2);
+  --theme-comment-bg-hover: rgba(245, 158, 11, 0.3);
+  --theme-comment-underline: #f59e0b;
+  --theme-comment-underline-active: #fbbf24;
+  --theme-comment-ring: rgba(251, 191, 36, 0.3);
+  --theme-selection-bg: rgba(59, 130, 246, 0.25);
+  --theme-native-selection: rgba(129, 140, 248, 0.4);
+  --theme-drag-handle: #f59e0b;
+  --theme-drag-handle-hover: #fbbf24;
+  --theme-diff-added-bg: rgba(16, 185, 129, 0.15);
+  --theme-diff-added-text: #6ee7b7;
+  --theme-diff-removed-bg: rgba(239, 68, 68, 0.15);
+  --theme-diff-removed-text: #fca5a5;
+  --theme-gradient-from: #0f172a;
+  --theme-gradient-to: rgba(99, 102, 241, 0.08);
+}
+
+/* ========== Sepia Theme ========== */
+[data-theme="sepia"] {
+  color-scheme: light;
+  --theme-bg: #faf6f1;
+  --theme-bg-secondary: #f5efe6;
+  --theme-bg-raised: #faf6f1;
+  --theme-bg-inset: #f0e8db;
+  --theme-border: #e0d5c5;
+  --theme-border-subtle: #f0e8db;
+  --theme-text: #3d3229;
+  --theme-text-secondary: #5c4f42;
+  --theme-text-muted: #8b7e6f;
+  --theme-text-faint: #b8ad9e;
+  --theme-accent: #8b5e3c;
+  --theme-accent-hover: #714b2f;
+  --theme-accent-bg: rgba(139, 94, 60, 0.1);
+  --theme-accent-bg-strong: rgba(139, 94, 60, 0.18);
+  --theme-accent-text: #8b5e3c;
+  --theme-accent-border: rgba(139, 94, 60, 0.35);
+  --theme-accent-ring: rgba(139, 94, 60, 0.25);
+  --theme-on-accent: #faf6f1;
+  --theme-danger: #c0392b;
+  --theme-danger-bg: rgba(192, 57, 43, 0.1);
+  --theme-danger-text: #c0392b;
+  --theme-success: #27ae60;
+  --theme-success-bg: rgba(39, 174, 96, 0.1);
+  --theme-success-text: #27ae60;
+  --theme-warning: #d4a04a;
+  --theme-warning-bg: rgba(212, 160, 74, 0.12);
+  --theme-warning-text: #b8862e;
+  --theme-status-open-bg: rgba(41, 128, 185, 0.15);
+  --theme-status-open-text: #2980b9;
+  --theme-status-addressed-bg: rgba(212, 160, 74, 0.18);
+  --theme-status-addressed-text: #8b6914;
+  --theme-status-accepted-bg: rgba(39, 174, 96, 0.15);
+  --theme-status-accepted-text: #1e8449;
+  --theme-status-reopened-bg: rgba(211, 84, 0, 0.15);
+  --theme-status-reopened-text: #d35400;
+  --theme-comment-anchor-bg: rgba(212, 160, 74, 0.15);
+  --theme-comment-anchor-text: #8b5e3c;
+  --theme-comment-anchor-border: rgba(212, 160, 74, 0.3);
+  --theme-comment-bg: rgba(212, 160, 74, 0.2);
+  --theme-comment-bg-hover: rgba(212, 160, 74, 0.3);
+  --theme-comment-underline: #d4a04a;
+  --theme-comment-underline-active: #b8862e;
+  --theme-comment-ring: rgba(184, 134, 46, 0.3);
+  --theme-selection-bg: rgba(41, 128, 185, 0.15);
+  --theme-native-selection: rgba(139, 94, 60, 0.25);
+  --theme-drag-handle: #b8862e;
+  --theme-drag-handle-hover: #8b5e3c;
+  --theme-diff-added-bg: rgba(39, 174, 96, 0.12);
+  --theme-diff-added-text: #1e7a45;
+  --theme-diff-removed-bg: rgba(192, 57, 43, 0.12);
+  --theme-diff-removed-text: #922b21;
+  --theme-gradient-from: #f5efe6;
+  --theme-gradient-to: rgba(139, 94, 60, 0.06);
+}
+
+/* ========== Nord Theme ========== */
+[data-theme="nord"] {
+  color-scheme: dark;
+  --theme-bg: #2e3440;
+  --theme-bg-secondary: #3b4252;
+  --theme-bg-raised: #3b4252;
+  --theme-bg-inset: #2e3440;
+  --theme-border: #4c566a;
+  --theme-border-subtle: #3b4252;
+  --theme-text: #eceff4;
+  --theme-text-secondary: #d8dee9;
+  --theme-text-muted: #7b88a1;
+  --theme-text-faint: #4c566a;
+  --theme-accent: #88c0d0;
+  --theme-accent-hover: #8fbcbb;
+  --theme-accent-bg: rgba(136, 192, 208, 0.15);
+  --theme-accent-bg-strong: rgba(136, 192, 208, 0.25);
+  --theme-accent-text: #88c0d0;
+  --theme-accent-border: rgba(136, 192, 208, 0.4);
+  --theme-accent-ring: rgba(136, 192, 208, 0.3);
+  --theme-on-accent: #2e3440;
+  --theme-danger: #bf616a;
+  --theme-danger-bg: rgba(191, 97, 106, 0.15);
+  --theme-danger-text: #bf616a;
+  --theme-success: #a3be8c;
+  --theme-success-bg: rgba(163, 190, 140, 0.15);
+  --theme-success-text: #a3be8c;
+  --theme-warning: #ebcb8b;
+  --theme-warning-bg: rgba(235, 203, 139, 0.15);
+  --theme-warning-text: #ebcb8b;
+  --theme-status-open-bg: rgba(94, 129, 172, 0.2);
+  --theme-status-open-text: #81a1c1;
+  --theme-status-addressed-bg: rgba(235, 203, 139, 0.2);
+  --theme-status-addressed-text: #ebcb8b;
+  --theme-status-accepted-bg: rgba(163, 190, 140, 0.2);
+  --theme-status-accepted-text: #a3be8c;
+  --theme-status-reopened-bg: rgba(208, 135, 112, 0.2);
+  --theme-status-reopened-text: #d08770;
+  --theme-comment-anchor-bg: rgba(235, 203, 139, 0.15);
+  --theme-comment-anchor-text: #ebcb8b;
+  --theme-comment-anchor-border: rgba(235, 203, 139, 0.3);
+  --theme-comment-bg: rgba(235, 203, 139, 0.2);
+  --theme-comment-bg-hover: rgba(235, 203, 139, 0.3);
+  --theme-comment-underline: #ebcb8b;
+  --theme-comment-underline-active: #d08770;
+  --theme-comment-ring: rgba(208, 135, 112, 0.3);
+  --theme-selection-bg: rgba(94, 129, 172, 0.25);
+  --theme-native-selection: rgba(136, 192, 208, 0.3);
+  --theme-drag-handle: #d08770;
+  --theme-drag-handle-hover: #ebcb8b;
+  --theme-diff-added-bg: rgba(163, 190, 140, 0.15);
+  --theme-diff-added-text: #a3be8c;
+  --theme-diff-removed-bg: rgba(191, 97, 106, 0.15);
+  --theme-diff-removed-text: #bf616a;
+  --theme-gradient-from: #2e3440;
+  --theme-gradient-to: rgba(136, 192, 208, 0.08);
+}
+
+/* ========== Prose Theme Overrides ========== */
+.prose {
+  --tw-prose-body: var(--theme-text-secondary);
+  --tw-prose-headings: var(--theme-text);
+  --tw-prose-links: var(--theme-accent-text);
+  --tw-prose-bold: var(--theme-text);
+  --tw-prose-code: var(--theme-accent-text);
+  --tw-prose-quotes: var(--theme-text-secondary);
+  --tw-prose-quote-borders: var(--theme-border);
+  --tw-prose-counters: var(--theme-text-muted);
+  --tw-prose-bullets: var(--theme-text-muted);
+  --tw-prose-hr: var(--theme-border);
+  --tw-prose-th-borders: var(--theme-border);
+  --tw-prose-td-borders: var(--theme-border);
+  --tw-prose-captions: var(--theme-text-muted);
+  --tw-prose-pre-bg: var(--theme-bg-inset);
+  --tw-prose-pre-code: var(--theme-text-secondary);
+}
+
+.prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  color: var(--theme-accent-text);
+  background-color: var(--theme-accent-bg);
+}
+
+.prose :where(th):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  background-color: var(--theme-bg-secondary);
+}
+
+.prose :where(td):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  border-color: var(--theme-border);
+}
+
+.prose :where(h1):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  border-color: var(--theme-border);
+}
+
+.prose :where(hr):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  border-color: var(--theme-border);
+}
+
+.prose :where(pre):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  background-color: var(--theme-bg-inset);
+  color: var(--theme-text-secondary);
+}
+
+/* Reset prose mark styling so our highlights aren't overridden by the
+   Typography plugin or browser dark-mode defaults */
+.prose mark,
+mark {
+  background-color: transparent;
+  color: inherit;
+}
+
+/* ========== Comment Highlight Styles ========== */
+.prose mark.comment-highlight,
 mark.comment-highlight {
-  background-color: #fef3c7;
-  text-decoration: underline 2px #f59e0b;
+  background-color: var(--theme-comment-bg);
+  color: var(--theme-text);
+  text-decoration: underline 2px var(--theme-comment-underline);
   text-underline-offset: 2px;
   padding: 1px 0;
   cursor: pointer;
@@ -13,14 +369,16 @@ mark.comment-highlight {
   line-height: inherit;
 }
 
+.prose mark.comment-highlight:hover,
 mark.comment-highlight:hover {
-  background-color: #fde68a;
+  background-color: var(--theme-comment-bg-hover);
 }
 
+.prose mark.comment-highlight-active,
 mark.comment-highlight-active {
-  background-color: #fde68a;
-  text-decoration-color: #d97706;
-  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.3);
+  background-color: var(--theme-comment-bg-hover);
+  text-decoration-color: var(--theme-comment-underline-active);
+  box-shadow: 0 0 0 1px var(--theme-comment-ring);
 }
 
 /* Smooth scrolling for the viewer */
@@ -28,24 +386,26 @@ mark.comment-highlight-active {
   scroll-behavior: smooth;
 }
 
-/* Pending selection highlight (applied in useLayoutEffect alongside comment highlights) */
+/* Pending selection highlight */
+.prose mark.selection-highlight,
 mark.selection-highlight {
-  background-color: #dbeafe;
+  background-color: var(--theme-selection-bg);
+  color: var(--theme-text);
   border-radius: 2px;
   padding: 1px 0;
   line-height: inherit;
 }
 
-/* Browser native selection color while actively dragging */
+/* Browser native selection color */
 ::selection {
-  background-color: #c7d2fe;
+  background-color: var(--theme-native-selection);
   color: inherit;
 }
 
 /* Drag handles for resizing comment highlights */
 .drag-handle {
   width: 4px;
-  background-color: #d97706;
+  background-color: var(--theme-drag-handle);
   border-radius: 2px;
   cursor: ew-resize;
   z-index: 10;
@@ -53,7 +413,6 @@ mark.selection-highlight {
   transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
-/* Larger click target via pseudo-element */
 .drag-handle::before {
   content: '';
   position: absolute;
@@ -64,11 +423,11 @@ mark.selection-highlight {
 }
 
 .drag-handle:hover {
-  background-color: #b45309;
+  background-color: var(--theme-drag-handle-hover);
   transform: scaleX(1.5);
 }
 
-/* During drag, lock cursor across entire page */
+/* During drag, lock cursor */
 body.anchor-dragging,
 body.anchor-dragging * {
   cursor: ew-resize !important;
