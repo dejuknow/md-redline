@@ -12,6 +12,7 @@ import {
   resolveAllComments,
   removeResolvedComments,
   serializeComment,
+  detectMissingAnchors,
 } from './comment-parser';
 import { getEffectiveStatus } from '../types';
 import type { MdComment } from '../types';
@@ -382,71 +383,47 @@ describe('getEffectiveStatus', () => {
   });
 });
 
-describe('anchor-missing detection', () => {
-  // This tests the logic used in App.tsx to detect when a comment's anchor text
-  // has been modified or removed from the clean markdown.
-  function detectMissingAnchors(
-    cleanMarkdown: string,
-    comments: { id: string; anchor: string }[],
-  ): Set<string> {
-    const missing = new Set<string>();
-    for (const c of comments) {
-      if (!cleanMarkdown.includes(c.anchor)) {
-        const parts = c.anchor.split(/\s+/).filter(Boolean);
-        if (parts.length === 0) continue;
-        const allFound = parts.every((p) => cleanMarkdown.includes(p));
-        if (!allFound) {
-          missing.add(c.id);
-        }
-      }
-    }
-    return missing;
-  }
-
+describe('detectMissingAnchors', () => {
   it('returns empty set when all anchors are present', () => {
     const clean = 'Hello world, this is a test';
     const comments = [
       { id: 'a', anchor: 'Hello world' },
       { id: 'b', anchor: 'this is a test' },
-    ];
+    ] as MdComment[];
     expect(detectMissingAnchors(clean, comments).size).toBe(0);
   });
 
   it('detects when anchor text is completely removed', () => {
     const clean = 'Hello world';
-    const comments = [{ id: 'a', anchor: 'deleted text' }];
+    const comments = [{ id: 'a', anchor: 'deleted text' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(true);
   });
 
   it('does not flag anchors with flexible whitespace match', () => {
-    // When "Hello world" is the anchor but clean markdown has "Hello" and "world" separately
     const clean = 'Hello\nworld';
-    const comments = [{ id: 'a', anchor: 'Hello world' }];
-    // "Hello world" is not found as exact match, but "Hello" and "world" are both present
+    const comments = [{ id: 'a', anchor: 'Hello world' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('detects partially modified anchor', () => {
     const clean = 'Hello universe';
-    const comments = [{ id: 'a', anchor: 'Hello world' }];
-    // "Hello" is found but "world" is not
+    const comments = [{ id: 'a', anchor: 'Hello world' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(true);
   });
 
   it('handles empty anchor gracefully', () => {
     const clean = 'Hello world';
-    const comments = [{ id: 'a', anchor: '' }];
-    // Empty anchor splits to empty parts, skip
+    const comments = [{ id: 'a', anchor: '' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('handles whitespace-only anchor gracefully', () => {
     const clean = 'Hello world';
-    const comments = [{ id: 'a', anchor: '   ' }];
+    const comments = [{ id: 'a', anchor: '   ' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -457,12 +434,47 @@ describe('anchor-missing detection', () => {
       { id: 'a', anchor: 'gone text' },
       { id: 'b', anchor: 'also gone' },
       { id: 'c', anchor: 'Only this remains' },
-    ];
+    ] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.size).toBe(2);
     expect(missing.has('a')).toBe(true);
     expect(missing.has('b')).toBe(true);
     expect(missing.has('c')).toBe(false);
+  });
+
+  it('flags anchor when words appear non-contiguously in different sections', () => {
+    const clean = 'API is great\n\nSome other stuff\n\ndesign guidelines here';
+    const comments = [{ id: 'a', anchor: 'API design guidelines' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(true);
+  });
+
+  it('does not flag anchor when words appear contiguously with extra whitespace', () => {
+    const clean = 'API  design\n\tguidelines';
+    const comments = [{ id: 'a', anchor: 'API design guidelines' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('skips accepted comments', () => {
+    const clean = 'Hello world';
+    const comments = [
+      { id: 'a', anchor: 'deleted text', status: 'accepted', resolved: true },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('returns empty set for empty markdown', () => {
+    const comments = [{ id: 'a', anchor: 'test' }] as MdComment[];
+    expect(detectMissingAnchors('', comments).size).toBe(0);
+  });
+
+  it('handles contiguous match at second occurrence', () => {
+    const clean = 'API stuff\n\nAPI design guidelines here';
+    const comments = [{ id: 'a', anchor: 'API design guidelines' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
   });
 });
 
@@ -635,5 +647,171 @@ describe('fuzzy re-matching', () => {
     const parsed = parseComments(raw);
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.comments[0].cleanOffset).toBe('the beginning of '.length);
+  });
+
+  it('uses contextAfter-only fallback when contextBefore is missing', () => {
+    const comment: MdComment = {
+      id: 'after-only-1',
+      anchor: 'old text',
+      text: 'note',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      resolved: false,
+      status: 'open',
+      contextAfter: ' and the rest follows',
+    };
+    const raw = `prefix text ${serializeComment(comment)}changed text and the rest follows here.`;
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(1);
+    const clean = parsed.cleanMarkdown;
+    expect(clean).toBe('prefix text changed text and the rest follows here.');
+    const afterIdx = clean.indexOf(' and the rest follows');
+    // cleanOffset estimated as afterIdx - old anchor length
+    expect(parsed.comments[0].cleanOffset).toBe(afterIdx - 'old text'.length);
+  });
+
+  it('rejects fuzzy match when gap between contexts is too large (>500 chars)', () => {
+    const filler = 'x'.repeat(501);
+    const comment: MdComment = {
+      id: 'gap-1',
+      anchor: 'old anchor',
+      text: 'note',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      resolved: false,
+      status: 'open',
+      contextBefore: 'context before ',
+      contextAfter: ' context after',
+    };
+    const raw = `context before ${serializeComment(comment)}${filler} context after end.`;
+    const parsed = parseComments(raw);
+    const clean = parsed.cleanMarkdown;
+    // Both-context match fails (gap > 500), contextBefore-only fallback succeeds
+    expect(parsed.comments[0].cleanOffset).toBe('context before '.length);
+  });
+
+  it('does not re-match when context exists but gap is zero', () => {
+    const comment: MdComment = {
+      id: 'zero-gap-1',
+      anchor: 'old anchor',
+      text: 'note',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      resolved: false,
+      status: 'open',
+      contextBefore: 'before',
+      contextAfter: 'after',
+    };
+    // Context is adjacent (gap = 0), so the both-context check fails (gap > 0 required)
+    const raw = `before${serializeComment(comment)}after end.`;
+    const parsed = parseComments(raw);
+    // Falls through to contextBefore-only (length 6 < 10, skipped), then contextAfter-only (length 5 < 10, skipped)
+    // cleanOffset stays at original marker position
+    expect(parsed.comments[0].cleanOffset).toBe('before'.length);
+  });
+});
+
+describe('insertComment with duplicate anchors', () => {
+  it('inserts at the first occurrence when anchor appears multiple times', () => {
+    const raw = 'foo bar foo baz foo';
+    const result = insertComment(raw, 'foo', 'which foo?');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe('foo bar foo baz foo');
+    expect(parsed.comments[0].cleanOffset).toBe(0);
+  });
+});
+
+describe('insertComment cross-element segments', () => {
+  it('handles cross-element anchor with duplicate segment text', () => {
+    const raw = 'item one\nitem two\nitem three';
+    const result = insertComment(raw, 'item one\nitem two', 'spans items');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe('item one\nitem two\nitem three');
+    expect(parsed.comments[0].cleanOffset).toBe(0);
+  });
+
+  it('finds segments with tabs (table selections)', () => {
+    const raw = 'Cell A\tCell B\tCell C';
+    const result = insertComment(raw, 'Cell A\tCell B', 'spans cells');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].cleanOffset).toBe(0);
+  });
+});
+
+describe('comments with nested JSON', () => {
+  it('parses comments with replies containing braces in text', () => {
+    const comment: MdComment = {
+      id: 'nested-1',
+      anchor: 'test',
+      text: 'use {} syntax',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      resolved: false,
+      status: 'open',
+      replies: [
+        { id: 'r1', text: 'try {value: true}', author: 'Bob', timestamp: '2024-01-01T00:00:00.000Z' },
+      ],
+    };
+    const raw = `${serializeComment(comment)}test content`;
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].text).toBe('use {} syntax');
+    expect(parsed.comments[0].replies).toHaveLength(1);
+    expect(parsed.comments[0].replies![0].text).toBe('try {value: true}');
+  });
+
+  it('parses comments with deeply nested reply objects', () => {
+    const comment: MdComment = {
+      id: 'deep-1',
+      anchor: 'hello',
+      text: 'comment',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      resolved: false,
+      status: 'open',
+      replies: [
+        { id: 'r1', text: 'first reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+        { id: 'r2', text: 'second reply', author: 'B', timestamp: '2024-01-02T00:00:00.000Z' },
+        { id: 'r3', text: 'third reply', author: 'C', timestamp: '2024-01-03T00:00:00.000Z' },
+      ],
+    };
+    const raw = `${serializeComment(comment)}hello world`;
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].replies).toHaveLength(3);
+  });
+});
+
+describe('stripInlineFormatting via insertComment', () => {
+  it('finds anchor inside strikethrough formatting', () => {
+    const raw = 'This has ~~deleted~~ text';
+    const result = insertComment(raw, 'deleted', 'why struck?');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].anchor).toBe('deleted');
+  });
+
+  it('finds anchor with multiple formatting markers', () => {
+    const raw = 'This is **_really_ important** stuff';
+    const result = insertComment(raw, 'really important', 'noted');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+  });
+
+  it('finds anchor in deeply nested list', () => {
+    const raw = '1. first\n2. second\n3. third';
+    const result = insertComment(raw, 'second', 'check');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+  });
+
+  it('preserves literal asterisks flanked by spaces', () => {
+    const raw = 'Use a * as wildcard here';
+    const result = insertComment(raw, 'a * as', 'clarify');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
   });
 });

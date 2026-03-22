@@ -26,6 +26,7 @@ import {
   addReply,
   resolveAllComments,
   removeResolvedComments,
+  detectMissingAnchors,
 } from './lib/comment-parser';
 import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
@@ -148,24 +149,10 @@ export default function App() {
   const html = useMemo(() => (cleanMarkdown ? renderMarkdown(cleanMarkdown) : ''), [cleanMarkdown]);
 
   // Detect missing anchors: comments whose anchor text can no longer be found in clean markdown
-  const missingAnchors = useMemo(() => {
-    const missing = new Set<string>();
-    if (!cleanMarkdown) return missing;
-    for (const c of comments) {
-      if (getEffectiveStatus(c) === 'accepted') continue;
-      // Check if the anchor text exists in the clean markdown
-      if (!cleanMarkdown.includes(c.anchor)) {
-        // Try flexible match (whitespace-normalized)
-        const parts = c.anchor.split(/\s+/).filter(Boolean);
-        if (parts.length === 0) continue;
-        const allFound = parts.every((p) => cleanMarkdown.includes(p));
-        if (!allFound) {
-          missing.add(c.id);
-        }
-      }
-    }
-    return missing;
-  }, [cleanMarkdown, comments]);
+  const missingAnchors = useMemo(
+    () => detectMissingAnchors(cleanMarkdown, comments),
+    [cleanMarkdown, comments],
+  );
 
   // Comment counts per tab (for badges)
   const commentCounts = useMemo(() => {

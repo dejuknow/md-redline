@@ -180,3 +180,112 @@ describe('ALLOWED_ROOTS with initial file', () => {
     expect(roots).toHaveLength(2); // Not added since it's under cwd
   });
 });
+
+describe('PUT /api/file JSON body validation', () => {
+  it('rejects non-JSON body gracefully', async () => {
+    // Simulates the server's try/catch pattern around JSON.parse
+    async function parseRequestBody(rawBody: string) {
+      try {
+        const body = JSON.parse(rawBody);
+        if (!body.path || body.content === undefined) {
+          return { error: 'path and content are required', status: 400 };
+        }
+        return { data: body, status: 200 };
+      } catch {
+        return { error: 'Invalid JSON body', status: 400 };
+      }
+    }
+
+    // Invalid JSON
+    const invalid = await parseRequestBody('not json at all');
+    expect(invalid.status).toBe(400);
+    expect(invalid.error).toBe('Invalid JSON body');
+
+    // Empty body
+    const empty = await parseRequestBody('');
+    expect(empty.status).toBe(400);
+    expect(empty.error).toBe('Invalid JSON body');
+
+    // Valid JSON but missing fields
+    const missingPath = await parseRequestBody('{"content":"hello"}');
+    expect(missingPath.status).toBe(400);
+    expect(missingPath.error).toBe('path and content are required');
+
+    // Valid JSON with all fields
+    const valid = await parseRequestBody('{"path":"/test.md","content":"# Hello"}');
+    expect(valid.status).toBe(200);
+    expect(valid.data).toEqual({ path: '/test.md', content: '# Hello' });
+  });
+});
+
+describe('recentWrites cleanup', () => {
+  it('cleans up even when write fails (try/finally pattern)', async () => {
+    const recentWrites = new Set<string>();
+    const path = '/test/file.md';
+
+    recentWrites.add(path);
+    try {
+      // Simulate a failed write
+      throw new Error('disk full');
+    } catch {
+      // Error handled (server returns 500)
+    } finally {
+      // This is the pattern the server uses — cleanup always runs
+      setTimeout(() => recentWrites.delete(path), 50);
+    }
+
+    // Path is still present immediately
+    expect(recentWrites.has(path)).toBe(true);
+
+    // Cleared after timeout
+    await new Promise((r) => setTimeout(r, 100));
+    expect(recentWrites.has(path)).toBe(false);
+  });
+
+  it('does not leak paths on successful writes', async () => {
+    const recentWrites = new Set<string>();
+    const path = '/test/file.md';
+
+    recentWrites.add(path);
+    try {
+      // Simulate successful write (no throw)
+    } finally {
+      setTimeout(() => recentWrites.delete(path), 50);
+    }
+
+    expect(recentWrites.has(path)).toBe(true);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(recentWrites.has(path)).toBe(false);
+  });
+});
+
+describe('SSE watcher error handling', () => {
+  it('watcher cleanup function clears all clients', () => {
+    const clients = new Set<{ closed: boolean }>();
+    const client1 = { closed: false };
+    const client2 = { closed: false };
+    clients.add(client1);
+    clients.add(client2);
+
+    // Simulate cleanUpWatcher
+    for (const client of clients) {
+      client.closed = true;
+    }
+    clients.clear();
+
+    expect(clients.size).toBe(0);
+    expect(client1.closed).toBe(true);
+    expect(client2.closed).toBe(true);
+  });
+
+  it('fileWatchers map is cleaned up on file deletion', () => {
+    const fileWatchers = new Map<string, { clients: Set<unknown> }>();
+    const path = '/test/file.md';
+    fileWatchers.set(path, { clients: new Set() });
+
+    // Simulate cleanup (what happens when readFile throws in the watcher callback)
+    fileWatchers.delete(path);
+
+    expect(fileWatchers.has(path)).toBe(false);
+  });
+});

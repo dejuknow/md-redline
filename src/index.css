@@ -427,7 +427,7 @@ mark.selection-highlight {
   transform: scaleX(1.5);
 }
 
-/* During drag, lock cursor */
+/* During drag, lock cursor across entire page */
 body.anchor-dragging,
 body.anchor-dragging * {
   cursor: ew-resize !important;

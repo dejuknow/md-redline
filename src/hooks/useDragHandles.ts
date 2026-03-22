@@ -74,16 +74,18 @@ function computePositions(
   };
 }
 
-/** Get container-relative text offset for a node+offset pair */
+/** Get container-relative text offset for a node+offset pair.
+ *  Uses Range API to handle both text nodes and element nodes
+ *  (caretFromPoint can return element nodes at block boundaries). */
 function getContainerTextOffset(container: HTMLElement, targetNode: Node, offset: number): number {
-  let total = 0;
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    if (node === targetNode) return total + offset;
-    total += node.textContent?.length || 0;
+  const range = document.createRange();
+  range.selectNodeContents(container);
+  try {
+    range.setEnd(targetNode, offset);
+  } catch {
+    return 0;
   }
-  return total;
+  return range.toString().length;
 }
 
 export function useDragHandles({
@@ -233,6 +235,9 @@ export function useDragHandles({
         const newText = fullText.slice(newStartOffset, newEndOffset);
         if (newText.length < 2) return;
 
+        // Snapshot DOM before mutation so we can roll back if re-wrapping fails
+        const snapshot = container.innerHTML;
+
         // Unwrap all active marks, preserving their children
         const oldMarks = container.querySelectorAll('mark.comment-highlight-active');
         oldMarks.forEach((oldMark) => {
@@ -270,7 +275,14 @@ export function useDragHandles({
           }
         }
 
-        if (wraps.length === 0) return;
+        if (wraps.length === 0) {
+          // Nothing to wrap — roll back so the old highlight stays visible
+          container.innerHTML = snapshot;
+          drag.markEls = Array.from(
+            container.querySelectorAll('mark.comment-highlight-active'),
+          ) as HTMLElement[];
+          return;
+        }
 
         // Wrap each portion in reverse order to avoid invalidating earlier nodes
         const newMarks: HTMLElement[] = [];
@@ -294,6 +306,12 @@ export function useDragHandles({
           drag.markEls = newMarks;
           drag.currentStartOffset = newStartOffset;
           drag.currentEndOffset = newEndOffset;
+        } else {
+          // All wrapping failed — roll back
+          container.innerHTML = snapshot;
+          drag.markEls = Array.from(
+            container.querySelectorAll('mark.comment-highlight-active'),
+          ) as HTMLElement[];
         }
 
         // Update handle positions

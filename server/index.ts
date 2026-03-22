@@ -73,7 +73,12 @@ app.get('/api/file', async (c) => {
 });
 
 app.put('/api/file', async (c) => {
-  const body = await c.req.json<{ path: string; content: string }>();
+  let body: { path: string; content: string };
+  try {
+    body = await c.req.json<{ path: string; content: string }>();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
   if (!body.path || body.content === undefined) {
     return c.json({ error: 'path and content are required' }, 400);
   }
@@ -85,8 +90,12 @@ app.put('/api/file', async (c) => {
     }
     // Mark as our own write so the file watcher ignores this change
     recentWrites.add(resolved);
-    await writeFile(resolved, body.content, 'utf-8');
-    setTimeout(() => recentWrites.delete(resolved), 500);
+    try {
+      await writeFile(resolved, body.content, 'utf-8');
+    } finally {
+      // Ensure recentWrites is always cleaned up, even if write fails
+      setTimeout(() => recentWrites.delete(resolved), 500);
+    }
     return c.json({ success: true, path: resolved });
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('Access denied')) {
@@ -200,6 +209,14 @@ app.get('/api/watch', async (c) => {
   if (!fileWatchers.has(resolved)) {
     const clients = new Set<WritableStreamDefaultWriter>();
     let debounce: ReturnType<typeof setTimeout> | null = null;
+    const cleanUpWatcher = () => {
+      for (const client of clients) {
+        client.close().catch(() => {});
+      }
+      clients.clear();
+      watcher.close();
+      fileWatchers.delete(resolved);
+    };
     const watcher = watch(resolved, () => {
       if (recentWrites.has(resolved)) return;
       if (debounce) clearTimeout(debounce);
@@ -211,10 +228,16 @@ app.get('/api/watch', async (c) => {
             client.write(frame).catch(() => {});
           }
         } catch {
-          /* file read error */
+          // File became unreadable (deleted/moved) — notify clients and clean up
+          const frame = sseFrame('error', JSON.stringify({ path: resolved, reason: 'file_gone' }));
+          for (const client of clients) {
+            client.write(frame).catch(() => {});
+          }
+          cleanUpWatcher();
         }
       }, 150);
     });
+    watcher.on('error', cleanUpWatcher);
     fileWatchers.set(resolved, { watcher, clients });
   }
 

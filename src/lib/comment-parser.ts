@@ -1,4 +1,4 @@
-import type { MdComment, ParseResult, CommentStatus, CommentReply } from '../types';
+import { getEffectiveStatus, type MdComment, type ParseResult, type CommentStatus, type CommentReply } from '../types';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -174,14 +174,10 @@ export function insertComment(
       .map((s) => s.trim())
       .filter(Boolean);
     if (segments.length > 0) {
-      // Try direct segment search in clean markdown — findSegments returns end offset,
-      // so subtract anchor length to get start
-      const endOffset = findSegments(cleanMarkdown, segments);
-      if (endOffset !== null) {
-        insertionCleanOffset = endOffset - anchor.length;
-        // For cross-element anchors the length may not match exactly, find start of first segment
-        const firstIdx = cleanMarkdown.indexOf(segments[0]);
-        if (firstIdx !== -1) insertionCleanOffset = firstIdx;
+      // Try direct segment search in clean markdown
+      const segResult = findSegments(cleanMarkdown, segments);
+      if (segResult !== null) {
+        insertionCleanOffset = segResult.start;
       }
 
       // If that fails, try in formatting-stripped text and map back
@@ -366,17 +362,19 @@ export function removeResolvedComments(rawMarkdown: string): string {
   });
 }
 
-/** Search for ordered segments in text, return the end offset of the last segment or null. */
-function findSegments(text: string, segments: string[]): number | null {
+/** Search for ordered segments in text, return the start and end offsets or null. */
+function findSegments(text: string, segments: string[]): { start: number; end: number } | null {
   let searchFrom = 0;
+  let firstStart = -1;
   let lastEnd = -1;
-  for (const segment of segments) {
-    const idx = text.indexOf(segment, searchFrom);
+  for (let i = 0; i < segments.length; i++) {
+    const idx = text.indexOf(segments[i], searchFrom);
     if (idx === -1) return null;
-    lastEnd = idx + segment.length;
+    if (i === 0) firstStart = idx;
+    lastEnd = idx + segments[i].length;
     searchFrom = lastEnd;
   }
-  return lastEnd === -1 ? null : lastEnd;
+  return firstStart === -1 ? null : { start: firstStart, end: lastEnd };
 }
 
 /**
@@ -444,4 +442,54 @@ function stripInlineFormatting(md: string): {
     plain,
     toCleanOffset: (off: number) => (off >= map.length ? md.length : map[off]),
   };
+}
+
+/**
+ * Check if ordered parts appear contiguously in text, with only whitespace between them.
+ * Used for flexible anchor detection when exact string match fails.
+ */
+function partsAppearContiguously(text: string, parts: string[]): boolean {
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const firstIdx = text.indexOf(parts[0], searchFrom);
+    if (firstIdx === -1) return false;
+    let pos = firstIdx + parts[0].length;
+    let matched = true;
+    for (let i = 1; i < parts.length; i++) {
+      while (pos < text.length && /\s/.test(text[pos])) pos++;
+      if (text.startsWith(parts[i], pos)) {
+        pos += parts[i].length;
+      } else {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return true;
+    searchFrom = firstIdx + 1;
+  }
+  return false;
+}
+
+/**
+ * Detect comments whose anchor text can no longer be found in the clean markdown.
+ * Returns a set of comment IDs with missing anchors.
+ * Parts must appear contiguously (with only whitespace between them) to count as found.
+ */
+export function detectMissingAnchors(
+  cleanMarkdown: string,
+  comments: MdComment[],
+): Set<string> {
+  const missing = new Set<string>();
+  if (!cleanMarkdown) return missing;
+  for (const c of comments) {
+    if (getEffectiveStatus(c) === 'accepted') continue;
+    if (!cleanMarkdown.includes(c.anchor)) {
+      const parts = c.anchor.split(/\s+/).filter(Boolean);
+      if (parts.length === 0) continue;
+      if (!partsAppearContiguously(cleanMarkdown, parts)) {
+        missing.add(c.id);
+      }
+    }
+  }
+  return missing;
 }
