@@ -39,4 +39,6 @@ export interface SelectionInfo {
   rect: DOMRect;
   contextBefore: string;
   contextAfter: string;
+  /** Character offset of the selection start within the container's text content. */
+  offset: number;
 }

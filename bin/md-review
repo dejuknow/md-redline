@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# md-review — open a markdown file in md-commenter for reviewing
+# Usage: md-review <file.md>
+#        md-review              (opens the app with no file pre-loaded)
+
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SERVER_PORT=3001
+CLIENT_PORT=5173
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "Usage: md-review [file.md]"
+  echo "Opens a markdown file in md-commenter for inline commenting."
+  echo "Starts the app automatically if it's not already running."
+  exit 0
+fi
+
+# Resolve the file path
+FILE=""
+if [[ -n "${1:-}" ]]; then
+  if [[ ! -f "$1" ]]; then
+    echo "Error: file not found: $1" >&2
+    exit 1
+  fi
+  FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+fi
+
+# Check if the server is already running
+server_running() {
+  curl -sf "http://localhost:${SERVER_PORT}/api/config" >/dev/null 2>&1
+}
+
+if ! server_running; then
+  echo "Starting md-commenter..."
+  cd "$APP_DIR"
+  npm run dev >/dev/null 2>&1 &
+  APP_PID=$!
+
+  # Wait up to 15 seconds for the server
+  for i in $(seq 1 30); do
+    if server_running; then
+      break
+    fi
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+      echo "Error: app failed to start. Run 'npm run dev' manually for details." >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+
+  if ! server_running; then
+    echo "Error: server did not start within 15 seconds." >&2
+    exit 1
+  fi
+  echo "md-commenter is running."
+fi
+
+# Build the URL
+URL="http://localhost:${CLIENT_PORT}"
+if [[ -n "$FILE" ]]; then
+  # Percent-encode the file path for the query parameter
+  ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$FILE")
+  URL="${URL}?file=${ENCODED}"
+fi
+
+# Open in the default browser
+open "$URL" 2>/dev/null || xdg-open "$URL" 2>/dev/null || echo "Open in your browser: $URL"

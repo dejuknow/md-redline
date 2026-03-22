@@ -262,8 +262,17 @@ export default function App() {
     return () => clearTimeout(externalChangeTimerRef.current);
   }, []);
 
-  // Load initial file from CLI arg (skip if session restored tabs)
+  // Load initial file from URL ?file= param, CLI arg, or restored session
   useEffect(() => {
+    const urlFile = new URLSearchParams(window.location.search).get('file');
+    if (urlFile) {
+      setInputPath(urlFile);
+      openTab(urlFile);
+      addRecentFile(urlFile);
+      // Clean the URL so refreshing doesn't re-trigger
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
     if (savedSession && savedSession.openTabs.length > 0) return;
     fetch('/api/config')
       .then((r) => r.json())
@@ -274,7 +283,7 @@ export default function App() {
         }
       })
       .catch(() => {});
-  }, [openTab]);
+  }, [openTab, addRecentFile]);
 
   const handleOpenFile = useCallback(
     (path: string) => {
@@ -706,6 +715,7 @@ export default function App() {
                       comments={comments}
                       activeCommentId={activeCommentId}
                       selectionText={selection?.text ?? null}
+                      selectionOffset={selection?.offset ?? null}
                       onHighlightClick={handleHighlightClick}
                     />
                     <DragHandles
