@@ -129,7 +129,11 @@ export function serializeComment(comment: MdComment): string {
   // Strip cleanOffset — it's computed at parse time, not persisted
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { cleanOffset, ...data } = comment;
-  return `<!-- @comment${JSON.stringify(data)} -->`;
+  // Escape --> in the JSON to prevent it from closing the HTML comment
+  // prematurely. \u003e is the Unicode escape for >, which JSON.parse
+  // decodes back to > automatically — no manual unescaping needed.
+  const json = JSON.stringify(data).replace(/-->/g, '--\\u003e');
+  return `<!-- @comment${json} -->`;
 }
 
 export function insertComment(
