@@ -1,6 +1,7 @@
-import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
+import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
+import { stripInlineFormatting } from '../lib/comment-parser';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
@@ -14,6 +15,7 @@ export interface ViewerContextMenuInfo {
 
 interface Props {
   html: string;
+  cleanMarkdown: string;
   comments: MdComment[];
   activeCommentId: string | null;
   selectionText: string | null;
@@ -34,11 +36,19 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu },
+    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const activeMarkRef = useRef<HTMLElement | null>(null);
+
+    // Build a mapping from clean markdown offsets to rendered/plain text offsets.
+    // cleanOffset lives in clean-markdown space (with ** ## etc), but DOM text is
+    // in rendered space (formatting stripped). We need to convert before matching.
+    const toPlainOffset = useMemo(
+      () => stripInlineFormatting(cleanMarkdown).toPlainOffset,
+      [cleanMarkdown],
+    );
 
     useImperativeHandle(ref, () => ({
       getContainer: () => containerRef.current,
@@ -72,24 +82,27 @@ export const MarkdownViewer = memo(
       container.innerHTML = html;
 
       // --- Comment highlights ---
-      // Group comments that share the same anchor AND cleanOffset (exact same highlight)
+      // Group comments that share the same anchor AND cleanOffset (exact same highlight).
+      // Convert cleanOffset (clean markdown space) → plainOffset (rendered text space)
+      // so wrapText can correctly match against DOM text node positions.
       const highlightGroups = new Map<
         string,
-        { ids: string[]; anchor: string; cleanOffset?: number }
+        { ids: string[]; anchor: string; plainOffset?: number }
       >();
       for (const comment of comments) {
         if (getEffectiveStatus(comment) === 'resolved') continue;
+        const plainOffset = comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
         const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
         const group = highlightGroups.get(key) || {
           ids: [],
           anchor: comment.anchor,
-          cleanOffset: comment.cleanOffset,
+          plainOffset,
         };
         group.ids.push(comment.id);
         highlightGroups.set(key, group);
       }
 
-      for (const { anchor, ids, cleanOffset } of highlightGroups.values()) {
+      for (const { anchor, ids, plainOffset } of highlightGroups.values()) {
         wrapText(
           container,
           anchor,
@@ -100,7 +113,7 @@ export const MarkdownViewer = memo(
               mark.classList.add('comment-highlight-active');
             }
           },
-          cleanOffset,
+          plainOffset,
         );
       }
 
@@ -120,7 +133,7 @@ export const MarkdownViewer = memo(
       activeMarkRef.current = container.querySelector(
         'mark.comment-highlight-active',
       ) as HTMLElement | null;
-    }, [html, comments, activeCommentId, selectionText, selectionOffset]);
+    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
@@ -174,13 +187,13 @@ export const MarkdownViewer = memo(
 );
 
 /** Find an occurrence of `text` in the container's text nodes and wrap it in <mark> elements.
- *  When `cleanOffset` is provided, uses it to find the correct occurrence (supports overlapping).
- *  Handles text that spans multiple DOM elements (e.g. header -> paragraph). */
+ *  When `hintOffset` is provided (in rendered/plain-text space), uses it to disambiguate
+ *  duplicate anchor text. Handles text that spans multiple DOM elements. */
 function wrapText(
   container: HTMLElement,
   text: string,
   configure: (mark: HTMLElement) => void,
-  cleanOffset?: number,
+  hintOffset?: number,
 ) {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -205,29 +218,26 @@ function wrapText(
   let matchStart: number;
   let matchEnd: number;
 
-  if (cleanOffset != null) {
-    // Position-based: use cleanOffset to find the right occurrence.
-    // The rendered text may differ from clean markdown (no ## / ** etc),
-    // so search for the anchor text near the expected position.
+  if (hintOffset != null) {
+    // Position-based: use hintOffset (in rendered-text space, same coordinate system
+    // as fullText) to find the right occurrence among duplicates.
     // When the anchor is drag-expanded backwards, it can start well before
-    // cleanOffset (the marker stays put but the anchor grows leftward).
+    // the hint (the marker stays put but the anchor grows leftward).
     // Use the anchor length as additional search window to handle this.
     const searchWindow = Math.max(20, text.length);
-    const exactIdx = fullText.indexOf(text, Math.max(0, cleanOffset - searchWindow));
-    if (exactIdx !== -1 && exactIdx <= cleanOffset + 20) {
+    const exactIdx = fullText.indexOf(text, Math.max(0, hintOffset - searchWindow));
+    if (exactIdx !== -1 && exactIdx <= hintOffset + 20) {
       matchStart = exactIdx;
       matchEnd = exactIdx + text.length;
     } else {
-      // Rendered text is shorter than clean markdown (heading markers, bold/italic
-      // syntax, list markers etc. are stripped), so cleanOffset can overshoot the
-      // actual position in fullText.  Find ALL occurrences and pick the closest.
+      // Find ALL occurrences and pick the closest to hintOffset.
       let bestIdx = -1;
       let bestDist = Infinity;
       let searchFrom = 0;
       while (searchFrom < fullText.length) {
         const idx = fullText.indexOf(text, searchFrom);
         if (idx === -1) break;
-        const dist = Math.abs(idx - cleanOffset);
+        const dist = Math.abs(idx - hintOffset);
         if (dist < bestDist) {
           bestDist = dist;
           bestIdx = idx;
