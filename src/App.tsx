@@ -265,7 +265,6 @@ export default function App() {
     const urlDir = params.get('dir');
 
     if (urlFile) {
-      setInputPath(urlFile);
       openTab(urlFile);
       addRecentFile(urlFile);
       window.history.replaceState({}, '', window.location.pathname);
@@ -282,7 +281,6 @@ export default function App() {
       .then((r) => r.json())
       .then((data) => {
         if (data.initialFile) {
-          setInputPath(data.initialFile);
           openTab(data.initialFile);
         }
         if (data.initialDir) {
