@@ -813,8 +813,12 @@ export default function App() {
         <>
           <div className="flex-1 flex min-h-0 relative">
             {/* File explorer left pane */}
-            {explorerVisible && (
-              <div className="w-56 border-r border-border bg-surface-secondary shrink-0 flex flex-col">
+            <div
+              className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-in-out ${
+                explorerVisible ? 'w-56' : 'w-0 border-r-0'
+              }`}
+            >
+              <div className="w-56 h-full flex flex-col">
                 <FileExplorer
                   initialDir={explorerDir}
                   activeFilePath={activeFilePath}
@@ -822,7 +826,7 @@ export default function App() {
                   onClose={() => setExplorerVisible(false)}
                 />
               </div>
-            )}
+            </div>
 
             {/* Markdown viewer */}
             <div
@@ -858,9 +862,13 @@ export default function App() {
             </div>
 
             {/* Comment sidebar */}
-            {sidebarVisible && (
-              <div className="w-80 border-l border-border bg-surface-secondary shrink-0 flex flex-col">
-                <div className="h-10 border-b border-border flex items-center justify-between px-4">
+            <div
+              className={`border-l border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-in-out ${
+                sidebarVisible ? 'w-80' : 'w-0 border-l-0'
+              }`}
+            >
+              <div className="w-80 h-full flex flex-col">
+                <div className="h-10 border-b border-border flex items-center justify-between px-4 shrink-0">
                   <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider">
                     Comments
                   </h2>
@@ -892,7 +900,7 @@ export default function App() {
                   />
                 </div>
               </div>
-            )}
+            </div>
 
             {/* Review Summary popover (Feature 4) */}
             {showReviewSummary && (

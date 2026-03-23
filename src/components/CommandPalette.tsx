@@ -36,8 +36,8 @@ export function CommandPalette({ commands, open, onClose }: Props) {
     sections.set(cmd.section, list);
   }
 
-  // Flat list for keyboard navigation
-  const flatList = filtered;
+  // Flat list for keyboard navigation — must match visual (grouped) render order
+  const flatList = Array.from(sections.values()).flat();
 
   // Reset on open
   useEffect(() => {
