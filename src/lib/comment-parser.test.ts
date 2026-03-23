@@ -785,6 +785,51 @@ describe('comments with nested JSON', () => {
   });
 });
 
+describe('updateCommentAnchor and cleanOffset after backward drag', () => {
+  it('marker stays in place after anchor expansion — cleanOffset unchanged', () => {
+    const raw =
+      'Some text before ' +
+      `${marker({ id: 'drag-1', anchor: 'target' })}target end.`;
+
+    const expanded = updateCommentAnchor(raw, 'drag-1', 'text before target');
+    const parsed = parseComments(expanded);
+    const comment = parsed.comments[0];
+    const clean = parsed.cleanMarkdown;
+
+    // Marker hasn't moved, so cleanOffset stays at the marker's position
+    expect(comment.cleanOffset).toBe('Some text before '.length);
+    // But the new anchor starts BEFORE cleanOffset
+    expect(comment.anchor).toBe('text before target');
+    expect(clean.indexOf(comment.anchor)).toBeLessThan(comment.cleanOffset!);
+  });
+
+  it('cleanOffset gap grows with formatting characters between anchor start and marker', () => {
+    // In rendered HTML, formatting markers (**, *, ##) are stripped, so the
+    // rendered-text position of "target" is closer to the start than
+    // cleanOffset suggests. When the anchor expands backwards, the gap
+    // between cleanOffset and the anchor's rendered position grows further.
+    const raw =
+      '## Heading\n\n' +
+      'Has **bold** and *italic* and **more bold** ' +
+      `${marker({ id: 'gap-1', anchor: 'target' })}target end.`;
+
+    const parsed = parseComments(raw);
+    const comment = parsed.comments[0];
+    const clean = parsed.cleanMarkdown;
+
+    // cleanOffset includes ## \n\n ** ** * * ** ** characters
+    const targetInClean = clean.indexOf('target');
+    // cleanOffset == targetInClean because marker is right before "target"
+    expect(comment.cleanOffset).toBe(targetInClean);
+
+    // In rendered text (no ##, **, *), "target" would be at a LOWER position.
+    // The formatting chars add ~20+ chars of offset. wrapText must account
+    // for this when searching, especially after anchor expansion.
+    const formattingChars = clean.slice(0, targetInClean).replace(/[^#*_\n]/g, '').length;
+    expect(formattingChars).toBeGreaterThan(10);
+  });
+});
+
 describe('stripInlineFormatting via insertComment', () => {
   it('finds anchor inside strikethrough formatting', () => {
     const raw = 'This has ~~deleted~~ text';

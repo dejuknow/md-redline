@@ -174,13 +174,17 @@ function wrapText(
     // Position-based: use cleanOffset to find the right occurrence.
     // The rendered text may differ from clean markdown (no ## / ** etc),
     // so search for the anchor text near the expected position.
-    const exactIdx = fullText.indexOf(text, Math.max(0, cleanOffset - 20));
+    // When the anchor is drag-expanded backwards, it can start well before
+    // cleanOffset (the marker stays put but the anchor grows leftward).
+    // Use the anchor length as additional search window to handle this.
+    const searchWindow = Math.max(20, text.length);
+    const exactIdx = fullText.indexOf(text, Math.max(0, cleanOffset - searchWindow));
     if (exactIdx !== -1 && exactIdx <= cleanOffset + 20) {
       matchStart = exactIdx;
       matchEnd = exactIdx + text.length;
     } else {
-      // Flexible fallback near the offset
-      const result = flexibleSearch(fullText, text, Math.max(0, cleanOffset - 50));
+      // Flexible fallback with an equally widened window
+      const result = flexibleSearch(fullText, text, Math.max(0, cleanOffset - searchWindow - 30));
       if (!result) return;
       matchStart = result.start;
       matchEnd = result.end;
