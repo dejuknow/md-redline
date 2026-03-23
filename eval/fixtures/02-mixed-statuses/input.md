@@ -2,7 +2,7 @@
 
 ## Overview
 
-<!-- @comment{"id":"eval-02-c1","anchor":"The API uses rate limiting to prevent abuse","text":"Add detail: specify the rate limits (requests per minute/hour) and whether they differ by endpoint or plan tier.","author":"PM","timestamp":"2026-03-19T09:00:00Z","resolved":false,"status":"open"} -->The API uses rate limiting to prevent abuse. All endpoints are protected.
+<!-- @comment{"id":"eval-02-c1","anchor":"The API uses rate limiting to prevent abuse","text":"Rewrite this paragraph: specify the rate limits (requests per minute/hour) and whether they differ by endpoint or plan tier. Remove the vague 'All endpoints are protected' sentence.","author":"PM","timestamp":"2026-03-19T09:00:00Z","resolved":false,"status":"open"} -->The API uses rate limiting to prevent abuse. All endpoints are protected.
 
 ## Rate Limit Headers
 
