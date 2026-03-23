@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import { readFile, writeFile, readdir, stat, realpath } from 'fs/promises';
-import { watch, type FSWatcher } from 'fs';
+import { watch, statSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir } from 'os';
 
@@ -12,12 +12,32 @@ const app = new Hono();
 app.use('*', cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }));
 app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 })); // 10MB
 
-const initialFile = process.argv[2] ? resolve(process.argv[2]) : '';
+const arg = process.argv[2] ? resolve(process.argv[2]) : '';
 
-// Allowed base directories: cwd, home, and the initial file's directory (if provided).
+// Determine if the argument is a directory or a file
+let initialFile = '';
+let initialDir = '';
+try {
+  const argStat = arg ? statSync(arg) : null;
+  if (argStat?.isDirectory()) {
+    initialDir = arg;
+  } else if (arg) {
+    initialFile = arg;
+  }
+} catch {
+  // Doesn't exist yet — treat as file
+  if (arg) initialFile = arg;
+}
+
+// Allowed base directories: cwd, home, and the initial file/dir (if provided).
 const ALLOWED_ROOTS = [resolve(process.cwd()), resolve(homedir())];
 if (initialFile) {
-  const initialDir = dirname(initialFile);
+  const fileDir = dirname(initialFile);
+  if (!ALLOWED_ROOTS.some((r) => fileDir.startsWith(r + '/') || fileDir === r)) {
+    ALLOWED_ROOTS.push(fileDir);
+  }
+}
+if (initialDir) {
   if (!ALLOWED_ROOTS.some((r) => initialDir.startsWith(r + '/') || initialDir === r)) {
     ALLOWED_ROOTS.push(initialDir);
   }
@@ -49,7 +69,7 @@ function isMdFile(resolved: string): boolean {
 const recentWrites = new Set<string>();
 
 app.get('/api/config', (c) => {
-  return c.json({ initialFile });
+  return c.json({ initialFile, initialDir });
 });
 
 app.get('/api/file', async (c) => {
@@ -268,7 +288,7 @@ app.get('/api/watch', async (c) => {
 
 const port = 3001;
 serve({ fetch: app.fetch, port }, () => {
-  console.log(`md-commenter server running on http://localhost:${port}`);
+  console.log(`md-review server running on http://localhost:${port}`);
   if (initialFile) {
     console.log(`Initial file: ${initialFile}`);
   }

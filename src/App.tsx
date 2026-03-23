@@ -36,11 +36,14 @@ import { CommentForm, TEMPLATES } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
 import { FileBrowser } from './components/FileBrowser';
+import { FileExplorer } from './components/FileExplorer';
 import { DragHandles } from './components/DragHandles';
 import { DiffViewer } from './components/DiffViewer';
 import { Toast } from './components/Toast';
 import { ReviewSummary } from './components/ReviewSummary';
+import { CommandPalette, type Command } from './components/CommandPalette';
 import { useDragHandles } from './hooks/useDragHandles';
+import { useAuthor } from './hooks/useAuthor';
 import { getEffectiveStatus } from './types';
 
 // Load saved session for initial state
@@ -66,7 +69,10 @@ export default function App() {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [inputPath, setInputPath] = useState('');
   const [showBrowser, setShowBrowser] = useState(false);
+  const [explorerVisible, setExplorerVisible] = useState(false);
+  const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
+  const { author, setAuthor } = useAuthor();
 
   // Session-persisted state: initialize from saved session
   const [viewMode, setViewMode] = useState<ViewMode>(savedSession?.viewMode ?? 'rendered');
@@ -128,6 +134,9 @@ export default function App() {
 
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
+
+  // Command palette state
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -246,14 +255,22 @@ export default function App() {
     return () => clearTimeout(externalChangeTimerRef.current);
   }, []);
 
-  // Load initial file from URL ?file= param, CLI arg, or restored session
+  // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
-    const urlFile = new URLSearchParams(window.location.search).get('file');
+    const params = new URLSearchParams(window.location.search);
+    const urlFile = params.get('file');
+    const urlDir = params.get('dir');
+
     if (urlFile) {
       setInputPath(urlFile);
       openTab(urlFile);
       addRecentFile(urlFile);
-      // Clean the URL so refreshing doesn't re-trigger
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+    if (urlDir) {
+      setExplorerDir(urlDir);
+      setExplorerVisible(true);
       window.history.replaceState({}, '', window.location.pathname);
       return;
     }
@@ -264,6 +281,10 @@ export default function App() {
         if (data.initialFile) {
           setInputPath(data.initialFile);
           openTab(data.initialFile);
+        }
+        if (data.initialDir) {
+          setExplorerDir(data.initialDir);
+          setExplorerVisible(true);
         }
       })
       .catch(() => {});
@@ -277,6 +298,14 @@ export default function App() {
         addRecentFile(path.trim());
         setShowBrowser(false);
       }
+    },
+    [openTab, addRecentFile],
+  );
+
+  const handleExplorerOpenFile = useCallback(
+    (path: string) => {
+      openTab(path.trim());
+      addRecentFile(path.trim());
     },
     [openTab, addRecentFile],
   );
@@ -296,7 +325,7 @@ export default function App() {
         rawMarkdownRef.current,
         anchor,
         text,
-        'User',
+        author,
         contextBefore,
         contextAfter,
       );
@@ -304,7 +333,7 @@ export default function App() {
       clearSelection();
       setAutoExpandForm(false);
     },
-    [updateAndSave, clearSelection],
+    [updateAndSave, clearSelection, author],
   );
 
   const handleResolve = useCallback(
@@ -338,9 +367,9 @@ export default function App() {
 
   const handleReply = useCallback(
     (id: string, text: string) => {
-      updateAndSave(addReply(rawMarkdownRef.current, id, text));
+      updateAndSave(addReply(rawMarkdownRef.current, id, text, author));
     },
-    [updateAndSave],
+    [updateAndSave, author],
   );
 
   const handleBulkResolve = useCallback(() => {
@@ -428,6 +457,20 @@ export default function App() {
       const isInput =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 
+      // Cmd+K : Open command palette (works even in inputs)
+      if (mod && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+        return;
+      }
+
+      // Cmd+B : Toggle file explorer
+      if (mod && e.key === 'b') {
+        e.preventDefault();
+        setExplorerVisible((prev) => !prev);
+        return;
+      }
+
       // Cmd+\ : Toggle sidebar
       if (mod && e.key === '\\') {
         e.preventDefault();
@@ -464,35 +507,119 @@ export default function App() {
       // Cmd+Shift+M : Start commenting on selection
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        // The selection hook handles detection — we just need the form to appear.
-        // If there's already a selection, lock it and the form will show.
         if (selectionRef.current) {
           lockSelection();
         }
         return;
       }
 
-      // N / P : Jump to next / previous comment (only when not in an input)
-      if (!isInput && !mod && !e.shiftKey && !e.altKey) {
-        if (e.key.toLowerCase() === 'n') {
+      // Keys below only work outside inputs and when command palette is closed
+      if (isInput || showCommandPalette) return;
+      if (mod || e.shiftKey || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+
+      // N / P : Jump to next / previous comment
+      if (key === 'n') {
+        e.preventDefault();
+        handleJumpToNext();
+        return;
+      }
+      if (key === 'p') {
+        e.preventDefault();
+        handleJumpToPrev();
+        return;
+      }
+
+      // j / k : Navigate comments in sidebar (vim-style)
+      if (key === 'j') {
+        e.preventDefault();
+        handleJumpToNext();
+        return;
+      }
+      if (key === 'k') {
+        e.preventDefault();
+        handleJumpToPrev();
+        return;
+      }
+
+      // A : Address/resolve active comment
+      if (key === 'a' && activeCommentId) {
+        const comment = comments.find((c) => c.id === activeCommentId);
+        if (comment && getEffectiveStatus(comment) === 'open') {
           e.preventDefault();
-          handleJumpToNext();
-          return;
+          handleResolve(activeCommentId);
         }
-        if (e.key.toLowerCase() === 'p') {
+        return;
+      }
+
+      // X : Accept/resolve active comment (same as A for this status model)
+      if (key === 'x' && activeCommentId) {
+        const comment = comments.find((c) => c.id === activeCommentId);
+        if (comment && getEffectiveStatus(comment) === 'open') {
           e.preventDefault();
-          handleJumpToPrev();
-          return;
+          handleResolve(activeCommentId);
         }
+        return;
+      }
+
+      // U : Unresolve/reopen active comment
+      if (key === 'u' && activeCommentId) {
+        const comment = comments.find((c) => c.id === activeCommentId);
+        if (comment && getEffectiveStatus(comment) === 'resolved') {
+          e.preventDefault();
+          handleUnresolve(activeCommentId);
+        }
+        return;
       }
     };
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, viewMode]);
+  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, showCommandPalette]);
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
+
+  // Command palette commands
+  const paletteCommands = useMemo((): Command[] => {
+    const cmds: Command[] = [
+      { id: 'next-comment', label: 'Jump to next comment', shortcut: 'N / J', section: 'Navigation', onExecute: handleJumpToNext },
+      { id: 'prev-comment', label: 'Jump to previous comment', shortcut: 'P / K', section: 'Navigation', onExecute: handleJumpToPrev },
+      { id: 'toggle-sidebar', label: 'Toggle sidebar', shortcut: `${modKey}+\\`, section: 'View', onExecute: () => setSidebarVisible((p) => !p) },
+      { id: 'view-rendered', label: 'Switch to rendered view', section: 'View', onExecute: () => setViewMode('rendered') },
+      { id: 'view-raw', label: 'Switch to raw markdown', section: 'View', onExecute: () => setViewMode('raw') },
+      { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
+      { id: 'take-snapshot', label: 'Take diff snapshot', section: 'File', onExecute: handleSnapshot },
+      { id: 'open-file', label: 'Open file browser', section: 'File', onExecute: () => setShowBrowser(true) },
+      { id: 'review-summary', label: 'Toggle review summary', section: 'View', onExecute: () => setShowReviewSummary((p) => !p) },
+      { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
+    ];
+
+    if (currentSnapshot) {
+      cmds.push({ id: 'view-diff', label: 'Toggle diff view', section: 'View', onExecute: () => setViewMode((m) => m === 'diff' ? 'rendered' : 'diff') });
+    }
+
+    if (openCommentCount > 0) {
+      cmds.push({ id: 'resolve-all', label: 'Resolve all open comments', section: 'Comments', onExecute: handleBulkResolve });
+    }
+
+    if (activeCommentId) {
+      const activeComment = comments.find((c) => c.id === activeCommentId);
+      if (activeComment) {
+        const status = getEffectiveStatus(activeComment);
+        if (status === 'open') {
+          cmds.push({ id: 'resolve-active', label: 'Resolve active comment', shortcut: 'A', section: 'Comments', onExecute: () => handleResolve(activeCommentId) });
+        }
+        if (status === 'resolved') {
+          cmds.push({ id: 'unresolve-active', label: 'Reopen active comment', shortcut: 'U', section: 'Comments', onExecute: () => handleUnresolve(activeCommentId) });
+        }
+        cmds.push({ id: 'delete-active', label: 'Delete active comment', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
+      }
+    }
+
+    return cmds;
+  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, openCommentCount, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
 
   const fileBrowserContent = (
     <div className="w-full max-w-lg">
@@ -546,7 +673,7 @@ export default function App() {
               />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-content mb-2">md-commenter</h1>
+          <h1 className="text-2xl font-bold text-content mb-2">md-review</h1>
           <p className="text-content-secondary text-sm leading-relaxed">
             Review and annotate your markdown files with inline comments.
             <br />
@@ -651,6 +778,10 @@ export default function App() {
         hasSnapshot={currentSnapshot !== null}
         hasExternalChange={hasExternalChange}
         showReviewSummary={showReviewSummary}
+        showExplorer={explorerVisible}
+        author={author}
+        onAuthorChange={setAuthor}
+        onToggleExplorer={() => setExplorerVisible((p) => !p)}
         onViewModeChange={(mode) => {
           setViewMode(mode);
           if (mode === 'raw') clearSelection();
@@ -680,6 +811,18 @@ export default function App() {
       ) : (
         <>
           <div className="flex-1 flex min-h-0 relative">
+            {/* File explorer left pane */}
+            {explorerVisible && (
+              <div className="w-56 border-r border-border bg-surface-secondary shrink-0 flex flex-col">
+                <FileExplorer
+                  initialDir={explorerDir}
+                  activeFilePath={activeFilePath}
+                  onOpenFile={handleExplorerOpenFile}
+                  onClose={() => setExplorerVisible(false)}
+                />
+              </div>
+            )}
+
             {/* Markdown viewer */}
             <div
               ref={containerRef}
@@ -777,8 +920,21 @@ export default function App() {
       {/* Toast notification (Feature 8) */}
       <Toast message={toast.message} visible={toast.visible} onDismiss={dismissToast} />
 
+      {/* Command palette */}
+      <CommandPalette
+        commands={paletteCommands}
+        open={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+      />
+
       {/* Keyboard shortcuts hint */}
       <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-muted shrink-0">
+        <span>
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+            {modKey}+K
+          </kbd>{' '}
+          Commands
+        </span>
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
             N
@@ -791,21 +947,19 @@ export default function App() {
         </span>
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {modKey}+\
+            A
           </kbd>{' '}
-          Sidebar
+          Resolve{' '}
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+            U
+          </kbd>{' '}
+          Reopen
         </span>
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
             {modKey}+Enter
           </kbd>{' '}
           Comment
-        </span>
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {modKey}+1-8
-          </kbd>{' '}
-          Quick template
         </span>
       </div>
     </div>

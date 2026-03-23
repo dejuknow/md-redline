@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# md-review — open a markdown file in md-commenter for reviewing
+# md-review — open a markdown file or folder in md-review for reviewing
 # Usage: md-review <file.md>
+#        md-review <directory>
 #        md-review              (opens the app with no file pre-loaded)
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,20 +11,24 @@ SERVER_PORT=3001
 CLIENT_PORT=5173
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "Usage: md-review [file.md]"
-  echo "Opens a markdown file in md-commenter for inline commenting."
+  echo "Usage: md-review [file.md | directory]"
+  echo "Opens a markdown file or folder in md-review for inline commenting."
   echo "Starts the app automatically if it's not already running."
   exit 0
 fi
 
-# Resolve the file path
+# Resolve the path — supports both files and directories
 FILE=""
+DIR=""
 if [[ -n "${1:-}" ]]; then
-  if [[ ! -f "$1" ]]; then
-    echo "Error: file not found: $1" >&2
+  if [[ -d "$1" ]]; then
+    DIR="$(cd "$1" && pwd)"
+  elif [[ -f "$1" ]]; then
+    FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+  else
+    echo "Error: not found: $1" >&2
     exit 1
   fi
-  FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 fi
 
 # Check if the server is already running
@@ -32,7 +37,7 @@ server_running() {
 }
 
 if ! server_running; then
-  echo "Starting md-commenter..."
+  echo "Starting md-review..."
   cd "$APP_DIR"
   npm run dev >/dev/null 2>&1 &
   APP_PID=$!
@@ -53,15 +58,17 @@ if ! server_running; then
     echo "Error: server did not start within 15 seconds." >&2
     exit 1
   fi
-  echo "md-commenter is running."
+  echo "md-review is running."
 fi
 
 # Build the URL
 URL="http://localhost:${CLIENT_PORT}"
 if [[ -n "$FILE" ]]; then
-  # Percent-encode the file path for the query parameter
   ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$FILE")
   URL="${URL}?file=${ENCODED}"
+elif [[ -n "$DIR" ]]; then
+  ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$DIR")
+  URL="${URL}?dir=${ENCODED}"
 fi
 
 # Open in the default browser

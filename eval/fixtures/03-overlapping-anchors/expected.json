@@ -1,0 +1,19 @@
+{
+  "totalComments": 2,
+  "actionableComments": 2,
+  "skipComments": 0,
+  "comments": [
+    {
+      "id": "eval-03-c1",
+      "expectedAction": "address",
+      "contentHints": {}
+    },
+    {
+      "id": "eval-03-c2",
+      "expectedAction": "address",
+      "contentHints": {}
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": []
+}

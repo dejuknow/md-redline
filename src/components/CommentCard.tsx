@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import type { MdComment, CommentStatus } from '../types';
 import { getEffectiveStatus } from '../types';
+import { getAuthorColor } from '../hooks/useAuthor';
 
 interface Props {
   comment: MdComment;
@@ -166,12 +167,17 @@ export const CommentCard = memo(function CommentCard({
 
       {/* Footer: author, time, actions */}
       <div className="px-3 pb-2 flex items-center justify-between">
-        <span className="text-xs text-content-muted">
+        <span className="text-xs text-content-muted flex items-center gap-1.5">
+          <span
+            className="inline-block w-2 h-2 rounded-full shrink-0"
+            style={{ backgroundColor: getAuthorColor(comment.author).text }}
+            title={comment.author}
+          />
           {comment.author} &middot; {timeAgo}
         </span>
 
         {!isEditing && (
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className={`flex gap-1 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
             {isResolved ? (
               <button
                 onClick={(e) => {
@@ -224,7 +230,11 @@ export const CommentCard = memo(function CommentCard({
           {replies.map((reply) => (
             <div key={reply.id} className="text-xs">
               <p className="text-content-secondary leading-relaxed">{reply.text}</p>
-              <span className="text-content-muted">
+              <span className="text-content-muted flex items-center gap-1">
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: getAuthorColor(reply.author).text }}
+                />
                 {reply.author} &middot; {getTimeAgo(reply.timestamp)}
               </span>
             </div>

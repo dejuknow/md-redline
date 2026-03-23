@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 // For isolated unit testing, we import the app directly if exported,
 // but since it's not, we test the security logic functions directly.
 
-const TEST_DIR = join(tmpdir(), 'md-commenter-test-' + Date.now());
+const TEST_DIR = join(tmpdir(), 'md-review-test-' + Date.now());
 const TEST_FILE = join(TEST_DIR, 'test.md');
 const TEST_FILE_TXT = join(TEST_DIR, 'test.txt');
 

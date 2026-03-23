@@ -1,0 +1,16 @@
+{
+  "totalComments": 1,
+  "actionableComments": 1,
+  "skipComments": 0,
+  "comments": [
+    {
+      "id": "eval-01-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldNotContain": ["System validates the input and responds appropriately"]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": []
+}

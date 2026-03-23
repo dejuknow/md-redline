@@ -1,4 +1,6 @@
+import { useState, useRef, useEffect } from 'react';
 import { ThemeSelector } from './ThemeSelector';
+import { getAuthorColor } from '../hooks/useAuthor';
 
 export type ViewMode = 'rendered' | 'raw' | 'diff';
 
@@ -12,6 +14,10 @@ interface Props {
   hasSnapshot: boolean;
   hasExternalChange: boolean;
   showReviewSummary: boolean;
+  showExplorer: boolean;
+  author: string;
+  onAuthorChange: (name: string) => void;
+  onToggleExplorer: () => void;
   onViewModeChange: (mode: ViewMode) => void;
   onReload: () => void;
   onSnapshot: () => void;
@@ -29,6 +35,10 @@ export function Toolbar({
   hasSnapshot,
   hasExternalChange,
   showReviewSummary,
+  showExplorer,
+  author,
+  onAuthorChange,
+  onToggleExplorer,
   onViewModeChange,
   onReload,
   onSnapshot,
@@ -36,6 +46,22 @@ export function Toolbar({
   onToggleReviewSummary,
 }: Props) {
   const fileName = filePath.split('/').pop() || filePath;
+  const [editingAuthor, setEditingAuthor] = useState(false);
+  const [authorDraft, setAuthorDraft] = useState(author);
+  const authorInputRef = useRef<HTMLInputElement>(null);
+  const authorColor = getAuthorColor(author);
+
+  useEffect(() => {
+    if (editingAuthor && authorInputRef.current) {
+      authorInputRef.current.focus();
+      authorInputRef.current.select();
+    }
+  }, [editingAuthor]);
+
+  const commitAuthor = () => {
+    onAuthorChange(authorDraft);
+    setEditingAuthor(false);
+  };
 
   return (
     <div className="h-12 border-b border-border bg-surface flex items-center px-4 gap-3 shrink-0">
@@ -86,22 +112,33 @@ export function Toolbar({
             strokeWidth="1"
           />
         </svg>
-        <span className="text-sm font-semibold text-content">md-commenter</span>
+        <span className="text-sm font-semibold text-content">md-review</span>
       </div>
+
+      {/* Explorer toggle */}
+      <button
+        onClick={onToggleExplorer}
+        className={`p-1 rounded transition-colors ${
+          showExplorer
+            ? 'text-primary-text bg-primary-bg'
+            : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
+        }`}
+        title="Toggle file explorer (Cmd+B)"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
+          />
+        </svg>
+      </button>
 
       {/* Separator */}
       <div className="h-5 w-px bg-border" />
 
-      {/* File info */}
+      {/* Spacer + external change indicator */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
-        <span className="text-sm text-content-secondary truncate font-medium" title={filePath}>
-          {fileName}
-        </span>
-        {commentCount > 0 && (
-          <span className="text-xs bg-primary-bg-strong text-primary-text px-1.5 py-0.5 rounded-full font-medium">
-            {commentCount}
-          </span>
-        )}
         {hasExternalChange && (
           <span className="text-xs bg-warning-bg text-warning-text px-1.5 py-0.5 rounded-full font-medium animate-pulse">
             External change
@@ -240,6 +277,41 @@ export function Toolbar({
             />
           </svg>
         </button>
+
+        {/* Author name */}
+        <div className="h-5 w-px bg-border" />
+        {editingAuthor ? (
+          <input
+            ref={authorInputRef}
+            value={authorDraft}
+            onChange={(e) => setAuthorDraft(e.target.value)}
+            onBlur={commitAuthor}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitAuthor();
+              if (e.key === 'Escape') {
+                setAuthorDraft(author);
+                setEditingAuthor(false);
+              }
+            }}
+            className="text-xs w-24 px-1.5 py-0.5 rounded border border-primary bg-surface text-content focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder="Your name"
+          />
+        ) : (
+          <button
+            onClick={() => {
+              setAuthorDraft(author);
+              setEditingAuthor(true);
+            }}
+            className="flex items-center gap-1.5 text-xs text-content-secondary hover:text-content transition-colors px-1.5 py-0.5 rounded hover:bg-surface-inset"
+            title="Click to change author name"
+          >
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: authorColor.text }}
+            />
+            {author}
+          </button>
+        )}
 
         {/* Theme selector */}
         <ThemeSelector />

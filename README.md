@@ -1,4 +1,4 @@
-# md-commenter
+# md-review
 
 Google Docs-style inline commenting for markdown files. Built for reviewing AI-generated specs, stories, and documentation — leave feedback directly in the `.md` file for the agent to address.
 

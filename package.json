@@ -1,5 +1,5 @@
 {
-  "name": "md-commenter",
+  "name": "md-review",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -17,7 +17,9 @@
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"server/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"server/**/*.ts\"",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "eval": "tsx eval/runner.ts",
+    "eval:dry": "tsx eval/runner.ts --dry-run"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",
