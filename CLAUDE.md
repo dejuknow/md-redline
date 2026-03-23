@@ -2,13 +2,13 @@
 
 ## What this project is
 
-<!-- @comment{"id":"f51bf822-b44b-4aa6-a30b-84b3fba7dfe0","anchor":"A local web app for adding inline review comments to markdown files. Think \"Google Docs commenting\" for .md files. The primary user is a product manager who generates specs/stories with AI tools and needs to leave feedback for the agent to address.","text":"asdf","author":"User","timestamp":"2026-03-23T03:23:49.590Z","resolved":false,"status":"open","contextBefore":"md-review\nWhat this project is\n","contextAfter":"\nHow to run\nnpm install\nnpm run dev   # "} -->A local web app for adding inline review comments to markdown files. Think "Google Docs commenting" for `.md` files. The primary user is a product manager who generates specs/stories with AI tools and needs to leave feedback for the agent to address.
+A local web app for adding inline review comments to markdown files. Think "Google Docs commenting" for `.md` files. The primary user is a product manager who generates specs/stories with AI tools and needs to leave feedback for the agent to address.
 
 ## How to run
 
 ```bash
 npm install
-<!-- @comment{"id":"3768d139-dd07-4817-9199-c7e1996feb24","anchor":"npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)","text":"gsdag","author":"Dennis","timestamp":"2026-03-23T02:53:41.956Z","resolved":false,"status":"open","contextBefore":"agent to address.\nHow to run\nnpm install","contextAfter":")\n\nQuick-open a file with md-review\nThe "} --><!-- @comment{"id":"4f53a883-db51-4f94-b72a-d6d978c35687","anchor":"npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)","text":"sadg","author":"User","timestamp":"2026-03-23T03:23:53.762Z","resolved":false,"status":"open","contextBefore":"gent to address.\nHow to run\nnpm install\n","contextAfter":"\n\nQuick-open a file with md-review\nThe f"} -->npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
+npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
 ```
 
 ### Quick-open a file with `md-review`
@@ -25,13 +25,13 @@ This auto-starts the app if it's not running and opens the file in your browser.
 npm link   # one-time setup
 ```
 
-<!-- @comment{"id":"3133b3f2-bf74-47fe-94d0-033258d56a8e","anchor":"You can also open a file via URL: http://localhost:5173?file=/path/to/spec.md\n\nArchitecture o","text":"asf","author":"Dennis","timestamp":"2026-03-23T02:53:37.397Z","resolved":false,"status":"open","contextBefore":"le globally:\nnpm link   # one-time setup","contextAfter":"overview\n\nFrontend: React 19 + TypeScrip"} -->You can also open a file via URL: `http://localhost:5173?file=/path/to/spec.md`
+You can also open a file via URL: `http://localhost:5173?file=/path/to/spec.md`
 
 ## Architecture overview
 
 - **Frontend**: React 19 + TypeScript + Tailwind CSS v4 + Vite 8
-- **Backend**: Hono server at `server/index.ts` — exposes `/api/file` (GET/PUT), `/api/browse`, `/api/files`, `/api/config`
-- **Markdown pipeline**: `src/markdown/pipeline.ts` — unified + remark-parse + remark-rehype + rehype-raw + rehype-stringify
+- **Backend**: Hono server at `server/index.ts` — exposes `/api/file` (GET/PUT), `/api/browse`, `/api/files`, `/api/config`, `/api/watch` (SSE)
+- **Markdown pipeline**: `src/markdown/pipeline.ts` — unified + remark-parse + remark-gfm + remark-frontmatter + remark-rehype + rehype-raw + rehype-sanitize + rehype-stringify
 - **Comment storage**: Inline comment markers in the `.md` file: `<!-- @comment{JSON} -->`
 - **Comment parser**: `src/lib/comment-parser.ts` — extracts, inserts, removes, resolves, edits, replies, bulk operations on comments
 - **Highlighting**: Done in `useLayoutEffect` inside `MarkdownViewer.tsx` using ref-based innerHTML (React never manages the container's children) + DOM manipulation (`surroundContents` with `extractContents` fallback). `React.memo` prevents unnecessary re-renders.
@@ -40,12 +40,13 @@ npm link   # one-time setup
 ## UI features
 
 ### File management
-- **File browser**: Navigate directories with breadcrumb navigation and home shortcut
-- **Path input**: Type an absolute path to open any `.md` file
+- **File explorer**: Sidebar directory navigator toggled with `Cmd+B`, with breadcrumb navigation and home shortcut
+- **File browser**: Modal for opening files with full directory traversal
+- **Command palette**: `Cmd+K` to search and execute commands with fuzzy filtering and keyboard navigation (arrows, vim j/k)
 - **Recent files**: Quick-access list of last 10 opened files (persisted in localStorage)
 - **Multi-tab support**: Open multiple files, switch between tabs; tab badges show unresolved comment counts
-- **URL query param**: Open `?file=/path/to/file.md` to load a file directly
-- **File reload**: Manual reload button in toolbar
+- **URL query param**: Open `?file=/path/to/file.md` or `?dir=/path/to/dir` to load directly
+- **File reload**: Manual reload button in tab bar
 
 ### Commenting
 - **Add comments**: Select text in the rendered markdown, then click "Comment" or press `Cmd+Enter`
@@ -75,7 +76,7 @@ Status transitions in the UI:
 ### Viewing modes
 - **Rendered view**: HTML-rendered markdown with comment highlights
 - **Raw view**: Raw markdown with comment markers visible
-- **Diff view**: Side-by-side diff comparing current content to a snapshot (take snapshot via toolbar)
+- **Diff view**: Side-by-side diff comparing current content to a snapshot (take snapshot via tab bar)
 
 ### Review summary
 - **Cross-file summary popover**: Shows all open files with comment counts per status
@@ -83,8 +84,9 @@ Status transitions in the UI:
 - **Quick file jump**: Click a file in the summary to switch to it
 
 ### Navigation
-- **Jump to next**: Press `N` or click toolbar button to focus next unresolved comment
-- **Jump to previous**: Press `P` to focus previous unresolved comment
+- **Jump to next**: Press `N` or `J` to focus next unresolved comment
+- **Jump to previous**: Press `P` or `K` to focus previous unresolved comment
+- **Quick resolve**: Press `A` or `X` to resolve the active open comment; `U` to unresolve
 - **Click-to-select**: Click highlighted text in the viewer to activate the comment in the sidebar
 - Comment cycling wraps around and skips resolved comments
 
@@ -97,9 +99,10 @@ Status transitions in the UI:
 Theme selection is persistent across sessions.
 
 ### Real-time file watching
-- Detects external file changes via SSE (Server-Sent Events)
+- Detects external file changes via SSE (Server-Sent Events) at `/api/watch`
 - Auto-reloads with toast notification when changes are detected
 - Notifies specifically about resolved comments or new replies (useful when an AI agent edits the file)
+- Debounced at 150ms; skips notifications for writes initiated by the app itself
 
 ### Session persistence
 All of the following are saved to localStorage and restored on reload:
@@ -108,16 +111,21 @@ All of the following are saved to localStorage and restored on reload:
 - View mode (rendered/raw/diff)
 - Recent files list
 - Theme selection
+- Author name
 
 ### Keyboard shortcuts
 | Shortcut | Action |
 |---|---|
+| `Cmd+K` | Toggle command palette |
+| `Cmd+B` | Toggle file explorer |
 | `Cmd+Enter` | Submit comment / expand comment form |
 | `Cmd+1-8` | Apply quick template 1-8 on selection |
 | `Cmd+Shift+M` | Start commenting on selection |
 | `Cmd+\` | Toggle sidebar |
-| `N` | Jump to next unresolved comment |
-| `P` | Jump to previous unresolved comment |
+| `N` / `J` | Jump to next unresolved comment |
+| `P` / `K` | Jump to previous unresolved comment |
+| `A` / `X` | Resolve active open comment |
+| `U` | Unresolve/reopen active resolved comment |
 | `Escape` | Cancel comment form / unlock selection / cancel drag |
 
 ### Toast notifications
@@ -161,11 +169,71 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
 
 Key functions in `src/lib/comment-parser.ts`:
 - `parseComments(raw)` — extract comments, return clean markdown + comment array
-- `insertComment(raw, anchor, text, author?)` — add new comment
+- `insertComment(raw, anchor, text, author?, contextBefore?, contextAfter?)` — add new comment
 - `removeComment(raw, id)` — delete comment
-- `setCommentStatus(raw, id, status)` — change status (also sets `resolved`)
+- `resolveComment(raw, id)` — set status to `resolved`
+- `unresolveComment(raw, id)` — set status back to `open`
 - `editComment(raw, id, newText)` — update comment text
 - `addReply(raw, id, text, author?)` — add threaded reply
 - `resolveAllComments(raw)` — bulk resolve all open comments
 - `removeResolvedComments(raw)` — delete all resolved comments
 - `updateCommentAnchor(raw, id, newAnchor)` — change anchor text (drag-resize)
+- `detectMissingAnchors(cleanMarkdown, comments)` — returns Set of comment IDs whose anchor can't be found
+
+## Testing
+
+```bash
+npm test              # Unit tests (vitest, single run)
+npm run test:watch    # Unit tests in watch mode
+npm run test:e2e      # Playwright e2e tests (chromium)
+npm run test:e2e:ui   # Playwright with interactive UI
+```
+
+**Unit tests** (`src/lib/`):
+- `comment-parser.test.ts` — comprehensive coverage of all parser functions, edge cases, fuzzy re-matching
+- `diff.test.ts` — LCS-based line diff algorithm
+
+**E2E tests** (`e2e/`):
+- `commenting.spec.ts` — core commenting workflow (create, edit, delete, resolve, reply)
+- `advanced.spec.ts` — themes, multi-tab, bulk operations, file watching
+- `drag-regression.spec.ts` — regression tests for anchor drag-resize across formatting boundaries
+
+## Eval framework
+
+Evaluates how well AI agents handle review comments in markdown files.
+
+```bash
+npm run eval              # Run full eval suite
+npm run eval:dry          # Dry run (validate fixtures, no agent calls)
+```
+
+### CLI options
+
+```
+--case, -c <string>     Filter cases by name substring
+--format, -f <string>   Format variant (default: "current")
+--agent, -a <string>    Agent adapter (default: "claude-cli")
+--dry-run               Validate fixtures without running agents
+--verbose, -v           Print detailed scoring per case
+```
+
+### Fixture structure
+
+Each case is a directory under `eval/fixtures/` with three files:
+- `input.md` — markdown with embedded `<!-- @comment{} -->` markers
+- `prompt.txt` — instruction for the agent
+- `expected.json` — scoring criteria (totalComments, actionableComments, per-comment expectedAction, contentAssertions)
+
+10 fixtures: single-rewrite, mixed-statuses, overlapping-anchors, vague-comment, code-block, deletion-request, threaded-comments, large-file, no-comments, frontmatter.
+
+### Scoring dimensions
+
+| Dimension | Weight | What it measures |
+|-----------|--------|------------------|
+| parsing | 15% | Were all input comment markers preserved and parseable? |
+| triage | 20% | Did the agent act on `open` comments and skip non-actionable ones? |
+| execution | 30% | Did content changes actually address the feedback? |
+| protocol | 20% | Did the agent set status to `addressed` for acted-on comments? |
+| integrity | 15% | Are all markers in output valid JSON with required fields? |
+
+Results are saved to `eval/results/<timestamp>_<agent>_<format>/` with per-case `scores.json` and a run-level `summary.json`.
