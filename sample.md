@@ -54,7 +54,7 @@ As a user, I want to sign in via a magic link sent to my email so that I can acc
 - All passwords are hashed with bcrypt (cost factor 12)
 - Rate limiting: 5 failed login attempts per IP per 15-minute window
 - CSRF protection via double-submit cookie pattern
-- Session invalidation on p<!-- @comment{"id":"359d23c0-a0e8-4e08-a7b5-170a5fc23a7a","anchor":"CSRF protection via double-submit cookie pattern\nSession invalidation on p","text":"fff","author":"User","timestamp":"2026-03-19T03:07:43.174Z","resolved":false} -->assword change
+- Session invalidation on password change
 
 ### Database Schema
 
