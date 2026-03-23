@@ -22,7 +22,8 @@ import {
   removeComment,
   editComment,
   updateCommentAnchor,
-  setCommentStatus,
+  resolveComment,
+  unresolveComment,
   addReply,
   resolveAllComments,
   removeResolvedComments,
@@ -40,7 +41,6 @@ import { DiffViewer } from './components/DiffViewer';
 import { Toast } from './components/Toast';
 import { ReviewSummary } from './components/ReviewSummary';
 import { useDragHandles } from './hooks/useDragHandles';
-import type { CommentStatus } from './types';
 import { getEffectiveStatus } from './types';
 
 // Load saved session for initial state
@@ -161,14 +161,14 @@ export default function App() {
       if (tab.filePath === activeFilePath) {
         counts.set(
           tab.filePath,
-          comments.filter((c) => getEffectiveStatus(c) !== 'accepted').length,
+          comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length,
         );
       } else {
         try {
           const { comments: tabComments } = parseComments(tab.rawMarkdown);
           counts.set(
             tab.filePath,
-            tabComments.filter((c) => getEffectiveStatus(c) !== 'accepted').length,
+            tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length,
           );
         } catch {
           counts.set(tab.filePath, 0);
@@ -203,18 +203,15 @@ export default function App() {
           const { comments: newComments } = parseComments(content);
           const newById = new Map(newComments.map((c) => [c.id, c]));
 
-          let addressedCount = 0;
+          let resolvedCount = 0;
           let newReplyCount = 0;
           for (const oldC of oldComments) {
             const oldStatus = getEffectiveStatus(oldC);
             const newC = newById.get(oldC.id);
             if (!newC) continue;
             const newStatus = getEffectiveStatus(newC);
-            if (
-              (oldStatus === 'open' || oldStatus === 'reopened') &&
-              newStatus === 'addressed'
-            ) {
-              addressedCount++;
+            if (oldStatus === 'open' && newStatus === 'resolved') {
+              resolvedCount++;
             }
             const oldReplies = oldC.replies?.length ?? 0;
             const newReplies = newC.replies?.length ?? 0;
@@ -223,9 +220,9 @@ export default function App() {
             }
           }
 
-          if (addressedCount > 0) {
+          if (resolvedCount > 0) {
             showToast(
-              `Agent addressed ${addressedCount} comment${addressedCount > 1 ? 's' : ''}`,
+              `${resolvedCount} comment${resolvedCount > 1 ? 's' : ''} resolved externally`,
             );
           } else if (newReplyCount > 0) {
             showToast(
@@ -310,9 +307,16 @@ export default function App() {
     [updateAndSave, clearSelection],
   );
 
-  const handleSetStatus = useCallback(
-    (id: string, status: CommentStatus) => {
-      updateAndSave(setCommentStatus(rawMarkdownRef.current, id, status));
+  const handleResolve = useCallback(
+    (id: string) => {
+      updateAndSave(resolveComment(rawMarkdownRef.current, id));
+    },
+    [updateAndSave],
+  );
+
+  const handleUnresolve = useCallback(
+    (id: string) => {
+      updateAndSave(unresolveComment(rawMarkdownRef.current, id));
     },
     [updateAndSave],
   );
@@ -373,12 +377,9 @@ export default function App() {
     setSnapshots((prev) => new Map(prev).set(activeFilePath, rawMarkdownRef.current));
   }, [activeFilePath]);
 
-  // Jump to next unresolved comment
+  // Jump to next open comment
   const handleJumpToNext = useCallback(() => {
-    const unresolvedComments = comments.filter((c) => {
-      const s = getEffectiveStatus(c);
-      return s === 'open' || s === 'reopened' || s === 'addressed';
-    });
+    const unresolvedComments = comments.filter((c) => getEffectiveStatus(c) === 'open');
     if (unresolvedComments.length === 0) return;
 
     const currentIdx = activeCommentId
@@ -390,12 +391,9 @@ export default function App() {
     viewerRef.current?.scrollToComment(next.id);
   }, [comments, activeCommentId]);
 
-  // Jump to previous unresolved comment
+  // Jump to previous open comment
   const handleJumpToPrev = useCallback(() => {
-    const unresolvedComments = comments.filter((c) => {
-      const s = getEffectiveStatus(c);
-      return s === 'open' || s === 'reopened' || s === 'addressed';
-    });
+    const unresolvedComments = comments.filter((c) => getEffectiveStatus(c) === 'open');
     if (unresolvedComments.length === 0) return;
 
     const currentIdx = activeCommentId
@@ -416,7 +414,7 @@ export default function App() {
     onAnchorChange: handleAnchorChange,
   });
 
-  const openCommentCount = comments.filter((c) => getEffectiveStatus(c) !== 'accepted').length;
+  const openCommentCount = comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length;
 
   // Stable ref for selection to use in keyboard handler without re-creating it
   const selectionRef = useRef(selection);
@@ -731,7 +729,8 @@ export default function App() {
                     filter={sidebarFilter}
                     onFilterChange={setSidebarFilter}
                     onActivate={handleSidebarActivate}
-                    onSetStatus={handleSetStatus}
+                    onResolve={handleResolve}
+                    onUnresolve={handleUnresolve}
                     onDelete={handleDelete}
                     onEdit={handleEdit}
                     onReply={handleReply}
