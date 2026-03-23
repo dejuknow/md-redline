@@ -2,6 +2,16 @@ import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle } from '
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 
+export interface ViewerContextMenuInfo {
+  /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
+  type: 'selection' | 'highlight';
+  /** Comment IDs (only for 'highlight' type) */
+  commentIds?: string[];
+  /** Screen coordinates for the menu */
+  x: number;
+  y: number;
+}
+
 interface Props {
   html: string;
   comments: MdComment[];
@@ -9,6 +19,7 @@ interface Props {
   selectionText: string | null;
   selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
+  onContextMenu?: (info: ViewerContextMenuInfo) => void;
 }
 
 export interface MarkdownViewerHandle {
@@ -23,7 +34,7 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick },
+    { html, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -121,6 +132,29 @@ export const MarkdownViewer = memo(
       }
     };
 
+    const handleContextMenu = (e: React.MouseEvent) => {
+      if (!onCtxMenu) return;
+
+      // Check if right-click is on a comment highlight
+      const mark = (e.target as HTMLElement).closest(
+        'mark.comment-highlight',
+      ) as HTMLElement | null;
+      if (mark?.dataset.commentIds) {
+        e.preventDefault();
+        const ids = mark.dataset.commentIds.split(',');
+        onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY });
+        return;
+      }
+
+      // Check if there is a text selection within the container
+      const sel = window.getSelection();
+      if (sel && sel.toString().trim().length > 0 && containerRef.current?.contains(sel.anchorNode)) {
+        e.preventDefault();
+        onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY });
+        return;
+      }
+    };
+
     return (
       <div
         ref={containerRef}
@@ -133,6 +167,7 @@ export const MarkdownViewer = memo(
           prose-th:font-semibold
           prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:font-normal prose-code:before:content-none prose-code:after:content-none"
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
       />
     );
   }),

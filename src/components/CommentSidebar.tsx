@@ -4,6 +4,12 @@ import { getEffectiveStatus } from '../types';
 import { CommentCard } from './CommentCard';
 import type { FilterMode } from '../hooks/useSessionPersistence';
 
+export interface SidebarContextMenuInfo {
+  commentId: string;
+  x: number;
+  y: number;
+}
+
 interface Props {
   comments: MdComment[];
   activeCommentId: string | null;
@@ -18,6 +24,13 @@ interface Props {
   onReply: (id: string, text: string) => void;
   onBulkResolve: () => void;
   onBulkDeleteResolved: () => void;
+  onContextMenu?: (info: SidebarContextMenuInfo) => void;
+  /** When set, the matching comment enters edit mode. Use Date.now() to re-trigger. */
+  requestEditId?: string | null;
+  requestEditToken?: number;
+  /** When set, the matching comment enters reply mode. Use Date.now() to re-trigger. */
+  requestReplyId?: string | null;
+  requestReplyToken?: number;
 }
 
 const FILTER_TABS: { key: FilterMode; label: string }[] = [
@@ -40,6 +53,11 @@ export function CommentSidebar({
   onReply,
   onBulkResolve,
   onBulkDeleteResolved,
+  onContextMenu: onCtxMenu,
+  requestEditId,
+  requestEditToken,
+  requestReplyId,
+  requestReplyToken,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
@@ -167,6 +185,9 @@ export function CommentSidebar({
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
+              onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
+              requestEdit={comment.id === requestEditId ? requestEditToken : undefined}
+              requestReply={comment.id === requestReplyId ? requestReplyToken : undefined}
             />
           </div>
         ))}
@@ -192,6 +213,9 @@ export function CommentSidebar({
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
+              onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
+              requestEdit={comment.id === requestEditId ? requestEditToken : undefined}
+              requestReply={comment.id === requestReplyId ? requestReplyToken : undefined}
             />
           </div>
         ))}

@@ -15,6 +15,11 @@ interface Props {
   onDelete: (id: string) => void;
   onEdit: (id: string, newText: string) => void;
   onReply: (id: string, text: string) => void;
+  onContextMenu?: (id: string, x: number, y: number) => void;
+  /** When set to a new truthy value, enters edit mode */
+  requestEdit?: number;
+  /** When set to a new truthy value, enters reply mode */
+  requestReply?: number;
 }
 
 const STATUS_CONFIG: Record<CommentStatus, { label: string; className: string }> = {
@@ -32,6 +37,9 @@ export const CommentCard = memo(function CommentCard({
   onDelete,
   onEdit,
   onReply,
+  onContextMenu: onCtxMenu,
+  requestEdit,
+  requestReply,
 }: Props) {
   const status = getEffectiveStatus(comment);
   const statusConfig = STATUS_CONFIG[status];
@@ -72,6 +80,20 @@ export const CommentCard = memo(function CommentCard({
     }
   }, [isReplying]);
 
+  // External triggers to enter edit/reply mode
+  useEffect(() => {
+    if (requestEdit) {
+      setEditText(comment.text);
+      setIsEditing(true);
+    }
+  }, [requestEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (requestReply) {
+      setIsReplying(true);
+    }
+  }, [requestReply]);
+
   const handleSave = () => {
     const trimmed = editText.trim();
     if (trimmed && trimmed !== comment.text && trimmed.length <= COMMENT_MAX_LENGTH) {
@@ -107,6 +129,12 @@ export const CommentCard = memo(function CommentCard({
             : 'border-border bg-surface hover:border-content-faint hover:shadow-sm'
       }`}
       onClick={() => onActivate(comment.id)}
+      onContextMenu={(e) => {
+        if (onCtxMenu) {
+          e.preventDefault();
+          onCtxMenu(comment.id, e.clientX, e.clientY);
+        }
+      }}
     >
       {/* Header: anchor + status badge */}
       <div className="px-3 pt-3 pb-1 flex items-start gap-2">
