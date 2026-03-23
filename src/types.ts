@@ -24,9 +24,10 @@ export interface MdComment {
 }
 
 export function getEffectiveStatus(comment: MdComment): CommentStatus {
-  if (comment.status === 'open' || comment.status === 'resolved') return comment.status;
-  // Legacy: map old statuses and resolved boolean
-  if (comment.status === 'accepted' || comment.resolved) return 'resolved';
+  // Cast to string to handle legacy status values (e.g. 'accepted') from old comment markers
+  const status = comment.status as string | undefined;
+  if (status === 'open' || status === 'resolved') return status;
+  if (status === 'accepted' || comment.resolved) return 'resolved';
   return 'open';
 }
 

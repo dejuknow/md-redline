@@ -14,7 +14,7 @@ import {
   detectMissingAnchors,
 } from './comment-parser';
 import { getEffectiveStatus } from '../types';
-import type { MdComment } from '../types';
+import type { MdComment, CommentStatus } from '../types';
 
 // Helper to make a comment marker
 function marker(overrides: Partial<MdComment> = {}): string {
@@ -144,6 +144,25 @@ describe('insertComment', () => {
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.cleanMarkdown).toBe('hello hello hello');
+  });
+
+  it('uses hintOffset to disambiguate duplicate anchor text', () => {
+    const raw = 'foo bar foo bar foo';
+    // "foo" appears at clean offsets 0, 8, 16; hintOffset=15 is closest to 16
+    const result = insertComment(raw, 'foo', 'third one', 'User', undefined, undefined, 15);
+    // The marker should be inserted before the third "foo", not the first
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toBe('foo bar foo bar ');
+  });
+
+  it('uses hintOffset to select second occurrence of duplicate text', () => {
+    const raw = 'The cat sat. The cat played.';
+    // "The cat" appears at offsets 0 and 13; hintOffset=13 should pick the second
+    const result = insertComment(raw, 'The cat', 'second one', 'User', undefined, undefined, 13);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toBe('The cat sat. ');
   });
 });
 
@@ -434,8 +453,8 @@ describe('detectMissingAnchors', () => {
   it('skips accepted comments', () => {
     const clean = 'Hello world';
     const comments = [
-      { id: 'a', anchor: 'deleted text', status: 'accepted', resolved: true },
-    ] as MdComment[];
+      { id: 'a', anchor: 'deleted text', status: 'accepted' as CommentStatus, resolved: true },
+    ] as unknown as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -660,7 +679,6 @@ describe('fuzzy re-matching', () => {
     };
     const raw = `context before ${serializeComment(comment)}${filler} context after end.`;
     const parsed = parseComments(raw);
-    const clean = parsed.cleanMarkdown;
     // Both-context match fails (gap > 500), contextBefore-only fallback succeeds
     expect(parsed.comments[0].cleanOffset).toBe('context before '.length);
   });

@@ -175,6 +175,7 @@ export function insertComment(
   author: string = 'User',
   contextBefore?: string,
   contextAfter?: string,
+  hintOffset?: number,
 ): string {
   const comment: MdComment = {
     id: crypto.randomUUID(),
@@ -194,10 +195,27 @@ export function insertComment(
 
   let insertionCleanOffset: number | null = null;
 
-  // Try exact match first
+  // Try exact match — find ALL occurrences and pick the best one
   const cleanIdx = cleanMarkdown.indexOf(anchor);
   if (cleanIdx !== -1) {
-    insertionCleanOffset = cleanIdx;
+    // Collect all occurrences
+    const occurrences: number[] = [];
+    let searchFrom = 0;
+    while (true) {
+      const idx = cleanMarkdown.indexOf(anchor, searchFrom);
+      if (idx === -1) break;
+      occurrences.push(idx);
+      searchFrom = idx + 1;
+    }
+
+    if (occurrences.length === 1 || hintOffset === undefined) {
+      insertionCleanOffset = occurrences[0];
+    } else {
+      // Pick the occurrence closest to the hint offset (from DOM selection)
+      insertionCleanOffset = occurrences.reduce((best, idx) =>
+        Math.abs(idx - hintOffset) < Math.abs(best - hintOffset) ? idx : best,
+      );
+    }
   }
 
   // Flexible match for cross-element selections: split anchor by newlines
