@@ -164,6 +164,43 @@ describe('insertComment', () => {
     const textBefore = result.slice(0, markerIdx);
     expect(textBefore).toBe('The cat sat. ');
   });
+
+  it('uses hintOffset to disambiguate duplicate cross-element selections', () => {
+    // Anchor spans a newline, which triggers the segment-based fallback.
+    // The same two-line pattern repeats, so hintOffset must disambiguate.
+    const raw = 'hello\nworld\n\nhello\nworld';
+    // Segments: ["hello", "world"]. Appear at clean offsets 0 and 13.
+    // In plain text (same as clean here, no formatting), also at 0 and 13.
+    // hintOffset=13 should pick the second occurrence.
+    const result = insertComment(raw, 'hello\nworld', 'second', 'User', undefined, undefined, 13);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toBe('hello\nworld\n\n');
+  });
+
+  it('uses hintOffset when one occurrence is formatted and the other is not', () => {
+    // **foo**\nbar\n\nfoo\nbar — only "foo\nbar" at position 13 is an exact match
+    // in clean markdown; the first occurrence is inside **foo** so indexOf misses it.
+    // hintOffset=0 (plain text position of first "foo") should pick the formatted one.
+    const raw = '**foo**\nbar\n\nfoo\nbar';
+    const result = insertComment(raw, 'foo', 'first one', 'User', undefined, undefined, 0);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    // Marker should be before "foo" inside **foo** (after the ** formatting prefix)
+    expect(textBefore).toBe('**');
+  });
+
+  it('uses hintOffset in plain-text space to handle formatted duplicates', () => {
+    // **foo** x foo — clean markdown has "foo" at offsets 2 and 10,
+    // but rendered/plain text has "foo" at offsets 0 and 6.
+    // Selecting second "foo" gives hintOffset=6 (plain-text space).
+    const raw = '**foo** x foo';
+    const result = insertComment(raw, 'foo', 'second one', 'User', undefined, undefined, 6);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    // Marker should be before the second "foo" (after "**foo** x ")
+    expect(textBefore).toBe('**foo** x ');
+  });
 });
 
 describe('removeComment', () => {

@@ -195,40 +195,59 @@ export function insertComment(
 
   let insertionCleanOffset: number | null = null;
 
-  // Try exact match — find ALL occurrences and pick the best one
-  const cleanIdx = cleanMarkdown.indexOf(anchor);
-  if (cleanIdx !== -1) {
-    // Collect all occurrences
-    const occurrences: number[] = [];
-    let searchFrom = 0;
+  // When hintOffset is provided (from DOM selection), search in plain-text space
+  // first. This is the same coordinate space as hintOffset and sees through
+  // markdown formatting, so it correctly handles duplicates where one occurrence
+  // is formatted (e.g. **foo**) and another is not (foo).
+  if (hintOffset !== undefined) {
+    const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
+
+    // Direct search for anchor in plain text
+    const plainOccs: number[] = [];
+    let pSearch = 0;
     while (true) {
-      const idx = cleanMarkdown.indexOf(anchor, searchFrom);
-      if (idx === -1) break;
-      occurrences.push(idx);
-      searchFrom = idx + 1;
+      const pIdx = plain.indexOf(anchor, pSearch);
+      if (pIdx === -1) break;
+      plainOccs.push(pIdx);
+      pSearch = pIdx + 1;
     }
 
-    if (occurrences.length === 1 || hintOffset === undefined) {
-      insertionCleanOffset = occurrences[0];
-    } else {
-      // Pick the occurrence closest to the hint offset (from DOM selection)
-      insertionCleanOffset = occurrences.reduce((best, idx) =>
-        Math.abs(idx - hintOffset) < Math.abs(best - hintOffset) ? idx : best,
+    // Also try segment-based search for cross-element selections (newlines/tabs)
+    if (plainOccs.length === 0) {
+      const segments = anchor
+        .split(/[\n\t]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (segments.length > 0) {
+        for (const r of findAllSegments(plain, segments)) {
+          plainOccs.push(r.start);
+        }
+      }
+    }
+
+    if (plainOccs.length > 0) {
+      const best = plainOccs.reduce((b, idx) =>
+        Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
       );
+      insertionCleanOffset = toCleanOffset(best);
     }
   }
 
-  // Flexible match for cross-element selections: split anchor by newlines
-  // and tabs (tables use \t between cells in sel.toString()) and find each
-  // segment in order. First try against clean markdown directly, then against
-  // a formatting-stripped version (handles **bold**, *italic*, etc.)
+  // Fallback when no hintOffset: use exact match in clean markdown (first occurrence)
+  if (insertionCleanOffset === null) {
+    const cleanIdx = cleanMarkdown.indexOf(anchor);
+    if (cleanIdx !== -1) {
+      insertionCleanOffset = cleanIdx;
+    }
+  }
+
+  // Fallback: cross-element selections with newlines/tabs — segment-based search
   if (insertionCleanOffset === null) {
     const segments = anchor
       .split(/[\n\t]+/)
       .map((s) => s.trim())
       .filter(Boolean);
     if (segments.length > 0) {
-      // Try direct segment search in clean markdown
       const segResult = findSegments(cleanMarkdown, segments);
       if (segResult !== null) {
         insertionCleanOffset = segResult.start;
@@ -396,9 +415,9 @@ export function removeResolvedComments(rawMarkdown: string): string {
   });
 }
 
-/** Search for ordered segments in text, return the start and end offsets or null. */
-function findSegments(text: string, segments: string[]): { start: number; end: number } | null {
-  let searchFrom = 0;
+/** Search for ordered segments in text starting from a given offset, return the start and end offsets or null. */
+function findSegments(text: string, segments: string[], startFrom = 0): { start: number; end: number } | null {
+  let searchFrom = startFrom;
   let firstStart = -1;
   let lastEnd = -1;
   for (let i = 0; i < segments.length; i++) {
@@ -409,6 +428,19 @@ function findSegments(text: string, segments: string[]): { start: number; end: n
     searchFrom = lastEnd;
   }
   return firstStart === -1 ? null : { start: firstStart, end: lastEnd };
+}
+
+/** Find ALL occurrences of ordered segments in text. */
+function findAllSegments(text: string, segments: string[]): { start: number; end: number }[] {
+  const results: { start: number; end: number }[] = [];
+  let startFrom = 0;
+  while (true) {
+    const result = findSegments(text, segments, startFrom);
+    if (result === null) break;
+    results.push(result);
+    startFrom = result.start + 1;
+  }
+  return results;
 }
 
 /**
