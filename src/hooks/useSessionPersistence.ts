@@ -11,7 +11,7 @@ export interface SessionState {
   viewMode: ViewMode;
 }
 
-const STORAGE_KEY = 'md-commenter-session';
+const STORAGE_KEY = 'md-review-session';
 const DEBOUNCE_MS = 500;
 
 export function loadSession(): SessionState | null {

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-const STORAGE_KEY = 'md-commenter-recent-files';
+const STORAGE_KEY = 'md-review-recent-files';
 const MAX_RECENT = 10;
 
 export interface RecentFile {
