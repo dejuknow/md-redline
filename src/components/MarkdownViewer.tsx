@@ -183,11 +183,32 @@ function wrapText(
       matchStart = exactIdx;
       matchEnd = exactIdx + text.length;
     } else {
-      // Flexible fallback with an equally widened window
-      const result = flexibleSearch(fullText, text, Math.max(0, cleanOffset - searchWindow - 30));
-      if (!result) return;
-      matchStart = result.start;
-      matchEnd = result.end;
+      // Rendered text is shorter than clean markdown (heading markers, bold/italic
+      // syntax, list markers etc. are stripped), so cleanOffset can overshoot the
+      // actual position in fullText.  Find ALL occurrences and pick the closest.
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      let searchFrom = 0;
+      while (searchFrom < fullText.length) {
+        const idx = fullText.indexOf(text, searchFrom);
+        if (idx === -1) break;
+        const dist = Math.abs(idx - cleanOffset);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = idx;
+        }
+        searchFrom = idx + 1;
+      }
+      if (bestIdx !== -1) {
+        matchStart = bestIdx;
+        matchEnd = bestIdx + text.length;
+      } else {
+        // Flexible whitespace fallback (no startFrom constraint)
+        const result = flexibleSearch(fullText, text);
+        if (!result) return;
+        matchStart = result.start;
+        matchEnd = result.end;
+      }
     }
   } else {
     // No offset — first occurrence (used for selection highlights)
@@ -245,37 +266,24 @@ function wrapText(
   for (let g = groups.length - 1; g >= 0; g--) {
     const group = groups[g];
     if (group.length > 1) {
-      // Multiple wraps in the same block — merge into a single plain-text mark
-      // to avoid seam artifacts from inline element boundaries (e.g. <strong>)
+      // Multiple wraps in the same block — use Range to wrap them in a single
+      // <mark>.  extractContents() splits partially-selected inline elements
+      // (e.g. <strong>), preserving formatting while producing one mark (no seam).
       const mark = document.createElement('mark');
       configure(mark);
-      let matchedText = '';
-      for (const { node: tn, start, end } of group) {
-        matchedText += tn.textContent?.slice(start, end) || '';
-      }
-      mark.textContent = matchedText;
 
-      const firstNode = group[0].node;
-      const firstParent = firstNode.parentNode;
-      const anchor = firstParent && !BLOCK_TAGS.has((firstParent as Element).tagName)
-        ? firstParent : firstNode;
-      anchor.parentNode?.insertBefore(mark, anchor);
+      const firstWrap = group[0];
+      const lastWrap = group[group.length - 1];
+      const range = document.createRange();
+      range.setStart(firstWrap.node, firstWrap.start);
+      range.setEnd(lastWrap.node, lastWrap.end);
 
-      for (let i = group.length - 1; i >= 0; i--) {
-        const { node: tn, start, end } = group[i];
-        const len = tn.textContent?.length || 0;
-        if (start === 0 && end >= len) {
-          const parent = tn.parentNode;
-          tn.remove();
-          if (parent && parent !== mark.parentNode &&
-              parent.childNodes.length === 0 && !BLOCK_TAGS.has((parent as Element).tagName)) {
-            parent.remove();
-          }
-        } else if (start === 0) {
-          tn.textContent = tn.textContent!.slice(end);
-        } else {
-          tn.textContent = tn.textContent!.slice(0, start);
-        }
+      try {
+        const fragment = range.extractContents();
+        mark.appendChild(fragment);
+        range.insertNode(mark);
+      } catch {
+        // Skip if extraction fails
       }
     } else {
       // Single wrap in this block — use surroundContents

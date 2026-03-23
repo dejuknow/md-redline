@@ -105,8 +105,9 @@ export default function App() {
       for (const path of savedSession.openTabs) {
         openTab(path);
       }
-      if (savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)) {
-        // openTab already switches to the last opened; switch to the saved active
+      // Switch to the saved active tab — unless a URL ?file= param takes precedence
+      const urlFile = new URLSearchParams(window.location.search).get('file');
+      if (!urlFile && savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)) {
         setTimeout(() => switchTab(savedSession.activeFilePath!), 50);
       }
     }

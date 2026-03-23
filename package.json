@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "md-review": "bin/md-review"
+    "md-review": "bin/md-review",
+    "mdr": "bin/md-review"
   },
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"tsx server/index.ts\" \"vite\"",
