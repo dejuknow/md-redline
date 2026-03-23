@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import type { MdComment, CommentStatus } from '../types';
 import { getEffectiveStatus } from '../types';
 import { getAuthorColor } from '../hooks/useAuthor';
+import { useAutoResize } from '../hooks/useAutoResize';
+import { COMMENT_MAX_LENGTH } from './CommentForm';
 
 interface Props {
   comment: MdComment;
@@ -38,15 +40,31 @@ export const CommentCard = memo(function CommentCard({
   const [editText, setEditText] = useState(comment.text);
   const [isReplying, setIsReplying] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const [isTextExpanded, setIsTextExpanded] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [isClamped, setIsClamped] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  const resizeEditTextarea = useAutoResize(textareaRef, editText);
+  useAutoResize(replyRef, replyText);
+
+  // Detect if comment text is long enough to need clamping
+  const checkClamped = useCallback(() => {
+    const el = textRef.current;
+    if (el) setIsClamped(el.scrollHeight > el.clientHeight);
+  }, []);
+
+  useEffect(() => {
+    checkClamped();
+  }, [comment.text, isTextExpanded, checkClamped]);
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
+      resizeEditTextarea();
       textareaRef.current.focus();
       textareaRef.current.selectionStart = textareaRef.current.value.length;
     }
-  }, [isEditing]);
+  }, [isEditing, resizeEditTextarea]);
 
   useEffect(() => {
     if (isReplying && replyRef.current) {
@@ -56,7 +74,7 @@ export const CommentCard = memo(function CommentCard({
 
   const handleSave = () => {
     const trimmed = editText.trim();
-    if (trimmed && trimmed !== comment.text) {
+    if (trimmed && trimmed !== comment.text && trimmed.length <= COMMENT_MAX_LENGTH) {
       onEdit(comment.id, trimmed);
     }
     setIsEditing(false);
@@ -69,7 +87,7 @@ export const CommentCard = memo(function CommentCard({
 
   const handleReplySubmit = () => {
     const trimmed = replyText.trim();
-    if (trimmed) {
+    if (trimmed && trimmed.length <= COMMENT_MAX_LENGTH) {
       onReply(comment.id, trimmed);
       setReplyText('');
       setIsReplying(false);
@@ -121,7 +139,29 @@ export const CommentCard = memo(function CommentCard({
       {/* Comment text */}
       <div className="px-3 py-2">
         {isEditing ? (
-          <div onClick={(e) => e.stopPropagation()}>
+          <div className="flex flex-col-reverse gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-end gap-1.5">
+              <button
+                onClick={handleCancel}
+                className="text-xs px-2 py-1 rounded text-content-secondary hover:bg-surface-inset transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={!editText.trim() || editText.length > COMMENT_MAX_LENGTH}
+                className="text-xs px-2 py-1 rounded bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+            {editText.length > COMMENT_MAX_LENGTH * 0.8 && (
+              <p className={`text-right text-xs ${
+                editText.length >= COMMENT_MAX_LENGTH ? 'text-danger font-medium' : 'text-content-muted'
+              }`}>
+                {editText.length}/{COMMENT_MAX_LENGTH}
+              </p>
+            )}
             <textarea
               ref={textareaRef}
               value={editText}
@@ -135,33 +175,33 @@ export const CommentCard = memo(function CommentCard({
                   handleCancel();
                 }
               }}
-              className="w-full text-sm border border-border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none bg-surface text-content"
-              rows={3}
+              maxLength={COMMENT_MAX_LENGTH}
+              className="w-full text-sm border border-border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
+              rows={1}
             />
-            <div className="flex justify-end gap-1.5 mt-1.5">
-              <button
-                onClick={handleCancel}
-                className="text-xs px-2 py-1 rounded text-content-secondary hover:bg-surface-inset transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={!editText.trim()}
-                className="text-xs px-2 py-1 rounded bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
-              >
-                Save
-              </button>
-            </div>
           </div>
         ) : (
-          <p
-            className={`text-sm leading-relaxed ${
-              isResolved ? 'text-content-muted line-through' : 'text-content'
-            }`}
-          >
-            {comment.text}
-          </p>
+          <div>
+            <p
+              ref={textRef}
+              className={`text-sm leading-relaxed whitespace-pre-wrap ${
+                isResolved ? 'text-content-muted line-through' : 'text-content'
+              } ${!isTextExpanded ? 'line-clamp-4' : ''}`}
+            >
+              {comment.text}
+            </p>
+            {(isClamped || isTextExpanded) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsTextExpanded(!isTextExpanded);
+                }}
+                className="text-xs text-primary-text hover:underline mt-1"
+              >
+                {isTextExpanded ? 'Show less' : 'Show more'}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -262,9 +302,17 @@ export const CommentCard = memo(function CommentCard({
                   }
                 }}
                 placeholder="Write a reply..."
-                className="w-full text-xs border border-border rounded-md px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
-                rows={2}
+                maxLength={COMMENT_MAX_LENGTH}
+                className="w-full text-xs border border-border rounded-md px-2 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
+                rows={1}
               />
+              {replyText.length > COMMENT_MAX_LENGTH * 0.8 && (
+                <p className={`text-right text-xs mt-0.5 ${
+                  replyText.length >= COMMENT_MAX_LENGTH ? 'text-danger font-medium' : 'text-content-muted'
+                }`}>
+                  {replyText.length}/{COMMENT_MAX_LENGTH}
+                </p>
+              )}
               <div className="flex justify-end gap-1.5 mt-1">
                 <button
                   onClick={() => {
@@ -277,7 +325,7 @@ export const CommentCard = memo(function CommentCard({
                 </button>
                 <button
                   onClick={handleReplySubmit}
-                  disabled={!replyText.trim()}
+                  disabled={!replyText.trim() || replyText.length > COMMENT_MAX_LENGTH}
                   className="text-xs px-2 py-0.5 rounded bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
                 >
                   Reply

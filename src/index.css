@@ -358,7 +358,7 @@ mark.comment-highlight:hover {
 mark.comment-highlight-active {
   background-color: var(--theme-comment-bg-hover);
   text-decoration-color: var(--theme-comment-underline-active);
-  box-shadow: 0 0 0 1px var(--theme-comment-ring);
+  outline: 1px solid var(--theme-comment-ring);
 }
 
 /* Smooth scrolling for the viewer */

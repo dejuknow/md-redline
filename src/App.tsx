@@ -11,6 +11,7 @@ import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
+import { useResizablePanel } from './hooks/useResizablePanel';
 import {
   useSessionPersistence,
   loadSession,
@@ -35,8 +36,8 @@ import { CommentSidebar } from './components/CommentSidebar';
 import { CommentForm, TEMPLATES } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
-import { FileBrowser } from './components/FileBrowser';
 import { FileExplorer } from './components/FileExplorer';
+import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { DiffViewer } from './components/DiffViewer';
 import { Toast } from './components/Toast';
@@ -67,12 +68,13 @@ export default function App() {
   } = useTabs();
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [inputPath, setInputPath] = useState('');
-  const [showBrowser, setShowBrowser] = useState(false);
-  const [explorerVisible, setExplorerVisible] = useState(false);
+  const [explorerVisible, setExplorerVisible] = useState(
+    !savedSession?.openTabs?.length
+  );
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
+  const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
 
   // Session-persisted state: initialize from saved session
   const [viewMode, setViewMode] = useState<ViewMode>(savedSession?.viewMode ?? 'rendered');
@@ -135,8 +137,9 @@ export default function App() {
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
 
-  // Command palette state
+  // Command palette & file opener state
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showFileOpener, setShowFileOpener] = useState(false);
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -152,7 +155,7 @@ export default function App() {
   );
 
   // Parse comments from raw markdown
-  const { cleanMarkdown, comments } = useMemo(() => parseComments(rawMarkdown), [rawMarkdown]);
+  const { cleanMarkdown, comments } = useMemo(() => parseComments(rawMarkdown ?? ''), [rawMarkdown]);
 
   // Render markdown to HTML
   const html = useMemo(() => (cleanMarkdown ? renderMarkdown(cleanMarkdown) : ''), [cleanMarkdown]);
@@ -293,10 +296,8 @@ export default function App() {
   const handleOpenFile = useCallback(
     (path: string) => {
       if (path.trim()) {
-        setInputPath(path);
         openTab(path.trim());
         addRecentFile(path.trim());
-        setShowBrowser(false);
       }
     },
     [openTab, addRecentFile],
@@ -464,6 +465,13 @@ export default function App() {
         return;
       }
 
+      // Cmd+O : Open file
+      if (mod && e.key === 'o') {
+        e.preventDefault();
+        setShowFileOpener((prev) => !prev);
+        return;
+      }
+
       // Cmd+B : Toggle file explorer
       if (mod && e.key === 'b') {
         e.preventDefault();
@@ -591,7 +599,7 @@ export default function App() {
       { id: 'view-raw', label: 'Switch to raw markdown', section: 'View', onExecute: () => setViewMode('raw') },
       { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
       { id: 'take-snapshot', label: 'Take diff snapshot', section: 'File', onExecute: handleSnapshot },
-      { id: 'open-file', label: 'Open file browser', section: 'File', onExecute: () => setShowBrowser(true) },
+      { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: () => setShowFileOpener(true) },
       { id: 'review-summary', label: 'Toggle review summary', section: 'View', onExecute: () => setShowReviewSummary((p) => !p) },
       { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
     ];
@@ -621,151 +629,6 @@ export default function App() {
     return cmds;
   }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, openCommentCount, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
 
-  const fileBrowserContent = (
-    <div className="w-full max-w-lg">
-      {/* Logo & title */}
-      {tabs.length === 0 && (
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-bg-strong mb-4">
-            <svg className="w-8 h-8 text-primary-text" viewBox="0 0 32 32" fill="none">
-              <rect
-                x="4"
-                y="2"
-                width="18"
-                height="24"
-                rx="2"
-                fill="currentColor"
-                opacity="0.15"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <line
-                x1="8"
-                y1="8"
-                x2="18"
-                y2="8"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <line
-                x1="8"
-                y1="12"
-                x2="16"
-                y2="12"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <line
-                x1="8"
-                y1="16"
-                x2="18"
-                y2="16"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <path
-                d="M18 18h8a2 2 0 012 2v6a2 2 0 01-2 2h-4l-3 3v-3h-1a2 2 0 01-2-2v-6a2 2 0 012-2z"
-                style={{ fill: 'var(--theme-comment-underline)', stroke: 'var(--theme-comment-underline-active)' }}
-                strokeWidth="1"
-              />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-content mb-2">md-review</h1>
-          <p className="text-content-secondary text-sm leading-relaxed">
-            Review and annotate your markdown files with inline comments.
-            <br />
-            Select text to add comments, just like Google Docs.
-          </p>
-        </div>
-      )}
-
-      {/* File input */}
-      <div className="bg-surface-raised rounded-xl shadow-sm border border-border p-6">
-        <label className="block text-sm font-medium text-content mb-2">
-          Open a markdown file
-        </label>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleOpenFile(inputPath);
-          }}
-          className="flex gap-2"
-        >
-          <input
-            type="text"
-            value={inputPath}
-            onChange={(e) => setInputPath(e.target.value)}
-            placeholder="/path/to/your/file.md"
-            className="flex-1 text-sm border border-border rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
-          />
-          <button
-            type="submit"
-            disabled={!inputPath.trim() || isLoading}
-            className="px-4 py-2.5 bg-primary text-on-primary text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Open
-          </button>
-        </form>
-
-        {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-
-        {/* Recent files */}
-        {recentFiles.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border-subtle">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-content-secondary">Recent files</p>
-              <button
-                onClick={clearRecentFiles}
-                className="text-xs text-content-muted hover:text-danger transition-colors"
-              >
-                Clear
-              </button>
-            </div>
-            <div className="space-y-1">
-              {recentFiles.map((file) => (
-                <button
-                  key={file.path}
-                  onClick={() => handleOpenFile(file.path)}
-                  className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-primary-bg transition-colors group"
-                >
-                  <span className="font-medium text-content group-hover:text-primary-text">
-                    {file.name}
-                  </span>
-                  <span className="block text-xs text-content-muted truncate">{file.path}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* File browser */}
-        <div className="mt-4 pt-4 border-t border-border-subtle">
-          <p className="text-xs font-medium text-content-secondary mb-2">Browse files</p>
-          <FileBrowser onOpenFile={handleOpenFile} />
-        </div>
-      </div>
-
-      {tabs.length === 0 && (
-        <p className="text-center text-xs text-content-muted mt-6">
-          Comments are stored as HTML comments in your .md file &mdash; no sidecar files needed
-        </p>
-      )}
-    </div>
-  );
-
-  // Landing page (no tabs open)
-  if (tabs.length === 0) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gradient-from to-gradient-to flex items-center justify-center p-4">
-        {fileBrowserContent}
-      </div>
-    );
-  }
-
-  // Editor view (with tabs)
   return (
     <div className="h-screen flex flex-col bg-surface">
       <Toolbar
@@ -785,11 +648,10 @@ export default function App() {
         commentCounts={commentCounts}
         onSwitchTab={(path) => {
           switchTab(path);
-          setShowBrowser(false);
           setShowReviewSummary(false);
         }}
         onCloseTab={closeTab}
-        onOpenFile={() => setShowBrowser(true)}
+        onOpenFile={() => setShowFileOpener(true)}
         viewMode={viewMode}
         hasSnapshot={currentSnapshot !== null}
         hasExternalChange={hasExternalChange}
@@ -805,20 +667,16 @@ export default function App() {
         onReload={reloadFile}
       />
 
-      {showBrowser ? (
-        <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto bg-gradient-to-br from-gradient-from to-gradient-to">
-          {fileBrowserContent}
-        </div>
-      ) : (
-        <>
+      <>
           <div className="flex-1 flex min-h-0 relative">
             {/* File explorer left pane */}
             <div
-              className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-in-out ${
-                explorerVisible ? 'w-56' : 'w-0 border-r-0'
-              }`}
+              className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
+                explorerVisible ? '' : 'w-0 border-r-0'
+              } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
+              style={explorerVisible ? { width: explorerWidth } : undefined}
             >
-              <div className="w-56 h-full flex flex-col">
+              <div className="h-full flex flex-col" style={{ minWidth: explorerWidth }}>
                 <FileExplorer
                   initialDir={explorerDir}
                   activeFilePath={activeFilePath}
@@ -827,6 +685,14 @@ export default function App() {
                 />
               </div>
             </div>
+            {explorerVisible && (
+              <div
+                className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+                onMouseDown={e => onResizeStart('explorer', e)}
+              >
+                <div className="absolute inset-y-0 -left-1 -right-1" />
+              </div>
+            )}
 
             {/* Markdown viewer */}
             <div
@@ -862,12 +728,21 @@ export default function App() {
             </div>
 
             {/* Comment sidebar */}
+            {sidebarVisible && (
+              <div
+                className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+                onMouseDown={e => onResizeStart('sidebar', e)}
+              >
+                <div className="absolute inset-y-0 -left-1 -right-1" />
+              </div>
+            )}
             <div
-              className={`border-l border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden transition-[width] duration-200 ease-in-out ${
-                sidebarVisible ? 'w-80' : 'w-0 border-l-0'
-              }`}
+              className={`border-l border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
+                sidebarVisible ? '' : 'w-0 border-l-0'
+              } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
+              style={sidebarVisible ? { width: sidebarWidth } : undefined}
             >
-              <div className="w-80 h-full flex flex-col">
+              <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
                 <div className="h-10 border-b border-border flex items-center justify-between px-4 shrink-0">
                   <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider">
                     Comments
@@ -933,7 +808,6 @@ export default function App() {
             />
           )}
         </>
-      )}
 
       {/* Toast notification (Feature 8) */}
       <Toast message={toast.message} visible={toast.visible} onDismiss={dismissToast} />
@@ -943,6 +817,19 @@ export default function App() {
         commands={paletteCommands}
         open={showCommandPalette}
         onClose={() => setShowCommandPalette(false)}
+      />
+
+      {/* File opener */}
+      <FileOpener
+        open={showFileOpener}
+        onClose={() => setShowFileOpener(false)}
+        onOpenFile={(path) => {
+          handleOpenFile(path);
+          setShowFileOpener(false);
+        }}
+        recentFiles={recentFiles}
+        activeFilePath={activeFilePath}
+        onClearRecent={clearRecentFiles}
       />
 
       {/* Keyboard shortcuts hint */}

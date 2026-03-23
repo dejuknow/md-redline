@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { SelectionInfo } from '../types';
+import { useAutoResize } from '../hooks/useAutoResize';
+
+export const COMMENT_MAX_LENGTH = 500;
 
 export const TEMPLATES = [
   { label: 'Rewrite this', text: 'Rewrite this section — it needs to be clearer.' },
@@ -25,6 +28,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const [text, setText] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  useAutoResize(inputRef, text);
 
   useEffect(() => {
     if (isExpanded && inputRef.current) {
@@ -65,7 +69,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   };
 
   const handleSubmit = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || text.length > COMMENT_MAX_LENGTH) return;
     onSubmit(selection.text, text.trim(), selection.contextBefore, selection.contextAfter);
     setText('');
     setIsExpanded(false);
@@ -157,9 +161,17 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Add your comment..."
-          rows={3}
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
+          rows={1}
+          maxLength={COMMENT_MAX_LENGTH}
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content overflow-hidden"
         />
+        {text.length > COMMENT_MAX_LENGTH * 0.8 && (
+          <p className={`text-right text-xs mt-1 ${
+            text.length >= COMMENT_MAX_LENGTH ? 'text-danger font-medium' : 'text-content-muted'
+          }`}>
+            {text.length}/{COMMENT_MAX_LENGTH}
+          </p>
+        )}
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-content-muted">
@@ -198,7 +210,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
             </button>
             <button
               onClick={handleSubmit}
-              disabled={!text.trim()}
+              disabled={!text.trim() || text.length > COMMENT_MAX_LENGTH}
               className="text-xs px-3 py-1.5 bg-primary text-on-primary rounded-md hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Comment

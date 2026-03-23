@@ -17,6 +17,7 @@ interface Props {
 export function CommandPalette({ commands, open, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isKeyboardNav, setIsKeyboardNav] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -74,9 +75,11 @@ export function CommandPalette({ commands, open, onClose }: Props) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown' || (e.key === 'j' && e.ctrlKey)) {
       e.preventDefault();
+      setIsKeyboardNav(true);
       setSelectedIndex((i) => (i + 1) % flatList.length);
     } else if (e.key === 'ArrowUp' || (e.key === 'k' && e.ctrlKey)) {
       e.preventDefault();
+      setIsKeyboardNav(true);
       setSelectedIndex((i) => (i - 1 + flatList.length) % flatList.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -155,7 +158,10 @@ export function CommandPalette({ commands, open, onClose }: Props) {
                     key={cmd.id}
                     data-selected={isSelected}
                     onClick={() => execute(cmd)}
-                    onMouseEnter={() => setSelectedIndex(globalIdx)}
+                    onMouseMove={() => {
+                      if (isKeyboardNav) setIsKeyboardNav(false);
+                      else setSelectedIndex(globalIdx);
+                    }}
                     className={`w-full text-left px-4 py-2 flex items-center justify-between text-sm transition-colors ${
                       isSelected
                         ? 'bg-primary-bg text-primary-text'

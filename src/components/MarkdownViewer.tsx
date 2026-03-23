@@ -216,30 +216,102 @@ function wrapText(
   }
   if (wraps.length === 0) return;
 
-  // Wrap matched portions — process in reverse to avoid invalidating earlier nodes
-  for (let i = wraps.length - 1; i >= 0; i--) {
-    const { node: tn, start, end } = wraps[i];
-    // Skip whitespace-only portions (e.g. newline nodes between block elements)
+  // Filter out whitespace-only portions
+  const visibleWraps = wraps.filter(({ node: tn, start, end }) => {
     const slice = tn.textContent?.slice(start, end) || '';
-    if (!slice.trim()) continue;
-    const range = document.createRange();
-    range.setStart(tn, start);
-    range.setEnd(tn, end);
-    const mark = document.createElement('mark');
-    configure(mark);
-    try {
-      range.surroundContents(mark);
-    } catch {
-      // Fallback for cross-element edge cases: extract and re-insert
+    return slice.trim().length > 0;
+  });
+  if (visibleWraps.length === 0) return;
+
+  // Group wraps by block parent so we merge wraps within the same block
+  // (e.g. text nodes split by <strong>) into a single <mark>, while creating
+  // separate marks for wraps in different blocks (e.g. different <li>s).
+  const groups: { node: Text; start: number; end: number }[][] = [];
+  let currentGroup: typeof groups[0] = [];
+  let currentBlock: Element | null = null;
+
+  for (const w of visibleWraps) {
+    const block = getBlockParent(w.node);
+    if (block !== currentBlock && currentGroup.length > 0) {
+      groups.push(currentGroup);
+      currentGroup = [];
+    }
+    currentBlock = block;
+    currentGroup.push(w);
+  }
+  if (currentGroup.length > 0) groups.push(currentGroup);
+
+  // Process each group in reverse to avoid invalidating earlier positions
+  for (let g = groups.length - 1; g >= 0; g--) {
+    const group = groups[g];
+    if (group.length > 1) {
+      // Multiple wraps in the same block — merge into a single plain-text mark
+      // to avoid seam artifacts from inline element boundaries (e.g. <strong>)
+      const mark = document.createElement('mark');
+      configure(mark);
+      let matchedText = '';
+      for (const { node: tn, start, end } of group) {
+        matchedText += tn.textContent?.slice(start, end) || '';
+      }
+      mark.textContent = matchedText;
+
+      const firstNode = group[0].node;
+      const firstParent = firstNode.parentNode;
+      const anchor = firstParent && !BLOCK_TAGS.has((firstParent as Element).tagName)
+        ? firstParent : firstNode;
+      anchor.parentNode?.insertBefore(mark, anchor);
+
+      for (let i = group.length - 1; i >= 0; i--) {
+        const { node: tn, start, end } = group[i];
+        const len = tn.textContent?.length || 0;
+        if (start === 0 && end >= len) {
+          const parent = tn.parentNode;
+          tn.remove();
+          if (parent && parent !== mark.parentNode &&
+              parent.childNodes.length === 0 && !BLOCK_TAGS.has((parent as Element).tagName)) {
+            parent.remove();
+          }
+        } else if (start === 0) {
+          tn.textContent = tn.textContent!.slice(end);
+        } else {
+          tn.textContent = tn.textContent!.slice(0, start);
+        }
+      }
+    } else {
+      // Single wrap in this block — use surroundContents
+      const { node: tn, start, end } = group[0];
+      const range = document.createRange();
+      range.setStart(tn, start);
+      range.setEnd(tn, end);
+      const mark = document.createElement('mark');
+      configure(mark);
       try {
-        const fragment = range.extractContents();
-        mark.appendChild(fragment);
-        range.insertNode(mark);
+        range.surroundContents(mark);
       } catch {
-        // Skip if all wrapping fails
+        try {
+          const fragment = range.extractContents();
+          mark.appendChild(fragment);
+          range.insertNode(mark);
+        } catch {
+          // Skip if all wrapping fails
+        }
       }
     }
   }
+}
+
+const BLOCK_TAGS = new Set([
+  'P', 'LI', 'DIV', 'BLOCKQUOTE', 'TD', 'TH', 'DD', 'DT',
+  'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SECTION', 'ARTICLE',
+]);
+
+function getBlockParent(node: Node): Element | null {
+  let el = node.parentElement;
+  while (el) {
+    if (BLOCK_TAGS.has(el.tagName)) return el;
+    el = el.parentElement;
+  }
+  return null;
 }
 
 /**

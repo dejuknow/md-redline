@@ -5,7 +5,8 @@ import { serve } from '@hono/node-server';
 import { readFile, writeFile, readdir, stat, realpath } from 'fs/promises';
 import { watch, statSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
-import { homedir } from 'os';
+import { homedir, platform } from 'os';
+import { execFile } from 'child_process';
 
 const app = new Hono();
 
@@ -188,6 +189,40 @@ app.get('/api/browse', async (c) => {
     }
     console.error('GET /api/browse failed:', err);
     return c.json({ error: 'Directory not found or not accessible' }, 404);
+  }
+});
+
+app.get('/api/pick-file', async (c) => {
+  const os = platform();
+  try {
+    const path = await new Promise<string>((resolve, reject) => {
+      if (os === 'darwin') {
+        execFile('osascript', [
+          '-e',
+          'set f to POSIX path of (choose file of type {"md", "markdown", "public.plain-text"} with prompt "Choose a markdown file")',
+          '-e', 'return f',
+        ], (err, stdout) => {
+          if (err) return reject(err);
+          resolve(stdout.trim());
+        });
+      } else if (os === 'linux') {
+        execFile('zenity', [
+          '--file-selection',
+          '--title=Choose a markdown file',
+          '--file-filter=Markdown files | *.md *.markdown',
+        ], (err, stdout) => {
+          if (err) return reject(err);
+          resolve(stdout.trim());
+        });
+      } else {
+        reject(new Error('Unsupported platform'));
+      }
+    });
+    if (!path) return c.json({ error: 'No file selected' }, 400);
+    return c.json({ path });
+  } catch {
+    // User cancelled or dialog failed
+    return c.json({ cancelled: true });
   }
 });
 
