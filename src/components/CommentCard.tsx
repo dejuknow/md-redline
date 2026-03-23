@@ -7,7 +7,8 @@ interface Props {
   isActive: boolean;
   anchorMissing?: boolean;
   onActivate: (id: string) => void;
-  onSetStatus: (id: string, status: CommentStatus) => void;
+  onResolve: (id: string) => void;
+  onUnresolve: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (id: string, newText: string) => void;
   onReply: (id: string, text: string) => void;
@@ -15,9 +16,7 @@ interface Props {
 
 const STATUS_CONFIG: Record<CommentStatus, { label: string; className: string }> = {
   open: { label: 'Open', className: 'bg-status-open-bg text-status-open-text' },
-  addressed: { label: 'Addressed', className: 'bg-status-addressed-bg text-status-addressed-text' },
-  accepted: { label: 'Accepted', className: 'bg-status-accepted-bg text-status-accepted-text' },
-  reopened: { label: 'Reopened', className: 'bg-status-reopened-bg text-status-reopened-text' },
+  resolved: { label: 'Resolved', className: 'bg-status-resolved-bg text-status-resolved-text' },
 };
 
 export const CommentCard = memo(function CommentCard({
@@ -25,7 +24,8 @@ export const CommentCard = memo(function CommentCard({
   isActive,
   anchorMissing,
   onActivate,
-  onSetStatus,
+  onResolve,
+  onUnresolve,
   onDelete,
   onEdit,
   onReply,
@@ -75,7 +75,7 @@ export const CommentCard = memo(function CommentCard({
     }
   };
 
-  const isResolved = status === 'accepted';
+  const isResolved = status === 'resolved';
   const replies = comment.replies || [];
 
   return (
@@ -172,7 +172,17 @@ export const CommentCard = memo(function CommentCard({
 
         {!isEditing && (
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            {status === 'open' || status === 'reopened' ? (
+            {isResolved ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnresolve(comment.id);
+                }}
+                className="text-xs px-2 py-0.5 rounded text-primary-text hover:bg-primary-bg transition-colors"
+              >
+                Reopen
+              </button>
+            ) : (
               <>
                 <button
                   onClick={(e) => {
@@ -187,53 +197,13 @@ export const CommentCard = memo(function CommentCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSetStatus(comment.id, 'addressed');
-                  }}
-                  className="text-xs px-2 py-0.5 rounded text-warning-text hover:bg-warning-bg transition-colors"
-                >
-                  Address
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSetStatus(comment.id, 'accepted');
+                    onResolve(comment.id);
                   }}
                   className="text-xs px-2 py-0.5 rounded text-success-text hover:bg-success-bg transition-colors"
                 >
                   Resolve
                 </button>
               </>
-            ) : status === 'addressed' ? (
-              <>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSetStatus(comment.id, 'accepted');
-                  }}
-                  className="text-xs px-2 py-0.5 rounded text-success-text hover:bg-success-bg transition-colors"
-                >
-                  Accept
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSetStatus(comment.id, 'open');
-                  }}
-                  className="text-xs px-2 py-0.5 rounded text-warning-text hover:bg-warning-bg transition-colors"
-                >
-                  Reopen
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSetStatus(comment.id, 'open');
-                }}
-                className="text-xs px-2 py-0.5 rounded text-primary-text hover:bg-primary-bg transition-colors"
-              >
-                Reopen
-              </button>
             )}
             <button
               onClick={(e) => {

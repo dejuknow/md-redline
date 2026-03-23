@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from 'react';
 import type { ViewMode } from '../components/Toolbar';
 
-export type FilterMode = 'all' | 'open' | 'addressed' | 'accepted';
+export type FilterMode = 'all' | 'open' | 'resolved';
 
 export interface SessionState {
   openTabs: string[];

@@ -1,4 +1,4 @@
-export type CommentStatus = 'open' | 'addressed' | 'accepted' | 'reopened';
+export type CommentStatus = 'open' | 'resolved';
 
 export interface CommentReply {
   id: string;
@@ -24,8 +24,10 @@ export interface MdComment {
 }
 
 export function getEffectiveStatus(comment: MdComment): CommentStatus {
-  if (comment.status) return comment.status;
-  return comment.resolved ? 'accepted' : 'open';
+  if (comment.status === 'open' || comment.status === 'resolved') return comment.status;
+  // Legacy: map old statuses and resolved boolean
+  if (comment.status === 'accepted' || comment.resolved) return 'resolved';
+  return 'open';
 }
 
 export interface ParseResult {

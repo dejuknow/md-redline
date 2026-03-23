@@ -103,7 +103,7 @@ export function Toolbar({
           </span>
         )}
         {hasExternalChange && (
-          <span className="text-xs bg-status-addressed-bg text-status-addressed-text px-1.5 py-0.5 rounded-full font-medium animate-pulse">
+          <span className="text-xs bg-warning-bg text-warning-text px-1.5 py-0.5 rounded-full font-medium animate-pulse">
             External change
           </span>
         )}

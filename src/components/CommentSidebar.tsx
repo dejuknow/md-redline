@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { MdComment, CommentStatus } from '../types';
+import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { CommentCard } from './CommentCard';
 import type { FilterMode } from '../hooks/useSessionPersistence';
@@ -11,7 +11,8 @@ interface Props {
   filter: FilterMode;
   onFilterChange: (filter: FilterMode) => void;
   onActivate: (id: string) => void;
-  onSetStatus: (id: string, status: CommentStatus) => void;
+  onResolve: (id: string) => void;
+  onUnresolve: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (id: string, newText: string) => void;
   onReply: (id: string, text: string) => void;
@@ -22,8 +23,7 @@ interface Props {
 const FILTER_TABS: { key: FilterMode; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'open', label: 'Open' },
-  { key: 'addressed', label: 'Addressed' },
-  { key: 'accepted', label: 'Accepted' },
+  { key: 'resolved', label: 'Resolved' },
 ];
 
 export function CommentSidebar({
@@ -33,7 +33,8 @@ export function CommentSidebar({
   filter,
   onFilterChange,
   onActivate,
-  onSetStatus,
+  onResolve,
+  onUnresolve,
   onDelete,
   onEdit,
   onReply,
@@ -51,22 +52,20 @@ export function CommentSidebar({
   }, [activeCommentId]);
 
   // Count by status
-  const counts = { open: 0, addressed: 0, accepted: 0, reopened: 0 };
+  const counts = { open: 0, resolved: 0 };
   for (const c of comments) {
     counts[getEffectiveStatus(c)]++;
   }
-  const openCount = counts.open + counts.reopened;
-  const addressedCount = counts.addressed;
-  const acceptedCount = counts.accepted;
+  const openCount = counts.open;
+  const resolvedCount = counts.resolved;
 
   // Filter and search
   const filtered = comments.filter((c) => {
     const status = getEffectiveStatus(c);
 
     // Status filter
-    if (filter === 'open' && status !== 'open' && status !== 'reopened') return false;
-    if (filter === 'addressed' && status !== 'addressed') return false;
-    if (filter === 'accepted' && status !== 'accepted') return false;
+    if (filter === 'open' && status !== 'open') return false;
+    if (filter === 'resolved' && status !== 'resolved') return false;
 
     // Text search
     if (search) {
@@ -81,9 +80,9 @@ export function CommentSidebar({
     return true;
   });
 
-  // Sort: active (non-accepted) first, then accepted
-  const activeComments = filtered.filter((c) => getEffectiveStatus(c) !== 'accepted');
-  const resolvedComments = filtered.filter((c) => getEffectiveStatus(c) === 'accepted');
+  // Sort: open first, then resolved
+  const activeComments = filtered.filter((c) => getEffectiveStatus(c) !== 'resolved');
+  const resolvedComments = filtered.filter((c) => getEffectiveStatus(c) === 'resolved');
 
   if (comments.length === 0) {
     return (
@@ -120,9 +119,7 @@ export function CommentSidebar({
                 ? comments.length
                 : key === 'open'
                   ? openCount
-                  : key === 'addressed'
-                    ? addressedCount
-                    : acceptedCount;
+                  : resolvedCount;
             return (
               <button
                 key={key}
@@ -165,7 +162,8 @@ export function CommentSidebar({
               isActive={comment.id === activeCommentId}
               anchorMissing={missingAnchors.has(comment.id)}
               onActivate={onActivate}
-              onSetStatus={onSetStatus}
+              onResolve={onResolve}
+              onUnresolve={onUnresolve}
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
@@ -173,11 +171,11 @@ export function CommentSidebar({
           </div>
         ))}
 
-        {resolvedComments.length > 0 && filter !== 'accepted' && (
+        {resolvedComments.length > 0 && filter !== 'resolved' && (
           <div className="flex items-center gap-2 pt-3 pb-1">
             <div className="h-px flex-1 bg-border" />
             <span className="text-xs text-content-muted font-medium">
-              Accepted ({resolvedComments.length})
+              Resolved ({resolvedComments.length})
             </span>
             <div className="h-px flex-1 bg-border" />
           </div>
@@ -189,7 +187,8 @@ export function CommentSidebar({
               isActive={comment.id === activeCommentId}
               anchorMissing={missingAnchors.has(comment.id)}
               onActivate={onActivate}
-              onSetStatus={onSetStatus}
+              onResolve={onResolve}
+              onUnresolve={onUnresolve}
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
@@ -211,11 +210,10 @@ export function CommentSidebar({
         <div className="flex items-center justify-between">
           <span className="text-xs text-content-secondary">
             {openCount} open
-            {addressedCount > 0 && ` \u00b7 ${addressedCount} addressed`}
-            {acceptedCount > 0 && ` \u00b7 ${acceptedCount} accepted`}
+            {resolvedCount > 0 && ` \u00b7 ${resolvedCount} resolved`}
           </span>
           <div className="flex gap-1">
-            {openCount + addressedCount > 0 && (
+            {openCount > 0 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -227,16 +225,16 @@ export function CommentSidebar({
                 Resolve All
               </button>
             )}
-            {acceptedCount > 0 && (
+            {resolvedCount > 0 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onBulkDeleteResolved();
                 }}
                 className="text-[10px] px-2 py-0.5 rounded text-danger hover:bg-danger-bg font-medium transition-colors"
-                title="Delete all accepted comments"
+                title="Delete all resolved comments"
               >
-                Clear Accepted
+                Clear Resolved
               </button>
             )}
           </div>

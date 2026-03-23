@@ -14,8 +14,7 @@ interface FileSummary {
   filePath: string;
   fileName: string;
   open: number;
-  addressed: number;
-  accepted: number;
+  resolved: number;
   total: number;
 }
 
@@ -25,12 +24,11 @@ export function ReviewSummary({ tabs, activeFilePath, onSwitchToFile, onClose }:
     for (const tab of tabs) {
       try {
         const { comments } = parseComments(tab.rawMarkdown);
-        const counts = { open: 0, addressed: 0, accepted: 0 };
+        const counts = { open: 0, resolved: 0 };
         for (const c of comments) {
           const s = getEffectiveStatus(c);
-          if (s === 'open' || s === 'reopened') counts.open++;
-          else if (s === 'addressed') counts.addressed++;
-          else if (s === 'accepted') counts.accepted++;
+          if (s === 'open') counts.open++;
+          else if (s === 'resolved') counts.resolved++;
         }
         result.push({
           filePath: tab.filePath,
@@ -43,8 +41,7 @@ export function ReviewSummary({ tabs, activeFilePath, onSwitchToFile, onClose }:
           filePath: tab.filePath,
           fileName: tab.filePath.split('/').pop() || tab.filePath,
           open: 0,
-          addressed: 0,
-          accepted: 0,
+          resolved: 0,
           total: 0,
         });
       }
@@ -53,7 +50,7 @@ export function ReviewSummary({ tabs, activeFilePath, onSwitchToFile, onClose }:
   }, [tabs]);
 
   const totalOpen = summaries.reduce((sum, s) => sum + s.open, 0);
-  const totalAddressed = summaries.reduce((sum, s) => sum + s.addressed, 0);
+  const totalResolved = summaries.reduce((sum, s) => sum + s.resolved, 0);
   const totalComments = summaries.reduce((sum, s) => sum + s.total, 0);
 
   return (
@@ -66,8 +63,8 @@ export function ReviewSummary({ tabs, activeFilePath, onSwitchToFile, onClose }:
             {totalComments} comment{totalComments !== 1 ? 's' : ''} across {tabs.length} file
             {tabs.length !== 1 ? 's' : ''}
             {totalOpen > 0 && <span className="text-primary-text font-medium"> &middot; {totalOpen} open</span>}
-            {totalAddressed > 0 && (
-              <span className="text-warning-text font-medium"> &middot; {totalAddressed} addressed</span>
+            {totalResolved > 0 && (
+              <span className="text-success-text font-medium"> &middot; {totalResolved} resolved</span>
             )}
           </p>
         </div>
@@ -107,14 +104,9 @@ export function ReviewSummary({ tabs, activeFilePath, onSwitchToFile, onClose }:
                   {s.open} open
                 </span>
               )}
-              {s.addressed > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-status-addressed-bg text-status-addressed-text font-medium">
-                  {s.addressed}
-                </span>
-              )}
-              {s.accepted > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-status-accepted-bg text-status-accepted-text font-medium">
-                  {s.accepted}
+              {s.resolved > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-status-resolved-bg text-status-resolved-text font-medium">
+                  {s.resolved}
                 </span>
               )}
             </div>

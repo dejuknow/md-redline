@@ -7,7 +7,6 @@ import {
   unresolveComment,
   editComment,
   updateCommentAnchor,
-  setCommentStatus,
   addReply,
   resolveAllComments,
   removeResolvedComments,
@@ -176,11 +175,11 @@ describe('resolveComment / unresolveComment', () => {
     const result = resolveComment(raw, 'r1');
     const parsed = parseComments(result);
     expect(parsed.comments[0].resolved).toBe(true);
-    expect(parsed.comments[0].status).toBe('accepted');
+    expect(parsed.comments[0].status).toBe('resolved');
   });
 
   it('unresolves a comment', () => {
-    const raw = `${marker({ id: 'r1', resolved: true, status: 'accepted' })}hello`;
+    const raw = `${marker({ id: 'r1', resolved: true, status: 'resolved' })}hello`;
     const result = unresolveComment(raw, 'r1');
     const parsed = parseComments(result);
     expect(parsed.comments[0].resolved).toBe(false);
@@ -214,32 +213,6 @@ describe('updateCommentAnchor', () => {
   });
 });
 
-describe('setCommentStatus', () => {
-  it('sets status and resolved flag correctly for accepted', () => {
-    const raw = `${marker({ id: 's1', status: 'open', resolved: false })}hello`;
-    const result = setCommentStatus(raw, 's1', 'accepted');
-    const parsed = parseComments(result);
-    expect(parsed.comments[0].status).toBe('accepted');
-    expect(parsed.comments[0].resolved).toBe(true);
-  });
-
-  it('sets status and resolved flag correctly for addressed', () => {
-    const raw = `${marker({ id: 's1', status: 'open', resolved: false })}hello`;
-    const result = setCommentStatus(raw, 's1', 'addressed');
-    const parsed = parseComments(result);
-    expect(parsed.comments[0].status).toBe('addressed');
-    expect(parsed.comments[0].resolved).toBe(false);
-  });
-
-  it('sets status and resolved flag correctly for reopened', () => {
-    const raw = `${marker({ id: 's1', status: 'accepted', resolved: true })}hello`;
-    const result = setCommentStatus(raw, 's1', 'reopened');
-    const parsed = parseComments(result);
-    expect(parsed.comments[0].status).toBe('reopened');
-    expect(parsed.comments[0].resolved).toBe(false);
-  });
-});
-
 describe('addReply', () => {
   it('adds a reply to an existing comment', () => {
     const raw = `${marker({ id: 'rp1' })}hello`;
@@ -261,15 +234,15 @@ describe('addReply', () => {
 
 describe('resolveAllComments', () => {
   it('resolves all open comments', () => {
-    const raw = `${marker({ id: 'a', resolved: false, status: 'open' })}hello ${marker({ id: 'b', resolved: false, status: 'addressed' })}world`;
+    const raw = `${marker({ id: 'a', resolved: false, status: 'open' })}hello ${marker({ id: 'b', resolved: false, status: 'open' })}world`;
     const result = resolveAllComments(raw);
     const parsed = parseComments(result);
     expect(parsed.comments.every((c) => c.resolved)).toBe(true);
-    expect(parsed.comments.every((c) => c.status === 'accepted')).toBe(true);
+    expect(parsed.comments.every((c) => c.status === 'resolved')).toBe(true);
   });
 
   it('leaves already resolved comments unchanged', () => {
-    const raw = `${marker({ id: 'a', resolved: true, status: 'accepted' })}hello`;
+    const raw = `${marker({ id: 'a', resolved: true, status: 'resolved' })}hello`;
     const result = resolveAllComments(raw);
     expect(result).toBe(raw); // no change
   });
@@ -367,14 +340,16 @@ describe('edge cases', () => {
 
 describe('getEffectiveStatus', () => {
   it('returns explicit status when present', () => {
-    expect(getEffectiveStatus({ status: 'addressed' } as MdComment)).toBe('addressed');
-    expect(getEffectiveStatus({ status: 'reopened' } as MdComment)).toBe('reopened');
-    expect(getEffectiveStatus({ status: 'accepted' } as MdComment)).toBe('accepted');
+    expect(getEffectiveStatus({ status: 'resolved' } as MdComment)).toBe('resolved');
     expect(getEffectiveStatus({ status: 'open' } as MdComment)).toBe('open');
   });
 
+  it('maps legacy statuses to simplified ones', () => {
+    expect(getEffectiveStatus({ status: 'accepted' } as unknown as MdComment)).toBe('resolved');
+  });
+
   it('falls back to resolved boolean when status is missing (legacy)', () => {
-    expect(getEffectiveStatus({ resolved: true } as MdComment)).toBe('accepted');
+    expect(getEffectiveStatus({ resolved: true } as MdComment)).toBe('resolved');
     expect(getEffectiveStatus({ resolved: false } as MdComment)).toBe('open');
   });
 

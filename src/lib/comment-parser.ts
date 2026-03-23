@@ -1,4 +1,4 @@
-import { getEffectiveStatus, type MdComment, type ParseResult, type CommentStatus, type CommentReply } from '../types';
+import { getEffectiveStatus, type MdComment, type ParseResult, type CommentReply } from '../types';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -220,7 +220,7 @@ export function resolveComment(rawMarkdown: string, commentId: string): string {
       const data = JSON.parse(json) as MdComment;
       if (data.id === commentId) {
         data.resolved = true;
-        data.status = 'accepted';
+        data.status = 'resolved';
         return serializeComment(data);
       }
     } catch {
@@ -283,26 +283,6 @@ export function updateCommentAnchor(
   });
 }
 
-export function setCommentStatus(
-  rawMarkdown: string,
-  commentId: string,
-  status: CommentStatus,
-): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) {
-        data.status = status;
-        data.resolved = status === 'accepted';
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
-    }
-    return match;
-  });
-}
 
 export function addReply(
   rawMarkdown: string,
@@ -339,7 +319,7 @@ export function resolveAllComments(rawMarkdown: string): string {
       const data = JSON.parse(json) as MdComment;
       if (!data.resolved) {
         data.resolved = true;
-        data.status = 'accepted';
+        data.status = 'resolved';
         return serializeComment(data);
       }
     } catch {
@@ -482,7 +462,7 @@ export function detectMissingAnchors(
   const missing = new Set<string>();
   if (!cleanMarkdown) return missing;
   for (const c of comments) {
-    if (getEffectiveStatus(c) === 'accepted') continue;
+    if (getEffectiveStatus(c) === 'resolved') continue;
     if (!cleanMarkdown.includes(c.anchor)) {
       const parts = c.anchor.split(/\s+/).filter(Boolean);
       if (parts.length === 0) continue;
