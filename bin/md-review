@@ -6,7 +6,14 @@ set -euo pipefail
 #        md-review <directory>
 #        md-review              (opens the app with no file pre-loaded)
 
-APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve symlinks (e.g. when invoked via npm-linked `mdr`)
+SCRIPT="$0"
+if [[ -L "$SCRIPT" ]]; then
+  SCRIPT="$(readlink "$SCRIPT")"
+  # Handle relative symlinks
+  [[ "$SCRIPT" != /* ]] && SCRIPT="$(dirname "$0")/$SCRIPT"
+fi
+APP_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 SERVER_PORT=3001
 CLIENT_PORT=5173
 
