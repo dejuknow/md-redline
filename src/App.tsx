@@ -769,27 +769,15 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-surface">
       <Toolbar
-        filePath={filePath}
         lastSaved={lastSaved}
         error={error}
         isLoading={isLoading}
-        commentCount={openCommentCount}
-        viewMode={viewMode}
-        hasSnapshot={currentSnapshot !== null}
-        hasExternalChange={hasExternalChange}
-        showReviewSummary={showReviewSummary}
         showExplorer={explorerVisible}
+        sidebarVisible={sidebarVisible}
         author={author}
         onAuthorChange={setAuthor}
         onToggleExplorer={() => setExplorerVisible((p) => !p)}
-        onViewModeChange={(mode) => {
-          setViewMode(mode);
-          if (mode === 'raw') clearSelection();
-        }}
-        onReload={reloadFile}
-        onSnapshot={handleSnapshot}
-        onJumpToNext={handleJumpToNext}
-        onToggleReviewSummary={() => setShowReviewSummary((prev) => !prev)}
+        onToggleSidebar={() => setSidebarVisible((p) => !p)}
       />
       <TabBar
         tabs={tabs}
@@ -802,6 +790,19 @@ export default function App() {
         }}
         onCloseTab={closeTab}
         onOpenFile={() => setShowBrowser(true)}
+        viewMode={viewMode}
+        hasSnapshot={currentSnapshot !== null}
+        hasExternalChange={hasExternalChange}
+        showReviewSummary={showReviewSummary}
+        commentCount={openCommentCount}
+        onViewModeChange={(mode) => {
+          setViewMode(mode);
+          if (mode === 'raw') clearSelection();
+        }}
+        onSnapshot={handleSnapshot}
+        onJumpToNext={handleJumpToNext}
+        onToggleReviewSummary={() => setShowReviewSummary((prev) => !prev)}
+        onReload={reloadFile}
       />
 
       {showBrowser ? (
@@ -859,10 +860,19 @@ export default function App() {
             {/* Comment sidebar */}
             {sidebarVisible && (
               <div className="w-80 border-l border-border bg-surface-secondary shrink-0 flex flex-col">
-                <div className="h-10 border-b border-border flex items-center px-4">
+                <div className="h-10 border-b border-border flex items-center justify-between px-4">
                   <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider">
                     Comments
                   </h2>
+                  <button
+                    onClick={() => setSidebarVisible(false)}
+                    className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+                    title="Close comments sidebar"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
                 <div className="flex-1 min-h-0">
                   <CommentSidebar

@@ -2,13 +2,13 @@
 
 ## What this project is
 
-A local web app for adding inline review comments to markdown files. Think "Google Docs commenting" for `.md` files. The primary user is a product manager who generates specs/stories with AI tools and needs to leave feedback for the agent to address.
+<!-- @comment{"id":"f51bf822-b44b-4aa6-a30b-84b3fba7dfe0","anchor":"A local web app for adding inline review comments to markdown files. Think \"Google Docs commenting\" for .md files. The primary user is a product manager who generates specs/stories with AI tools and needs to leave feedback for the agent to address.","text":"asdf","author":"User","timestamp":"2026-03-23T03:23:49.590Z","resolved":false,"status":"open","contextBefore":"md-review\nWhat this project is\n","contextAfter":"\nHow to run\nnpm install\nnpm run dev   # "} -->A local web app for adding inline review comments to markdown files. Think "Google Docs commenting" for `.md` files. The primary user is a product manager who generates specs/stories with AI tools and needs to leave feedback for the agent to address.
 
 ## How to run
 
 ```bash
 npm install
-<!-- @comment{"id":"3768d139-dd07-4817-9199-c7e1996feb24","anchor":"npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)","text":"gsdag","author":"Dennis","timestamp":"2026-03-23T02:53:41.956Z","resolved":false,"status":"open","contextBefore":"agent to address.\nHow to run\nnpm install","contextAfter":")\n\nQuick-open a file with md-review\nThe "} -->npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
+<!-- @comment{"id":"3768d139-dd07-4817-9199-c7e1996feb24","anchor":"npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)","text":"gsdag","author":"Dennis","timestamp":"2026-03-23T02:53:41.956Z","resolved":false,"status":"open","contextBefore":"agent to address.\nHow to run\nnpm install","contextAfter":")\n\nQuick-open a file with md-review\nThe "} --><!-- @comment{"id":"4f53a883-db51-4f94-b72a-d6d978c35687","anchor":"npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)","text":"sadg","author":"User","timestamp":"2026-03-23T03:23:53.762Z","resolved":false,"status":"open","contextBefore":"gent to address.\nHow to run\nnpm install\n","contextAfter":"\n\nQuick-open a file with md-review\nThe f"} -->npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
 ```
 
 ### Quick-open a file with `md-review`
