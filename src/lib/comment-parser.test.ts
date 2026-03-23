@@ -835,3 +835,54 @@ describe('stripInlineFormatting via insertComment', () => {
     expect(parsed.comments).toHaveLength(1);
   });
 });
+
+describe('comment text containing -->', () => {
+  it('round-trips comment text with --> without breaking the marker', () => {
+    const raw = 'Some text here';
+    const result = insertComment(raw, 'text', 'Use <!-- summary{} --> for this');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].text).toBe('Use <!-- summary{} --> for this');
+    expect(parsed.cleanMarkdown).toBe('Some text here');
+  });
+
+  it('handles multiple --> occurrences in comment text', () => {
+    const raw = 'Hello world';
+    const result = insertComment(raw, 'world', 'a --> b --> c');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].text).toBe('a --> b --> c');
+  });
+
+  it('handles --> in anchor text', () => {
+    const raw = 'Use --> to indicate flow';
+    const result = insertComment(raw, '--> to indicate', 'clarify arrow');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].anchor).toBe('--> to indicate');
+  });
+
+  it('handles } --> pattern that could trick the regex', () => {
+    const raw = 'Some text here';
+    const result = insertComment(raw, 'text', 'see <!-- @comment{fake} --> above');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].text).toBe('see <!-- @comment{fake} --> above');
+    expect(parsed.cleanMarkdown).toBe('Some text here');
+  });
+
+  it('serializes --> as unicode escape in the marker', () => {
+    const comment: MdComment = {
+      id: 'test',
+      anchor: 'text',
+      text: 'has --> in it',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      resolved: false,
+      status: 'open',
+    };
+    const serialized = serializeComment(comment);
+    expect(serialized).not.toContain('"has -->');
+    expect(serialized).toContain('--\\u003e');
+  });
+});
