@@ -33,7 +33,7 @@ import {
 import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo } from './components/MarkdownViewer';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
-import { CommentForm, TEMPLATES } from './components/CommentForm';
+import { CommentForm } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
 import { TabBar, type TabContextMenuInfo } from './components/TabBar';
 import { FileExplorer, type ExplorerContextMenuInfo } from './components/FileExplorer';
@@ -44,9 +44,11 @@ import { Toast } from './components/Toast';
 import { ReviewSummary } from './components/ReviewSummary';
 import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
+import { SettingsPanel } from './components/SettingsPanel';
 import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
+import { useSettings } from './contexts/SettingsContext';
 import { getEffectiveStatus } from './types';
 
 // Load saved session for initial state
@@ -79,6 +81,7 @@ export default function App() {
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
+  const { settings } = useSettings();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
 
   // Session-persisted state: initialize from saved session
@@ -143,9 +146,10 @@ export default function App() {
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
 
-  // Command palette & file opener state
+  // Command palette, file opener, & settings panel state
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showFileOpener, setShowFileOpener] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Platform info for context menu labels
   const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
@@ -571,7 +575,7 @@ export default function App() {
         const sel = selectionRef.current;
         if (!sel) return;
 
-        const templateItems: ContextMenuItem[] = TEMPLATES.map((t) => ({
+        const templateItems: ContextMenuItem[] = settings.templates.map((t) => ({
           label: t.label,
           onClick: () => {
             handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter);
@@ -780,6 +784,10 @@ export default function App() {
     [comments, handleResolve, handleUnresolve, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
   );
 
+  // Stable ref for templates to use in keyboard handler
+  const templatesRef = useRef(settings.templates);
+  templatesRef.current = settings.templates;
+
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -793,6 +801,13 @@ export default function App() {
         e.preventDefault();
         setShowFileOpener(false);
         setShowCommandPalette((prev) => !prev);
+        return;
+      }
+
+      // Cmd+, : Open settings (works even in inputs)
+      if (mod && e.key === ',') {
+        e.preventDefault();
+        setShowSettings((prev) => !prev);
         return;
       }
 
@@ -836,10 +851,11 @@ export default function App() {
         e.key <= '8'
       ) {
         const idx = parseInt(e.key) - 1;
-        if (idx < TEMPLATES.length) {
+        const templates = templatesRef.current;
+        if (idx < templates.length) {
           e.preventDefault();
           const sel = selectionRef.current;
-          handleAddComment(sel.text, TEMPLATES[idx].text, sel.contextBefore, sel.contextAfter, sel.offset);
+          handleAddComment(sel.text, templates[idx].text, sel.contextBefore, sel.contextAfter, sel.offset);
           return;
         }
       }
@@ -934,6 +950,7 @@ export default function App() {
       { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: () => setShowFileOpener(true) },
       { id: 'review-summary', label: 'Toggle review summary', section: 'View', onExecute: () => setShowReviewSummary((p) => !p) },
       { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
+      { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
     ];
 
     if (currentSnapshot) {
@@ -973,6 +990,7 @@ export default function App() {
         onAuthorChange={setAuthor}
         onToggleExplorer={() => setExplorerVisible((p) => !p)}
         onToggleSidebar={() => setSidebarVisible((p) => !p)}
+        onOpenSettings={() => setShowSettings(true)}
       />
       <TabBar
         tabs={tabs}
@@ -1202,6 +1220,14 @@ export default function App() {
           onClose={sidebarCtxMenu.close}
         />
       )}
+
+      {/* Settings panel */}
+      <SettingsPanel
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        author={author}
+        onAuthorChange={setAuthor}
+      />
 
       {/* Keyboard shortcuts hint */}
       <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-muted shrink-0">

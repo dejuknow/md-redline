@@ -1,19 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
-
-export const COMMENT_MAX_LENGTH = 500;
-
-export const TEMPLATES = [
-  { label: 'Rewrite this', text: 'Rewrite this section — it needs to be clearer.' },
-  { label: 'Add detail', text: 'Add more detail here.' },
-  { label: 'Remove', text: 'Remove this — it is not needed.' },
-  { label: 'Needs example', text: 'Add an example to illustrate this.' },
-  { label: 'Too vague', text: 'This is too vague — be more specific.' },
-  { label: 'Fix formatting', text: 'Fix the formatting in this section.' },
-  { label: 'Factually wrong', text: 'This is factually incorrect — please verify and correct.' },
-  { label: 'Out of scope', text: 'This is out of scope — remove or move to a separate doc.' },
-];
+import { useSettings } from '../contexts/SettingsContext';
 
 interface Props {
   selection: SelectionInfo;
@@ -24,9 +12,12 @@ interface Props {
 }
 
 export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock }: Props) {
+  const { settings } = useSettings();
+  const TEMPLATES = settings.templates;
+  const COMMENT_MAX_LENGTH = settings.commentMaxLength;
   const [isExpanded, setIsExpanded] = useState(false);
   const [text, setText] = useState('');
-  const [showTemplates, setShowTemplates] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(settings.showTemplatesByDefault);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useAutoResize(inputRef, text);
 
@@ -51,7 +42,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     setPrevSelectionKey(selectionKey);
     if (isExpanded) setIsExpanded(false);
     if (text) setText('');
-    if (showTemplates) setShowTemplates(false);
+    if (showTemplates !== settings.showTemplatesByDefault) setShowTemplates(settings.showTemplatesByDefault);
   }
 
   // Position the form near the selection

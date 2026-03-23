@@ -1,0 +1,535 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useTheme } from 'next-themes';
+import { useSettings } from '../contexts/SettingsContext';
+import type { CommentTemplate } from '../lib/settings';
+
+const THEMES = [
+  { key: 'light', label: 'Light', colors: ['#ffffff', '#4f46e5', '#f59e0b'] },
+  { key: 'dark', label: 'Dark', colors: ['#0f172a', '#818cf8', '#f59e0b'] },
+  { key: 'sepia', label: 'Sepia', colors: ['#faf6f1', '#8b5e3c', '#d4a04a'] },
+  { key: 'nord', label: 'Nord', colors: ['#2e3440', '#88c0d0', '#ebcb8b'] },
+];
+
+type Section = 'templates' | 'general' | 'theme';
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  author: string;
+  onAuthorChange: (name: string) => void;
+}
+
+export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) {
+  const { settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, resetTemplates } = useSettings();
+  const { theme, setTheme } = useTheme();
+  const [activeSection, setActiveSection] = useState<Section>('general');
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Local draft state for templates editing
+  const [draftTemplates, setDraftTemplates] = useState<CommentTemplate[]>(settings.templates);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editText, setEditText] = useState('');
+  const [addingNew, setAddingNew] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newText, setNewText] = useState('');
+
+  // Local draft state for general settings
+  const [draftAuthor, setDraftAuthor] = useState(author);
+  const [draftMaxLength, setDraftMaxLength] = useState(String(settings.commentMaxLength));
+
+  const authorInputRef = useRef<HTMLInputElement>(null);
+  const newLabelRef = useRef<HTMLInputElement>(null);
+
+  // Sync drafts when settings change or panel opens
+  useEffect(() => {
+    if (open) {
+      setDraftTemplates(settings.templates);
+      setDraftAuthor(author);
+      setDraftMaxLength(String(settings.commentMaxLength));
+      setEditingIndex(null);
+      setAddingNew(false);
+    }
+  }, [open, settings.templates, author, settings.commentMaxLength]);
+
+  // Focus new template label input when adding
+  useEffect(() => {
+    if (addingNew && newLabelRef.current) {
+      newLabelRef.current.focus();
+    }
+  }, [addingNew]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  // --- Template operations ---
+  const handleDeleteTemplate = useCallback(
+    (index: number) => {
+      const next = draftTemplates.filter((_, i) => i !== index);
+      setDraftTemplates(next);
+      updateTemplates(next);
+      if (editingIndex === index) setEditingIndex(null);
+    },
+    [draftTemplates, editingIndex, updateTemplates],
+  );
+
+  const handleMoveTemplate = useCallback(
+    (index: number, direction: 'up' | 'down') => {
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= draftTemplates.length) return;
+      const next = [...draftTemplates];
+      [next[index], next[target]] = [next[target], next[index]];
+      setDraftTemplates(next);
+      updateTemplates(next);
+      if (editingIndex === index) setEditingIndex(target);
+    },
+    [draftTemplates, editingIndex, updateTemplates],
+  );
+
+  const handleStartEdit = useCallback(
+    (index: number) => {
+      setEditingIndex(index);
+      setEditLabel(draftTemplates[index].label);
+      setEditText(draftTemplates[index].text);
+      setAddingNew(false);
+    },
+    [draftTemplates],
+  );
+
+  const handleSaveEdit = useCallback(() => {
+    if (editingIndex === null || !editLabel.trim() || !editText.trim()) return;
+    const next = [...draftTemplates];
+    next[editingIndex] = { label: editLabel.trim(), text: editText.trim() };
+    setDraftTemplates(next);
+    updateTemplates(next);
+    setEditingIndex(null);
+  }, [editingIndex, editLabel, editText, draftTemplates, updateTemplates]);
+
+  const handleAddTemplate = useCallback(() => {
+    if (!newLabel.trim() || !newText.trim()) return;
+    const next = [...draftTemplates, { label: newLabel.trim(), text: newText.trim() }];
+    setDraftTemplates(next);
+    updateTemplates(next);
+    setNewLabel('');
+    setNewText('');
+    setAddingNew(false);
+  }, [newLabel, newText, draftTemplates, updateTemplates]);
+
+  const handleResetTemplates = useCallback(() => {
+    resetTemplates();
+    setEditingIndex(null);
+    setAddingNew(false);
+  }, [resetTemplates]);
+
+  // --- General settings ---
+  const handleAuthorBlur = useCallback(() => {
+    const trimmed = draftAuthor.trim() || 'User';
+    setDraftAuthor(trimmed);
+    onAuthorChange(trimmed);
+  }, [draftAuthor, onAuthorChange]);
+
+  const handleMaxLengthBlur = useCallback(() => {
+    const num = parseInt(draftMaxLength);
+    const valid = !isNaN(num) && num > 0 ? num : 500;
+    setDraftMaxLength(String(valid));
+    updateCommentMaxLength(valid);
+  }, [draftMaxLength, updateCommentMaxLength]);
+
+  if (!open) return null;
+
+  const sections: { key: Section; label: string; icon: React.ReactNode }[] = [
+    {
+      key: 'general',
+      label: 'General',
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      ),
+    },
+    {
+      key: 'templates',
+      label: 'Templates',
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+        </svg>
+      ),
+    },
+    {
+      key: 'theme',
+      label: 'Theme',
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008z" />
+        </svg>
+      ),
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center"
+      onClick={onClose}
+    >
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/40" />
+
+      {/* Panel */}
+      <div
+        ref={panelRef}
+        className="relative w-full max-w-2xl max-h-[80vh] bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <h2 className="text-sm font-semibold text-content">Settings</h2>
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex h-[420px]">
+          {/* Sidebar navigation */}
+          <div className="w-40 border-r border-border bg-surface-secondary shrink-0 py-2">
+            {sections.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => setActiveSection(s.key)}
+                className={`w-full text-left px-4 py-2 flex items-center gap-2.5 text-sm transition-colors ${
+                  activeSection === s.key
+                    ? 'bg-primary-bg text-primary-text font-medium'
+                    : 'text-content-secondary hover:bg-surface-inset hover:text-content'
+                }`}
+              >
+                {s.icon}
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Content area */}
+          <div className="flex-1 overflow-y-auto p-5">
+            {activeSection === 'templates' && (
+              <div>
+                {/* Show templates by default — standalone preference */}
+                <label className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-content">Show templates by default</h3>
+                    <p className="text-xs text-content-muted mt-0.5">
+                      Automatically show the template picker when adding a new comment.
+                    </p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={settings.showTemplatesByDefault}
+                    onClick={() => updateShowTemplatesByDefault(!settings.showTemplatesByDefault)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                      settings.showTemplatesByDefault ? 'bg-primary' : 'bg-border'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                        settings.showTemplatesByDefault ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                      }`}
+                    />
+                  </button>
+                </label>
+
+                {/* Divider */}
+                <div className="border-t border-border my-4" />
+
+                {/* Template list header */}
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-semibold text-content">Shortcuts &amp; templates</h3>
+                  <button
+                    onClick={handleResetTemplates}
+                    className="text-xs px-2.5 py-1 rounded-md border border-border text-content-secondary hover:bg-surface-inset transition-colors"
+                  >
+                    Reset to defaults
+                  </button>
+                </div>
+                <p className="text-xs text-content-muted mb-3">
+                  The first 8 templates are mapped to {/Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '\u2318' : 'Ctrl'}+1&ndash;8. Drag to reorder.
+                </p>
+
+                {/* Template list */}
+                <div className="space-y-1">
+                  {draftTemplates.map((t, i) => (
+                    <div key={i}>
+                      {editingIndex === i ? (
+                        /* Editing inline */
+                        <div className="rounded-lg border border-primary-border bg-primary-bg p-3 space-y-2">
+                          <input
+                            value={editLabel}
+                            onChange={(e) => setEditLabel(e.target.value)}
+                            placeholder="Label"
+                            className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                          />
+                          <textarea
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            placeholder="Template text"
+                            rows={2}
+                            className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => setEditingIndex(null)}
+                              className="text-xs px-2.5 py-1 rounded-md text-content-secondary hover:bg-surface-inset transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleSaveEdit}
+                              disabled={!editLabel.trim() || !editText.trim()}
+                              className="text-xs px-2.5 py-1 rounded-md bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Display row */
+                        <div className="group flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-surface-inset transition-colors">
+                          {/* Shortcut badge */}
+                          <span className="w-8 shrink-0 text-center">
+                            {i < 8 ? (
+                              <kbd className="text-[10px] px-1 py-0.5 rounded border border-border text-content-muted bg-surface font-mono">
+                                {/Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '\u2318' : '^'}{i + 1}
+                              </kbd>
+                            ) : (
+                              <span className="text-[10px] text-content-faint">&mdash;</span>
+                            )}
+                          </span>
+
+                          {/* Label + text preview */}
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-content font-medium">{t.label}</span>
+                            <p className="text-xs text-content-muted truncate">{t.text}</p>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <button
+                              onClick={() => handleMoveTemplate(i, 'up')}
+                              disabled={i === 0}
+                              className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-surface disabled:opacity-30 transition-colors"
+                              title="Move up"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleMoveTemplate(i, 'down')}
+                              disabled={i === draftTemplates.length - 1}
+                              className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-surface disabled:opacity-30 transition-colors"
+                              title="Move down"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleStartEdit(i)}
+                              className="p-1 rounded text-content-muted hover:text-primary-text hover:bg-primary-bg transition-colors"
+                              title="Edit"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTemplate(i)}
+                              className="p-1 rounded text-content-muted hover:text-danger-text hover:bg-danger-bg transition-colors"
+                              title="Delete"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add new template */}
+                {addingNew ? (
+                  <div className="mt-3 rounded-lg border border-primary-border bg-primary-bg p-3 space-y-2">
+                    <input
+                      ref={newLabelRef}
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder="Label (e.g. Clarify)"
+                      className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { setAddingNew(false); setNewLabel(''); setNewText(''); }
+                      }}
+                    />
+                    <textarea
+                      value={newText}
+                      onChange={(e) => setNewText(e.target.value)}
+                      placeholder="Template text (e.g. Please clarify this section.)"
+                      rows={2}
+                      className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { setAddingNew(false); setNewLabel(''); setNewText(''); }
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleAddTemplate(); }
+                      }}
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => { setAddingNew(false); setNewLabel(''); setNewText(''); }}
+                        className="text-xs px-2.5 py-1 rounded-md text-content-secondary hover:bg-surface-inset transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleAddTemplate}
+                        disabled={!newLabel.trim() || !newText.trim()}
+                        className="text-xs px-2.5 py-1 rounded-md bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setAddingNew(true); setEditingIndex(null); }}
+                    className="mt-3 w-full text-left px-3 py-2 rounded-lg border border-dashed border-border text-sm text-content-muted hover:text-primary-text hover:border-primary-border hover:bg-primary-bg transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add template
+                  </button>
+                )}
+              </div>
+            )}
+
+            {activeSection === 'general' && (
+              <div className="space-y-6">
+                {/* Author Name */}
+                <div>
+                  <h3 className="text-sm font-semibold text-content mb-1">Author Name</h3>
+                  <p className="text-xs text-content-muted mb-2">
+                    Name attached to your comments and replies.
+                  </p>
+                  <input
+                    ref={authorInputRef}
+                    value={draftAuthor}
+                    onChange={(e) => setDraftAuthor(e.target.value)}
+                    onBlur={handleAuthorBlur}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAuthorBlur();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    className="w-60 text-sm px-3 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="Your name"
+                  />
+                </div>
+
+                {/* Comment Max Length */}
+                <div>
+                  <h3 className="text-sm font-semibold text-content mb-1">Comment Max Length</h3>
+                  <p className="text-xs text-content-muted mb-2">
+                    Maximum number of characters allowed in a comment.
+                  </p>
+                  <input
+                    type="number"
+                    min="50"
+                    max="10000"
+                    value={draftMaxLength}
+                    onChange={(e) => setDraftMaxLength(e.target.value)}
+                    onBlur={handleMaxLengthBlur}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleMaxLengthBlur();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    className="w-32 text-sm px-3 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                  <span className="text-xs text-content-muted ml-2">characters</span>
+                </div>
+              </div>
+            )}
+
+            {activeSection === 'theme' && (
+              <div>
+                <h3 className="text-sm font-semibold text-content mb-1">Theme</h3>
+                <p className="text-xs text-content-muted mb-4">
+                  Choose a color theme for the interface.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => setTheme(t.key)}
+                      className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
+                        theme === t.key
+                          ? 'border-primary bg-primary-bg'
+                          : 'border-border hover:border-primary-border hover:bg-surface-inset'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex gap-1">
+                          {t.colors.map((c, i) => (
+                            <div
+                              key={i}
+                              className="w-4 h-4 rounded-full border border-border"
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <span className={`text-sm font-medium ${
+                        theme === t.key ? 'text-primary-text' : 'text-content'
+                      }`}>
+                        {t.label}
+                      </span>
+                      {theme === t.key && (
+                        <svg
+                          className="inline-block w-3.5 h-3.5 ml-1.5 text-primary-text"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
