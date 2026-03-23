@@ -6,21 +6,51 @@ const COMMENT_PATTERN = /<!-- @comment(\{.*?\}) -->/gs;
 
 export function parseComments(rawMarkdown: string): ParseResult {
   const comments: MdComment[] = [];
-  const strippedRegions: { rawStart: number; rawEnd: number }[] = [];
+  const strippedRegions: { rawStart: number; rawEnd: number; parsed: boolean }[] = [];
+
+  // Build list of fenced code block ranges to skip markers inside them
+  const codeBlockRanges: { start: number; end: number }[] = [];
+  const fenceRegex = /^(`{3,}|~{3,}).*$/gm;
+  let fenceMatch: RegExpExecArray | null;
+  let openFence: { marker: string; start: number } | null = null;
+  while ((fenceMatch = fenceRegex.exec(rawMarkdown)) !== null) {
+    const marker = fenceMatch[1];
+    if (!openFence) {
+      openFence = { marker: marker[0].repeat(marker.length), start: fenceMatch.index };
+    } else if (marker[0] === openFence.marker[0] && marker.length >= openFence.marker.length) {
+      codeBlockRanges.push({ start: openFence.start, end: fenceMatch.index + fenceMatch[0].length });
+      openFence = null;
+    }
+  }
+
+  function isInsideCodeBlock(offset: number): boolean {
+    for (const range of codeBlockRanges) {
+      if (offset >= range.start && offset <= range.end) return true;
+    }
+    return false;
+  }
 
   let match: RegExpExecArray | null;
   const regex = new RegExp(COMMENT_PATTERN);
 
   while ((match = regex.exec(rawMarkdown)) !== null) {
+    // Skip markers inside fenced code blocks (e.g. documentation examples)
+    if (isInsideCodeBlock(match.index)) continue;
+
+    let parsed = false;
     try {
       const data = JSON.parse(match[1]) as MdComment;
-      comments.push(data);
+      if (data.id && data.anchor) {
+        comments.push(data);
+        parsed = true;
+      }
     } catch {
-      // Skip malformed comments
+      // Malformed JSON — still strip the marker
     }
     strippedRegions.push({
       rawStart: match.index,
       rawEnd: match.index + match[0].length,
+      parsed,
     });
   }
 
@@ -37,11 +67,13 @@ export function parseComments(rawMarkdown: string): ParseResult {
   // where the marker was. Since markers are placed BEFORE the anchor text,
   // this is the start of the anchor text in the clean content.
   let cumShift = 0;
+  let commentIdx = 0;
   for (let i = 0; i < strippedRegions.length; i++) {
     const region = strippedRegions[i];
     const cleanPos = region.rawStart - cumShift;
-    if (comments[i]) {
-      comments[i].cleanOffset = cleanPos;
+    if (region.parsed && comments[commentIdx]) {
+      comments[commentIdx].cleanOffset = cleanPos;
+      commentIdx++;
     }
     cumShift += region.rawEnd - region.rawStart;
   }
