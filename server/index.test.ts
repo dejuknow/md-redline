@@ -1,7 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { writeFile, unlink, mkdir, rmdir, symlink, realpath } from 'fs/promises';
+import { realpathSync } from 'fs';
 import { join, resolve, extname, dirname } from 'path';
 import { tmpdir, homedir } from 'os';
+
+/** Canonicalize a path via realpathSync, matching the production server's startup logic. */
+function canonicalize(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
 
 // The server is an Hono app — we test it via fetch against the running process.
 // For isolated unit testing, we import the app directly if exported,
@@ -301,17 +311,19 @@ describe('symlink bypass prevention for new files', () => {
       // Symlink already exists from a previous run
     }
 
-    // The lexical path is inside TEST_DIR (allowed), but the real parent is EXTERNAL_DIR
+    // The lexical path is inside TEST_DIR (allowed), but the real parent is EXTERNAL_DIR.
+    // Use canonicalize() for allowed roots — matching the production server's startup.
     const maliciousPath = join(linkPath, 'new.md');
     await expect(
-      resolveAndValidate(maliciousPath, [TEST_DIR]),
+      resolveAndValidate(maliciousPath, [canonicalize(TEST_DIR)]),
     ).rejects.toThrow('Access denied');
   });
 
   it('allows new file under a real (non-symlinked) allowed directory', async () => {
-    const realTestDir = await realpath(TEST_DIR);
-    const newFilePath = join(realTestDir, 'new-file.md');
-    const result = await resolveAndValidate(newFilePath, [realTestDir]);
+    // Use canonicalize() for allowed roots — matching production.
+    // On macOS, /tmp -> /private/tmp, so this tests that both sides are canonical.
+    const newFilePath = join(TEST_DIR, 'new-file.md');
+    const result = await resolveAndValidate(newFilePath, [canonicalize(TEST_DIR)]);
     expect(result).toContain('new-file.md');
   });
 });
@@ -340,14 +352,14 @@ describe('tilde expansion', () => {
   }
 
   it('expands ~/path to homedir/path', async () => {
-    const home = homedir();
+    const home = canonicalize(homedir());
     const result = await resolveAndValidate('~/test.md', [home]);
     expect(result).toBe(join(home, 'test.md'));
   });
 
   it('does not expand ~ in the middle of a path', async () => {
     // "foo/~/bar.md" should NOT expand the ~
-    const cwd = resolve(process.cwd());
+    const cwd = canonicalize(process.cwd());
     await expect(
       resolveAndValidate('foo/~/bar.md', [cwd]),
     ).resolves.toContain('foo/~/bar.md');

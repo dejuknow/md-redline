@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import { readFile, writeFile, readdir, stat, realpath } from 'fs/promises';
-import { watch, statSync, type FSWatcher } from 'fs';
+import { watch, statSync, realpathSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform } from 'os';
 import { execFile } from 'child_process';
@@ -31,16 +31,25 @@ try {
 }
 
 // Allowed base directories: cwd, home, and the initial file/dir (if provided).
-const ALLOWED_ROOTS = [resolve(process.cwd()), resolve(homedir())];
+// Canonicalize with realpathSync so comparisons match realpath() output in resolveAndValidate.
+function canonicalize(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+const ALLOWED_ROOTS = [canonicalize(process.cwd()), canonicalize(homedir())];
 if (initialFile) {
-  const fileDir = dirname(initialFile);
+  const fileDir = canonicalize(dirname(initialFile));
   if (!ALLOWED_ROOTS.some((r) => fileDir.startsWith(r + '/') || fileDir === r)) {
     ALLOWED_ROOTS.push(fileDir);
   }
 }
 if (initialDir) {
-  if (!ALLOWED_ROOTS.some((r) => initialDir.startsWith(r + '/') || initialDir === r)) {
-    ALLOWED_ROOTS.push(initialDir);
+  const dir = canonicalize(initialDir);
+  if (!ALLOWED_ROOTS.some((r) => dir.startsWith(r + '/') || dir === r)) {
+    ALLOWED_ROOTS.push(dir);
   }
 }
 
