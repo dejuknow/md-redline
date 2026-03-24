@@ -4,11 +4,9 @@ import type { ExpectedCriteria, ScoringResult, DimensionScores } from './types.j
 const COMMENT_MARKER_RE = /<!-- @comment(\{.*?\}) -->/gs;
 
 const WEIGHTS: Record<keyof DimensionScores, number> = {
-  parsing: 0.15,
-  triage: 0.20,
-  execution: 0.30,
-  protocol: 0.20,
-  integrity: 0.15,
+  parsing: 0.25,
+  execution: 0.50,
+  integrity: 0.25,
 };
 
 export function score(
@@ -25,72 +23,33 @@ export function score(
   const inputById = new Map(inputParsed.comments.map((c) => [c.id, c]));
   const outputById = new Map(outputParsed.comments.map((c) => [c.id, c]));
 
-  // --- 1. Parsing: Are all input markers still present and parseable? ---
+  // --- 1. Parsing: Were comment markers handled correctly? ---
+  // After addressing, agents should DELETE markers. Score based on whether
+  // addressed comments had their markers removed.
   let parsingScore: number;
   if (expected.totalComments === 0) {
     parsingScore = 1.0;
     details.push('parsing: no comments expected, score=1.0');
   } else {
-    // Count how many input comment IDs are still found in output
-    let preserved = 0;
-    for (const id of inputById.keys()) {
-      if (outputById.has(id)) preserved++;
-    }
-    parsingScore = preserved / inputById.size;
-    details.push(
-      `parsing: ${preserved}/${inputById.size} markers preserved`,
-    );
-  }
-
-  // --- 2. Triage: Did it act on actionable and skip non-actionable? ---
-  let triageScore: number;
-  if (expected.comments.length === 0) {
-    triageScore = 1.0;
-    details.push('triage: no comments to triage, score=1.0');
-  } else {
     let correct = 0;
     for (const exp of expected.comments) {
-      const inputComment = inputById.get(exp.id);
-      const outputComment = outputById.get(exp.id);
-
       if (exp.expectedAction === 'address') {
-        // Should have been acted on: status changed, or content near anchor modified, or marker removed
-        const statusChanged =
-          outputComment && outputComment.status !== inputComment?.status;
-        const markerRemoved = !outputComment;
-        const contentChanged =
-          inputParsed.cleanMarkdown !== outputParsed.cleanMarkdown;
-
-        if (statusChanged || markerRemoved || contentChanged) {
+        // Marker should be removed after addressing
+        if (!outputById.has(exp.id)) {
           correct++;
-          details.push(`triage: ${exp.id} — correctly acted on`);
+          details.push(`parsing: ${exp.id} — marker correctly removed`);
         } else {
-          details.push(`triage: ${exp.id} — should have been addressed but wasn't`);
-        }
-      } else if (exp.expectedAction === 'skip') {
-        // Should have been left alone
-        if (outputComment) {
-          const statusUnchanged =
-            outputComment.status === inputComment?.status &&
-            outputComment.resolved === inputComment?.resolved;
-          if (statusUnchanged) {
-            correct++;
-            details.push(`triage: ${exp.id} — correctly skipped`);
-          } else {
-            details.push(`triage: ${exp.id} — should have been skipped but was modified`);
-          }
-        } else {
-          details.push(`triage: ${exp.id} — should have been skipped but was removed`);
+          details.push(`parsing: ${exp.id} — marker should have been removed but was preserved`);
         }
       }
     }
-    triageScore = correct / expected.comments.length;
+    parsingScore = expected.comments.length > 0 ? correct / expected.comments.length : 1.0;
     details.push(
-      `triage: ${correct}/${expected.comments.length} correct`,
+      `parsing: ${correct}/${expected.comments.length} markers correctly handled`,
     );
   }
 
-  // --- 3. Execution: Did content changes address the feedback? ---
+  // --- 2. Execution: Did content changes address the feedback? ---
   let executionScore: number;
   if (!expected.contentShouldChange) {
     // Content should NOT have changed
@@ -158,52 +117,12 @@ export function score(
     }
   }
 
-  // --- 4. Protocol: Did it set status to "addressed"? ---
-  let protocolScore: number;
-  const addressable = expected.comments.filter(
-    (c) => c.expectedAction === 'address',
-  );
-  if (addressable.length === 0) {
-    protocolScore = 1.0;
-    details.push('protocol: no comments to address, score=1.0');
-  } else {
-    let correct = 0;
-    for (const exp of addressable) {
-      const outputComment = outputById.get(exp.id);
-      if (outputComment) {
-        // Check if status was set to "addressed"
-        const rawStatus = (outputComment as Record<string, unknown>).status;
-        if (rawStatus === 'addressed') {
-          correct++;
-          details.push(`protocol: ${exp.id} — status correctly set to "addressed"`);
-        } else {
-          details.push(
-            `protocol: ${exp.id} — status is "${rawStatus}" (expected "addressed")`,
-          );
-        }
-      } else {
-        // Marker was removed — partial credit (agent addressed it but didn't follow protocol)
-        correct += 0.5;
-        details.push(
-          `protocol: ${exp.id} — marker removed (partial credit)`,
-        );
-      }
-    }
-    protocolScore = correct / addressable.length;
-    details.push(
-      `protocol: ${correct}/${addressable.length} correct`,
-    );
-  }
-
-  // --- 5. Integrity: Are all markers in the output valid JSON? ---
+  // --- 3. Integrity: Are all remaining markers in the output valid JSON? ---
   let integrityScore: number;
   const rawMarkers = [...outputRaw.matchAll(new RegExp(COMMENT_MARKER_RE))];
-  if (rawMarkers.length === 0 && expected.totalComments === 0) {
+  if (rawMarkers.length === 0) {
     integrityScore = 1.0;
-    details.push('integrity: no markers expected or found, score=1.0');
-  } else if (rawMarkers.length === 0 && expected.totalComments > 0) {
-    integrityScore = 0.0;
-    details.push('integrity: all markers were removed — FAIL');
+    details.push('integrity: no markers remaining, score=1.0');
   } else {
     let valid = 0;
     for (const m of rawMarkers) {
@@ -229,9 +148,7 @@ export function score(
 
   const scores: DimensionScores = {
     parsing: parsingScore,
-    triage: triageScore,
     execution: executionScore,
-    protocol: protocolScore,
     integrity: integrityScore,
   };
 

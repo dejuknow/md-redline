@@ -1,7 +1,6 @@
 {
-  "totalComments": 5,
+  "totalComments": 3,
   "actionableComments": 3,
-  "skipComments": 2,
   "comments": [
     {
       "id": "eval-08-c1",
@@ -18,17 +17,9 @@
       }
     },
     {
-      "id": "eval-08-c3",
-      "expectedAction": "skip"
-    },
-    {
       "id": "eval-08-c4",
       "expectedAction": "address",
       "contentHints": {}
-    },
-    {
-      "id": "eval-08-c5",
-      "expectedAction": "skip"
     }
   ],
   "contentShouldChange": true,

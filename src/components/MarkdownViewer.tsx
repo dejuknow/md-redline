@@ -1,6 +1,5 @@
 import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import type { MdComment } from '../types';
-import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 
 export interface ViewerContextMenuInfo {
@@ -95,7 +94,6 @@ export const MarkdownViewer = memo(
         { ids: string[]; anchor: string; plainOffset?: number }
       >();
       for (const comment of comments) {
-        if (getEffectiveStatus(comment) === 'resolved') continue;
         const plainOffset = comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
         const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
         const group = highlightGroups.get(key) || {

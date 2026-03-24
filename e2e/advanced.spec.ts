@@ -121,7 +121,7 @@ test.describe('Multi-tab support', () => {
     await expect(tab2).not.toBeVisible();
   });
 
-  test('tab badges show unresolved comment counts', async ({ page }) => {
+  test('tab badges show comment counts', async ({ page }) => {
     await openFixture(page, FIXTURE_1);
 
     await addComment(page, 'valid credentials', 'Tab badge test comment');
@@ -133,12 +133,6 @@ test.describe('Multi-tab support', () => {
 
     await addComment(page, 'brute force attacks', 'Second tab badge comment');
     await expect(badge).toHaveText('2');
-
-    // Resolve one — badge should drop to 1
-    const card = getCard(page, 'Tab badge test comment');
-    await card.hover();
-    await card.getByRole('button', { name: 'Resolve' }).click({ force: true });
-    await expect(badge).toHaveText('1');
   });
 });
 
@@ -154,7 +148,7 @@ test.describe('Overlapping comments', () => {
     // These overlap on "password login".
     const withOverlapping = FIXTURE_1_ORIGINAL.replace(
       'email and password login',
-      '<!-- @comment{"id":"overlap-1","anchor":"email and password login","text":"Comment on full phrase","author":"User","timestamp":"2026-03-22T00:00:00.000Z","resolved":false,"status":"open","replies":[]} -->email and <!-- @comment{"id":"overlap-2","anchor":"password login","text":"Comment on password login","author":"User","timestamp":"2026-03-22T00:00:01.000Z","resolved":false,"status":"open","replies":[]} -->password login',
+      '<!-- @comment{"id":"overlap-1","anchor":"email and password login","text":"Comment on full phrase","author":"User","timestamp":"2026-03-22T00:00:00.000Z","replies":[]} -->email and <!-- @comment{"id":"overlap-2","anchor":"password login","text":"Comment on password login","author":"User","timestamp":"2026-03-22T00:00:01.000Z","replies":[]} -->password login',
     );
     writeFileSync(FIXTURE_1, withOverlapping);
 
@@ -173,7 +167,7 @@ test.describe('Overlapping comments', () => {
   test('clicking overlapping highlight activates a comment in sidebar', async ({ page }) => {
     const withOverlapping = FIXTURE_1_ORIGINAL.replace(
       'email and password login',
-      '<!-- @comment{"id":"ov-a","anchor":"email and password login","text":"Overlap Alpha","author":"User","timestamp":"2026-03-22T00:00:00.000Z","resolved":false,"status":"open","replies":[]} -->email and <!-- @comment{"id":"ov-b","anchor":"password login","text":"Overlap Beta","author":"User","timestamp":"2026-03-22T00:00:01.000Z","resolved":false,"status":"open","replies":[]} -->password login',
+      '<!-- @comment{"id":"ov-a","anchor":"email and password login","text":"Overlap Alpha","author":"User","timestamp":"2026-03-22T00:00:00.000Z","replies":[]} -->email and <!-- @comment{"id":"ov-b","anchor":"password login","text":"Overlap Beta","author":"User","timestamp":"2026-03-22T00:00:01.000Z","replies":[]} -->password login',
     );
     writeFileSync(FIXTURE_1, withOverlapping);
 
@@ -230,20 +224,6 @@ test.describe('Highlight and sidebar sync', () => {
     await expect(activeMark.first()).toBeInViewport();
   });
 
-  test('accepted comments do not show highlights', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Will be accepted');
-
-    await expect(page.locator('mark.comment-highlight')).toHaveCount(1);
-
-    // Resolve the comment
-    const card = getCard(page, 'Will be accepted');
-    await card.hover();
-    await card.getByRole('button', { name: 'Resolve' }).click({ force: true });
-
-    // Highlight should be gone (accepted comments are not highlighted)
-    await expect(page.locator('mark.comment-highlight')).toHaveCount(0);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -283,21 +263,6 @@ test.describe('Session persistence', () => {
     await expect(page.locator('h2', { hasText: 'Comments' })).not.toBeVisible();
   });
 
-  test('sidebar filter persists across reload', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Filter persist test');
-
-    const filterBar = page.locator('.px-3.pt-3.pb-1');
-    await filterBar.getByRole('button', { name: /Open/ }).click();
-
-    await page.waitForTimeout(1000);
-    await page.reload();
-    await page.locator('.prose').waitFor({ timeout: 10_000 });
-
-    const openTab = page.locator('.px-3.pt-3.pb-1').getByRole('button', { name: /Open/ });
-    await expect(openTab).toHaveClass(/bg-primary-bg-strong/);
-  });
-
   test('view mode persists across reload', async ({ page }) => {
     await openFixture(page);
 
@@ -332,35 +297,18 @@ test.describe('SSE file watching', () => {
     await expect(page.getByRole('heading', { name: 'Modified Section' })).toBeVisible({ timeout: 15_000 });
   });
 
-  test('external comment status change shows toast notification', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Agent will address this');
-
-    // Wait for save to flush + recentWrites guard to clear + SSE to stabilize
-    await page.waitForTimeout(1500);
-
-    // Read the current file, change the comment status to "addressed"
-    const currentContent = readFileSync(FIXTURE_1, 'utf-8');
-    const addressedContent = currentContent.replace('"status":"open"', '"status":"addressed"');
-    writeFileSync(FIXTURE_1, addressedContent);
-
-    // Should show a toast about addressed comments
-    await expect(page.getByText(/Agent addressed 1 comment/)).toBeVisible({ timeout: 15_000 });
-  });
-
   test('external reply addition shows toast notification', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Waiting for reply');
 
     await page.waitForTimeout(1500);
 
-    // Add a reply externally.
-    // insertComment doesn't include a "replies" key, so we need to insert it.
+    // Add a reply externally by injecting a replies array into the comment JSON.
     const currentContent = readFileSync(FIXTURE_1, 'utf-8');
-    // Add replies array before the closing }} of the comment JSON
+    // Find the comment marker and inject replies before the closing }
     const withReply = currentContent.replace(
-      /"status":"open"(,"contextBefore":[^}]*)?}/,
-      (match) => match.slice(0, -1) + ',"replies":[{"id":"ext-reply-1","text":"Done!","author":"Agent","timestamp":"2026-03-22T00:00:00.000Z"}]}',
+      /(@comment\{[^}]*"text":"Waiting for reply"[^}]*)\}/,
+      '$1,"replies":[{"id":"ext-reply-1","text":"Done!","author":"Agent","timestamp":"2026-03-22T00:00:00.000Z"}]}',
     );
     writeFileSync(FIXTURE_1, withReply);
 

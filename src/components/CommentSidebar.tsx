@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { MdComment } from '../types';
-import { getEffectiveStatus } from '../types';
 import { CommentCard } from './CommentCard';
-import type { FilterMode } from '../hooks/useSessionPersistence';
 
 export interface SidebarContextMenuInfo {
   commentId: string;
@@ -14,16 +12,11 @@ interface Props {
   comments: MdComment[];
   activeCommentId: string | null;
   missingAnchors: Set<string>;
-  filter: FilterMode;
-  onFilterChange: (filter: FilterMode) => void;
   onActivate: (id: string) => void;
-  onResolve: (id: string) => void;
-  onUnresolve: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (id: string, newText: string) => void;
   onReply: (id: string, text: string) => void;
-  onBulkResolve: () => void;
-  onBulkDeleteResolved: () => void;
+  onBulkDelete: () => void;
   onContextMenu?: (info: SidebarContextMenuInfo) => void;
   /** When set, the matching comment enters edit mode. Use Date.now() to re-trigger. */
   requestEditId?: string | null;
@@ -33,26 +26,15 @@ interface Props {
   requestReplyToken?: number;
 }
 
-const FILTER_TABS: { key: FilterMode; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'open', label: 'Open' },
-  { key: 'resolved', label: 'Resolved' },
-];
-
 export function CommentSidebar({
   comments,
   activeCommentId,
   missingAnchors,
-  filter,
-  onFilterChange,
   onActivate,
-  onResolve,
-  onUnresolve,
   onDelete,
   onEdit,
   onReply,
-  onBulkResolve,
-  onBulkDeleteResolved,
+  onBulkDelete,
   onContextMenu: onCtxMenu,
   requestEditId,
   requestEditToken,
@@ -69,23 +51,8 @@ export function CommentSidebar({
     }
   }, [activeCommentId]);
 
-  // Count by status
-  const counts = { open: 0, resolved: 0 };
-  for (const c of comments) {
-    counts[getEffectiveStatus(c)]++;
-  }
-  const openCount = counts.open;
-  const resolvedCount = counts.resolved;
-
-  // Filter and search
+  // Search filter
   const filtered = comments.filter((c) => {
-    const status = getEffectiveStatus(c);
-
-    // Status filter
-    if (filter === 'open' && status !== 'open') return false;
-    if (filter === 'resolved' && status !== 'resolved') return false;
-
-    // Text search
     if (search) {
       const q = search.toLowerCase();
       const matchesText = c.text.toLowerCase().includes(q);
@@ -97,10 +64,6 @@ export function CommentSidebar({
 
     return true;
   });
-
-  // Sort: open first, then resolved
-  const activeComments = filtered.filter((c) => getEffectiveStatus(c) !== 'resolved');
-  const resolvedComments = filtered.filter((c) => getEffectiveStatus(c) === 'resolved');
 
   if (comments.length === 0) {
     return (
@@ -128,40 +91,8 @@ export function CommentSidebar({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Filter tabs */}
-      <div className="px-3 pt-3 pb-1">
-        <div className="flex gap-1">
-          {FILTER_TABS.map(({ key, label }) => {
-            const count =
-              key === 'all'
-                ? comments.length
-                : key === 'open'
-                  ? openCount
-                  : resolvedCount;
-            return (
-              <button
-                key={key}
-                onClick={() => onFilterChange(key)}
-                className={`text-[10px] px-2 py-1 rounded-md font-medium transition-colors ${
-                  filter === key
-                    ? 'bg-primary-bg-strong text-primary-text'
-                    : 'text-content-secondary hover:bg-surface-inset'
-                }`}
-              >
-                {label}
-                {count > 0 && (
-                  <span className={`ml-1 ${filter === key ? 'text-primary-text' : 'text-content-muted'}`}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Search */}
-      <div className="px-3 pb-2">
+      <div className="px-3 pt-3 pb-2">
         <input
           type="text"
           value={search}
@@ -173,43 +104,13 @@ export function CommentSidebar({
 
       {/* Comment list */}
       <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
-        {activeComments.map((comment) => (
+        {filtered.map((comment) => (
           <div key={comment.id} ref={comment.id === activeCommentId ? activeRef : undefined}>
             <CommentCard
               comment={comment}
               isActive={comment.id === activeCommentId}
               anchorMissing={missingAnchors.has(comment.id)}
               onActivate={onActivate}
-              onResolve={onResolve}
-              onUnresolve={onUnresolve}
-              onDelete={onDelete}
-              onEdit={onEdit}
-              onReply={onReply}
-              onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
-              requestEdit={comment.id === requestEditId ? requestEditToken : undefined}
-              requestReply={comment.id === requestReplyId ? requestReplyToken : undefined}
-            />
-          </div>
-        ))}
-
-        {resolvedComments.length > 0 && filter !== 'resolved' && (
-          <div className="flex items-center gap-2 pt-3 pb-1">
-            <div className="h-px flex-1 bg-border" />
-            <span className="text-xs text-content-muted font-medium">
-              Resolved ({resolvedComments.length})
-            </span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-        )}
-        {resolvedComments.map((comment) => (
-          <div key={comment.id} ref={comment.id === activeCommentId ? activeRef : undefined}>
-            <CommentCard
-              comment={comment}
-              isActive={comment.id === activeCommentId}
-              anchorMissing={missingAnchors.has(comment.id)}
-              onActivate={onActivate}
-              onResolve={onResolve}
-              onUnresolve={onUnresolve}
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
@@ -223,7 +124,7 @@ export function CommentSidebar({
         {filtered.length === 0 && (
           <div className="text-center py-6">
             <p className="text-xs text-content-muted">
-              {search ? 'No comments match your search' : 'No comments in this category'}
+              {search ? 'No comments match your search' : 'No comments'}
             </p>
           </div>
         )}
@@ -233,32 +134,19 @@ export function CommentSidebar({
       <div className="border-t border-border px-4 py-2 bg-surface-secondary">
         <div className="flex items-center justify-between">
           <span className="text-xs text-content-secondary">
-            {openCount} open
-            {resolvedCount > 0 && ` \u00b7 ${resolvedCount} resolved`}
+            {comments.length} comment{comments.length !== 1 ? 's' : ''}
           </span>
           <div className="flex gap-1">
-            {openCount > 0 && (
+            {comments.length > 0 && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onBulkResolve();
-                }}
-                className="text-[10px] px-2 py-0.5 rounded text-success-text hover:bg-success-bg font-medium transition-colors"
-                title="Resolve all open comments"
-              >
-                Resolve All
-              </button>
-            )}
-            {resolvedCount > 0 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBulkDeleteResolved();
+                  onBulkDelete();
                 }}
                 className="text-[10px] px-2 py-0.5 rounded text-danger hover:bg-danger-bg font-medium transition-colors"
-                title="Delete all resolved comments"
+                title="Delete all comments"
               >
-                Clear Resolved
+                Delete All
               </button>
             )}
           </div>

@@ -14,7 +14,7 @@ The data pipeline ingests events from multiple sources, transforms them, and loa
 
 ## Ingestion
 
-<!-- @comment{"id":"eval-10-c1","anchor":"Events are ingested via Kafka","text":"Specify the Kafka configuration: number of partitions, replication factor, retention period. Also mention the schema registry (Avro/Protobuf).","author":"PM","timestamp":"2026-03-20T09:00:00Z","resolved":false,"status":"open"} -->Events are ingested via Kafka. Each event source publishes to a dedicated topic.
+<!-- @comment{"id":"eval-10-c1","anchor":"Events are ingested via Kafka","text":"Specify the Kafka configuration: number of partitions, replication factor, retention period. Also mention the schema registry (Avro/Protobuf).","author":"PM","timestamp":"2026-03-20T09:00:00Z"} -->Events are ingested via Kafka. Each event source publishes to a dedicated topic.
 
 ## Transformation
 

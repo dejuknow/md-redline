@@ -15,17 +15,14 @@ The JSON contains these fields:
 - "id": unique identifier
 - "anchor": the text being commented on
 - "text": the reviewer's feedback
-- "status": "open" means it needs to be addressed; "addressed" means already handled; "accepted" means resolved
-- "resolved": boolean (true when accepted)
 - "replies": array of threaded replies with additional context
 
 Your job:
 1. Read each comment and understand what change the reviewer is requesting
 2. Make the requested changes to the document content
-3. For each comment you address, update its "status" field from "open" to "addressed" and keep "resolved" as false
-4. Do NOT modify comments with status "accepted", "resolved", or "addressed"
-5. Preserve all comment markers in their exact <!-- @comment{JSON} --> format
-6. Preserve the marker's position (before its anchor text)`;
+3. After addressing a comment, DELETE its <!-- @comment{JSON} --> marker entirely from the file
+4. If a comment has replies, read them for additional context on what changes to make
+5. Ensure the final file contains no comment markers — all comments should be addressed and their markers removed`;
 
 export const claudeCli: AgentAdapter = {
   name: 'claude-cli',

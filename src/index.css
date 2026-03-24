@@ -44,12 +44,6 @@
   --color-warning-bg: var(--theme-warning-bg);
   --color-warning-text: var(--theme-warning-text);
 
-  /* Status badges */
-  --color-status-open-bg: var(--theme-status-open-bg);
-  --color-status-open-text: var(--theme-status-open-text);
-  --color-status-resolved-bg: var(--theme-status-resolved-bg);
-  --color-status-resolved-text: var(--theme-status-resolved-text);
-
   /* Comment anchors */
   --color-comment-anchor-bg: var(--theme-comment-anchor-bg);
   --color-comment-anchor-text: var(--theme-comment-anchor-text);
@@ -96,10 +90,6 @@
   --theme-warning: #f59e0b;
   --theme-warning-bg: #fffbeb;
   --theme-warning-text: #d97706;
-  --theme-status-open-bg: #dbeafe;
-  --theme-status-open-text: #1d4ed8;
-  --theme-status-resolved-bg: #d1fae5;
-  --theme-status-resolved-text: #047857;
   --theme-comment-anchor-bg: #fffbeb;
   --theme-comment-anchor-text: #b45309;
   --theme-comment-anchor-border: #fde68a;
@@ -153,10 +143,6 @@
   --theme-warning: #fbbf24;
   --theme-warning-bg: rgba(245, 158, 11, 0.15);
   --theme-warning-text: #fbbf24;
-  --theme-status-open-bg: rgba(59, 130, 246, 0.2);
-  --theme-status-open-text: #93c5fd;
-  --theme-status-resolved-bg: rgba(16, 185, 129, 0.2);
-  --theme-status-resolved-text: #6ee7b7;
   --theme-comment-anchor-bg: rgba(245, 158, 11, 0.15);
   --theme-comment-anchor-text: #fcd34d;
   --theme-comment-anchor-border: rgba(245, 158, 11, 0.3);
@@ -210,10 +196,6 @@
   --theme-warning: #d4a04a;
   --theme-warning-bg: rgba(212, 160, 74, 0.12);
   --theme-warning-text: #b8862e;
-  --theme-status-open-bg: rgba(41, 128, 185, 0.15);
-  --theme-status-open-text: #2980b9;
-  --theme-status-resolved-bg: rgba(39, 174, 96, 0.15);
-  --theme-status-resolved-text: #1e8449;
   --theme-comment-anchor-bg: rgba(212, 160, 74, 0.15);
   --theme-comment-anchor-text: #8b5e3c;
   --theme-comment-anchor-border: rgba(212, 160, 74, 0.3);
@@ -267,10 +249,6 @@
   --theme-warning: #ebcb8b;
   --theme-warning-bg: rgba(235, 203, 139, 0.15);
   --theme-warning-text: #ebcb8b;
-  --theme-status-open-bg: rgba(94, 129, 172, 0.2);
-  --theme-status-open-text: #81a1c1;
-  --theme-status-resolved-bg: rgba(163, 190, 140, 0.2);
-  --theme-status-resolved-text: #a3be8c;
   --theme-comment-anchor-bg: rgba(235, 203, 139, 0.15);
   --theme-comment-anchor-text: #ebcb8b;
   --theme-comment-anchor-border: rgba(235, 203, 139, 0.3);

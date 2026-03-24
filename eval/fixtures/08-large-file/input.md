@@ -22,7 +22,7 @@ Users can store multiple shipping addresses. Each address includes name, street,
 
 ### 3.1 Product Listings
 
-<!-- @comment{"id":"eval-08-c1","anchor":"Products have a title, description, price, and images","text":"Add detail: what are the constraints? Max title length, max description length, supported image formats, max image size, max images per product.","author":"PM","timestamp":"2026-03-18T09:00:00Z","resolved":false,"status":"open"} -->Products have a title, description, price, and images. Each product belongs to exactly one category.
+<!-- @comment{"id":"eval-08-c1","anchor":"Products have a title, description, price, and images","text":"Add detail: what are the constraints? Max title length, max description length, supported image formats, max image size, max images per product.","author":"PM","timestamp":"2026-03-18T09:00:00Z"} -->Products have a title, description, price, and images. Each product belongs to exactly one category.
 
 ### 3.2 Categories
 
@@ -44,7 +44,7 @@ Users can add, remove, and update quantities of items in their cart. The cart pe
 
 ### 4.2 Cart Validation
 
-<!-- @comment{"id":"eval-08-c2","anchor":"Before checkout the cart is validated","text":"Specify what validation occurs: stock availability, price changes since item was added, minimum order amount, shipping restrictions.","author":"PM","timestamp":"2026-03-18T10:00:00Z","resolved":false,"status":"open"} -->Before checkout the cart is validated. Invalid items are flagged to the user.
+<!-- @comment{"id":"eval-08-c2","anchor":"Before checkout the cart is validated","text":"Specify what validation occurs: stock availability, price changes since item was added, minimum order amount, shipping restrictions.","author":"PM","timestamp":"2026-03-18T10:00:00Z"} -->Before checkout the cart is validated. Invalid items are flagged to the user.
 
 ### 4.3 Saved for Later
 
@@ -54,7 +54,7 @@ Users can move items from their cart to a "saved for later" list. Items in this 
 
 ### 5.1 Shipping
 
-<!-- @comment{"id":"eval-08-c3","anchor":"Shipping costs are calculated at checkout","text":"Already addressed in the implementation — shipping uses weight-based rates from the carrier API.","author":"PM","timestamp":"2026-03-17T14:00:00Z","resolved":true,"status":"accepted"} -->Shipping costs are calculated at checkout. Multiple shipping options are presented to the user.
+Shipping costs are calculated at checkout. Multiple shipping options are presented to the user.
 
 ### 5.2 Payment
 
@@ -72,7 +72,7 @@ Orders progress through these statuses: pending → processing → shipped → d
 
 ### 6.2 Returns
 
-<!-- @comment{"id":"eval-08-c4","anchor":"Customers can request returns within the return window","text":"Specify the return window duration (14 days? 30 days?) and what conditions must be met (unused, original packaging, etc).","author":"PM","timestamp":"2026-03-18T11:00:00Z","resolved":false,"status":"open"} -->Customers can request returns within the return window. Return requests are reviewed by the merchant before approval.
+<!-- @comment{"id":"eval-08-c4","anchor":"Customers can request returns within the return window","text":"Specify the return window duration (14 days? 30 days?) and what conditions must be met (unused, original packaging, etc).","author":"PM","timestamp":"2026-03-18T11:00:00Z"} -->Customers can request returns within the return window. Return requests are reviewed by the merchant before approval.
 
 ### 6.3 Refunds
 
@@ -82,7 +82,7 @@ Refunds are processed to the original payment method within 5-10 business days o
 
 ### 7.1 Analytics
 
-<!-- @comment{"id":"eval-08-c5","anchor":"The dashboard shows sales analytics","text":"This was already expanded — dashboard now shows revenue, orders, conversion rate, and top products.","author":"Dev","timestamp":"2026-03-17T16:00:00Z","resolved":false,"status":"addressed"} -->The dashboard shows sales analytics. Merchants can view daily, weekly, and monthly reports.
+The dashboard shows sales analytics. Merchants can view daily, weekly, and monthly reports.
 
 ### 7.2 Inventory Management
 

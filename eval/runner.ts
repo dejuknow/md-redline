@@ -74,9 +74,7 @@ function printTable(results: ScoringResult[]) {
   const header = [
     'Case'.padEnd(28),
     'Parse',
-    'Triage',
-    'Exec',
-    'Proto',
+    ' Exec',
     'Integ',
     'Overall',
   ].join(' | ');
@@ -91,9 +89,7 @@ function printTable(results: ScoringResult[]) {
     const row = [
       r.case.padEnd(28),
       fmtPct(r.scores.parsing),
-      fmtPct(r.scores.triage),
       fmtPct(r.scores.execution),
-      fmtPct(r.scores.protocol),
       fmtPct(r.scores.integrity),
       fmtPct(r.overall),
     ].join(' | ');
@@ -111,9 +107,7 @@ function printTable(results: ScoringResult[]) {
     const row = [
       'AVERAGE'.padEnd(28),
       fmtPct(avg('parsing')),
-      fmtPct(avg('triage')),
       fmtPct(avg('execution')),
-      fmtPct(avg('protocol')),
       fmtPct(avg('integrity')),
       fmtPct(avgOverall),
     ].join(' | ');
@@ -234,9 +228,7 @@ async function main() {
         case: evalCase.name,
         scores: {
           parsing: 0,
-          triage: 0,
           execution: 0,
-          protocol: 0,
           integrity: 0,
         },
         overall: 0,

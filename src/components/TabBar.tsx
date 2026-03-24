@@ -136,7 +136,7 @@ export function TabBar({
           <button
             onClick={onJumpToNext}
             className="text-content-muted hover:text-primary-text transition-colors p-1 rounded hover:bg-primary-bg"
-            title="Jump to next unresolved comment (N)"
+            title="Jump to next comment (N)"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path
