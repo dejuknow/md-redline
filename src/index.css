@@ -118,6 +118,9 @@
   --theme-diff-removed-text: #991b1b;
   --theme-gradient-from: #f8fafc;
   --theme-gradient-to: rgba(238, 242, 255, 0.3);
+  --theme-search-bg: rgba(74, 222, 128, 0.3);
+  --theme-search-active-bg: #f97316;
+  --theme-search-active-text: #ffffff;
 }
 
 /* ========== Dark Theme ========== */
@@ -172,6 +175,9 @@
   --theme-diff-removed-text: #fca5a5;
   --theme-gradient-from: #0f172a;
   --theme-gradient-to: rgba(99, 102, 241, 0.08);
+  --theme-search-bg: rgba(74, 222, 128, 0.2);
+  --theme-search-active-bg: rgba(249, 115, 22, 0.7);
+  --theme-search-active-text: #ffffff;
 }
 
 /* ========== Sepia Theme ========== */
@@ -226,6 +232,9 @@
   --theme-diff-removed-text: #922b21;
   --theme-gradient-from: #f5efe6;
   --theme-gradient-to: rgba(139, 94, 60, 0.06);
+  --theme-search-bg: rgba(74, 222, 128, 0.2);
+  --theme-search-active-bg: rgba(194, 120, 3, 0.6);
+  --theme-search-active-text: #faf6f1;
 }
 
 /* ========== Nord Theme ========== */
@@ -280,6 +289,9 @@
   --theme-diff-removed-text: #bf616a;
   --theme-gradient-from: #2e3440;
   --theme-gradient-to: rgba(136, 192, 208, 0.08);
+  --theme-search-bg: rgba(163, 190, 140, 0.3);
+  --theme-search-active-bg: rgba(208, 135, 112, 0.7);
+  --theme-search-active-text: #eceff4;
 }
 
 /* ========== Prose Theme Overrides ========== */
@@ -371,6 +383,25 @@ mark.comment-highlight-active {
 mark.selection-highlight {
   background-color: var(--theme-selection-bg);
   color: var(--theme-text);
+  border-radius: 2px;
+  padding: 1px 0;
+  line-height: inherit;
+}
+
+/* Search highlights */
+.prose mark.search-highlight,
+mark.search-highlight {
+  background-color: var(--theme-search-bg);
+  color: inherit;
+  padding: 1px 0;
+  border-radius: 2px;
+  line-height: inherit;
+}
+
+.prose mark.search-highlight-active,
+mark.search-highlight-active {
+  background-color: var(--theme-search-active-bg);
+  color: var(--theme-search-active-text);
   border-radius: 2px;
   padding: 1px 0;
   line-height: inherit;

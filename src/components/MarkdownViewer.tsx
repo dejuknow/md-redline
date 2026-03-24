@@ -22,6 +22,9 @@ interface Props {
   selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
   onContextMenu?: (info: ViewerContextMenuInfo) => void;
+  searchQuery?: string;
+  searchActiveIndex?: number;
+  onSearchCount?: (count: number) => void;
 }
 
 export interface MarkdownViewerHandle {
@@ -36,11 +39,13 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu },
+    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu, searchQuery, searchActiveIndex, onSearchCount },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const activeMarkRef = useRef<HTMLElement | null>(null);
+    const searchCountCb = useRef(onSearchCount);
+    searchCountCb.current = onSearchCount;
 
     // Build a mapping from clean markdown offsets to rendered/plain text offsets.
     // cleanOffset lives in clean-markdown space (with ** ## etc), but DOM text is
@@ -129,11 +134,19 @@ export const MarkdownViewer = memo(
         );
       }
 
+      // --- Search highlights ---
+      if (searchQuery) {
+        const count = highlightSearchMatches(container, searchQuery, searchActiveIndex ?? 0);
+        searchCountCb.current?.(count);
+      } else {
+        searchCountCb.current?.(0);
+      }
+
       // Store reference to the active mark for drag handles
       activeMarkRef.current = container.querySelector(
         'mark.comment-highlight-active',
       ) as HTMLElement | null;
-    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset]);
+    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, searchQuery, searchActiveIndex]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
@@ -405,4 +418,81 @@ function flexibleSearch(
     searchFrom = firstIdx + 1;
   }
   return null;
+}
+
+/** Find all case-insensitive occurrences of `query` in the container's text and wrap them
+ *  in <mark class="search-highlight"> elements. The match at `activeIndex` gets an additional
+ *  `search-highlight-active` class and is scrolled into view. */
+export function highlightSearchMatches(container: HTMLElement, query: string, activeIndex: number): number {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let tn: Text | null;
+  while ((tn = walker.nextNode() as Text | null)) textNodes.push(tn);
+  if (textNodes.length === 0) return 0;
+
+  const nodeInfo: { node: Text; globalStart: number; length: number }[] = [];
+  let pos = 0;
+  for (const n of textNodes) {
+    const len = n.textContent?.length || 0;
+    nodeInfo.push({ node: n, globalStart: pos, length: len });
+    pos += len;
+  }
+  const fullText = textNodes.map(n => n.textContent || '').join('');
+  const lowerFull = fullText.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+
+  // Find all non-overlapping match positions
+  const matches: { start: number; end: number }[] = [];
+  let searchPos = 0;
+  while (searchPos < lowerFull.length) {
+    const idx = lowerFull.indexOf(lowerQuery, searchPos);
+    if (idx === -1) break;
+    matches.push({ start: idx, end: idx + query.length });
+    searchPos = idx + query.length;
+  }
+  if (matches.length === 0) return 0;
+
+  // Process matches in reverse to preserve earlier text node positions
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const match = matches[i];
+    const isActive = i === activeIndex;
+
+    // Collect text node portions spanning this match
+    const wraps: { node: Text; start: number; end: number }[] = [];
+    for (const info of nodeInfo) {
+      const nodeEnd = info.globalStart + info.length;
+      if (nodeEnd <= match.start || info.globalStart >= match.end) continue;
+      const localStart = Math.max(0, match.start - info.globalStart);
+      const localEnd = Math.min(info.length, match.end - info.globalStart);
+      if (localStart < localEnd) wraps.push({ node: info.node, start: localStart, end: localEnd });
+    }
+
+    // Wrap each portion in reverse order within this match
+    for (let w = wraps.length - 1; w >= 0; w--) {
+      const { node: wn, start, end } = wraps[w];
+      const range = document.createRange();
+      range.setStart(wn, start);
+      range.setEnd(wn, end);
+      const mark = document.createElement('mark');
+      mark.className = isActive ? 'search-highlight search-highlight-active' : 'search-highlight';
+      if (isActive) mark.dataset.searchActive = 'true';
+      try {
+        range.surroundContents(mark);
+      } catch {
+        try {
+          const fragment = range.extractContents();
+          mark.appendChild(fragment);
+          range.insertNode(mark);
+        } catch { /* skip */ }
+      }
+    }
+  }
+
+  // Scroll active match into view
+  const activeMark = container.querySelector('mark[data-search-active]');
+  if (activeMark) {
+    activeMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  return matches.length;
 }

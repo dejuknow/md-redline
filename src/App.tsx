@@ -31,7 +31,7 @@ import {
   detectMissingAnchors,
 } from './lib/comment-parser';
 import { renderMarkdown } from './markdown/pipeline';
-import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo } from './components/MarkdownViewer';
+import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, highlightSearchMatches } from './components/MarkdownViewer';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
@@ -45,10 +45,12 @@ import { ReviewSummary } from './components/ReviewSummary';
 import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
 import { SettingsPanel } from './components/SettingsPanel';
+import { SearchBar } from './components/SearchBar';
 import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
+import { useTheme } from 'next-themes';
 import { getEffectiveStatus } from './types';
 
 // Load saved session for initial state
@@ -82,6 +84,7 @@ export default function App() {
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
+  const { theme, setTheme } = useTheme();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
 
   // Session-persisted state: initialize from saved session
@@ -151,6 +154,13 @@ export default function App() {
   const [showFileOpener, setShowFileOpener] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
+  // Text search state
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const [searchMatchCount, setSearchMatchCount] = useState(0);
+  const [searchFocusTrigger, setSearchFocusTrigger] = useState(0);
+
   // Platform info for context menu labels
   const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
   useEffect(() => {
@@ -188,6 +198,7 @@ export default function App() {
   }, []);
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
+  const rawViewRef = useRef<HTMLPreElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
@@ -798,6 +809,48 @@ export default function App() {
     [comments, handleResolve, handleUnresolve, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
   );
 
+  // --- Text search callbacks ---
+  const handleSearchCount = useCallback((count: number) => {
+    setSearchMatchCount(count);
+  }, []);
+
+  const handleSearchNext = useCallback(() => {
+    setActiveSearchIndex(prev => (prev < searchMatchCount - 1 ? prev + 1 : 0));
+  }, [searchMatchCount]);
+
+  const handleSearchPrev = useCallback(() => {
+    setActiveSearchIndex(prev => (prev > 0 ? prev - 1 : Math.max(0, searchMatchCount - 1)));
+  }, [searchMatchCount]);
+
+  const handleSearchClose = useCallback(() => {
+    setShowSearch(false);
+    setSearchQuery('');
+    setActiveSearchIndex(0);
+    setSearchMatchCount(0);
+  }, []);
+
+  const handleSearchQueryChange = useCallback((query: string) => {
+    setSearchQuery(query);
+    setActiveSearchIndex(0);
+  }, []);
+
+  // Raw view: set textContent via ref and apply search highlights
+  useLayoutEffect(() => {
+    if (viewMode !== 'raw' || !rawViewRef.current) return;
+    rawViewRef.current.textContent = rawMarkdown;
+    if (showSearch && searchQuery) {
+      const count = highlightSearchMatches(rawViewRef.current, searchQuery, activeSearchIndex);
+      setSearchMatchCount(count);
+    } else {
+      setSearchMatchCount(0);
+    }
+  }, [viewMode, rawMarkdown, showSearch, searchQuery, activeSearchIndex]);
+
+  // Reset match count in diff view (no search support)
+  useEffect(() => {
+    if (viewMode === 'diff') setSearchMatchCount(0);
+  }, [viewMode]);
+
   // Stable ref for templates to use in keyboard handler
   const templatesRef = useRef(settings.templates);
   templatesRef.current = settings.templates;
@@ -837,6 +890,14 @@ export default function App() {
       if (mod && e.key === 'b') {
         e.preventDefault();
         setExplorerVisible((prev) => !prev);
+        return;
+      }
+
+      // Cmd+F : Find in document
+      if (mod && e.key === 'f') {
+        e.preventDefault();
+        setShowSearch(true);
+        setSearchFocusTrigger(t => t + 1);
         return;
       }
 
@@ -888,6 +949,12 @@ export default function App() {
       if (mod || e.shiftKey || e.altKey) return;
 
       const key = e.key.toLowerCase();
+
+      // Escape : Close search bar
+      if (key === 'escape' && showSearch) {
+        handleSearchClose();
+        return;
+      }
 
       // N / P : Jump to next / previous comment
       if (key === 'n') {
@@ -946,7 +1013,7 @@ export default function App() {
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, showCommandPalette]);
+  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, showCommandPalette, showSearch, handleSearchClose]);
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -965,6 +1032,11 @@ export default function App() {
       { id: 'review-summary', label: 'Toggle review summary', section: 'View', onExecute: () => setShowReviewSummary((p) => !p) },
       { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
       { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
+      { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } },
+      { id: 'theme-light', label: 'Theme: Light', section: 'Theme', onExecute: () => setTheme('light') },
+      { id: 'theme-dark', label: 'Theme: Dark', section: 'Theme', onExecute: () => setTheme('dark') },
+      { id: 'theme-sepia', label: 'Theme: Sepia', section: 'Theme', onExecute: () => setTheme('sepia') },
+      { id: 'theme-nord', label: 'Theme: Nord', section: 'Theme', onExecute: () => setTheme('nord') },
     ];
 
     if (currentSnapshot) {
@@ -990,7 +1062,7 @@ export default function App() {
     }
 
     return cmds;
-  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, openCommentCount, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
+  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, openCommentCount, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme]);
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -1005,6 +1077,8 @@ export default function App() {
         onToggleExplorer={() => setExplorerVisible((p) => !p)}
         onToggleSidebar={() => setSidebarVisible((p) => !p)}
         onOpenSettings={() => setShowSettings(true)}
+        onSearch={() => { if (showSearch) { handleSearchClose(); } else { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } }}
+        searchActive={showSearch}
       />
       <TabBar
         tabs={tabs}
@@ -1061,37 +1135,52 @@ export default function App() {
             )}
 
             {/* Markdown viewer */}
-            <div
-              ref={containerRef}
-              className="flex-1 overflow-y-auto px-8 py-6 lg:px-12 xl:px-16 relative"
-            >
-              <div className="max-w-3xl mx-auto">
-                {viewMode === 'raw' ? (
-                  <pre className="text-sm text-content whitespace-pre-wrap break-words font-mono leading-relaxed">
-                    {rawMarkdown}
-                  </pre>
-                ) : viewMode === 'diff' && currentSnapshot ? (
-                  <DiffViewer oldRaw={currentSnapshot} newRaw={rawMarkdown} />
-                ) : (
-                  <>
-                    <MarkdownViewer
-                      ref={viewerRef}
-                      html={html}
-                      cleanMarkdown={cleanMarkdown}
-                      comments={comments}
-                      activeCommentId={activeCommentId}
-                      selectionText={selection?.text ?? null}
-                      selectionOffset={selection?.offset ?? null}
-                      onHighlightClick={handleHighlightClick}
-                      onContextMenu={handleViewerContextMenu}
-                    />
-                    <DragHandles
-                      startPos={handlePositions?.start ?? null}
-                      endPos={handlePositions?.end ?? null}
-                      onMouseDown={onHandleMouseDown}
-                    />
-                  </>
-                )}
+            <div className="flex-1 min-h-0 min-w-0 relative">
+              {showSearch && (
+                <SearchBar
+                  query={searchQuery}
+                  onQueryChange={handleSearchQueryChange}
+                  matchCount={searchMatchCount}
+                  activeIndex={activeSearchIndex}
+                  onNext={handleSearchNext}
+                  onPrev={handleSearchPrev}
+                  onClose={handleSearchClose}
+                  focusTrigger={searchFocusTrigger}
+                />
+              )}
+              <div
+                ref={containerRef}
+                className="h-full overflow-y-auto px-8 py-6 lg:px-12 xl:px-16 relative"
+              >
+                <div className="max-w-3xl mx-auto">
+                  {viewMode === 'raw' ? (
+                    <pre ref={rawViewRef} className="text-sm text-content whitespace-pre-wrap break-words font-mono leading-relaxed" />
+                  ) : viewMode === 'diff' && currentSnapshot ? (
+                    <DiffViewer oldRaw={currentSnapshot} newRaw={rawMarkdown} />
+                  ) : (
+                    <>
+                      <MarkdownViewer
+                        ref={viewerRef}
+                        html={html}
+                        cleanMarkdown={cleanMarkdown}
+                        comments={comments}
+                        activeCommentId={activeCommentId}
+                        selectionText={selection?.text ?? null}
+                        selectionOffset={selection?.offset ?? null}
+                        onHighlightClick={handleHighlightClick}
+                        onContextMenu={handleViewerContextMenu}
+                        searchQuery={showSearch ? searchQuery : undefined}
+                        searchActiveIndex={activeSearchIndex}
+                        onSearchCount={handleSearchCount}
+                      />
+                      <DragHandles
+                        startPos={handlePositions?.start ?? null}
+                        endPos={handlePositions?.end ?? null}
+                        onMouseDown={onHandleMouseDown}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1250,6 +1339,12 @@ export default function App() {
             {modKey}+K
           </kbd>{' '}
           Commands
+        </span>
+        <span>
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+            {modKey}+F
+          </kbd>{' '}
+          Find
         </span>
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
