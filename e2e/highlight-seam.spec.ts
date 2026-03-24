@@ -1,15 +1,12 @@
 /**
- * Regression tests for highlight seam artifacts.
+ * Regression tests for highlight wrapping across inline element boundaries.
  *
  * When a comment's anchor spans an inline element boundary (e.g. <strong>),
- * naive per-node wrapping creates two adjacent <mark> elements with a visible
- * seam between them. The fix groups wraps by block parent and merges wraps
- * within the same block into a single <mark> with plain text.
- *
- * These tests verify that:
- * 1. A comment spanning bold→regular text within one <li> produces one <mark>
- * 2. A comment spanning multiple <li> elements produces one <mark> per <li>,
- *    each without an internal <strong> boundary
+ * the highlight must:
+ * 1. Produce a single <mark> per block (no seam artifacts from split marks)
+ * 2. Preserve inline formatting inside the mark (bold stays bold)
+ * 3. Maintain correct text order when the selection starts mid-way through
+ *    an inline element
  */
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
@@ -119,9 +116,9 @@ test.describe('highlight seam regression', () => {
     });
 
     // Should be exactly 1 mark (merged), not 2 (split by <strong>)
+    // The mark preserves inline formatting — <strong> is kept inside the mark.
     expect(markStructure).not.toBeNull();
     expect(markStructure!.markCount).toBe(1);
-    expect(markStructure!.marksWithStrong).toBe(0);
     expect(markStructure!.markTexts[0]).toContain('bold text');
     expect(markStructure!.markTexts[0]).toContain('followed');
   });
@@ -156,9 +153,71 @@ test.describe('highlight seam regression', () => {
     });
 
     // Even though the comment spans multiple <li>s, each <li> should have
-    // at most 1 mark for this comment (merged across the <strong> boundary)
+    // at most 1 mark for this comment (merged across the <strong> boundary).
+    // The mark preserves inline formatting — <strong> is kept inside the mark.
     expect(markStructure.markCount).toBe(1);
-    expect(markStructure.marksWithStrong).toBe(0);
     expect(markStructure.marksInsideStrong).toBe(0);
+  });
+
+  test('bold formatting is preserved inside the highlight mark', async ({ page }) => {
+    await openFixture(page);
+
+    // "bold text: followed" spans <strong>bold text</strong> + regular text
+    await addComment(page, 'bold text: followed', 'formatting preservation test');
+
+    await page.getByText('formatting preservation test').click();
+    await page.waitForTimeout(300);
+
+    const result = await page.evaluate(() => {
+      const container = Array.from(document.querySelectorAll('p'))
+        .find(el => el.textContent?.includes('bold text'));
+      if (!container) return null;
+
+      const mark = container.querySelector('mark.comment-highlight');
+      if (!mark) return null;
+      return {
+        hasStrong: !!mark.querySelector('strong'),
+        strongText: mark.querySelector('strong')?.textContent || '',
+        fullText: mark.textContent || '',
+      };
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.hasStrong).toBe(true);
+    expect(result!.strongText).toBe('bold text');
+    expect(result!.fullText).toBe('bold text: followed');
+  });
+
+  test('text order is preserved when selection starts mid-way through bold', async ({ page }) => {
+    await openFixture(page);
+
+    // "Proposition: Today" starts inside <strong>Value Proposition</strong>
+    // and extends into the regular text that follows
+    await addComment(page, 'Proposition: Today', 'text order test');
+
+    await page.getByText('text order test').click();
+    await page.waitForTimeout(300);
+
+    // Check that the rendered paragraph text is in correct order
+    const result = await page.evaluate(() => {
+      const container = Array.from(document.querySelectorAll('p'))
+        .find(el => el.textContent?.includes('Value Proposition'));
+      if (!container) return null;
+
+      return {
+        // Full paragraph text should read naturally — no word reordering
+        paragraphText: container.textContent || '',
+        markText: container.querySelector('mark.comment-highlight')?.textContent || '',
+      };
+    });
+
+    expect(result).not.toBeNull();
+    // "Value" must appear before "Proposition" in the paragraph
+    const valueIdx = result!.paragraphText.indexOf('Value');
+    const propIdx = result!.paragraphText.indexOf('Proposition');
+    expect(valueIdx).toBeLessThan(propIdx);
+    // The mark should contain the selected text
+    expect(result!.markText).toContain('Proposition');
+    expect(result!.markText).toContain('Today');
   });
 });

@@ -9,3 +9,7 @@
 ## Single Bold Item
 
 Here is a sentence with **bold text**: followed by regular text.
+
+## Partial Bold Selection
+
+**Value Proposition**: Today, admins must manually download web content.
