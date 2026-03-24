@@ -15,7 +15,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const { settings } = useSettings();
   const TEMPLATES = settings.templates;
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(!!settings.quickComment);
   const [text, setText] = useState('');
   const [showTemplates, setShowTemplates] = useState(settings.showTemplatesByDefault);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -35,12 +35,33 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     }
   }, [autoExpand, isExpanded, onLock]);
 
+  // Quick comment: lock selection on mount when starting expanded
+  const quickCommentRef = useRef(settings.quickComment);
+  useEffect(() => {
+    if (quickCommentRef.current) {
+      onLock();
+    }
+  }, [onLock]);
+
+  // Click outside: dismiss if expanded with empty text
+  const formRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isExpanded) return;
+    const handler = (e: MouseEvent) => {
+      if (formRef.current && !formRef.current.contains(e.target as Node) && !text.trim()) {
+        onCancel();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isExpanded, text, onCancel]);
+
   // Reset expanded state when selection changes — derive from selection identity
   const selectionKey = `${selection.text}:${selection.rect.top}:${selection.rect.left}`;
   const [prevSelectionKey, setPrevSelectionKey] = useState(selectionKey);
   if (prevSelectionKey !== selectionKey) {
     setPrevSelectionKey(selectionKey);
-    if (isExpanded) setIsExpanded(false);
+    if (!settings.quickComment && isExpanded) setIsExpanded(false);
     if (text) setText('');
     if (showTemplates !== settings.showTemplatesByDefault) setShowTemplates(settings.showTemplatesByDefault);
   }
@@ -91,7 +112,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   if (!isExpanded) {
     return (
-      <div style={style} data-comment-form>
+      <div ref={formRef} style={style} data-comment-form>
         <button
           onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
           onClick={handleExpand}
@@ -114,6 +135,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   return (
     <div
+      ref={formRef}
       style={style}
       data-comment-form
       className="w-80 bg-surface-raised rounded-xl shadow-xl border border-border overflow-hidden"

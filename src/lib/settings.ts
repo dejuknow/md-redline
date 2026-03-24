@@ -9,6 +9,8 @@ export interface AppSettings {
   showTemplatesByDefault: boolean;
   /** Enable resolve/reopen workflow for human-to-human review. When off, comments are simply deleted after being addressed. */
   enableResolve: boolean;
+  /** Skip the "Comment" button and go straight to the comment form when text is selected. */
+  quickComment: boolean;
 }
 
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   commentMaxLength: 500,
   showTemplatesByDefault: false,
   enableResolve: false,
+  quickComment: false,
 };
 
 const STORAGE_KEY = 'md-review-settings';
@@ -50,6 +53,10 @@ export function loadSettings(): AppSettings {
         typeof parsed.enableResolve === 'boolean'
           ? parsed.enableResolve
           : DEFAULT_SETTINGS.enableResolve,
+      quickComment:
+        typeof parsed.quickComment === 'boolean'
+          ? parsed.quickComment
+          : DEFAULT_SETTINGS.quickComment,
     };
   } catch {
     return DEFAULT_SETTINGS;

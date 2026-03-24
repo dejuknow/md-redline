@@ -63,6 +63,12 @@ export function TabBar({
             <button
               key={tab.filePath}
               onClick={() => onSwitchTab(tab.filePath)}
+              onMouseDown={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  onCloseTab(tab.filePath);
+                }
+              }}
               onContextMenu={(e) => {
                 if (onTabContextMenu) {
                   e.preventDefault();
