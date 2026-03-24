@@ -7,6 +7,8 @@ export interface AppSettings {
   templates: CommentTemplate[];
   commentMaxLength: number;
   showTemplatesByDefault: boolean;
+  /** Enable resolve/reopen workflow for human-to-human review. When off, comments are simply deleted after being addressed. */
+  enableResolve: boolean;
 }
 
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   templates: DEFAULT_TEMPLATES,
   commentMaxLength: 500,
   showTemplatesByDefault: false,
+  enableResolve: false,
 };
 
 const STORAGE_KEY = 'md-review-settings';
@@ -43,6 +46,10 @@ export function loadSettings(): AppSettings {
         typeof parsed.showTemplatesByDefault === 'boolean'
           ? parsed.showTemplatesByDefault
           : DEFAULT_SETTINGS.showTemplatesByDefault,
+      enableResolve:
+        typeof parsed.enableResolve === 'boolean'
+          ? parsed.enableResolve
+          : DEFAULT_SETTINGS.enableResolve,
     };
   } catch {
     return DEFAULT_SETTINGS;

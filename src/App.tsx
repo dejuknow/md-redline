@@ -22,10 +22,15 @@ import {
   removeComment,
   editComment,
   updateCommentAnchor,
+  resolveComment,
+  unresolveComment,
   addReply,
   removeAllComments,
+  resolveAllComments,
+  removeResolvedComments,
   detectMissingAnchors,
 } from './lib/comment-parser';
+import { getEffectiveStatus } from './types';
 import { renderMarkdown } from './markdown/pipeline';
 import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, highlightSearchMatches } from './components/MarkdownViewer';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
@@ -226,18 +231,24 @@ export default function App() {
     const counts = new Map<string, number>();
     for (const tab of tabs) {
       if (tab.filePath === activeFilePath) {
-        counts.set(tab.filePath, comments.length);
+        const count = settings.enableResolve
+          ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+          : comments.length;
+        counts.set(tab.filePath, count);
       } else {
         try {
           const { comments: tabComments } = parseComments(tab.rawMarkdown);
-          counts.set(tab.filePath, tabComments.length);
+          const count = settings.enableResolve
+            ? tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+            : tabComments.length;
+          counts.set(tab.filePath, count);
         } catch {
           counts.set(tab.filePath, 0);
         }
       }
     }
     return counts;
-  }, [tabs, activeFilePath, comments]);
+  }, [tabs, activeFilePath, comments, settings.enableResolve]);
 
   // Clear transient state on tab switch — derive from activeFilePath change
   const [prevFilePath, setPrevFilePath] = useState(activeFilePath);
@@ -267,12 +278,20 @@ export default function App() {
           const newById = new Map(newComments.map((c) => [c.id, c]));
 
           let deletedCount = 0;
+          let resolvedCount = 0;
           let newReplyCount = 0;
           for (const oldC of oldComments) {
             const newC = newById.get(oldC.id);
             if (!newC) {
               deletedCount++;
               continue;
+            }
+            if (settings.enableResolve) {
+              const oldStatus = getEffectiveStatus(oldC);
+              const newStatus = getEffectiveStatus(newC);
+              if (oldStatus === 'open' && newStatus === 'resolved') {
+                resolvedCount++;
+              }
             }
             const oldReplies = oldC.replies?.length ?? 0;
             const newReplies = newC.replies?.length ?? 0;
@@ -281,7 +300,11 @@ export default function App() {
             }
           }
 
-          if (deletedCount > 0) {
+          if (resolvedCount > 0) {
+            showToast(
+              `${resolvedCount} comment${resolvedCount > 1 ? 's' : ''} resolved externally`,
+            );
+          } else if (deletedCount > 0) {
             showToast(
               `${deletedCount} comment${deletedCount > 1 ? 's' : ''} addressed externally`,
             );
@@ -399,6 +422,20 @@ export default function App() {
     [updateAndSave, clearSelection, author],
   );
 
+  const handleResolve = useCallback(
+    (id: string) => {
+      updateAndSave(resolveComment(rawMarkdownRef.current, id));
+    },
+    [updateAndSave],
+  );
+
+  const handleUnresolve = useCallback(
+    (id: string) => {
+      updateAndSave(unresolveComment(rawMarkdownRef.current, id));
+    },
+    [updateAndSave],
+  );
+
   const handleDelete = useCallback(
     (id: string) => {
       updateAndSave(removeComment(rawMarkdownRef.current, id));
@@ -423,6 +460,14 @@ export default function App() {
 
   const handleBulkDelete = useCallback(() => {
     updateAndSave(removeAllComments(rawMarkdownRef.current));
+  }, [updateAndSave]);
+
+  const handleBulkResolve = useCallback(() => {
+    updateAndSave(resolveAllComments(rawMarkdownRef.current));
+  }, [updateAndSave]);
+
+  const handleBulkDeleteResolved = useCallback(() => {
+    updateAndSave(removeResolvedComments(rawMarkdownRef.current));
   }, [updateAndSave]);
 
   const handleHighlightClick = useCallback((commentId: string) => {
@@ -451,32 +496,37 @@ export default function App() {
     setSnapshots((prev) => new Map(prev).set(activeFilePath, rawMarkdownRef.current));
   }, [activeFilePath]);
 
-  // Jump to next comment
+  // Jump to next comment (skip resolved when resolve is enabled)
   const handleJumpToNext = useCallback(() => {
-    if (comments.length === 0) return;
+    const navigable = settings.enableResolve
+      ? comments.filter((c) => getEffectiveStatus(c) === 'open')
+      : comments;
+    if (navigable.length === 0) return;
 
     const currentIdx = activeCommentId
-      ? comments.findIndex((c) => c.id === activeCommentId)
+      ? navigable.findIndex((c) => c.id === activeCommentId)
       : -1;
-    const nextIdx = (currentIdx + 1) % comments.length;
-    const next = comments[nextIdx];
+    const nextIdx = (currentIdx + 1) % navigable.length;
+    const next = navigable[nextIdx];
     setActiveCommentId(next.id);
     viewerRef.current?.scrollToComment(next.id);
-  }, [comments, activeCommentId]);
+  }, [comments, activeCommentId, settings.enableResolve]);
 
   // Jump to previous comment
   const handleJumpToPrev = useCallback(() => {
-    if (comments.length === 0) return;
+    const navigable = settings.enableResolve
+      ? comments.filter((c) => getEffectiveStatus(c) === 'open')
+      : comments;
+    if (navigable.length === 0) return;
 
     const currentIdx = activeCommentId
-      ? comments.findIndex((c) => c.id === activeCommentId)
+      ? navigable.findIndex((c) => c.id === activeCommentId)
       : -1;
-    // When currentIdx is -1 (no active) or 0 (first), wrap to last
-    const prevIdx = currentIdx <= 0 ? comments.length - 1 : currentIdx - 1;
-    const prev = comments[prevIdx];
+    const prevIdx = currentIdx <= 0 ? navigable.length - 1 : currentIdx - 1;
+    const prev = navigable[prevIdx];
     setActiveCommentId(prev.id);
     viewerRef.current?.scrollToComment(prev.id);
-  }, [comments, activeCommentId]);
+  }, [comments, activeCommentId, settings.enableResolve]);
 
   const { handlePositions, onHandleMouseDown } = useDragHandles({
     viewerRef,
@@ -486,7 +536,9 @@ export default function App() {
     onAnchorChange: handleAnchorChange,
   });
 
-  const commentCount = comments.length;
+  const commentCount = settings.enableResolve
+    ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+    : comments.length;
 
   // Stable ref for selection to use in keyboard handler without re-creating it
   const selectionRef = useRef(selection);
@@ -506,6 +558,15 @@ export default function App() {
         const comment = comments.find((c) => c.id === commentId);
         if (!comment) return;
 
+        const resolveItems: ContextMenuEntry[] = settings.enableResolve
+          ? [
+              { type: 'divider' as const },
+              getEffectiveStatus(comment) === 'resolved'
+                ? { label: 'Reopen', onClick: () => handleUnresolve(commentId) }
+                : { label: 'Resolve', onClick: () => handleResolve(commentId) },
+            ]
+          : [];
+
         const items: ContextMenuEntry[] = [
           {
             label: 'Edit',
@@ -523,6 +584,7 @@ export default function App() {
               triggerReply(commentId);
             },
           },
+          ...resolveItems,
           { type: 'divider' as const },
           {
             label: 'Delete',
@@ -586,7 +648,7 @@ export default function App() {
         viewerCtxMenu.open(info.x, info.y);
       }
     },
-    [comments, handleDelete, handleAddComment, lockSelection, triggerEdit, triggerReply, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [comments, settings.enableResolve, handleResolve, handleUnresolve, handleDelete, handleAddComment, lockSelection, triggerEdit, triggerReply, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
   );
 
   const handleExplorerContextMenu = useCallback(
@@ -723,7 +785,16 @@ export default function App() {
       const comment = comments.find((c) => c.id === info.commentId);
       if (!comment) return;
 
+      const resolveItems: ContextMenuEntry[] = settings.enableResolve
+        ? [
+            getEffectiveStatus(comment) === 'resolved'
+              ? { label: 'Reopen', onClick: () => handleUnresolve(info.commentId) }
+              : { label: 'Resolve', onClick: () => handleResolve(info.commentId) },
+          ]
+        : [];
+
       const items: ContextMenuEntry[] = [
+        ...resolveItems,
         {
           label: 'Delete',
           danger: true,
@@ -750,7 +821,7 @@ export default function App() {
       setSidebarCtxMenuItems(items);
       sidebarCtxMenu.open(info.x, info.y);
     },
-    [comments, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [comments, settings.enableResolve, handleResolve, handleUnresolve, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
   );
 
   // --- Text search callbacks ---
@@ -924,11 +995,30 @@ export default function App() {
         return;
       }
 
+      // A/X : Resolve active comment (only when resolve enabled)
+      if ((key === 'a' || key === 'x') && activeCommentId && settings.enableResolve) {
+        const comment = comments.find((c) => c.id === activeCommentId);
+        if (comment && getEffectiveStatus(comment) === 'open') {
+          e.preventDefault();
+          handleResolve(activeCommentId);
+        }
+        return;
+      }
+
+      // U : Unresolve/reopen active comment (only when resolve enabled)
+      if (key === 'u' && activeCommentId && settings.enableResolve) {
+        const comment = comments.find((c) => c.id === activeCommentId);
+        if (comment && getEffectiveStatus(comment) === 'resolved') {
+          e.preventDefault();
+          handleUnresolve(activeCommentId);
+        }
+        return;
+      }
     };
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, viewMode, activeCommentId, comments, showCommandPalette, showSearch, handleSearchClose]);
+  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, settings.enableResolve, showCommandPalette, showSearch, handleSearchClose]);
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -958,16 +1048,31 @@ export default function App() {
       cmds.push({ id: 'view-diff', label: 'Toggle diff view', section: 'View', onExecute: () => setViewMode((m) => m === 'diff' ? 'rendered' : 'diff') });
     }
 
+    if (settings.enableResolve && commentCount > 0) {
+      cmds.push({ id: 'resolve-all', label: 'Resolve all open comments', section: 'Comments', onExecute: handleBulkResolve });
+    }
     if (commentCount > 0) {
       cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
     }
 
     if (activeCommentId) {
+      if (settings.enableResolve) {
+        const activeComment = comments.find((c) => c.id === activeCommentId);
+        if (activeComment) {
+          const status = getEffectiveStatus(activeComment);
+          if (status === 'open') {
+            cmds.push({ id: 'resolve-active', label: 'Resolve active comment', shortcut: 'A', section: 'Comments', onExecute: () => handleResolve(activeCommentId) });
+          }
+          if (status === 'resolved') {
+            cmds.push({ id: 'unresolve-active', label: 'Reopen active comment', shortcut: 'U', section: 'Comments', onExecute: () => handleUnresolve(activeCommentId) });
+          }
+        }
+      }
       cmds.push({ id: 'delete-active', label: 'Delete active comment', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
     }
 
     return cmds;
-  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, handleBulkDelete, activeCommentId, handleDelete, setTheme]);
+  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme]);
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -1074,6 +1179,7 @@ export default function App() {
                         selectionOffset={selection?.offset ?? null}
                         onHighlightClick={handleHighlightClick}
                         onContextMenu={handleViewerContextMenu}
+                        enableResolve={settings.enableResolve}
                         searchQuery={showSearch ? searchQuery : undefined}
                         searchActiveIndex={activeSearchIndex}
                         onSearchCount={handleSearchCount}
@@ -1125,10 +1231,14 @@ export default function App() {
                     activeCommentId={activeCommentId}
                     missingAnchors={missingAnchors}
                     onActivate={handleSidebarActivate}
+                    onResolve={handleResolve}
+                    onUnresolve={handleUnresolve}
                     onDelete={handleDelete}
                     onEdit={handleEdit}
                     onReply={handleReply}
                     onBulkDelete={handleBulkDelete}
+                    onBulkResolve={handleBulkResolve}
+                    onBulkDeleteResolved={handleBulkDeleteResolved}
                     onContextMenu={handleSidebarContextMenu}
                     requestEditId={requestEditId}
                     requestEditToken={requestEditToken}

@@ -57,7 +57,7 @@ You can also open a file via URL: `http://localhost:5173?file=/path/to/spec.md`
 - **Overlapping comments**: Multiple comments can reference overlapping text regions
 - **Anchor drag-resize**: Drag handles on active comment to expand/contract the highlighted region; Escape to cancel
 
-### Comment workflow
+### Comment workflow (default: agent mode)
 Comments serve as instructions to an AI agent:
 1. User adds comments highlighting text and providing feedback
 2. Agent reads the file, addresses the comments, and deletes the markers
@@ -66,11 +66,21 @@ Comments serve as instructions to an AI agent:
 
 Actions available on comments: Edit, Delete, Reply.
 
+### Resolve workflow (opt-in via Settings > Enable resolve workflow)
+For human-to-human review, enable the resolve workflow in settings. This adds:
+- **Resolve/Reopen** actions on each comment
+- **Status badges** (Open/Resolved) on comment cards
+- **Filter tabs** (All/Open/Resolved) in the sidebar
+- **Bulk resolve** and **Clear resolved** actions
+- **Keyboard shortcuts**: `A`/`X` to resolve, `U` to reopen
+- Resolved comments hide their highlights and appear dimmed
+- Tab badges and navigation skip resolved comments
+
 ### Comment sidebar
 - **Search**: Full-text search across comment text, anchors, authors, and replies
-- **Bulk delete**: "Delete All" removes all comments from the file
+- **Bulk delete**: "Delete All" removes all comments from the file (or "Resolve All" / "Clear Resolved" when resolve is enabled)
 - **Auto-scroll**: Sidebar scrolls to the active comment automatically
-- **Footer**: Shows total comment count
+- **Footer**: Shows total comment count (or open/resolved breakdown when resolve is enabled)
 
 ### Viewing modes
 - **Rendered view**: HTML-rendered markdown with comment highlights
@@ -122,6 +132,8 @@ All of the following are saved to localStorage and restored on reload:
 | `Cmd+\` | Toggle sidebar |
 | `N` / `J` | Jump to next comment |
 | `P` / `K` | Jump to previous comment |
+| `A` / `X` | Resolve active comment (when resolve enabled) |
+| `U` | Reopen active resolved comment (when resolve enabled) |
 | `Escape` | Cancel comment form / unlock selection / cancel drag |
 
 ### Toast notifications
@@ -132,7 +144,8 @@ All of the following are saved to localStorage and restored on reload:
 ## Key design decisions
 
 - Comments are stored in the markdown file itself (no sidecar files) so AI agents can read them with a simple file read
-- Comments are instructions to the agent — once addressed, the agent deletes the markers. The diff view is the review mechanism.
+- By default, comments are instructions to the agent — once addressed, the agent deletes the markers. The diff view is the review mechanism.
+- An optional "resolve workflow" setting enables resolve/reopen for human-to-human review scenarios
 - Comment markers are placed **before** their anchor text — the marker's physical position in the file IS the comment's position, enabling precise matching and overlapping comments
 - The `anchor` field stores the originally selected text for agent readability and as a fallback for re-matching
 - Context before/after the anchor is stored for fuzzy re-matching when anchor text is edited
@@ -168,6 +181,10 @@ Key functions in `src/lib/comment-parser.ts`:
 - `editComment(raw, id, newText)` — update comment text
 - `addReply(raw, id, text, author?)` — add threaded reply
 - `removeAllComments(raw)` — delete all comments
+- `resolveComment(raw, id)` — set status to `resolved` (when resolve enabled)
+- `unresolveComment(raw, id)` — set status back to `open` (when resolve enabled)
+- `resolveAllComments(raw)` — bulk resolve all open comments
+- `removeResolvedComments(raw)` — delete all resolved comments
 - `updateCommentAnchor(raw, id, newAnchor)` — change anchor text (drag-resize)
 - `detectMissingAnchors(cleanMarkdown, comments)` — returns Set of comment IDs whose anchor can't be found
 
