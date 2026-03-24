@@ -460,6 +460,7 @@ export default function App() {
       // Cmd+K : Open command palette (works even in inputs)
       if (mod && e.key === 'k') {
         e.preventDefault();
+        setShowFileOpener(false);
         setShowCommandPalette((prev) => !prev);
         return;
       }
@@ -467,6 +468,7 @@ export default function App() {
       // Cmd+O : Open file
       if (mod && e.key === 'o') {
         e.preventDefault();
+        setShowCommandPalette(false);
         setShowFileOpener((prev) => !prev);
         return;
       }
