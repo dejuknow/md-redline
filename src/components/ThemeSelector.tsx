@@ -25,7 +25,7 @@ export function ThemeSelector() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="text-content-muted hover:text-primary-text transition-colors p-1 rounded hover:bg-primary-bg"
+        className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-surface-inset"
         title="Switch theme"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
