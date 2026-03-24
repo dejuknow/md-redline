@@ -20,7 +20,7 @@ interface Props {
 }
 
 export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) {
-  const { settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, updateEnableResolve, resetTemplates } = useSettings();
+  const { settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, updateEnableResolve, updateQuickComment, resetTemplates } = useSettings();
   const { theme, setTheme } = useTheme();
   const [activeSection, setActiveSection] = useState<Section>('general');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -471,6 +471,32 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       <span
                         className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
                           settings.enableResolve ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </button>
+                  </label>
+                </div>
+
+                {/* Quick Comment */}
+                <div>
+                  <label className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Quick comment</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Open the comment form immediately when text is selected, skipping the "Comment" button.
+                      </p>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={settings.quickComment}
+                      onClick={() => updateQuickComment(!settings.quickComment)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                        settings.quickComment ? 'bg-primary' : 'bg-border'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                          settings.quickComment ? 'translate-x-[18px]' : 'translate-x-[3px]'
                         }`}
                       />
                     </button>
