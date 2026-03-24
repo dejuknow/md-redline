@@ -1045,6 +1045,7 @@ export default function App() {
                     <MarkdownViewer
                       ref={viewerRef}
                       html={html}
+                      cleanMarkdown={cleanMarkdown}
                       comments={comments}
                       activeCommentId={activeCommentId}
                       selectionText={selection?.text ?? null}

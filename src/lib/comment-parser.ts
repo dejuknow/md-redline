@@ -448,9 +448,10 @@ function findAllSegments(text: string, segments: string[]): { start: number; end
  * (# headings, - lists, 1. lists) to produce plain text that matches rendered output.
  * Returns a position map to convert plain-text offsets back to clean-markdown offsets.
  */
-function stripInlineFormatting(md: string): {
+export function stripInlineFormatting(md: string): {
   plain: string;
   toCleanOffset: (off: number) => number;
+  toPlainOffset: (cleanOff: number) => number;
 } {
   const map: number[] = [];
   let plain = '';
@@ -507,6 +508,19 @@ function stripInlineFormatting(md: string): {
   return {
     plain,
     toCleanOffset: (off: number) => (off >= map.length ? md.length : map[off]),
+    toPlainOffset: (cleanOff: number) => {
+      // Binary search: find the plain index whose map entry is closest to cleanOff
+      let lo = 0;
+      let hi = map.length - 1;
+      if (hi < 0) return 0;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (map[mid] < cleanOff) lo = mid + 1;
+        else hi = mid;
+      }
+      // lo is now the first plain index where map[lo] >= cleanOff
+      return lo;
+    },
   };
 }
 
