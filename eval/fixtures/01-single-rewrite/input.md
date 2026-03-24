@@ -8,7 +8,7 @@ The system should handle user authentication in a secure manner. It needs to sup
 
 1. User navigates to the login page
 2. User enters their email and password
-3. <!-- @comment{"id":"eval-01-c1","anchor":"System validates the input and responds appropriately","text":"Rewrite: this is too vague. Specify what validation occurs (format check, credential lookup, rate limiting) and what the success/failure responses are.","author":"PM","timestamp":"2026-03-20T10:00:00Z","resolved":false,"status":"open"} -->System validates the input and responds appropriately
+3. <!-- @comment{"id":"eval-01-c1","anchor":"System validates the input and responds appropriately","text":"Rewrite: this is too vague. Specify what validation occurs (format check, credential lookup, rate limiting) and what the success/failure responses are.","author":"PM","timestamp":"2026-03-20T10:00:00Z"} -->System validates the input and responds appropriately
 4. User is redirected to the dashboard
 
 ## Session Management

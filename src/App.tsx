@@ -15,7 +15,6 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import {
   useSessionPersistence,
   loadSession,
-  type FilterMode,
 } from './hooks/useSessionPersistence';
 import {
   parseComments,
@@ -23,11 +22,8 @@ import {
   removeComment,
   editComment,
   updateCommentAnchor,
-  resolveComment,
-  unresolveComment,
   addReply,
-  resolveAllComments,
-  removeResolvedComments,
+  removeAllComments,
   detectMissingAnchors,
 } from './lib/comment-parser';
 import { renderMarkdown } from './markdown/pipeline';
@@ -51,7 +47,6 @@ import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
 import { useTheme } from 'next-themes';
-import { getEffectiveStatus } from './types';
 
 // Load saved session for initial state
 const savedSession = loadSession();
@@ -90,9 +85,7 @@ export default function App() {
   // Session-persisted state: initialize from saved session
   const [viewMode, setViewMode] = useState<ViewMode>(savedSession?.viewMode ?? 'rendered');
   const [sidebarVisible, setSidebarVisible] = useState(savedSession?.sidebarVisible ?? true);
-  const [sidebarFilter, setSidebarFilter] = useState<FilterMode>(
-    savedSession?.sidebarFilter ?? 'all',
-  );
+  const sidebarFilter = 'all' as const;
 
   // Session persistence
   const { persist } = useSessionPersistence();
@@ -102,10 +95,9 @@ export default function App() {
       openTabs: tabs.map((t) => t.filePath),
       activeFilePath,
       sidebarVisible,
-      sidebarFilter,
       viewMode,
     });
-  }, [tabs, activeFilePath, sidebarVisible, sidebarFilter, viewMode, persist]);
+  }, [tabs, activeFilePath, sidebarVisible, viewMode, persist]);
 
   // Restore session tabs on first mount
   const sessionRestoredRef = useRef(false);
@@ -234,17 +226,11 @@ export default function App() {
     const counts = new Map<string, number>();
     for (const tab of tabs) {
       if (tab.filePath === activeFilePath) {
-        counts.set(
-          tab.filePath,
-          comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length,
-        );
+        counts.set(tab.filePath, comments.length);
       } else {
         try {
           const { comments: tabComments } = parseComments(tab.rawMarkdown);
-          counts.set(
-            tab.filePath,
-            tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length,
-          );
+          counts.set(tab.filePath, tabComments.length);
         } catch {
           counts.set(tab.filePath, 0);
         }
@@ -272,7 +258,7 @@ export default function App() {
     filePath: activeFilePath,
     onExternalChange: useCallback(
       (content: string) => {
-        // Feature 8: Detect comment status transitions before updating
+        // Detect comment changes before updating
         let cleanContentChanged = false;
         try {
           const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(rawMarkdownRef.current);
@@ -280,15 +266,13 @@ export default function App() {
           cleanContentChanged = oldClean !== newClean;
           const newById = new Map(newComments.map((c) => [c.id, c]));
 
-          let resolvedCount = 0;
+          let deletedCount = 0;
           let newReplyCount = 0;
           for (const oldC of oldComments) {
-            const oldStatus = getEffectiveStatus(oldC);
             const newC = newById.get(oldC.id);
-            if (!newC) continue;
-            const newStatus = getEffectiveStatus(newC);
-            if (oldStatus === 'open' && newStatus === 'resolved') {
-              resolvedCount++;
+            if (!newC) {
+              deletedCount++;
+              continue;
             }
             const oldReplies = oldC.replies?.length ?? 0;
             const newReplies = newC.replies?.length ?? 0;
@@ -297,9 +281,9 @@ export default function App() {
             }
           }
 
-          if (resolvedCount > 0) {
+          if (deletedCount > 0) {
             showToast(
-              `${resolvedCount} comment${resolvedCount > 1 ? 's' : ''} resolved externally`,
+              `${deletedCount} comment${deletedCount > 1 ? 's' : ''} addressed externally`,
             );
           } else if (newReplyCount > 0) {
             showToast(
@@ -415,20 +399,6 @@ export default function App() {
     [updateAndSave, clearSelection, author],
   );
 
-  const handleResolve = useCallback(
-    (id: string) => {
-      updateAndSave(resolveComment(rawMarkdownRef.current, id));
-    },
-    [updateAndSave],
-  );
-
-  const handleUnresolve = useCallback(
-    (id: string) => {
-      updateAndSave(unresolveComment(rawMarkdownRef.current, id));
-    },
-    [updateAndSave],
-  );
-
   const handleDelete = useCallback(
     (id: string) => {
       updateAndSave(removeComment(rawMarkdownRef.current, id));
@@ -451,12 +421,8 @@ export default function App() {
     [updateAndSave, author],
   );
 
-  const handleBulkResolve = useCallback(() => {
-    updateAndSave(resolveAllComments(rawMarkdownRef.current));
-  }, [updateAndSave]);
-
-  const handleBulkDeleteResolved = useCallback(() => {
-    updateAndSave(removeResolvedComments(rawMarkdownRef.current));
+  const handleBulkDelete = useCallback(() => {
+    updateAndSave(removeAllComments(rawMarkdownRef.current));
   }, [updateAndSave]);
 
   const handleHighlightClick = useCallback((commentId: string) => {
@@ -485,31 +451,29 @@ export default function App() {
     setSnapshots((prev) => new Map(prev).set(activeFilePath, rawMarkdownRef.current));
   }, [activeFilePath]);
 
-  // Jump to next open comment
+  // Jump to next comment
   const handleJumpToNext = useCallback(() => {
-    const unresolvedComments = comments.filter((c) => getEffectiveStatus(c) === 'open');
-    if (unresolvedComments.length === 0) return;
+    if (comments.length === 0) return;
 
     const currentIdx = activeCommentId
-      ? unresolvedComments.findIndex((c) => c.id === activeCommentId)
+      ? comments.findIndex((c) => c.id === activeCommentId)
       : -1;
-    const nextIdx = (currentIdx + 1) % unresolvedComments.length;
-    const next = unresolvedComments[nextIdx];
+    const nextIdx = (currentIdx + 1) % comments.length;
+    const next = comments[nextIdx];
     setActiveCommentId(next.id);
     viewerRef.current?.scrollToComment(next.id);
   }, [comments, activeCommentId]);
 
-  // Jump to previous open comment
+  // Jump to previous comment
   const handleJumpToPrev = useCallback(() => {
-    const unresolvedComments = comments.filter((c) => getEffectiveStatus(c) === 'open');
-    if (unresolvedComments.length === 0) return;
+    if (comments.length === 0) return;
 
     const currentIdx = activeCommentId
-      ? unresolvedComments.findIndex((c) => c.id === activeCommentId)
+      ? comments.findIndex((c) => c.id === activeCommentId)
       : -1;
     // When currentIdx is -1 (no active) or 0 (first), wrap to last
-    const prevIdx = currentIdx <= 0 ? unresolvedComments.length - 1 : currentIdx - 1;
-    const prev = unresolvedComments[prevIdx];
+    const prevIdx = currentIdx <= 0 ? comments.length - 1 : currentIdx - 1;
+    const prev = comments[prevIdx];
     setActiveCommentId(prev.id);
     viewerRef.current?.scrollToComment(prev.id);
   }, [comments, activeCommentId]);
@@ -522,7 +486,7 @@ export default function App() {
     onAnchorChange: handleAnchorChange,
   });
 
-  const openCommentCount = comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length;
+  const commentCount = comments.length;
 
   // Stable ref for selection to use in keyboard handler without re-creating it
   const selectionRef = useRef(selection);
@@ -542,7 +506,6 @@ export default function App() {
         const comment = comments.find((c) => c.id === commentId);
         if (!comment) return;
 
-        const status = getEffectiveStatus(comment);
         const items: ContextMenuEntry[] = [
           {
             label: 'Edit',
@@ -561,15 +524,6 @@ export default function App() {
             },
           },
           { type: 'divider' as const },
-          status === 'resolved'
-            ? {
-                label: 'Reopen',
-                onClick: () => handleUnresolve(commentId),
-              }
-            : {
-                label: 'Resolve',
-                onClick: () => handleResolve(commentId),
-              },
           {
             label: 'Delete',
             danger: true,
@@ -632,7 +586,7 @@ export default function App() {
         viewerCtxMenu.open(info.x, info.y);
       }
     },
-    [comments, handleResolve, handleUnresolve, handleDelete, handleAddComment, lockSelection, triggerEdit, triggerReply, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [comments, handleDelete, handleAddComment, lockSelection, triggerEdit, triggerReply, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
   );
 
   const handleExplorerContextMenu = useCallback(
@@ -769,17 +723,7 @@ export default function App() {
       const comment = comments.find((c) => c.id === info.commentId);
       if (!comment) return;
 
-      const status = getEffectiveStatus(comment);
       const items: ContextMenuEntry[] = [
-        status === 'resolved'
-          ? {
-              label: 'Reopen',
-              onClick: () => handleUnresolve(info.commentId),
-            }
-          : {
-              label: 'Resolve',
-              onClick: () => handleResolve(info.commentId),
-            },
         {
           label: 'Delete',
           danger: true,
@@ -806,7 +750,7 @@ export default function App() {
       setSidebarCtxMenuItems(items);
       sidebarCtxMenu.open(info.x, info.y);
     },
-    [comments, handleResolve, handleUnresolve, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [comments, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
   );
 
   // --- Text search callbacks ---
@@ -980,40 +924,11 @@ export default function App() {
         return;
       }
 
-      // A : Address/resolve active comment
-      if (key === 'a' && activeCommentId) {
-        const comment = comments.find((c) => c.id === activeCommentId);
-        if (comment && getEffectiveStatus(comment) === 'open') {
-          e.preventDefault();
-          handleResolve(activeCommentId);
-        }
-        return;
-      }
-
-      // X : Accept/resolve active comment (same as A for this status model)
-      if (key === 'x' && activeCommentId) {
-        const comment = comments.find((c) => c.id === activeCommentId);
-        if (comment && getEffectiveStatus(comment) === 'open') {
-          e.preventDefault();
-          handleResolve(activeCommentId);
-        }
-        return;
-      }
-
-      // U : Unresolve/reopen active comment
-      if (key === 'u' && activeCommentId) {
-        const comment = comments.find((c) => c.id === activeCommentId);
-        if (comment && getEffectiveStatus(comment) === 'resolved') {
-          e.preventDefault();
-          handleUnresolve(activeCommentId);
-        }
-        return;
-      }
     };
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, showCommandPalette, showSearch, handleSearchClose]);
+  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, viewMode, activeCommentId, comments, showCommandPalette, showSearch, handleSearchClose]);
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -1043,26 +958,16 @@ export default function App() {
       cmds.push({ id: 'view-diff', label: 'Toggle diff view', section: 'View', onExecute: () => setViewMode((m) => m === 'diff' ? 'rendered' : 'diff') });
     }
 
-    if (openCommentCount > 0) {
-      cmds.push({ id: 'resolve-all', label: 'Resolve all open comments', section: 'Comments', onExecute: handleBulkResolve });
+    if (commentCount > 0) {
+      cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
     }
 
     if (activeCommentId) {
-      const activeComment = comments.find((c) => c.id === activeCommentId);
-      if (activeComment) {
-        const status = getEffectiveStatus(activeComment);
-        if (status === 'open') {
-          cmds.push({ id: 'resolve-active', label: 'Resolve active comment', shortcut: 'A', section: 'Comments', onExecute: () => handleResolve(activeCommentId) });
-        }
-        if (status === 'resolved') {
-          cmds.push({ id: 'unresolve-active', label: 'Reopen active comment', shortcut: 'U', section: 'Comments', onExecute: () => handleUnresolve(activeCommentId) });
-        }
-        cmds.push({ id: 'delete-active', label: 'Delete active comment', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
-      }
+      cmds.push({ id: 'delete-active', label: 'Delete active comment', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
     }
 
     return cmds;
-  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, openCommentCount, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme]);
+  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, handleBulkDelete, activeCommentId, handleDelete, setTheme]);
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -1095,7 +1000,7 @@ export default function App() {
         hasSnapshot={currentSnapshot !== null}
         hasExternalChange={hasExternalChange}
         showReviewSummary={showReviewSummary}
-        commentCount={openCommentCount}
+        commentCount={commentCount}
         onViewModeChange={(mode) => {
           setViewMode(mode);
           if (mode === 'raw') clearSelection();
@@ -1219,16 +1124,11 @@ export default function App() {
                     comments={comments}
                     activeCommentId={activeCommentId}
                     missingAnchors={missingAnchors}
-                    filter={sidebarFilter}
-                    onFilterChange={setSidebarFilter}
                     onActivate={handleSidebarActivate}
-                    onResolve={handleResolve}
-                    onUnresolve={handleUnresolve}
                     onDelete={handleDelete}
                     onEdit={handleEdit}
                     onReply={handleReply}
-                    onBulkResolve={handleBulkResolve}
-                    onBulkDeleteResolved={handleBulkDeleteResolved}
+                    onBulkDelete={handleBulkDelete}
                     onContextMenu={handleSidebarContextMenu}
                     requestEditId={requestEditId}
                     requestEditToken={requestEditToken}

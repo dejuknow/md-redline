@@ -3,18 +3,13 @@ import {
   parseComments,
   insertComment,
   removeComment,
-  resolveComment,
-  unresolveComment,
   editComment,
   updateCommentAnchor,
   addReply,
-  resolveAllComments,
-  removeResolvedComments,
   serializeComment,
   detectMissingAnchors,
 } from './comment-parser';
-import { getEffectiveStatus } from '../types';
-import type { MdComment, CommentStatus } from '../types';
+import type { MdComment } from '../types';
 
 // Helper to make a comment marker
 function marker(overrides: Partial<MdComment> = {}): string {
@@ -24,8 +19,6 @@ function marker(overrides: Partial<MdComment> = {}): string {
     text: overrides.text ?? 'my comment',
     author: overrides.author ?? 'User',
     timestamp: overrides.timestamp ?? '2024-01-01T00:00:00.000Z',
-    resolved: overrides.resolved ?? false,
-    status: overrides.status ?? 'open',
     replies: overrides.replies,
     ...overrides,
   };
@@ -94,8 +87,6 @@ describe('parseComments', () => {
       text: 'line one\nline two',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
     };
     const m = serializeComment(comment);
     const raw = `${m}hello world`;
@@ -225,24 +216,6 @@ describe('removeComment', () => {
   });
 });
 
-describe('resolveComment / unresolveComment', () => {
-  it('resolves a comment', () => {
-    const raw = `${marker({ id: 'r1', resolved: false, status: 'open' })}hello`;
-    const result = resolveComment(raw, 'r1');
-    const parsed = parseComments(result);
-    expect(parsed.comments[0].resolved).toBe(true);
-    expect(parsed.comments[0].status).toBe('resolved');
-  });
-
-  it('unresolves a comment', () => {
-    const raw = `${marker({ id: 'r1', resolved: true, status: 'resolved' })}hello`;
-    const result = unresolveComment(raw, 'r1');
-    const parsed = parseComments(result);
-    expect(parsed.comments[0].resolved).toBe(false);
-    expect(parsed.comments[0].status).toBe('open');
-  });
-});
-
 describe('editComment', () => {
   it('updates the comment text', () => {
     const raw = `${marker({ id: 'e1', text: 'old text' })}hello`;
@@ -288,38 +261,6 @@ describe('addReply', () => {
   });
 });
 
-describe('resolveAllComments', () => {
-  it('resolves all open comments', () => {
-    const raw = `${marker({ id: 'a', resolved: false, status: 'open' })}hello ${marker({ id: 'b', resolved: false, status: 'open' })}world`;
-    const result = resolveAllComments(raw);
-    const parsed = parseComments(result);
-    expect(parsed.comments.every((c) => c.resolved)).toBe(true);
-    expect(parsed.comments.every((c) => c.status === 'resolved')).toBe(true);
-  });
-
-  it('leaves already resolved comments unchanged', () => {
-    const raw = `${marker({ id: 'a', resolved: true, status: 'resolved' })}hello`;
-    const result = resolveAllComments(raw);
-    expect(result).toBe(raw); // no change
-  });
-});
-
-describe('removeResolvedComments', () => {
-  it('removes all resolved comments', () => {
-    const raw = `${marker({ id: 'a', resolved: true })}hello ${marker({ id: 'b', resolved: false })}world`;
-    const result = removeResolvedComments(raw);
-    const parsed = parseComments(result);
-    expect(parsed.comments).toHaveLength(1);
-    expect(parsed.comments[0].id).toBe('b');
-  });
-
-  it('leaves unresolved comments intact', () => {
-    const raw = `${marker({ id: 'a', resolved: false })}hello`;
-    const result = removeResolvedComments(raw);
-    expect(result).toBe(raw);
-  });
-});
-
 describe('serializeComment', () => {
   it('produces a valid comment marker', () => {
     const comment: MdComment = {
@@ -328,8 +269,6 @@ describe('serializeComment', () => {
       text: 'a comment',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
     };
     const result = serializeComment(comment);
     expect(result).toMatch(/^<!-- @comment\{.*\} -->$/);
@@ -344,8 +283,6 @@ describe('serializeComment', () => {
       text: 'comment',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       cleanOffset: 42,
     };
     const result = serializeComment(comment);
@@ -391,26 +328,6 @@ describe('edge cases', () => {
     const reparsed = parseComments(rebuilt);
     expect(reparsed.comments).toHaveLength(2);
     expect(reparsed.cleanMarkdown).toBe(cleanMarkdown);
-  });
-});
-
-describe('getEffectiveStatus', () => {
-  it('returns explicit status when present', () => {
-    expect(getEffectiveStatus({ status: 'resolved' } as MdComment)).toBe('resolved');
-    expect(getEffectiveStatus({ status: 'open' } as MdComment)).toBe('open');
-  });
-
-  it('maps legacy statuses to simplified ones', () => {
-    expect(getEffectiveStatus({ status: 'accepted' } as unknown as MdComment)).toBe('resolved');
-  });
-
-  it('falls back to resolved boolean when status is missing (legacy)', () => {
-    expect(getEffectiveStatus({ resolved: true } as MdComment)).toBe('resolved');
-    expect(getEffectiveStatus({ resolved: false } as MdComment)).toBe('open');
-  });
-
-  it('falls back to open when both status and resolved are falsy', () => {
-    expect(getEffectiveStatus({} as MdComment)).toBe('open');
   });
 });
 
@@ -483,15 +400,6 @@ describe('detectMissingAnchors', () => {
   it('does not flag anchor when words appear contiguously with extra whitespace', () => {
     const clean = 'API  design\n\tguidelines';
     const comments = [{ id: 'a', anchor: 'API design guidelines' }] as MdComment[];
-    const missing = detectMissingAnchors(clean, comments);
-    expect(missing.has('a')).toBe(false);
-  });
-
-  it('skips accepted comments', () => {
-    const clean = 'Hello world';
-    const comments = [
-      { id: 'a', anchor: 'deleted text', status: 'accepted' as CommentStatus, resolved: true },
-    ] as unknown as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -590,8 +498,6 @@ describe('fuzzy re-matching', () => {
       text: 'rewrite this',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextBefore: 'before the ',
       contextAfter: ' and after',
     };
@@ -613,8 +519,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextBefore: 'before ',
       contextAfter: ' after',
     };
@@ -634,8 +538,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
     };
     const raw = `completely different content ${serializeComment(comment)}here now.`;
     const parsed = parseComments(raw);
@@ -651,8 +553,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextBefore: 'nonexistent before',
       contextAfter: 'nonexistent after',
     };
@@ -670,8 +570,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextBefore: 'the beginning of ',
     };
     const raw = `the beginning of ${serializeComment(comment)}new text here.`;
@@ -687,8 +585,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextAfter: ' and the rest follows',
     };
     const raw = `prefix text ${serializeComment(comment)}changed text and the rest follows here.`;
@@ -709,8 +605,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextBefore: 'context before ',
       contextAfter: ' context after',
     };
@@ -727,8 +621,6 @@ describe('fuzzy re-matching', () => {
       text: 'note',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       contextBefore: 'before',
       contextAfter: 'after',
     };
@@ -779,8 +671,6 @@ describe('comments with nested JSON', () => {
       text: 'use {} syntax',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       replies: [
         { id: 'r1', text: 'try {value: true}', author: 'Bob', timestamp: '2024-01-01T00:00:00.000Z' },
       ],
@@ -800,8 +690,6 @@ describe('comments with nested JSON', () => {
       text: 'comment',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
       replies: [
         { id: 'r1', text: 'first reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
         { id: 'r2', text: 'second reply', author: 'B', timestamp: '2024-01-02T00:00:00.000Z' },
@@ -933,8 +821,6 @@ describe('comment text containing -->', () => {
       text: 'has --> in it',
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
-      resolved: false,
-      status: 'open',
     };
     const serialized = serializeComment(comment);
     expect(serialized).not.toContain('"has -->');

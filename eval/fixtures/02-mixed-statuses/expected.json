@@ -1,7 +1,6 @@
 {
-  "totalComments": 3,
+  "totalComments": 1,
   "actionableComments": 1,
-  "skipComments": 2,
   "comments": [
     {
       "id": "eval-02-c1",
@@ -10,14 +9,6 @@
         "shouldContain": ["request"],
         "shouldNotContain": ["All endpoints are protected."]
       }
-    },
-    {
-      "id": "eval-02-c2",
-      "expectedAction": "skip"
-    },
-    {
-      "id": "eval-02-c3",
-      "expectedAction": "skip"
     }
   ],
   "contentShouldChange": true,

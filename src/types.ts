@@ -1,5 +1,3 @@
-export type CommentStatus = 'open' | 'resolved';
-
 export interface CommentReply {
   id: string;
   text: string;
@@ -13,22 +11,12 @@ export interface MdComment {
   text: string;
   author: string;
   timestamp: string;
-  resolved: boolean;
-  status?: CommentStatus;
   replies?: CommentReply[];
   /** Surrounding context stored at comment creation time for fuzzy re-matching when anchor text is edited. */
   contextBefore?: string;
   contextAfter?: string;
   /** Character offset of the anchor's start position in the clean markdown. Computed at parse time, not stored in the file. */
   cleanOffset?: number;
-}
-
-export function getEffectiveStatus(comment: MdComment): CommentStatus {
-  // Cast to string to handle legacy status values (e.g. 'accepted') from old comment markers
-  const status = comment.status as string | undefined;
-  if (status === 'open' || status === 'resolved') return status;
-  if (status === 'accepted' || comment.resolved) return 'resolved';
-  return 'open';
 }
 
 export interface ParseResult {

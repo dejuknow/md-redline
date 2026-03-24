@@ -17,7 +17,7 @@
 
 ## Internal Notes
 
-<!-- @comment{"id":"eval-06-c1","anchor":"This section contains draft ideas that are not yet approved. We discussed possibly adding a billing revamp but leadership hasn't signed off. Also, Jake mentioned something about migrating to a new CI provider but that's TBD.","text":"Remove this section — internal notes should not be in the published spec.","author":"PM","timestamp":"2026-03-20T16:00:00Z","resolved":false,"status":"open"} -->This section contains draft ideas that are not yet approved. We discussed possibly adding a billing revamp but leadership hasn't signed off. Also, Jake mentioned something about migrating to a new CI provider but that's TBD.
+<!-- @comment{"id":"eval-06-c1","anchor":"This section contains draft ideas that are not yet approved. We discussed possibly adding a billing revamp but leadership hasn't signed off. Also, Jake mentioned something about migrating to a new CI provider but that's TBD.","text":"Remove this section — internal notes should not be in the published spec.","author":"PM","timestamp":"2026-03-20T16:00:00Z"} -->This section contains draft ideas that are not yet approved. We discussed possibly adding a billing revamp but leadership hasn't signed off. Also, Jake mentioned something about migrating to a new CI provider but that's TBD.
 
 ## Success Metrics
 

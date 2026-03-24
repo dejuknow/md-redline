@@ -89,11 +89,6 @@ async function clickCardAction(page: Page, commentText: string, actionName: stri
   await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
-/** Get the status badge text on a comment card */
-function getStatusBadge(page: Page, commentText: string) {
-  return getCard(page, commentText).locator('span.rounded-full');
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -120,9 +115,6 @@ test.describe('Adding comments', () => {
   test('select text and add a comment via the floating form', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'This needs more detail about what valid means.');
-
-    // Status badge should show "Open"
-    await expect(getStatusBadge(page, 'This needs more detail')).toHaveText('Open');
   });
 
   test('comment is persisted to the markdown file', async ({ page }) => {
@@ -154,28 +146,6 @@ test.describe('Adding comments', () => {
 });
 
 test.describe('Comment lifecycle', () => {
-  test('address and accept a comment', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Needs clarification');
-
-    await clickCardAction(page, 'Needs clarification', 'Address');
-    await expect(getStatusBadge(page, 'Needs clarification')).toHaveText('Addressed');
-
-    await clickCardAction(page, 'Needs clarification', 'Accept');
-    await expect(getStatusBadge(page, 'Needs clarification')).toHaveText('Accepted');
-  });
-
-  test('resolve then reopen a comment', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'email and password login', 'Consider OAuth too');
-
-    await clickCardAction(page, 'Consider OAuth too', 'Resolve');
-    await expect(getStatusBadge(page, 'Consider OAuth too')).toHaveText('Accepted');
-
-    await clickCardAction(page, 'Consider OAuth too', 'Reopen');
-    await expect(getStatusBadge(page, 'Consider OAuth too')).toHaveText('Open');
-  });
-
   test('delete a comment', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
@@ -224,35 +194,6 @@ test.describe('Comment editing and replies', () => {
 });
 
 test.describe('Sidebar filtering', () => {
-  test('filter tabs show correct counts and filter comments', async ({ page }) => {
-    await openFixture(page);
-
-    await addComment(page, 'valid credentials', 'Comment Alpha');
-    await addComment(page, 'brute force attacks', 'Comment Beta');
-
-    // Resolve Comment Alpha
-    await clickCardAction(page, 'Comment Alpha', 'Resolve');
-    await expect(getStatusBadge(page, 'Comment Alpha')).toHaveText('Accepted');
-
-    // The sidebar filter tabs — scoped to the filter bar area
-    const filterBar = page.locator('.px-3.pt-3.pb-1');
-    const openTab = filterBar.getByRole('button', { name: /Open/ });
-    const acceptedTab = filterBar.getByRole('button', { name: /Accepted/ });
-
-    await expect(openTab).toContainText('1');
-    await expect(acceptedTab).toContainText('1');
-
-    // Click "Open" — only Comment Beta visible
-    await openTab.click();
-    await expect(page.getByText('Comment Beta')).toBeVisible();
-    await expect(getCard(page, 'Comment Alpha')).not.toBeVisible();
-
-    // Click "Accepted" — only Comment Alpha visible
-    await acceptedTab.click();
-    await expect(page.getByText('Comment Alpha')).toBeVisible();
-    await expect(getCard(page, 'Comment Beta')).not.toBeVisible();
-  });
-
   test('search filters comments by text', async ({ page }) => {
     await openFixture(page);
 
@@ -263,28 +204,6 @@ test.describe('Sidebar filtering', () => {
 
     await expect(page.getByText('Improve rate limiting')).toBeVisible();
     await expect(getCard(page, 'Fix authentication flow')).not.toBeVisible();
-  });
-});
-
-test.describe('Bulk actions', () => {
-  test('Resolve All and Clear Accepted', async ({ page }) => {
-    await openFixture(page);
-
-    await addComment(page, 'valid credentials', 'Bulk comment 1');
-    await addComment(page, 'hashed with bcrypt', 'Bulk comment 2');
-
-    // Click "Resolve All"
-    await page.getByRole('button', { name: 'Resolve All' }).click();
-
-    // Both cards should show "Accepted" status
-    await expect(getStatusBadge(page, 'Bulk comment 1')).toHaveText('Accepted');
-    await expect(getStatusBadge(page, 'Bulk comment 2')).toHaveText('Accepted');
-
-    // Click "Clear Accepted"
-    await page.getByRole('button', { name: 'Clear Accepted' }).click();
-
-    // Sidebar should show empty state
-    await expect(page.getByText('No comments yet')).toBeVisible();
   });
 });
 
@@ -301,7 +220,7 @@ test.describe('View modes', () => {
 });
 
 test.describe('Keyboard navigation', () => {
-  test('N and P keys cycle through unresolved comments', async ({ page }) => {
+  test('N and P keys cycle through comments', async ({ page }) => {
     await openFixture(page);
 
     await addComment(page, 'valid credentials', 'First comment');
