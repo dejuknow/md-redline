@@ -243,6 +243,65 @@ test.describe('Keyboard navigation', () => {
   });
 });
 
+test.describe('Comment form click-outside dismiss', () => {
+  test('clicking outside dismisses expanded form when text is empty', async ({ page }) => {
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+
+    // Expand the comment form
+    const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
+    await expect(commentBtn).toBeVisible({ timeout: 5000 });
+    await commentBtn.click();
+
+    // Form should be expanded (textarea visible)
+    const textarea = page.getByPlaceholder('Add your comment...');
+    await expect(textarea).toBeVisible();
+
+    // Click outside the form on the sidebar heading (not prose, not form)
+    await page.locator('h2', { hasText: 'Comments' }).click({ force: true });
+
+    // Form should be dismissed
+    await expect(textarea).not.toBeVisible();
+  });
+
+  test('clicking in prose area dismisses expanded form when text is empty', async ({ page }) => {
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+
+    const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
+    await expect(commentBtn).toBeVisible({ timeout: 5000 });
+    await commentBtn.click();
+
+    const textarea = page.getByPlaceholder('Add your comment...');
+    await expect(textarea).toBeVisible();
+
+    // Click in the prose/markdown viewer area (outside the form)
+    await page.locator('.prose h2').first().click({ force: true });
+
+    // Form should be dismissed — this is the key regression test
+    await expect(textarea).not.toBeVisible({ timeout: 3000 });
+  });
+
+  test('clicking outside does NOT dismiss when form has text', async ({ page }) => {
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+
+    const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
+    await expect(commentBtn).toBeVisible({ timeout: 5000 });
+    await commentBtn.click();
+
+    const textarea = page.getByPlaceholder('Add your comment...');
+    await expect(textarea).toBeVisible();
+    await textarea.fill('Some draft text');
+
+    // Click outside the form on the sidebar heading
+    await page.locator('h2', { hasText: 'Comments' }).click({ force: true });
+
+    // Form should still be visible because it has text
+    await expect(textarea).toBeVisible();
+  });
+});
+
 test.describe('Sidebar toggle', () => {
   test('Cmd+\\ toggles sidebar visibility', async ({ page }) => {
     await openFixture(page);
