@@ -341,6 +341,52 @@ app.get('/api/watch', async (c) => {
   });
 });
 
+app.get('/api/platform', (c) => {
+  return c.json({ platform: platform() });
+});
+
+app.post('/api/reveal', async (c) => {
+  let body: { path: string };
+  try {
+    body = await c.req.json<{ path: string }>();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+  if (!body.path) return c.json({ error: 'path is required' }, 400);
+
+  try {
+    const resolved = await resolveAndValidate(body.path);
+    const os = platform();
+    await new Promise<void>((promiseResolve, reject) => {
+      if (os === 'darwin') {
+        execFile('open', ['-R', resolved], (err) => {
+          if (err) return reject(err);
+          promiseResolve();
+        });
+      } else if (os === 'linux') {
+        execFile('xdg-open', [dirname(resolved)], (err) => {
+          if (err) return reject(err);
+          promiseResolve();
+        });
+      } else if (os === 'win32') {
+        execFile('explorer', ['/select,', resolved], (err) => {
+          if (err) return reject(err);
+          promiseResolve();
+        });
+      } else {
+        reject(new Error('Unsupported platform'));
+      }
+    });
+    return c.json({ success: true });
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Access denied')) {
+      return c.json({ error: err.message }, 403);
+    }
+    console.error('POST /api/reveal failed:', err);
+    return c.json({ error: 'Failed to reveal file' }, 500);
+  }
+});
+
 const port = 3001;
 serve({ fetch: app.fetch, port }, () => {
   console.log(`md-review server running on http://localhost:${port}`);

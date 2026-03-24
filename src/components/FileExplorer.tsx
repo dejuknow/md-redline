@@ -7,14 +7,23 @@ interface BrowseResult {
   files: { name: string; path: string }[];
 }
 
+export interface ExplorerContextMenuInfo {
+  type: 'file' | 'directory' | 'blank';
+  path: string;
+  name: string;
+  x: number;
+  y: number;
+}
+
 interface Props {
   initialDir?: string;
   activeFilePath: string | null;
   onOpenFile: (path: string) => void;
   onClose: () => void;
+  onContextMenu?: (info: ExplorerContextMenuInfo) => void;
 }
 
-export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose }: Props) {
+export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, onContextMenu: onCtxMenu }: Props) {
   const [data, setData] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,12 +106,27 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose }
 
       {/* File listing */}
       {data && (
-        <div className="flex-1 overflow-y-auto py-1">
+        <div
+          className="flex-1 overflow-y-auto py-1"
+          onContextMenu={(e) => {
+            // Fire on blank space — skip if a file/dir button already handled it
+            if (!onCtxMenu || !data) return;
+            // If the target is inside a button (file/dir item), let that handler take over
+            if ((e.target as HTMLElement).closest('button')) return;
+            e.preventDefault();
+            onCtxMenu({ type: 'blank', path: data.dir, name: data.dir.split('/').pop() || data.dir, x: e.clientX, y: e.clientY });
+          }}
+        >
           {/* Directories */}
           {data.directories.map((dir) => (
             <button
               key={dir.path}
               onClick={() => browse(dir.path)}
+              onContextMenu={(e) => {
+                if (!onCtxMenu) return;
+                e.preventDefault();
+                onCtxMenu({ type: 'directory', path: dir.path, name: dir.name, x: e.clientX, y: e.clientY });
+              }}
               className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-inset transition-colors"
             >
               <svg
@@ -129,6 +153,11 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose }
               <button
                 key={file.path}
                 onClick={() => onOpenFile(file.path)}
+                onContextMenu={(e) => {
+                  if (!onCtxMenu) return;
+                  e.preventDefault();
+                  onCtxMenu({ type: 'file', path: file.path, name: file.name, x: e.clientX, y: e.clientY });
+                }}
                 className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                   isActive
                     ? 'bg-primary-bg text-primary-text font-medium'

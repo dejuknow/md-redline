@@ -31,20 +31,22 @@ import {
   detectMissingAnchors,
 } from './lib/comment-parser';
 import { renderMarkdown } from './markdown/pipeline';
-import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
-import { CommentSidebar } from './components/CommentSidebar';
+import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo } from './components/MarkdownViewer';
+import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
 import { CommentForm, TEMPLATES } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
-import { TabBar } from './components/TabBar';
-import { FileExplorer } from './components/FileExplorer';
+import { TabBar, type TabContextMenuInfo } from './components/TabBar';
+import { FileExplorer, type ExplorerContextMenuInfo } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { DiffViewer } from './components/DiffViewer';
 import { Toast } from './components/Toast';
 import { ReviewSummary } from './components/ReviewSummary';
 import { CommandPalette, type Command } from './components/CommandPalette';
+import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
 import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
+import { useContextMenu } from './hooks/useContextMenu';
 import { getEffectiveStatus } from './types';
 
 // Load saved session for initial state
@@ -60,7 +62,11 @@ export default function App() {
     error,
     lastSaved,
     openTab,
+    openTabInBackground,
     closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
     switchTab,
     saveFile,
     reloadFile,
@@ -140,6 +146,42 @@ export default function App() {
   // Command palette & file opener state
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showFileOpener, setShowFileOpener] = useState(false);
+
+  // Platform info for context menu labels
+  const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
+  useEffect(() => {
+    fetch('/api/platform').then(r => r.json()).then(({ platform }) => {
+      if (platform === 'darwin') setRevealLabel('Reveal in Finder');
+      else if (platform === 'win32') setRevealLabel('Show in Explorer');
+      else setRevealLabel('Show in File Manager');
+    }).catch(() => {});
+  }, []);
+
+  // Context menu state
+  const viewerCtxMenu = useContextMenu();
+  const explorerCtxMenu = useContextMenu();
+  const tabCtxMenu = useContextMenu();
+  const sidebarCtxMenu = useContextMenu();
+  const [ctxMenuItems, setCtxMenuItems] = useState<ContextMenuEntry[]>([]);
+  const [explorerCtxMenuItems, setExplorerCtxMenuItems] = useState<ContextMenuEntry[]>([]);
+  const [tabCtxMenuItems, setTabCtxMenuItems] = useState<ContextMenuEntry[]>([]);
+  const [sidebarCtxMenuItems, setSidebarCtxMenuItems] = useState<ContextMenuEntry[]>([]);
+
+  // Triggers for remotely entering edit/reply mode on a CommentCard
+  const [requestEditId, setRequestEditId] = useState<string | null>(null);
+  const [requestEditToken, setRequestEditToken] = useState(0);
+  const [requestReplyId, setRequestReplyId] = useState<string | null>(null);
+  const [requestReplyToken, setRequestReplyToken] = useState(0);
+
+  const triggerEdit = useCallback((commentId: string) => {
+    setRequestEditId(commentId);
+    setRequestEditToken(Date.now());
+  }, []);
+
+  const triggerReply = useCallback((commentId: string) => {
+    setRequestReplyId(commentId);
+    setRequestReplyToken(Date.now());
+  }, []);
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -301,6 +343,14 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
+  const revealInFinder = useCallback((path: string) => {
+    fetch('/api/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }).catch(() => {});
+  }, []);
+
   const handleExplorerOpenFile = useCallback(
     (path: string) => {
       openTab(path.trim());
@@ -448,6 +498,287 @@ export default function App() {
   // Stable ref for selection to use in keyboard handler without re-creating it
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+
+  // --- Context menu handlers ---
+  const handleViewerContextMenu = useCallback(
+    (info: ViewerContextMenuInfo) => {
+      // Close other context menus if open
+      explorerCtxMenu.close();
+      tabCtxMenu.close();
+      sidebarCtxMenu.close();
+
+      if (info.type === 'highlight' && info.commentIds?.length) {
+        // Right-clicked on a comment highlight
+        const commentId = info.commentIds[0];
+        const comment = comments.find((c) => c.id === commentId);
+        if (!comment) return;
+
+        const status = getEffectiveStatus(comment);
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Edit',
+            onClick: () => {
+              setActiveCommentId(commentId);
+              setSidebarVisible(true);
+              triggerEdit(commentId);
+            },
+          },
+          {
+            label: 'Reply',
+            onClick: () => {
+              setActiveCommentId(commentId);
+              setSidebarVisible(true);
+              triggerReply(commentId);
+            },
+          },
+          { type: 'divider' as const },
+          status === 'resolved'
+            ? {
+                label: 'Reopen',
+                onClick: () => handleUnresolve(commentId),
+              }
+            : {
+                label: 'Resolve',
+                onClick: () => handleResolve(commentId),
+              },
+          {
+            label: 'Delete',
+            danger: true,
+            onClick: () => handleDelete(commentId),
+          },
+          { type: 'divider' as const },
+          {
+            label: 'Copy Anchor Text',
+            onClick: () => navigator.clipboard.writeText(comment.anchor),
+          },
+          {
+            label: 'Copy Comment Text',
+            onClick: () => navigator.clipboard.writeText(comment.text),
+          },
+          {
+            label: 'Jump to Sidebar',
+            onClick: () => {
+              setActiveCommentId(commentId);
+              setSidebarVisible(true);
+            },
+          },
+        ];
+
+        setCtxMenuItems(items);
+        viewerCtxMenu.open(info.x, info.y);
+      } else if (info.type === 'selection') {
+        // Right-clicked on selected text
+        const sel = selectionRef.current;
+        if (!sel) return;
+
+        const templateItems: ContextMenuItem[] = TEMPLATES.map((t) => ({
+          label: t.label,
+          onClick: () => {
+            handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter);
+          },
+        }));
+
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Comment',
+            onClick: () => {
+              lockSelection();
+              setAutoExpandForm(true);
+            },
+          },
+          {
+            label: 'Templates',
+            items: templateItems,
+          },
+          { type: 'divider' as const },
+          {
+            label: 'Copy',
+            onClick: () => {
+              navigator.clipboard.writeText(sel.text);
+            },
+          },
+        ];
+
+        setCtxMenuItems(items);
+        viewerCtxMenu.open(info.x, info.y);
+      }
+    },
+    [comments, handleResolve, handleUnresolve, handleDelete, handleAddComment, lockSelection, triggerEdit, triggerReply, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+  );
+
+  const handleExplorerContextMenu = useCallback(
+    (info: ExplorerContextMenuInfo) => {
+      viewerCtxMenu.close();
+      tabCtxMenu.close();
+      sidebarCtxMenu.close();
+
+      if (info.type === 'file') {
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Open',
+            onClick: () => handleExplorerOpenFile(info.path),
+          },
+          {
+            label: 'Open in Background Tab',
+            onClick: () => {
+              openTabInBackground(info.path);
+              addRecentFile(info.path);
+            },
+          },
+          { type: 'divider' as const },
+          {
+            label: revealLabel,
+            onClick: () => revealInFinder(info.path),
+          },
+          {
+            label: 'Copy Path',
+            onClick: () => navigator.clipboard.writeText(info.path),
+          },
+          {
+            label: 'Copy File Name',
+            onClick: () => navigator.clipboard.writeText(info.name),
+          },
+        ];
+        setExplorerCtxMenuItems(items);
+        explorerCtxMenu.open(info.x, info.y);
+      } else if (info.type === 'directory') {
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Open in Explorer',
+            onClick: () => {
+              setExplorerDir(info.path);
+              setExplorerVisible(true);
+            },
+          },
+          { type: 'divider' as const },
+          {
+            label: revealLabel,
+            onClick: () => revealInFinder(info.path),
+          },
+          {
+            label: 'Copy Path',
+            onClick: () => navigator.clipboard.writeText(info.path),
+          },
+        ];
+        setExplorerCtxMenuItems(items);
+        explorerCtxMenu.open(info.x, info.y);
+      } else {
+        // Blank space — context is the current directory
+        const items: ContextMenuEntry[] = [
+          {
+            label: revealLabel,
+            onClick: () => revealInFinder(info.path),
+          },
+          {
+            label: 'Copy Path',
+            onClick: () => navigator.clipboard.writeText(info.path),
+          },
+        ];
+        setExplorerCtxMenuItems(items);
+        explorerCtxMenu.open(info.x, info.y);
+      }
+    },
+    [handleExplorerOpenFile, openTabInBackground, addRecentFile, revealInFinder, revealLabel, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+  );
+
+  const handleTabContextMenu = useCallback(
+    (info: TabContextMenuInfo) => {
+      viewerCtxMenu.close();
+      explorerCtxMenu.close();
+      sidebarCtxMenu.close();
+
+      const tabIndex = tabs.findIndex((t) => t.filePath === info.filePath);
+      const hasTabsToRight = tabIndex >= 0 && tabIndex < tabs.length - 1;
+      const hasOtherTabs = tabs.length > 1;
+      const fileName = info.filePath.split('/').pop() || info.filePath;
+
+      const items: ContextMenuEntry[] = [
+        {
+          label: 'Close',
+          onClick: () => closeTab(info.filePath),
+        },
+        {
+          label: 'Close Others',
+          onClick: () => closeOtherTabs(info.filePath),
+          disabled: !hasOtherTabs,
+        },
+        {
+          label: 'Close Tabs to the Right',
+          onClick: () => closeTabsToRight(info.filePath),
+          disabled: !hasTabsToRight,
+        },
+        {
+          label: 'Close All',
+          onClick: () => closeAllTabs(),
+        },
+        { type: 'divider' as const },
+        {
+          label: 'Reveal in Finder',
+          onClick: () => revealInFinder(info.filePath),
+        },
+        {
+          label: 'Copy Path',
+          onClick: () => navigator.clipboard.writeText(info.filePath),
+        },
+        {
+          label: 'Copy File Name',
+          onClick: () => navigator.clipboard.writeText(fileName),
+        },
+      ];
+      setTabCtxMenuItems(items);
+      tabCtxMenu.open(info.x, info.y);
+    },
+    [tabs, closeTab, closeOtherTabs, closeAllTabs, closeTabsToRight, revealInFinder, revealLabel, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+  );
+
+  const handleSidebarContextMenu = useCallback(
+    (info: SidebarContextMenuInfo) => {
+      viewerCtxMenu.close();
+      explorerCtxMenu.close();
+      tabCtxMenu.close();
+
+      const comment = comments.find((c) => c.id === info.commentId);
+      if (!comment) return;
+
+      const status = getEffectiveStatus(comment);
+      const items: ContextMenuEntry[] = [
+        status === 'resolved'
+          ? {
+              label: 'Reopen',
+              onClick: () => handleUnresolve(info.commentId),
+            }
+          : {
+              label: 'Resolve',
+              onClick: () => handleResolve(info.commentId),
+            },
+        {
+          label: 'Delete',
+          danger: true,
+          onClick: () => handleDelete(info.commentId),
+        },
+        { type: 'divider' as const },
+        {
+          label: 'Copy Anchor Text',
+          onClick: () => navigator.clipboard.writeText(comment.anchor),
+        },
+        {
+          label: 'Copy Comment Text',
+          onClick: () => navigator.clipboard.writeText(comment.text),
+        },
+        { type: 'divider' as const },
+        {
+          label: 'Scroll to Highlight',
+          onClick: () => {
+            setActiveCommentId(info.commentId);
+            viewerRef.current?.scrollToComment(info.commentId);
+          },
+        },
+      ];
+      setSidebarCtxMenuItems(items);
+      sidebarCtxMenu.open(info.x, info.y);
+    },
+    [comments, handleResolve, handleUnresolve, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+  );
 
   // --- Keyboard shortcuts ---
   useEffect(() => {
@@ -653,6 +984,7 @@ export default function App() {
         }}
         onCloseTab={closeTab}
         onOpenFile={() => setShowFileOpener(true)}
+        onTabContextMenu={handleTabContextMenu}
         viewMode={viewMode}
         hasSnapshot={currentSnapshot !== null}
         hasExternalChange={hasExternalChange}
@@ -683,6 +1015,7 @@ export default function App() {
                   activeFilePath={activeFilePath}
                   onOpenFile={handleExplorerOpenFile}
                   onClose={() => setExplorerVisible(false)}
+                  onContextMenu={handleExplorerContextMenu}
                 />
               </div>
             </div>
@@ -717,6 +1050,7 @@ export default function App() {
                       selectionText={selection?.text ?? null}
                       selectionOffset={selection?.offset ?? null}
                       onHighlightClick={handleHighlightClick}
+                      onContextMenu={handleViewerContextMenu}
                     />
                     <DragHandles
                       startPos={handlePositions?.start ?? null}
@@ -773,6 +1107,11 @@ export default function App() {
                     onReply={handleReply}
                     onBulkResolve={handleBulkResolve}
                     onBulkDeleteResolved={handleBulkDeleteResolved}
+                    onContextMenu={handleSidebarContextMenu}
+                    requestEditId={requestEditId}
+                    requestEditToken={requestEditToken}
+                    requestReplyId={requestReplyId}
+                    requestReplyToken={requestReplyToken}
                   />
                 </div>
               </div>
@@ -832,6 +1171,36 @@ export default function App() {
         activeFilePath={activeFilePath}
         onClearRecent={clearRecentFiles}
       />
+
+      {/* Context menus */}
+      {viewerCtxMenu.isOpen && (
+        <ContextMenu
+          items={ctxMenuItems}
+          position={viewerCtxMenu.position}
+          onClose={viewerCtxMenu.close}
+        />
+      )}
+      {explorerCtxMenu.isOpen && (
+        <ContextMenu
+          items={explorerCtxMenuItems}
+          position={explorerCtxMenu.position}
+          onClose={explorerCtxMenu.close}
+        />
+      )}
+      {tabCtxMenu.isOpen && (
+        <ContextMenu
+          items={tabCtxMenuItems}
+          position={tabCtxMenu.position}
+          onClose={tabCtxMenu.close}
+        />
+      )}
+      {sidebarCtxMenu.isOpen && (
+        <ContextMenu
+          items={sidebarCtxMenuItems}
+          position={sidebarCtxMenu.position}
+          onClose={sidebarCtxMenu.close}
+        />
+      )}
 
       {/* Keyboard shortcuts hint */}
       <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-muted shrink-0">

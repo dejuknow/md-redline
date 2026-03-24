@@ -79,6 +79,51 @@ export function useTabs() {
     }
   }, []);
 
+  const openTabInBackground = useCallback(async (path: string) => {
+    // If already open, do nothing (don't switch)
+    if (tabDataRef.current.has(path)) return;
+
+    const newTab: TabState = {
+      filePath: path,
+      rawMarkdown: '',
+      isLoading: true,
+      error: null,
+      lastSaved: null,
+    };
+    setTabData((prev) => new Map(prev).set(path, newTab));
+    setTabOrder((prev) => [...prev, path]);
+
+    try {
+      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setTabData((prev) => {
+        const next = new Map(prev);
+        next.set(path, {
+          filePath: data.path,
+          rawMarkdown: data.content,
+          isLoading: false,
+          error: null,
+          lastSaved: new Date(),
+        });
+        return next;
+      });
+    } catch (err) {
+      setTabData((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(path);
+        if (existing) {
+          next.set(path, {
+            ...existing,
+            isLoading: false,
+            error: err instanceof Error ? err.message : 'Failed to load file',
+          });
+        }
+        return next;
+      });
+    }
+  }, []);
+
   const closeTab = useCallback((path: string) => {
     setTabOrder((prev) => {
       const idx = prev.indexOf(path);
@@ -96,6 +141,48 @@ export function useTabs() {
     setTabData((prev) => {
       const next = new Map(prev);
       next.delete(path);
+      return next;
+    });
+  }, []);
+
+  const closeOtherTabs = useCallback((keepPath: string) => {
+    setTabOrder((prev) => {
+      const next = prev.filter((p) => p === keepPath);
+      setActiveFilePath(keepPath);
+      return next;
+    });
+    setTabData((prev) => {
+      const next = new Map<string, TabState>();
+      const kept = prev.get(keepPath);
+      if (kept) next.set(keepPath, kept);
+      return next;
+    });
+  }, []);
+
+  const closeAllTabs = useCallback(() => {
+    setTabOrder([]);
+    setTabData(new Map());
+    setActiveFilePath(null);
+  }, []);
+
+  const closeTabsToRight = useCallback((path: string) => {
+    setTabOrder((prev) => {
+      const idx = prev.indexOf(path);
+      if (idx === -1) return prev;
+      const next = prev.slice(0, idx + 1);
+      setActiveFilePath((currentActive) => {
+        if (currentActive && next.includes(currentActive)) return currentActive;
+        return path;
+      });
+      // Clean up removed tab data
+      const removed = prev.slice(idx + 1);
+      if (removed.length > 0) {
+        setTabData((prevData) => {
+          const nextData = new Map(prevData);
+          for (const p of removed) nextData.delete(p);
+          return nextData;
+        });
+      }
       return next;
     });
   }, []);
@@ -178,7 +265,11 @@ export function useTabs() {
     error,
     lastSaved,
     openTab,
+    openTabInBackground,
     closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
     switchTab,
     saveFile,
     reloadFile,

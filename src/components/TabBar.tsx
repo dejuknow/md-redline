@@ -5,6 +5,12 @@ interface Tab {
   error: string | null;
 }
 
+export interface TabContextMenuInfo {
+  filePath: string;
+  x: number;
+  y: number;
+}
+
 interface Props {
   tabs: Tab[];
   activeFilePath: string | null;
@@ -12,6 +18,7 @@ interface Props {
   onSwitchTab: (path: string) => void;
   onCloseTab: (path: string) => void;
   onOpenFile: () => void;
+  onTabContextMenu?: (info: TabContextMenuInfo) => void;
   // Document actions (moved from Toolbar)
   viewMode: ViewMode;
   hasSnapshot: boolean;
@@ -32,6 +39,7 @@ export function TabBar({
   onSwitchTab,
   onCloseTab,
   onOpenFile,
+  onTabContextMenu,
   viewMode,
   hasSnapshot,
   hasExternalChange,
@@ -55,6 +63,12 @@ export function TabBar({
             <button
               key={tab.filePath}
               onClick={() => onSwitchTab(tab.filePath)}
+              onContextMenu={(e) => {
+                if (onTabContextMenu) {
+                  e.preventDefault();
+                  onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
+                }
+              }}
               className={`group flex items-center gap-1.5 px-3 text-xs border-r border-border shrink-0 max-w-[200px] transition-colors ${
                 isActive
                   ? 'bg-surface text-content font-medium border-b-2 border-b-primary'
