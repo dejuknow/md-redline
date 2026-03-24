@@ -86,8 +86,9 @@ function isMdFile(resolved: string): boolean {
   return extname(resolved).toLowerCase() === '.md';
 }
 
-// Paths currently being saved by the app (skip triggering SSE reload for our own writes)
-const recentWrites = new Set<string>();
+// Track the last content written by the app per path, so the SSE watcher
+// can skip notifications when the file still matches our own write.
+const lastWrittenContent = new Map<string, string>();
 
 app.get('/api/config', (c) => {
   return c.json({ initialFile, initialDir });
@@ -129,14 +130,9 @@ app.put('/api/file', async (c) => {
     if (!isMdFile(resolved)) {
       return c.json({ error: 'Only .md files are supported' }, 400);
     }
-    // Mark as our own write so the file watcher ignores this change
-    recentWrites.add(resolved);
-    try {
-      await writeFile(resolved, body.content, 'utf-8');
-    } finally {
-      // Ensure recentWrites is always cleaned up, even if write fails
-      setTimeout(() => recentWrites.delete(resolved), 500);
-    }
+    // Remember what we wrote so the SSE watcher can skip this change
+    lastWrittenContent.set(resolved, body.content);
+    await writeFile(resolved, body.content, 'utf-8');
     return c.json({ success: true, path: resolved });
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('Access denied')) {
@@ -293,11 +289,13 @@ app.get('/api/watch', async (c) => {
       fileWatchers.delete(resolved);
     };
     const watcher = watch(resolved, () => {
-      if (recentWrites.has(resolved)) return;
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(async () => {
         try {
           const content = await readFile(resolved, 'utf-8');
+          // Skip if the content matches what we last wrote (our own save)
+          if (lastWrittenContent.get(resolved) === content) return;
+          lastWrittenContent.delete(resolved);
           const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
           for (const client of clients) {
             client.write(frame).catch(() => {});

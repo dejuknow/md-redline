@@ -24,53 +24,48 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
 
-  const persist = useCallback((next: AppSettings) => {
-    setSettings(next);
-    saveSettings(next);
+  const update = useCallback((patch: Partial<AppSettings>) => {
+    setSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveSettings(next);
+      return next;
+    });
   }, []);
 
   const updateTemplates = useCallback(
-    (templates: CommentTemplate[]) => {
-      persist({ ...settings, templates });
-    },
-    [settings, persist],
+    (templates: CommentTemplate[]) => update({ templates }),
+    [update],
   );
 
   const updateCommentMaxLength = useCallback(
-    (commentMaxLength: number) => {
-      persist({ ...settings, commentMaxLength });
-    },
-    [settings, persist],
+    (commentMaxLength: number) => update({ commentMaxLength }),
+    [update],
   );
 
   const updateShowTemplatesByDefault = useCallback(
-    (showTemplatesByDefault: boolean) => {
-      persist({ ...settings, showTemplatesByDefault });
-    },
-    [settings, persist],
+    (showTemplatesByDefault: boolean) => update({ showTemplatesByDefault }),
+    [update],
   );
 
   const updateEnableResolve = useCallback(
-    (enableResolve: boolean) => {
-      persist({ ...settings, enableResolve });
-    },
-    [settings, persist],
+    (enableResolve: boolean) => update({ enableResolve }),
+    [update],
   );
 
   const updateQuickComment = useCallback(
-    (quickComment: boolean) => {
-      persist({ ...settings, quickComment });
-    },
-    [settings, persist],
+    (quickComment: boolean) => update({ quickComment }),
+    [update],
   );
 
-  const resetTemplates = useCallback(() => {
-    persist({ ...settings, templates: DEFAULT_TEMPLATES });
-  }, [settings, persist]);
+  const resetTemplates = useCallback(
+    () => update({ templates: DEFAULT_TEMPLATES }),
+    [update],
+  );
 
   const resetAll = useCallback(() => {
-    persist(DEFAULT_SETTINGS);
-  }, [persist]);
+    setSettings(DEFAULT_SETTINGS);
+    saveSettings(DEFAULT_SETTINGS);
+  }, []);
 
   return (
     <SettingsContext.Provider

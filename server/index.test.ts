@@ -236,44 +236,55 @@ describe('PUT /api/file JSON body validation', () => {
   });
 });
 
-describe('recentWrites cleanup', () => {
-  it('cleans up even when write fails (try/finally pattern)', async () => {
-    const recentWrites = new Set<string>();
+describe('lastWrittenContent self-write detection', () => {
+  it('skips SSE notification when file content matches last write', () => {
+    const lastWrittenContent = new Map<string, string>();
     const path = '/test/file.md';
+    const content = '# Hello\n\nWorld';
 
-    recentWrites.add(path);
-    try {
-      // Simulate a failed write
-      throw new Error('disk full');
-    } catch {
-      // Error handled (server returns 500)
-    } finally {
-      // This is the pattern the server uses — cleanup always runs
-      setTimeout(() => recentWrites.delete(path), 50);
-    }
+    // Simulate app saving the file
+    lastWrittenContent.set(path, content);
 
-    // Path is still present immediately
-    expect(recentWrites.has(path)).toBe(true);
-
-    // Cleared after timeout
-    await new Promise((r) => setTimeout(r, 100));
-    expect(recentWrites.has(path)).toBe(false);
+    // Simulate watcher reading the file — content matches, so skip
+    const fileContent = content;
+    const isOwnWrite = lastWrittenContent.get(path) === fileContent;
+    expect(isOwnWrite).toBe(true);
   });
 
-  it('does not leak paths on successful writes', async () => {
-    const recentWrites = new Set<string>();
+  it('detects external change when content differs from last write', () => {
+    const lastWrittenContent = new Map<string, string>();
     const path = '/test/file.md';
 
-    recentWrites.add(path);
-    try {
-      // Simulate successful write (no throw)
-    } finally {
-      setTimeout(() => recentWrites.delete(path), 50);
+    // Simulate app saving the file
+    lastWrittenContent.set(path, '# Hello');
+
+    // Simulate external edit
+    const fileContent = '# Hello\n\nNew content';
+    const isOwnWrite = lastWrittenContent.get(path) === fileContent;
+    expect(isOwnWrite).toBe(false);
+  });
+
+  it('detects change when no prior write is tracked', () => {
+    const lastWrittenContent = new Map<string, string>();
+    const path = '/test/file.md';
+
+    const isOwnWrite = lastWrittenContent.get(path) === '# Hello';
+    expect(isOwnWrite).toBe(false);
+  });
+
+  it('clears entry after detecting an external change', () => {
+    const lastWrittenContent = new Map<string, string>();
+    const path = '/test/file.md';
+
+    lastWrittenContent.set(path, '# Hello');
+
+    // External change detected — delete the entry
+    const fileContent = '# Changed';
+    if (lastWrittenContent.get(path) !== fileContent) {
+      lastWrittenContent.delete(path);
     }
 
-    expect(recentWrites.has(path)).toBe(true);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(recentWrites.has(path)).toBe(false);
+    expect(lastWrittenContent.has(path)).toBe(false);
   });
 });
 
