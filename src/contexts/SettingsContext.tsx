@@ -13,6 +13,7 @@ interface SettingsContextValue {
   updateTemplates: (templates: CommentTemplate[]) => void;
   updateCommentMaxLength: (maxLength: number) => void;
   updateShowTemplatesByDefault: (show: boolean) => void;
+  updateEnableResolve: (enable: boolean) => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -48,6 +49,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [settings, persist],
   );
 
+  const updateEnableResolve = useCallback(
+    (enableResolve: boolean) => {
+      persist({ ...settings, enableResolve });
+    },
+    [settings, persist],
+  );
+
   const resetTemplates = useCallback(() => {
     persist({ ...settings, templates: DEFAULT_TEMPLATES });
   }, [settings, persist]);
@@ -58,7 +66,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   return (
     <SettingsContext.Provider
-      value={{ settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, resetTemplates, resetAll }}
+      value={{ settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, updateEnableResolve, resetTemplates, resetAll }}
     >
       {children}
     </SettingsContext.Provider>

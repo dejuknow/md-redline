@@ -49,6 +49,12 @@
   --color-comment-anchor-text: var(--theme-comment-anchor-text);
   --color-comment-anchor-border: var(--theme-comment-anchor-border);
 
+  /* Status badges */
+  --color-status-open-bg: var(--theme-status-open-bg);
+  --color-status-open-text: var(--theme-status-open-text);
+  --color-status-resolved-bg: var(--theme-status-resolved-bg);
+  --color-status-resolved-text: var(--theme-status-resolved-text);
+
   /* Diff */
   --color-diff-added-bg: var(--theme-diff-added-bg);
   --color-diff-added-text: var(--theme-diff-added-text);
@@ -93,6 +99,10 @@
   --theme-comment-anchor-bg: #fffbeb;
   --theme-comment-anchor-text: #b45309;
   --theme-comment-anchor-border: #fde68a;
+  --theme-status-open-bg: #dbeafe;
+  --theme-status-open-text: #2563eb;
+  --theme-status-resolved-bg: #dcfce7;
+  --theme-status-resolved-text: #16a34a;
   --theme-comment-bg: #fef3c7;
   --theme-comment-bg-hover: #fde68a;
   --theme-comment-underline: #f59e0b;
@@ -146,6 +156,10 @@
   --theme-comment-anchor-bg: rgba(245, 158, 11, 0.15);
   --theme-comment-anchor-text: #fcd34d;
   --theme-comment-anchor-border: rgba(245, 158, 11, 0.3);
+  --theme-status-open-bg: rgba(59, 130, 246, 0.2);
+  --theme-status-open-text: #93c5fd;
+  --theme-status-resolved-bg: rgba(34, 197, 94, 0.2);
+  --theme-status-resolved-text: #86efac;
   --theme-comment-bg: rgba(245, 158, 11, 0.2);
   --theme-comment-bg-hover: rgba(245, 158, 11, 0.3);
   --theme-comment-underline: #f59e0b;
@@ -199,6 +213,10 @@
   --theme-comment-anchor-bg: rgba(212, 160, 74, 0.15);
   --theme-comment-anchor-text: #8b5e3c;
   --theme-comment-anchor-border: rgba(212, 160, 74, 0.3);
+  --theme-status-open-bg: rgba(41, 128, 185, 0.15);
+  --theme-status-open-text: #2980b9;
+  --theme-status-resolved-bg: rgba(39, 174, 96, 0.15);
+  --theme-status-resolved-text: #27ae60;
   --theme-comment-bg: rgba(212, 160, 74, 0.2);
   --theme-comment-bg-hover: rgba(212, 160, 74, 0.3);
   --theme-comment-underline: #d4a04a;
@@ -252,6 +270,10 @@
   --theme-comment-anchor-bg: rgba(235, 203, 139, 0.15);
   --theme-comment-anchor-text: #ebcb8b;
   --theme-comment-anchor-border: rgba(235, 203, 139, 0.3);
+  --theme-status-open-bg: rgba(136, 192, 208, 0.2);
+  --theme-status-open-text: #88c0d0;
+  --theme-status-resolved-bg: rgba(163, 190, 140, 0.2);
+  --theme-status-resolved-text: #a3be8c;
   --theme-comment-bg: rgba(235, 203, 139, 0.2);
   --theme-comment-bg-hover: rgba(235, 203, 139, 0.3);
   --theme-comment-underline: #ebcb8b;

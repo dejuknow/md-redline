@@ -1,4 +1,4 @@
-import { type MdComment, type ParseResult, type CommentReply } from '../types';
+import { getEffectiveStatus, type MdComment, type ParseResult, type CommentReply } from '../types';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -284,6 +284,40 @@ export function removeComment(rawMarkdown: string, commentId: string): string {
   });
 }
 
+export function resolveComment(rawMarkdown: string, commentId: string): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.id === commentId) {
+        data.resolved = true;
+        data.status = 'resolved';
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
+export function unresolveComment(rawMarkdown: string, commentId: string): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.id === commentId) {
+        data.resolved = false;
+        data.status = 'open';
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
 export function editComment(rawMarkdown: string, commentId: string, newText: string): string {
   const regex = new RegExp(COMMENT_PATTERN);
   return rawMarkdown.replace(regex, (match, json) => {
@@ -352,6 +386,36 @@ export function addReply(
 export function removeAllComments(rawMarkdown: string): string {
   const regex = new RegExp(COMMENT_PATTERN);
   return rawMarkdown.replace(regex, () => '');
+}
+
+export function resolveAllComments(rawMarkdown: string): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (!data.resolved) {
+        data.resolved = true;
+        data.status = 'resolved';
+        return serializeComment(data);
+      }
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
+}
+
+export function removeResolvedComments(rawMarkdown: string): string {
+  const regex = new RegExp(COMMENT_PATTERN);
+  return rawMarkdown.replace(regex, (match, json) => {
+    try {
+      const data = JSON.parse(json) as MdComment;
+      if (data.resolved) return '';
+    } catch {
+      // Keep malformed comments
+    }
+    return match;
+  });
 }
 
 /** Search for ordered segments in text starting from a given offset, return the start and end offsets or null. */
@@ -501,6 +565,7 @@ export function detectMissingAnchors(
   const missing = new Set<string>();
   if (!cleanMarkdown) return missing;
   for (const c of comments) {
+    if (getEffectiveStatus(c) === 'resolved') continue;
     if (!cleanMarkdown.includes(c.anchor)) {
       const parts = c.anchor.split(/\s+/).filter(Boolean);
       if (parts.length === 0) continue;

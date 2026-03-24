@@ -1,5 +1,6 @@
 import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import type { MdComment } from '../types';
+import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 
 export interface ViewerContextMenuInfo {
@@ -21,6 +22,7 @@ interface Props {
   selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
   onContextMenu?: (info: ViewerContextMenuInfo) => void;
+  enableResolve?: boolean;
   searchQuery?: string;
   searchActiveIndex?: number;
   onSearchCount?: (count: number) => void;
@@ -38,7 +40,7 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu, searchQuery, searchActiveIndex, onSearchCount },
+    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu, enableResolve, searchQuery, searchActiveIndex, onSearchCount },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -94,6 +96,7 @@ export const MarkdownViewer = memo(
         { ids: string[]; anchor: string; plainOffset?: number }
       >();
       for (const comment of comments) {
+        if (enableResolve && getEffectiveStatus(comment) === 'resolved') continue;
         const plainOffset = comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
         const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
         const group = highlightGroups.get(key) || {
@@ -144,7 +147,7 @@ export const MarkdownViewer = memo(
       activeMarkRef.current = container.querySelector(
         'mark.comment-highlight-active',
       ) as HTMLElement | null;
-    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, searchQuery, searchActiveIndex]);
+    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, enableResolve, searchQuery, searchActiveIndex]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(

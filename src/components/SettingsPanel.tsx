@@ -20,7 +20,7 @@ interface Props {
 }
 
 export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) {
-  const { settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, resetTemplates } = useSettings();
+  const { settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, updateEnableResolve, resetTemplates } = useSettings();
   const { theme, setTheme } = useTheme();
   const [activeSection, setActiveSection] = useState<Section>('general');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -229,7 +229,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
             {activeSection === 'templates' && (
               <div>
                 {/* Show templates by default — standalone preference */}
-                <label className="flex items-center justify-between">
+                <label className="flex items-center justify-between gap-4">
                   <div>
                     <h3 className="text-sm font-semibold text-content">Show templates by default</h3>
                     <p className="text-xs text-content-muted mt-0.5">
@@ -449,6 +449,32 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                     className="w-60 text-sm px-3 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     placeholder="Your name"
                   />
+                </div>
+
+                {/* Enable Resolve */}
+                <div>
+                  <label className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Enable resolve workflow</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Adds resolve and reopen actions for reviewing with humans. Leave off when working with AI agents.
+                      </p>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={settings.enableResolve}
+                      onClick={() => updateEnableResolve(!settings.enableResolve)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                        settings.enableResolve ? 'bg-primary' : 'bg-border'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                          settings.enableResolve ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </button>
+                  </label>
                 </div>
 
                 {/* Comment Max Length */}
