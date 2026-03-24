@@ -3,7 +3,7 @@ import type { MdComment, CommentStatus } from '../types';
 import { getEffectiveStatus } from '../types';
 import { getAuthorColor } from '../hooks/useAuthor';
 import { useAutoResize } from '../hooks/useAutoResize';
-import { COMMENT_MAX_LENGTH } from './CommentForm';
+import { useSettings } from '../contexts/SettingsContext';
 
 interface Props {
   comment: MdComment;
@@ -41,6 +41,8 @@ export const CommentCard = memo(function CommentCard({
   requestEdit,
   requestReply,
 }: Props) {
+  const { settings } = useSettings();
+  const COMMENT_MAX_LENGTH = settings.commentMaxLength;
   const status = getEffectiveStatus(comment);
   const statusConfig = STATUS_CONFIG[status];
   const timeAgo = getTimeAgo(comment.timestamp);
