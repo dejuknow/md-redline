@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { writeFile, unlink, mkdir, rmdir, symlink } from 'fs/promises';
-import { join, resolve, extname } from 'path';
-import { tmpdir } from 'os';
+import { writeFile, unlink, mkdir, rmdir, symlink, realpath } from 'fs/promises';
+import { join, resolve, extname, dirname } from 'path';
+import { tmpdir, homedir } from 'os';
 
 // The server is an Hono app — we test it via fetch against the running process.
 // For isolated unit testing, we import the app directly if exported,
@@ -10,9 +10,11 @@ import { tmpdir } from 'os';
 const TEST_DIR = join(tmpdir(), 'md-review-test-' + Date.now());
 const TEST_FILE = join(TEST_DIR, 'test.md');
 const TEST_FILE_TXT = join(TEST_DIR, 'test.txt');
+const EXTERNAL_DIR = join(tmpdir(), 'md-review-external-' + Date.now());
 
 beforeAll(async () => {
   await mkdir(TEST_DIR, { recursive: true });
+  await mkdir(EXTERNAL_DIR, { recursive: true });
   await writeFile(TEST_FILE, '# Test\n\nHello world');
   await writeFile(TEST_FILE_TXT, 'not markdown');
 });
@@ -27,7 +29,13 @@ afterAll(async () => {
     } catch {
       /* ignore */
     }
+    try {
+      await unlink(join(TEST_DIR, 'ext-link'));
+    } catch {
+      /* ignore */
+    }
     await rmdir(TEST_DIR);
+    await rmdir(EXTERNAL_DIR);
   } catch {
     /* ignore cleanup errors */
   }
@@ -256,6 +264,93 @@ describe('recentWrites cleanup', () => {
     expect(recentWrites.has(path)).toBe(true);
     await new Promise((r) => setTimeout(r, 100));
     expect(recentWrites.has(path)).toBe(false);
+  });
+});
+
+describe('symlink bypass prevention for new files', () => {
+  // Replicates resolveAndValidate logic: when realpath fails (file doesn't exist),
+  // resolve the parent directory to catch symlinked parents pointing outside allowed roots.
+  async function resolveAndValidate(inputPath: string, allowedRoots: string[]): Promise<string> {
+    const expanded = inputPath.startsWith('~/') ? join(homedir(), inputPath.slice(2)) : inputPath;
+    const resolved = resolve(expanded);
+    let real: string;
+    try {
+      real = await realpath(resolved);
+    } catch {
+      const parent = dirname(resolved);
+      try {
+        const realParent = await realpath(parent);
+        real = join(realParent, resolved.slice(parent.length + 1));
+      } catch {
+        real = resolved;
+      }
+    }
+    const allowed = allowedRoots.some((root) => real.startsWith(root + '/') || real === root);
+    if (!allowed) {
+      throw new Error('Access denied: path outside allowed directories');
+    }
+    return real;
+  }
+
+  it('rejects new file under a symlinked directory pointing outside allowed roots', async () => {
+    // Create a symlink inside TEST_DIR pointing to EXTERNAL_DIR
+    const linkPath = join(TEST_DIR, 'ext-link');
+    try {
+      await symlink(EXTERNAL_DIR, linkPath);
+    } catch {
+      // Symlink already exists from a previous run
+    }
+
+    // The lexical path is inside TEST_DIR (allowed), but the real parent is EXTERNAL_DIR
+    const maliciousPath = join(linkPath, 'new.md');
+    await expect(
+      resolveAndValidate(maliciousPath, [TEST_DIR]),
+    ).rejects.toThrow('Access denied');
+  });
+
+  it('allows new file under a real (non-symlinked) allowed directory', async () => {
+    const realTestDir = await realpath(TEST_DIR);
+    const newFilePath = join(realTestDir, 'new-file.md');
+    const result = await resolveAndValidate(newFilePath, [realTestDir]);
+    expect(result).toContain('new-file.md');
+  });
+});
+
+describe('tilde expansion', () => {
+  async function resolveAndValidate(inputPath: string, allowedRoots: string[]): Promise<string> {
+    const expanded = inputPath.startsWith('~/') ? join(homedir(), inputPath.slice(2)) : inputPath;
+    const resolved = resolve(expanded);
+    let real: string;
+    try {
+      real = await realpath(resolved);
+    } catch {
+      const parent = dirname(resolved);
+      try {
+        const realParent = await realpath(parent);
+        real = join(realParent, resolved.slice(parent.length + 1));
+      } catch {
+        real = resolved;
+      }
+    }
+    const allowed = allowedRoots.some((root) => real.startsWith(root + '/') || real === root);
+    if (!allowed) {
+      throw new Error('Access denied: path outside allowed directories');
+    }
+    return real;
+  }
+
+  it('expands ~/path to homedir/path', async () => {
+    const home = homedir();
+    const result = await resolveAndValidate('~/test.md', [home]);
+    expect(result).toBe(join(home, 'test.md'));
+  });
+
+  it('does not expand ~ in the middle of a path', async () => {
+    // "foo/~/bar.md" should NOT expand the ~
+    const cwd = resolve(process.cwd());
+    await expect(
+      resolveAndValidate('foo/~/bar.md', [cwd]),
+    ).resolves.toContain('foo/~/bar.md');
   });
 });
 

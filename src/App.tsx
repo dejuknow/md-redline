@@ -54,7 +54,6 @@ export default function App() {
   const {
     tabs,
     activeFilePath,
-    filePath,
     rawMarkdown,
     setRawMarkdown,
     isLoading,
@@ -320,7 +319,7 @@ export default function App() {
 
   // Feature 7: handleAddComment now accepts context for fuzzy re-matching
   const handleAddComment = useCallback(
-    (anchor: string, text: string, contextBefore?: string, contextAfter?: string) => {
+    (anchor: string, text: string, contextBefore?: string, contextAfter?: string, hintOffset?: number) => {
       const newRaw = insertComment(
         rawMarkdownRef.current,
         anchor,
@@ -328,6 +327,7 @@ export default function App() {
         author,
         contextBefore,
         contextAfter,
+        hintOffset,
       );
       updateAndSave(newRaw);
       clearSelection();
@@ -508,7 +508,7 @@ export default function App() {
         if (idx < TEMPLATES.length) {
           e.preventDefault();
           const sel = selectionRef.current;
-          handleAddComment(sel.text, TEMPLATES[idx].text, sel.contextBefore, sel.contextAfter);
+          handleAddComment(sel.text, TEMPLATES[idx].text, sel.contextBefore, sel.contextAfter, sel.offset);
           return;
         }
       }
@@ -797,8 +797,8 @@ export default function App() {
             <CommentForm
               selection={selection}
               autoExpand={autoExpandForm}
-              onSubmit={(anchor, text, ctxBefore, ctxAfter) => {
-                handleAddComment(anchor, text, ctxBefore, ctxAfter);
+              onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
+                handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
                 setAutoExpandForm(false);
               }}
               onCancel={() => {

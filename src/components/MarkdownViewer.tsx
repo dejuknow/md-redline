@@ -67,7 +67,7 @@ export const MarkdownViewer = memo(
         { ids: string[]; anchor: string; cleanOffset?: number }
       >();
       for (const comment of comments) {
-        if (getEffectiveStatus(comment) === 'accepted') continue;
+        if (getEffectiveStatus(comment) === 'resolved') continue;
         const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
         const group = highlightGroups.get(key) || {
           ids: [],

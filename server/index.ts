@@ -46,14 +46,25 @@ if (initialDir) {
 
 /** Resolve symlinks and check the real path is within allowed roots. */
 async function resolveAndValidate(inputPath: string): Promise<string> {
-  const resolved = resolve(inputPath);
+  // Expand ~ to home directory
+  const expanded = inputPath.startsWith('~/') ? join(homedir(), inputPath.slice(2)) : inputPath;
+  const resolved = resolve(expanded);
   // Resolve symlinks to prevent symlink-based bypass
   let real: string;
   try {
     real = await realpath(resolved);
   } catch {
-    // File doesn't exist yet (e.g. for writes) — use the resolved path
-    real = resolved;
+    // File doesn't exist yet (e.g. for writes) — resolve the parent directory
+    // to prevent symlink-based bypass (a symlinked parent could point outside
+    // allowed roots, and the lexical path would pass validation).
+    const parent = dirname(resolved);
+    try {
+      const realParent = await realpath(parent);
+      real = join(realParent, resolved.slice(parent.length + 1));
+    } catch {
+      // Parent doesn't exist either — use the resolved path (will fail on actual I/O)
+      real = resolved;
+    }
   }
   const allowed = ALLOWED_ROOTS.some((root) => real.startsWith(root + '/') || real === root);
   if (!allowed) {

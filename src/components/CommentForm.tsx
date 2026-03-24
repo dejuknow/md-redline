@@ -18,7 +18,7 @@ export const TEMPLATES = [
 interface Props {
   selection: SelectionInfo;
   autoExpand?: boolean;
-  onSubmit: (anchor: string, text: string, contextBefore: string, contextAfter: string) => void;
+  onSubmit: (anchor: string, text: string, contextBefore: string, contextAfter: string, hintOffset: number) => void;
   onCancel: () => void;
   onLock: () => void;
 }
@@ -70,7 +70,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   const handleSubmit = () => {
     if (!text.trim() || text.length > COMMENT_MAX_LENGTH) return;
-    onSubmit(selection.text, text.trim(), selection.contextBefore, selection.contextAfter);
+    onSubmit(selection.text, text.trim(), selection.contextBefore, selection.contextAfter, selection.offset);
     setText('');
     setIsExpanded(false);
     setShowTemplates(false);
