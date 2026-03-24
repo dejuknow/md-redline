@@ -196,6 +196,12 @@ export default function App() {
     rawMarkdownRef.current = rawMarkdown;
   }, [rawMarkdown]);
 
+  // Ref to access snapshot state inside callbacks without adding dependencies.
+  const currentSnapshotRef = useRef(currentSnapshot);
+  useLayoutEffect(() => {
+    currentSnapshotRef.current = currentSnapshot;
+  }, [currentSnapshot]);
+
   const { selection, clearSelection, lockSelection } = useSelection(
     containerRef as RefObject<HTMLElement | null>,
   );
@@ -256,9 +262,11 @@ export default function App() {
     onExternalChange: useCallback(
       (content: string) => {
         // Feature 8: Detect comment status transitions before updating
+        let cleanContentChanged = false;
         try {
-          const { comments: oldComments } = parseComments(rawMarkdownRef.current);
-          const { comments: newComments } = parseComments(content);
+          const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(rawMarkdownRef.current);
+          const { comments: newComments, cleanMarkdown: newClean } = parseComments(content);
+          cleanContentChanged = oldClean !== newClean;
           const newById = new Map(newComments.map((c) => [c.id, c]));
 
           let resolvedCount = 0;
@@ -292,6 +300,12 @@ export default function App() {
         }
 
         setRawMarkdown(content);
+
+        // Auto-switch to diff view when a snapshot exists and content actually changed
+        if (cleanContentChanged && currentSnapshotRef.current) {
+          setViewMode('diff');
+        }
+
         setHasExternalChange(true);
         clearTimeout(externalChangeTimerRef.current);
         externalChangeTimerRef.current = setTimeout(() => setHasExternalChange(false), 3000);
