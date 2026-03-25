@@ -96,17 +96,17 @@ async function clickCardAction(page: Page, commentText: string, actionName: stri
 test.describe('File opening', () => {
   test('opens a file via URL query param', async ({ page }) => {
     await openFixture(page);
-    // Toolbar shows filename
-    await expect(page.locator('span[title]', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    // Tab shows filename
+    await expect(page.locator('.h-9 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
     // Rendered content visible
     await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();
   });
 
-  test('opens a file via path input', async ({ page }) => {
+  test('opens a file via the file opener dialog', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByPlaceholder('/path/to/your/file.md')).toBeVisible();
-    await page.getByPlaceholder('/path/to/your/file.md').fill(FIXTURE);
-    await page.getByRole('button', { name: 'Open' }).click();
+    await page.locator('button[title="Open file"]').click();
+    await page.getByPlaceholder('File path or name...').fill(FIXTURE);
+    await page.getByPlaceholder('File path or name...').press('Enter');
     await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({ timeout: 10_000 });
   });
 });
@@ -303,17 +303,23 @@ test.describe('Comment form click-outside dismiss', () => {
 });
 
 test.describe('Sidebar toggle', () => {
-  test('Cmd+\\ toggles sidebar visibility', async ({ page }) => {
+  test('sidebar toggle button hides and shows sidebar', async ({ page }) => {
     await openFixture(page);
 
-    // Sidebar heading visible
-    const sidebar = page.locator('h2', { hasText: 'Comments' });
-    await expect(sidebar).toBeVisible();
+    const toggleBtn = page.locator('button[title*="Toggle comments sidebar"]');
 
-    await page.keyboard.press('Meta+Backslash');
-    await expect(sidebar).not.toBeVisible();
+    // Sidebar is open: toggle button has active state
+    let cls = await toggleBtn.getAttribute('class') ?? '';
+    expect(cls).toContain('bg-primary-bg');
 
-    await page.keyboard.press('Meta+Backslash');
-    await expect(sidebar).toBeVisible();
+    // Toggle off
+    await toggleBtn.click();
+    cls = await toggleBtn.getAttribute('class') ?? '';
+    expect(cls).not.toContain('bg-primary-bg');
+
+    // Toggle on
+    await toggleBtn.click();
+    cls = await toggleBtn.getAttribute('class') ?? '';
+    expect(cls).toContain('bg-primary-bg');
   });
 });

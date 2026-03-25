@@ -1,0 +1,37 @@
+{
+  "totalComments": 2,
+  "actionableComments": 2,
+  "comments": [
+    {
+      "id": "eval-13-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["| POST", "Yes"],
+        "shouldNotContain": []
+      }
+    },
+    {
+      "id": "eval-13-c2",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["soft delete"],
+        "shouldNotContain": []
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": [
+    {
+      "type": "contains",
+      "value": "## Error Codes"
+    },
+    {
+      "type": "contains",
+      "value": "| 429"
+    },
+    {
+      "type": "contains",
+      "value": "| GET    | /health"
+    }
+  ]
+}
