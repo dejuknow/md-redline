@@ -125,9 +125,6 @@ export default function App() {
   const [snapshots, setSnapshots] = useState<Map<string, string>>(new Map());
   const currentSnapshot = activeFilePath ? (snapshots.get(activeFilePath) ?? null) : null;
 
-  // External change indicator
-  const [hasExternalChange, setHasExternalChange] = useState(false);
-
   // Toast notification state (Feature 8)
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({
     message: '',
@@ -255,7 +252,6 @@ export default function App() {
   if (prevFilePath !== activeFilePath) {
     setPrevFilePath(activeFilePath);
     setActiveCommentId(null);
-    setHasExternalChange(false);
     if (viewMode === 'diff') setViewMode('rendered');
   }
   // clearSelection clears browser selection — must run as side effect
@@ -264,7 +260,6 @@ export default function App() {
   }, [activeFilePath, clearSelection]);
 
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
-  const externalChangeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   useFileWatcher({
     filePath: activeFilePath,
     onExternalChange: useCallback(
@@ -324,17 +319,10 @@ export default function App() {
           setViewMode('diff');
         }
 
-        setHasExternalChange(true);
-        clearTimeout(externalChangeTimerRef.current);
-        externalChangeTimerRef.current = setTimeout(() => setHasExternalChange(false), 3000);
       },
       [setRawMarkdown, showToast],
     ),
   });
-  // Clean up the timer on unmount
-  useEffect(() => {
-    return () => clearTimeout(externalChangeTimerRef.current);
-  }, []);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
@@ -469,6 +457,54 @@ export default function App() {
   const handleBulkDeleteResolved = useCallback(() => {
     updateAndSave(removeResolvedComments(rawMarkdownRef.current));
   }, [updateAndSave]);
+
+  const handleCopyAgentPrompt = useCallback((filePaths: string[]) => {
+    if (filePaths.length === 0) return;
+
+    const afterAction = settings.enableResolve
+      ? 'After addressing a comment, **resolve it** by setting `"status":"resolved"` and `"resolved":true` in the marker JSON'
+      : 'After addressing a comment, **remove the entire `<!-- @comment{...} -->` marker** from the file';
+
+    const isSingle = filePaths.length === 1;
+    const fileRef = isSingle ? filePaths[0] : 'the files listed below';
+    const fileList = isSingle
+      ? ''
+      : '\n\n## Files to review\n' + filePaths.map((p, i) => {
+          const count = commentCounts.get(p) ?? 0;
+          return `${i + 1}. ${p} (${count} comment${count !== 1 ? 's' : ''})`;
+        }).join('\n');
+
+    const prompt = `I've left review comments in ${fileRef} using inline comment markers. Please read ${isSingle ? 'the file' : 'each file'} and address them.${fileList}
+
+## Comment format
+
+Comments are embedded as HTML comment markers: \`<!-- @comment{JSON} -->\`
+Each marker is placed **immediately before** the text it refers to (the "anchor").
+The JSON contains these fields:
+- \`anchor\`: the exact text the comment refers to
+- \`text\`: my feedback — this is what I need you to address
+- \`replies\`: threaded discussion — read for additional context
+
+## What to do
+
+1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
+2. For each comment, read the \`text\` field and address the feedback by editing the document
+3. ${afterAction}
+4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it
+
+## How to respond
+
+After you're done, give me a brief summary:
+- How many comments you addressed${isSingle ? '' : ' (grouped by file)'}
+- For each one, a one-line description of what you changed
+- Any comments you left in place and why`;
+
+    const fileCount = filePaths.length;
+    navigator.clipboard.writeText(prompt).then(
+      () => showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}`),
+      () => showToast("Couldn't copy to clipboard. Try from localhost."),
+    );
+  }, [commentCounts, showToast, settings.enableResolve]);
 
   const handleHighlightClick = useCallback((commentId: string) => {
     setActiveCommentId(commentId);
@@ -1053,6 +1089,7 @@ export default function App() {
     }
     if (commentCount > 0) {
       cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
+      cmds.push({ id: 'copy-agent-prompt', label: 'Hand off to agent (copy instructions)', section: 'Comments', onExecute: () => activeFilePath && handleCopyAgentPrompt([activeFilePath]) });
     }
 
     if (activeCommentId) {
@@ -1072,7 +1109,7 @@ export default function App() {
     }
 
     return cmds;
-  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme]);
+  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleCopyAgentPrompt, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme]);
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -1087,8 +1124,6 @@ export default function App() {
         onToggleExplorer={() => setExplorerVisible((p) => !p)}
         onToggleSidebar={() => setSidebarVisible((p) => !p)}
         onOpenSettings={() => setShowSettings(true)}
-        onSearch={() => { if (showSearch) { handleSearchClose(); } else { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } }}
-        searchActive={showSearch}
       />
       <TabBar
         tabs={tabs}
@@ -1103,7 +1138,6 @@ export default function App() {
         onTabContextMenu={handleTabContextMenu}
         viewMode={viewMode}
         hasSnapshot={currentSnapshot !== null}
-        hasExternalChange={hasExternalChange}
         showReviewSummary={showReviewSummary}
         commentCount={commentCount}
         enableResolve={settings.enableResolve}
@@ -1114,7 +1148,9 @@ export default function App() {
         onSnapshot={handleSnapshot}
         onJumpToNext={handleJumpToNext}
         onToggleReviewSummary={() => setShowReviewSummary((prev) => !prev)}
-        onReload={reloadFile}
+        onSearch={() => { if (showSearch) { handleSearchClose(); } else { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } }}
+        searchActive={showSearch}
+        onCopyAgentPrompt={handleCopyAgentPrompt}
       />
 
       <>
