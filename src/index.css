@@ -354,7 +354,6 @@ mark.comment-highlight {
   color: var(--theme-text);
   text-decoration: underline 2px var(--theme-comment-underline);
   text-underline-offset: 2px;
-  padding: 1px 0;
   cursor: pointer;
   border-radius: 2px;
   transition: background-color 0.15s ease;
@@ -384,7 +383,6 @@ mark.selection-highlight {
   background-color: var(--theme-selection-bg);
   color: var(--theme-text);
   border-radius: 2px;
-  padding: 1px 0;
   line-height: inherit;
 }
 
@@ -393,7 +391,6 @@ mark.selection-highlight {
 mark.search-highlight {
   background-color: var(--theme-search-bg);
   color: inherit;
-  padding: 1px 0;
   border-radius: 2px;
   line-height: inherit;
 }
@@ -403,7 +400,6 @@ mark.search-highlight-active {
   background-color: var(--theme-search-active-bg);
   color: var(--theme-search-active-text);
   border-radius: 2px;
-  padding: 1px 0;
   line-height: inherit;
 }
 
