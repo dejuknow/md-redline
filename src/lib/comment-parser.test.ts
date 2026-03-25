@@ -415,6 +415,20 @@ describe('detectMissingAnchors', () => {
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
+
+  it('does not flag anchor spanning across list items', () => {
+    const clean = '- System sends verification email within 30 seconds\n- User cannot access protected routes';
+    const comments = [{ id: 'a', anchor: 'System sends verification email within 30 seconds\nUser cannot acce' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning across blockquote lines', () => {
+    const clean = '> First line of quote\n> Second line continues';
+    const comments = [{ id: 'a', anchor: 'First line of quote\nSecond line continues' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
 });
 
 describe('insertComment with formatted markdown (stripInlineFormatting)', () => {
