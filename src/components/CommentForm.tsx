@@ -45,16 +45,11 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   }, []);
 
   // Click outside: dismiss if expanded with empty text.
-  // Ignore clicks inside the markdown viewer (.prose) — those are new text
-  // selections, not "dismiss" intent. The new selection will reset the form
-  // via the selectionKey change below.
   const formRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isExpanded) return;
     const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (formRef.current && !formRef.current.contains(target) && !text.trim()) {
-        if ((target as Element).closest?.('.prose')) return;
+      if (formRef.current && !formRef.current.contains(e.target as Node) && !text.trim()) {
         onCancel();
       }
     };
