@@ -121,6 +121,9 @@
   --theme-search-bg: rgba(74, 222, 128, 0.3);
   --theme-search-active-bg: #f97316;
   --theme-search-active-text: #ffffff;
+  --theme-scrollbar-thumb: #c1c9d4;
+  --theme-scrollbar-thumb-hover: #a0aab6;
+  --theme-scrollbar-track: #f1f5f9;
 }
 
 /* ========== Dark Theme ========== */
@@ -178,6 +181,9 @@
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(249, 115, 22, 0.7);
   --theme-search-active-text: #ffffff;
+  --theme-scrollbar-thumb: #475569;
+  --theme-scrollbar-thumb-hover: #64748b;
+  --theme-scrollbar-track: #1e293b;
 }
 
 /* ========== Sepia Theme ========== */
@@ -235,6 +241,9 @@
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(194, 120, 3, 0.6);
   --theme-search-active-text: #faf6f1;
+  --theme-scrollbar-thumb: #c4b8a6;
+  --theme-scrollbar-thumb-hover: #a89880;
+  --theme-scrollbar-track: #f0e8db;
 }
 
 /* ========== Nord Theme ========== */
@@ -292,6 +301,33 @@
   --theme-search-bg: rgba(163, 190, 140, 0.3);
   --theme-search-active-bg: rgba(208, 135, 112, 0.7);
   --theme-search-active-text: #eceff4;
+  --theme-scrollbar-thumb: #4c566a;
+  --theme-scrollbar-thumb-hover: #5e6a82;
+  --theme-scrollbar-track: #3b4252;
+}
+
+/* ========== Scrollbar Styles ========== */
+* {
+  scrollbar-color: var(--theme-scrollbar-thumb) var(--theme-scrollbar-track);
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--theme-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--theme-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-scrollbar-thumb-hover);
 }
 
 /* ========== Prose Theme Overrides ========== */
