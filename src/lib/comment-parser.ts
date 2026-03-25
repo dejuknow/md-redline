@@ -539,7 +539,9 @@ function partsAppearContiguously(text: string, parts: string[]): boolean {
     let pos = firstIdx + parts[0].length;
     let matched = true;
     for (let i = 1; i < parts.length; i++) {
-      while (pos < text.length && /\s/.test(text[pos])) pos++;
+      // Skip whitespace and markdown block-level markers (list bullets, blockquote)
+      // so cross-line selections spanning list items or blockquotes still match
+      while (pos < text.length && /[\s\-*+>]/.test(text[pos])) pos++;
       if (text.startsWith(parts[i], pos)) {
         pos += parts[i].length;
       } else {

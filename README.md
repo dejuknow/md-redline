@@ -1,6 +1,17 @@
 # md-review
 
-Google Docs-style inline commenting for markdown files. Built for reviewing AI-generated specs, stories, and documentation — leave feedback directly in the `.md` file for the agent to address.
+A local review tool for markdown files. Select text, leave comments, and hand the file to an AI agent — the agent reads your feedback, makes changes, and you verify the results in a built-in diff view.
+
+md-review is built for the workflow that emerges when AI agents generate your specs, stories, and documentation. You need to review what the agent wrote, leave precise feedback on specific sections, and send it back for revision — the same loop you'd do with a human writer, except the other side is an agent that reads files instead of checking email. md-review gives you a visual interface for that conversation: highlight text, type your feedback, and the agent picks it up on its next read of the file.
+
+### Inline comments — no sidecar files, no external tools
+
+The key design decision is that comments are stored as HTML comment markers directly in the markdown file. No sidecar JSON, no database, no external service. This has several practical consequences:
+
+- **Zero-integration agent access.** The agent reads the file and sees the comments. No API calls, no MCP servers, no tool configuration. `cat spec.md` is the entire integration.
+- **Portable.** Comments travel with the file. Copy it, move it to another repo, drop it in a Slack thread — the review context stays attached. There's no dependency on a review tool being available.
+- **Invisible to renderers.** GitHub, VS Code preview, Obsidian, and Zed all silently skip HTML comments. The file renders cleanly everywhere while the feedback remains embedded for anyone who looks at the source.
+- **The file is the source of truth.** The agent addresses a comment and removes the marker. You diff the file to see what changed. No status syncing, no webhooks, no reconciling state across two systems.
 
 ## Quick start
 
