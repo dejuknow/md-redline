@@ -502,3 +502,34 @@ body {
 .context-menu-enter {
   animation: context-menu-in 0.1s ease-out;
 }
+
+/* ========== Mermaid Block Styles ========== */
+.mermaid-block {
+  position: relative;
+  margin: 1rem 0;
+}
+
+.mermaid-block .mermaid-svg {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 1rem;
+  background-color: var(--theme-bg-inset);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.mermaid-block .mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+
+.mermaid-error {
+  padding: 1rem;
+  color: var(--theme-danger-text);
+  background-color: var(--theme-danger-bg);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+}
