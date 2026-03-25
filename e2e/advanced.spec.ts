@@ -281,6 +281,21 @@ test.describe('Session persistence', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('SSE file watching', () => {
+  test('adding a comment does not trigger the Changed badge', async ({ page }) => {
+    await openFixture(page);
+
+    // Wait for SSE connection to establish
+    await page.waitForTimeout(1500);
+
+    await addComment(page, 'valid credentials', 'Self-write test');
+
+    // Wait long enough for any false SSE notification to arrive (150ms debounce + margin)
+    await page.waitForTimeout(1000);
+
+    // The "Changed" badge should NOT appear for our own save
+    await expect(page.getByText('Changed')).not.toBeVisible();
+  });
+
   test('external file modification triggers content reload', async ({ page }) => {
     await openFixture(page);
     await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();

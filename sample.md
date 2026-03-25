@@ -6,13 +6,13 @@ This document outlines the authentication system for the application. The system
 
 ## User Stories
 
-### US-001: Email Registration
+### US-001: Email R<!-- @comment{"id":"f4e71896-7bbc-4f47-aa7b-3813ade93de7","anchor":"egistration\nAs a new user, I want to register with my email and password so that I can access the application.\n\nAcceptance Criteria:","text":"asdf","author":"Dennis","timestamp":"2026-03-24T16:22:15.910Z","contextBefore":"entication.\nUser Stories\nUS-001: Email R","contextAfter":"\nUser provides email, password, and disp"} -->egistration
 
-As a new user, I want to register with my email and password so that I can access the application.
+<!-- @comment{"id":"77f5164c-8e55-4313-aad1-83ebadb6d7f9","anchor":" register with my email and password so that I can access the application.","text":"asdf","author":"Dennis","timestamp":"2026-03-24T16:21:26.142Z","contextBefore":"User Stories\nUS-001: Email Registration\n","contextAfter":"\nAcceptance Criteria:\n\nUser provides ema","resolved":true,"status":"resolved"} -->As a new user, I want to register with my email and password so that I can access the application.
 
 **Acceptance Criteria:**
 
-- User provides email, password, and display name
+- <!-- @comment{"id":"cd41c2e3-4a24-49f9-b61a-bfd3ec0465d3","anchor":"User provides email, password, and display name\nPassword must be at least","text":"qwert","author":"Dennis","timestamp":"2026-03-24T16:21:32.417Z","contextBefore":" the application.\nAcceptance Criteria:\n\n","contextAfter":" 8 characters with one uppercase, one nu"} -->User provides email, password, and display name
 - Password must be at least 8 characters with one uppercase, one number, and one special character
 - System sends verification email within 30 seconds
 - User cannot access protected routes until email is verified

@@ -25,6 +25,7 @@ interface Props {
   hasExternalChange: boolean;
   showReviewSummary: boolean;
   commentCount: number;
+  enableResolve?: boolean;
   onViewModeChange: (mode: ViewMode) => void;
   onSnapshot: () => void;
   onJumpToNext: () => void;
@@ -45,6 +46,7 @@ export function TabBar({
   hasExternalChange,
   showReviewSummary,
   commentCount,
+  enableResolve,
   onViewModeChange,
   onSnapshot,
   onJumpToNext,
@@ -142,7 +144,7 @@ export function TabBar({
           <button
             onClick={onJumpToNext}
             className="text-content-muted hover:text-primary-text transition-colors p-1 rounded hover:bg-primary-bg"
-            title="Jump to next comment (N)"
+            title={enableResolve ? "Jump to next open comment (N)" : "Jump to next comment (N)"}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path

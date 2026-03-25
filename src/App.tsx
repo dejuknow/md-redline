@@ -1106,6 +1106,7 @@ export default function App() {
         hasExternalChange={hasExternalChange}
         showReviewSummary={showReviewSummary}
         commentCount={commentCount}
+        enableResolve={settings.enableResolve}
         onViewModeChange={(mode) => {
           setViewMode(mode);
           if (mode === 'raw') clearSelection();
