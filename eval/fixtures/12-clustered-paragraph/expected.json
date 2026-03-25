@@ -1,0 +1,41 @@
+{
+  "totalComments": 3,
+  "actionableComments": 3,
+  "comments": [
+    {
+      "id": "eval-12-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["Stripe"],
+        "shouldNotContain": ["Users enter their card details on the checkout page."]
+      }
+    },
+    {
+      "id": "eval-12-c2",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["webhook"],
+        "shouldNotContain": ["The system processes the payment"]
+      }
+    },
+    {
+      "id": "eval-12-c3",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["SendGrid"],
+        "shouldNotContain": []
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": [
+    {
+      "type": "contains",
+      "value": "Refunds are processed within 5-10 business days"
+    },
+    {
+      "type": "contains",
+      "value": "## Supported Payment Methods"
+    }
+  ]
+}

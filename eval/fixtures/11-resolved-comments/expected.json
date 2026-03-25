@@ -1,0 +1,41 @@
+{
+  "totalComments": 3,
+  "actionableComments": 2,
+  "comments": [
+    {
+      "id": "eval-11-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["Docker"],
+        "shouldNotContain": ["You need Docker installed on your system."]
+      }
+    },
+    {
+      "id": "eval-11-c2",
+      "expectedAction": "skip",
+      "contentHints": {
+        "shouldContain": ["Copy the example config file and edit it"],
+        "shouldNotContain": []
+      }
+    },
+    {
+      "id": "eval-11-c3",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["docker compose"],
+        "shouldNotContain": ["Run the start command to launch all services."]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": [
+    {
+      "type": "contains",
+      "value": "Copy the example config file and edit it"
+    },
+    {
+      "type": "contains",
+      "value": ".env.example"
+    }
+  ]
+}
