@@ -1,14 +1,8 @@
 import { useCallback, useRef, useEffect } from 'react';
-import type { ViewMode } from '../components/Toolbar';
-
-export type FilterMode = 'all';
 
 export interface SessionState {
   openTabs: string[];
   activeFilePath: string | null;
-  sidebarVisible: boolean;
-  sidebarFilter: FilterMode;
-  viewMode: ViewMode;
 }
 
 const STORAGE_KEY = 'md-review-session';

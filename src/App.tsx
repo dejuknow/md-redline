@@ -53,6 +53,7 @@ import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
 import { useTheme } from 'next-themes';
+import { usePaneLayout } from './hooks/usePaneLayout';
 
 // Load saved session for initial state
 const savedSession = loadSession();
@@ -77,11 +78,7 @@ export default function App() {
   } = useTabs();
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [explorerVisible, setExplorerVisible] = useState(
-    !savedSession?.openTabs?.length
-  );
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
-  const [leftPanelView, setLeftPanelView] = useState<'explorer' | 'outline'>('explorer');
   const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
@@ -89,23 +86,22 @@ export default function App() {
   const { settings } = useSettings();
   const { theme, setTheme } = useTheme();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
-
-  // Session-persisted state: initialize from saved session
-  const [viewMode, setViewMode] = useState<ViewMode>(savedSession?.viewMode ?? 'rendered');
-  const [sidebarVisible, setSidebarVisible] = useState(savedSession?.sidebarVisible ?? true);
+  const {
+    explorerVisible, setExplorerVisible,
+    sidebarVisible, setSidebarVisible,
+    leftPanelView, setLeftPanelView,
+    viewMode, setViewMode,
+  } = usePaneLayout();
   const sidebarFilter = 'all' as const;
 
-  // Session persistence
+  // Session persistence (tabs only — pane layout is persisted by usePaneLayout)
   const { persist } = useSessionPersistence();
-  // Persist session state on changes
   useEffect(() => {
     persist({
       openTabs: tabs.map((t) => t.filePath),
       activeFilePath,
-      sidebarVisible,
-      viewMode,
     });
-  }, [tabs, activeFilePath, sidebarVisible, viewMode, persist]);
+  }, [tabs, activeFilePath, persist]);
 
   // Restore session tabs on first mount
   const sessionRestoredRef = useRef(false);
