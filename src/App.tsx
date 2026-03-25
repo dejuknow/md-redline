@@ -32,7 +32,8 @@ import {
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import { renderMarkdown } from './markdown/pipeline';
-import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, highlightSearchMatches } from './components/MarkdownViewer';
+import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, highlightSearchMatches, type TocHeading } from './components/MarkdownViewer';
+import { TableOfContents } from './components/TableOfContents';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar, type ViewMode } from './components/Toolbar';
@@ -80,6 +81,9 @@ export default function App() {
     !savedSession?.openTabs?.length
   );
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
+  const [leftPanelView, setLeftPanelView] = useState<'explorer' | 'outline'>('explorer');
+  const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
@@ -219,6 +223,43 @@ export default function App() {
     () => detectMissingAnchors(cleanMarkdown, comments),
     [cleanMarkdown, comments],
   );
+
+  // Extract headings from rendered HTML (runs after MarkdownViewer's useLayoutEffect sets innerHTML).
+  // Depends on html only — heading structure doesn't change with comment/selection state.
+  useEffect(() => {
+    const headings = viewerRef.current?.getHeadings() ?? [];
+    setTocHeadings(headings);
+  }, [html]);
+
+  // Track active heading based on scroll position.
+  // Elements are queried fresh each frame because MarkdownViewer rebuilds innerHTML
+  // on any prop change (activeCommentId, selection, etc.), replacing all DOM nodes.
+  useEffect(() => {
+    const scrollEl = containerRef.current;
+    if (!scrollEl || tocHeadings.length === 0) return;
+    const ids = tocHeadings.map((h) => h.id);
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const threshold = 60;
+        let activeId: string | null = null;
+        for (const id of ids) {
+          const el = scrollEl.querySelector(`#${CSS.escape(id)}`) as HTMLElement | null;
+          if (el && el.offsetTop <= scrollEl.scrollTop + threshold) {
+            activeId = id;
+          }
+        }
+        setActiveHeadingId(activeId);
+      });
+    };
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    onScroll(); // initial check
+    return () => {
+      scrollEl.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [tocHeadings]);
 
   // Comment counts per tab (for badges)
   const commentCounts = useMemo(() => {
@@ -926,6 +967,21 @@ After you're done, give me a brief summary:
         return;
       }
 
+      // Cmd+Shift+O : Toggle outline view in left panel (must come before Cmd+O)
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        if (!explorerVisible) {
+          setExplorerVisible(true);
+          setLeftPanelView('outline');
+        } else if (leftPanelView === 'explorer') {
+          setLeftPanelView('outline');
+        } else {
+          setExplorerVisible(false);
+          setLeftPanelView('explorer');
+        }
+        return;
+      }
+
       // Cmd+O : Open file
       if (mod && e.key === 'o') {
         e.preventDefault();
@@ -1051,7 +1107,7 @@ After you're done, give me a brief summary:
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, settings.enableResolve, showCommandPalette, showSearch, handleSearchClose]);
+  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, settings.enableResolve, showCommandPalette, showSearch, handleSearchClose, explorerVisible, leftPanelView]);
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -1069,6 +1125,11 @@ After you're done, give me a brief summary:
       { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: () => setShowFileOpener(true) },
 
       { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
+      { id: 'toggle-outline', label: 'Toggle document outline', shortcut: `${modKey}+Shift+O`, section: 'View', onExecute: () => {
+        if (!explorerVisible) { setExplorerVisible(true); setLeftPanelView('outline'); }
+        else if (leftPanelView === 'explorer') { setLeftPanelView('outline'); }
+        else { setExplorerVisible(false); setLeftPanelView('explorer'); }
+      } },
       { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
       { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } },
       { id: 'theme-light', label: 'Theme: Light', section: 'Theme', onExecute: () => setTheme('light') },
@@ -1105,8 +1166,22 @@ After you're done, give me a brief summary:
       cmds.push({ id: 'delete-active', label: 'Delete active comment', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
     }
 
+    // Heading navigation entries
+    for (const h of tocHeadings) {
+      const indent = '\u2003'.repeat(h.level - 1);
+      cmds.push({
+        id: `heading-${h.id}`,
+        label: `${indent}${h.text}`,
+        section: 'Headings',
+        onExecute: () => {
+          const el = containerRef.current?.querySelector(`#${CSS.escape(h.id)}`);
+          el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+      });
+    }
+
     return cmds;
-  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleCopyAgentPrompt, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme]);
+  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleCopyAgentPrompt, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme, tocHeadings, explorerVisible, leftPanelView]);
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -1146,7 +1221,7 @@ After you're done, give me a brief summary:
 
       <>
           <div className="flex-1 flex min-h-0 relative">
-            {/* File explorer left pane */}
+            {/* Left pane (Explorer / Outline) */}
             <div
               className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
                 explorerVisible ? '' : 'w-0 border-r-0'
@@ -1154,13 +1229,68 @@ After you're done, give me a brief summary:
               style={explorerVisible ? { width: explorerWidth } : undefined}
             >
               <div className="h-full flex flex-col" style={{ minWidth: explorerWidth }}>
-                <FileExplorer
-                  initialDir={explorerDir}
-                  activeFilePath={activeFilePath}
-                  onOpenFile={handleExplorerOpenFile}
-                  onClose={() => setExplorerVisible(false)}
-                  onContextMenu={handleExplorerContextMenu}
-                />
+                {/* Tab bar */}
+                <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => setLeftPanelView('explorer')}
+                      className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        leftPanelView === 'explorer'
+                          ? 'bg-surface-inset text-content'
+                          : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
+                      }`}
+                      title="File explorer"
+                    >
+                      <svg className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
+                      </svg>
+                      Explorer
+                    </button>
+                    <button
+                      onClick={() => setLeftPanelView('outline')}
+                      className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        leftPanelView === 'outline'
+                          ? 'bg-surface-inset text-content'
+                          : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
+                      }`}
+                      title="Document outline"
+                    >
+                      <svg className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                      </svg>
+                      Outline
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setExplorerVisible(false)}
+                    className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+                    title="Close panel"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Panel content */}
+                {leftPanelView === 'explorer' ? (
+                  <FileExplorer
+                    initialDir={explorerDir}
+                    activeFilePath={activeFilePath}
+                    onOpenFile={handleExplorerOpenFile}
+                    onClose={() => setExplorerVisible(false)}
+                    onContextMenu={handleExplorerContextMenu}
+                    hideHeader
+                  />
+                ) : (
+                  <TableOfContents
+                    headings={tocHeadings}
+                    activeHeadingId={activeHeadingId}
+                    onHeadingClick={(id) => {
+                      const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
+                      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                  />
+                )}
               </div>
             </div>
             {explorerVisible && (
@@ -1400,6 +1530,12 @@ After you're done, give me a brief summary:
             {modKey}+Enter
           </kbd>{' '}
           Comment
+        </span>
+        <span>
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+            {modKey}+Shift+O
+          </kbd>{' '}
+          Outline
         </span>
       </div>
     </div>
