@@ -24,13 +24,11 @@ interface Props {
   // Document actions (moved from Toolbar)
   viewMode: ViewMode;
   hasSnapshot: boolean;
-  showReviewSummary: boolean;
   commentCount: number;
   enableResolve?: boolean;
   onViewModeChange: (mode: ViewMode) => void;
   onSnapshot: () => void;
   onJumpToNext: () => void;
-  onToggleReviewSummary: () => void;
   onSearch: () => void;
   searchActive: boolean;
   onCopyAgentPrompt?: (filePaths: string[]) => void;
@@ -198,13 +196,11 @@ export function TabBar({
   onTabContextMenu,
   viewMode,
   hasSnapshot,
-  showReviewSummary,
   commentCount,
   enableResolve,
   onViewModeChange,
   onSnapshot,
   onJumpToNext,
-  onToggleReviewSummary,
   onSearch,
   searchActive,
   onCopyAgentPrompt,
@@ -318,16 +314,6 @@ export function TabBar({
             </svg>
           </IconButton>
         )}
-        <IconButton variant="active" active={showReviewSummary} onClick={onToggleReviewSummary} title="Review summary across files">
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"
-            />
-          </svg>
-        </IconButton>
-
         {/* Separator */}
         <div className="h-4 w-px bg-border mx-1" />
 

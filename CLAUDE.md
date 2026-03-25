@@ -87,11 +87,6 @@ For human-to-human review, enable the resolve workflow in settings. This adds:
 - **Raw view**: Raw markdown with comment markers visible
 - **Diff view**: Side-by-side diff comparing current content to a snapshot (take snapshot via tab bar)
 
-### Review summary
-- **Cross-file summary popover**: Shows all open files with comment counts
-- **Aggregate stats**: Total comments across all tabs
-- **Quick file jump**: Click a file in the summary to switch to it
-
 ### Navigation
 - **Jump to next**: Press `N` or `J` to focus next comment
 - **Jump to previous**: Press `P` or `K` to focus previous comment

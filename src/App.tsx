@@ -42,7 +42,7 @@ import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { DiffViewer } from './components/DiffViewer';
 import { Toast } from './components/Toast';
-import { ReviewSummary } from './components/ReviewSummary';
+
 import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -137,8 +137,6 @@ export default function App() {
     setToast((prev) => ({ ...prev, visible: false }));
   }, []);
 
-  // Review summary panel (Feature 4)
-  const [showReviewSummary, setShowReviewSummary] = useState(false);
 
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
@@ -1070,7 +1068,7 @@ After you're done, give me a brief summary:
       { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
       { id: 'take-snapshot', label: 'Take diff snapshot', section: 'File', onExecute: handleSnapshot },
       { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: () => setShowFileOpener(true) },
-      { id: 'review-summary', label: 'Toggle review summary', section: 'View', onExecute: () => setShowReviewSummary((p) => !p) },
+
       { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
       { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
       { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } },
@@ -1129,16 +1127,12 @@ After you're done, give me a brief summary:
         tabs={tabs}
         activeFilePath={activeFilePath}
         commentCounts={commentCounts}
-        onSwitchTab={(path) => {
-          switchTab(path);
-          setShowReviewSummary(false);
-        }}
+        onSwitchTab={switchTab}
         onCloseTab={closeTab}
         onOpenFile={() => setShowFileOpener(true)}
         onTabContextMenu={handleTabContextMenu}
         viewMode={viewMode}
         hasSnapshot={currentSnapshot !== null}
-        showReviewSummary={showReviewSummary}
         commentCount={commentCount}
         enableResolve={settings.enableResolve}
         onViewModeChange={(mode) => {
@@ -1147,7 +1141,6 @@ After you're done, give me a brief summary:
         }}
         onSnapshot={handleSnapshot}
         onJumpToNext={handleJumpToNext}
-        onToggleReviewSummary={() => setShowReviewSummary((prev) => !prev)}
         onSearch={() => { if (showSearch) { handleSearchClose(); } else { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } }}
         searchActive={showSearch}
         onCopyAgentPrompt={handleCopyAgentPrompt}
@@ -1286,18 +1279,7 @@ After you're done, give me a brief summary:
               </div>
             </div>
 
-            {/* Review Summary popover (Feature 4) */}
-            {showReviewSummary && (
-              <ReviewSummary
-                tabs={tabs}
-                activeFilePath={activeFilePath}
-                onSwitchToFile={(path) => {
-                  switchTab(path);
-                  setShowReviewSummary(false);
-                }}
-                onClose={() => setShowReviewSummary(false)}
-              />
-            )}
+
           </div>
 
           {/* Floating comment form (disabled in raw/diff view) */}
