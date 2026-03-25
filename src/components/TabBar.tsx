@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ViewMode } from './Toolbar';
 import { IconButton } from './IconButton';
+import { Separator } from './Separator';
 
 interface Tab {
   filePath: string;
@@ -92,7 +93,7 @@ function HandOffButton({
 
   return (
     <>
-      <div className="h-4 w-px bg-border mx-1" />
+      <Separator />
       <div className="group/handoff relative flex items-center" ref={ref} data-testid="handoff-group">
         {/* Paper-plane — hand off active file */}
         <button
@@ -299,23 +300,23 @@ export function TabBar({
           </svg>
         </IconButton>
 
-        {/* Separator */}
-        <div className="h-4 w-px bg-border mx-1" />
+        <Separator />
 
         {/* Comment navigation group */}
         {commentCount > 0 && (
-          <IconButton onClick={onJumpToNext} title={enableResolve ? "Jump to next open comment (N)" : "Jump to next comment (N)"}>
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12"
-              />
-            </svg>
-          </IconButton>
+          <>
+            <IconButton onClick={onJumpToNext} title={enableResolve ? "Jump to next open comment (N)" : "Jump to next comment (N)"}>
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12"
+                />
+              </svg>
+            </IconButton>
+            <Separator />
+          </>
         )}
-        {/* Separator */}
-        <div className="h-4 w-px bg-border mx-1" />
 
         {/* View controls group */}
         <IconButton

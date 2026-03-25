@@ -64,7 +64,6 @@ export default function App() {
     setRawMarkdown,
     isLoading,
     error,
-    lastSaved,
     openTab,
     openTabInBackground,
     closeTab,
@@ -1112,7 +1111,6 @@ After you're done, give me a brief summary:
   return (
     <div className="h-screen flex flex-col bg-surface">
       <Toolbar
-        lastSaved={lastSaved}
         error={error}
         isLoading={isLoading}
         showExplorer={explorerVisible}

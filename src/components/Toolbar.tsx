@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { getAuthorColor } from '../hooks/useAuthor';
 import { IconButton } from './IconButton';
+import { Separator } from './Separator';
 
 export type ViewMode = 'rendered' | 'raw' | 'diff';
 
 interface Props {
-  lastSaved: Date | null;
   error: string | null;
   isLoading: boolean;
   showExplorer: boolean;
@@ -18,7 +18,6 @@ interface Props {
 }
 
 export function Toolbar({
-  lastSaved,
   error,
   isLoading,
   showExplorer,
@@ -59,8 +58,7 @@ export function Toolbar({
         </svg>
       </IconButton>
 
-      {/* Separator */}
-      <div className="h-5 w-px bg-border" />
+      <Separator />
 
       {/* App logo + name */}
       <div className="flex items-center gap-2">
@@ -92,9 +90,6 @@ export function Toolbar({
       <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
         {error && <span className="text-xs text-danger font-medium">{error}</span>}
         {isLoading && <span className="text-xs text-content-muted">Loading...</span>}
-        {lastSaved && !error && !isLoading && (
-          <span className="text-xs text-content-muted">Saved {lastSaved.toLocaleTimeString()}</span>
-        )}
       </div>
 
       {/* Author name */}
@@ -139,8 +134,7 @@ export function Toolbar({
         </svg>
       </IconButton>
 
-      {/* Separator */}
-      <div className="h-5 w-px bg-border" />
+      <Separator />
 
       {/* Comments sidebar toggle (far right, mirrors explorer) */}
       <IconButton variant="active" active={sidebarVisible} size="md" onClick={onToggleSidebar} title="Toggle comments sidebar (Cmd+\)">
