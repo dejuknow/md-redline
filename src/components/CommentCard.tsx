@@ -4,6 +4,7 @@ import { getEffectiveStatus } from '../types';
 import { getAuthorColor } from '../hooks/useAuthor';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
+import { ActionButton } from './ActionButton';
 
 interface Props {
   comment: MdComment;
@@ -173,19 +174,15 @@ export const CommentCard = memo(function CommentCard({
         {isEditing ? (
           <div className="flex flex-col-reverse gap-1.5" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-end gap-1.5">
-              <button
-                onClick={handleCancel}
-                className="text-xs px-2 py-1 rounded text-content-secondary hover:bg-surface-inset transition-colors"
-              >
-                Cancel
-              </button>
-              <button
+              <ActionButton size="sm" onClick={handleCancel}>Cancel</ActionButton>
+              <ActionButton
+                intent="submit"
+                size="sm"
                 onClick={handleSave}
                 disabled={!editText.trim() || editText.length > COMMENT_MAX_LENGTH}
-                className="text-xs px-2 py-1 rounded bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
               >
                 Save
-              </button>
+              </ActionButton>
             </div>
             {editText.length > COMMENT_MAX_LENGTH * 0.8 && (
               <p className={`text-right text-xs ${
@@ -252,50 +249,25 @@ export const CommentCard = memo(function CommentCard({
           <div className={`flex gap-1 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
             {isResolved ? (
               onUnresolve && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onUnresolve(comment.id);
-                  }}
-                  className="text-xs px-2 py-0.5 rounded text-primary-text hover:bg-primary-bg transition-colors"
-                >
+                <ActionButton intent="primary" onClick={(e) => { e.stopPropagation(); onUnresolve(comment.id); }}>
                   Reopen
-                </button>
+                </ActionButton>
               )
             ) : (
               <>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditText(comment.text);
-                    setIsEditing(true);
-                  }}
-                  className="text-xs px-2 py-0.5 rounded text-content-secondary hover:bg-surface-inset transition-colors"
-                >
+                <ActionButton onClick={(e) => { e.stopPropagation(); setEditText(comment.text); setIsEditing(true); }}>
                   Edit
-                </button>
+                </ActionButton>
                 {onResolve && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onResolve(comment.id);
-                    }}
-                    className="text-xs px-2 py-0.5 rounded text-success-text hover:bg-success-bg transition-colors"
-                  >
+                  <ActionButton intent="success" onClick={(e) => { e.stopPropagation(); onResolve(comment.id); }}>
                     Resolve
-                  </button>
+                  </ActionButton>
                 )}
               </>
             )}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(comment.id);
-              }}
-              className="text-xs px-2 py-0.5 rounded text-danger hover:bg-danger-bg transition-colors"
-            >
+            <ActionButton intent="danger" onClick={(e) => { e.stopPropagation(); onDelete(comment.id); }}>
               Delete
-            </button>
+            </ActionButton>
           </div>
         )}
       </div>
@@ -350,22 +322,14 @@ export const CommentCard = memo(function CommentCard({
                 </p>
               )}
               <div className="flex justify-end gap-1.5 mt-1">
-                <button
-                  onClick={() => {
-                    setReplyText('');
-                    setIsReplying(false);
-                  }}
-                  className="text-xs px-2 py-0.5 rounded text-content-secondary hover:bg-surface-inset transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
+                <ActionButton onClick={() => { setReplyText(''); setIsReplying(false); }}>Cancel</ActionButton>
+                <ActionButton
+                  intent="submit"
                   onClick={handleReplySubmit}
                   disabled={!replyText.trim() || replyText.length > COMMENT_MAX_LENGTH}
-                  className="text-xs px-2 py-0.5 rounded bg-primary text-on-primary hover:bg-primary-hover transition-colors disabled:opacity-40"
                 >
                   Reply
-                </button>
+                </ActionButton>
               </div>
             </div>
           ) : (

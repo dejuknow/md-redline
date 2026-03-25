@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ViewMode } from './Toolbar';
+import { IconButton } from './IconButton';
 
 interface Tab {
   filePath: string;
@@ -295,108 +296,74 @@ export function TabBar({
       {/* Document actions (right side) */}
       <div className="flex items-center gap-0.5 px-2 shrink-0">
         {/* Search */}
-        <button
-          onClick={onSearch}
-          className={`p-1 rounded transition-colors ${
-            searchActive
-              ? 'text-primary-text bg-primary-bg'
-              : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
-          }`}
-          title="Find in document (Cmd+F)"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <IconButton variant="active" active={searchActive} onClick={onSearch} title="Find in document (Cmd+F)">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <circle cx="11" cy="11" r="8" />
             <path strokeLinecap="round" d="m21 21-4.35-4.35" />
           </svg>
-        </button>
+        </IconButton>
 
         {/* Separator */}
         <div className="h-4 w-px bg-border mx-1" />
 
         {/* Comment navigation group */}
         {commentCount > 0 && (
-          <button
-            onClick={onJumpToNext}
-            className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-surface-inset"
-            title={enableResolve ? "Jump to next open comment (N)" : "Jump to next comment (N)"}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <IconButton onClick={onJumpToNext} title={enableResolve ? "Jump to next open comment (N)" : "Jump to next comment (N)"}>
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12"
               />
             </svg>
-          </button>
+          </IconButton>
         )}
-        <button
-          onClick={onToggleReviewSummary}
-          className={`p-1 rounded transition-colors ${
-            showReviewSummary
-              ? 'text-primary-text bg-primary-bg'
-              : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
-          }`}
-          title="Review summary across files"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <IconButton variant="active" active={showReviewSummary} onClick={onToggleReviewSummary} title="Review summary across files">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
               d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"
             />
           </svg>
-        </button>
+        </IconButton>
 
         {/* Separator */}
         <div className="h-4 w-px bg-border mx-1" />
 
         {/* View controls group */}
-        <button
+        <IconButton
+          variant="active"
+          active={viewMode === 'raw'}
           onClick={() => onViewModeChange(viewMode === 'raw' ? 'rendered' : 'raw')}
-          className={`p-1 rounded transition-colors ${
-            viewMode === 'raw'
-              ? 'text-primary-text bg-primary-bg'
-              : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
-          }`}
           title={viewMode === 'raw' ? 'Switch to rendered view' : 'View raw markdown'}
         >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
               d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
             />
           </svg>
-        </button>
+        </IconButton>
         {hasSnapshot && (
-          <button
+          <IconButton
+            variant="active"
+            active={viewMode === 'diff'}
             onClick={() => onViewModeChange(viewMode === 'diff' ? 'rendered' : 'diff')}
-            className={`p-1 rounded transition-colors ${
-              viewMode === 'diff'
-                ? 'text-primary-text bg-primary-bg'
-                : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
-            }`}
             title={viewMode === 'diff' ? 'Switch to rendered view' : 'View diff since snapshot'}
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
               />
             </svg>
-          </button>
+          </IconButton>
         )}
-        <button
-          onClick={onSnapshot}
-          className={`p-1 rounded transition-colors ${
-            hasSnapshot
-              ? 'text-success-text hover:text-success hover:bg-success-bg'
-              : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
-          }`}
-          title={hasSnapshot ? 'Update diff snapshot' : 'Take diff snapshot'}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <IconButton variant="success" active={hasSnapshot} onClick={onSnapshot} title={hasSnapshot ? 'Update diff snapshot' : 'Take diff snapshot'}>
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -404,7 +371,7 @@ export function TabBar({
             />
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
           </svg>
-        </button>
+        </IconButton>
 
         {/* Separator + Hand off (primary action with multi-file dropdown) */}
         {commentCount > 0 && onCopyAgentPrompt && activeFilePath && (
