@@ -1367,16 +1367,18 @@ export default function App() {
           </kbd>{' '}
           Next / Prev
         </span>
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            A
-          </kbd>{' '}
-          Resolve{' '}
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            U
-          </kbd>{' '}
-          Reopen
-        </span>
+        {settings.enableResolve && (
+          <span>
+            <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+              A
+            </kbd>{' '}
+            Resolve{' '}
+            <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+              U
+            </kbd>{' '}
+            Reopen
+          </span>
+        )}
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
             {modKey}+Enter
