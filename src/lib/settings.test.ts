@@ -71,17 +71,17 @@ describe('loadSettings', () => {
 
   it('falls back to default for zero commentMaxLength', () => {
     store['md-review-settings'] = JSON.stringify({ commentMaxLength: 0 });
-    expect(loadSettings().commentMaxLength).toBe(500);
+    expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('falls back to default for negative commentMaxLength', () => {
     store['md-review-settings'] = JSON.stringify({ commentMaxLength: -10 });
-    expect(loadSettings().commentMaxLength).toBe(500);
+    expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('falls back to default for non-numeric commentMaxLength', () => {
     store['md-review-settings'] = JSON.stringify({ commentMaxLength: 'big' });
-    expect(loadSettings().commentMaxLength).toBe(500);
+    expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('preserves valid templates array', () => {
@@ -99,13 +99,13 @@ describe('loadSettings', () => {
     // Simulate stored settings from before enableResolve and quickComment existed
     store['md-review-settings'] = JSON.stringify({
       templates: DEFAULT_TEMPLATES,
-      commentMaxLength: 500,
+      commentMaxLength: 1000,
       showTemplatesByDefault: false,
     });
     const result = loadSettings();
     expect(result.enableResolve).toBe(false);
     expect(result.quickComment).toBe(false);
-    expect(result.commentMaxLength).toBe(500);
+    expect(result.commentMaxLength).toBe(1000);
     expect(result.showTemplatesByDefault).toBe(false);
   });
 

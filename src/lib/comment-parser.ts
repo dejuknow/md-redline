@@ -264,6 +264,25 @@ export function insertComment(
 
   if (insertionCleanOffset === null) return rawMarkdown;
 
+  // If the insertion point falls inside a fenced code block, move it before the block.
+  // HTML comment markers are literal text inside code blocks, so the marker must go outside.
+  {
+    const fenceRegex = /^(`{3,}|~{3,}).*$/gm;
+    let fm: RegExpExecArray | null;
+    let openF: { marker: string; start: number } | null = null;
+    while ((fm = fenceRegex.exec(cleanMarkdown)) !== null) {
+      const marker = fm[1];
+      if (!openF) {
+        openF = { marker: marker[0].repeat(marker.length), start: fm.index };
+      } else if (marker[0] === openF.marker[0] && marker.length >= openF.marker.length) {
+        if (insertionCleanOffset >= openF.start && insertionCleanOffset <= fm.index + fm[0].length) {
+          insertionCleanOffset = openF.start;
+        }
+        openF = null;
+      }
+    }
+  }
+
   // Insert marker BEFORE the anchor text in the raw markdown
   const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
@@ -463,6 +482,38 @@ export function stripInlineFormatting(md: string): {
   const atLineStart = (pos: number) => pos === 0 || md[pos - 1] === '\n';
 
   while (i < len) {
+    // Fenced code blocks: skip fence lines, keep content as-is
+    if (atLineStart(i) && (md[i] === '`' || md[i] === '~')) {
+      const fenceChar = md[i];
+      let fenceEnd = i;
+      while (fenceEnd < len && md[fenceEnd] === fenceChar) fenceEnd++;
+      const fenceLen = fenceEnd - i;
+      if (fenceLen >= 3) {
+        // Skip the opening fence line (markers + info string + newline)
+        while (fenceEnd < len && md[fenceEnd] !== '\n') fenceEnd++;
+        if (fenceEnd < len) fenceEnd++;
+        i = fenceEnd;
+        // Process content until closing fence — add as-is (no formatting stripping)
+        while (i < len) {
+          if (atLineStart(i) && md[i] === fenceChar) {
+            let closeEnd = i;
+            while (closeEnd < len && md[closeEnd] === fenceChar) closeEnd++;
+            if (closeEnd - i >= fenceLen) {
+              // Skip closing fence line
+              while (closeEnd < len && md[closeEnd] !== '\n') closeEnd++;
+              if (closeEnd < len) closeEnd++;
+              i = closeEnd;
+              break;
+            }
+          }
+          map.push(i);
+          plain += md[i];
+          i++;
+        }
+        continue;
+      }
+    }
+
     // Heading markers at line start
     if (atLineStart(i) && md[i] === '#') {
       while (i < len && md[i] === '#') i++;

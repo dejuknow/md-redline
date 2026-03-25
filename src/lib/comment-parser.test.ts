@@ -8,6 +8,7 @@ import {
   addReply,
   serializeComment,
   detectMissingAnchors,
+  stripInlineFormatting,
 } from './comment-parser';
 import type { MdComment } from '../types';
 
@@ -790,6 +791,183 @@ describe('stripInlineFormatting via insertComment', () => {
     const result = insertComment(raw, 'a * as', 'clarify');
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
+  });
+});
+
+describe('stripInlineFormatting with fenced code blocks', () => {
+  it('strips fence markers but keeps code block content', () => {
+    const md = '```\nhello\n```';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('hello');
+    expect(plain).not.toContain('```');
+  });
+
+  it('strips info string along with opening fence', () => {
+    const md = '```mermaid\ngraph TD\n```';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('graph TD');
+    expect(plain).not.toContain('mermaid');
+  });
+
+  it('preserves backticks inside code blocks as literal text', () => {
+    const md = '```\nuse `backticks` here\n```';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('`backticks`');
+  });
+
+  it('preserves asterisks inside code blocks as literal text', () => {
+    const md = '```\n**not bold** and *not italic*\n```';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('**not bold**');
+    expect(plain).toContain('*not italic*');
+  });
+
+  it('handles tilde-fenced code blocks', () => {
+    const md = '~~~\ncode here\n~~~';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('code here');
+    expect(plain).not.toContain('~~~');
+  });
+
+  it('handles text before and after code blocks', () => {
+    const md = 'before\n\n```\ncode\n```\n\nafter';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('before');
+    expect(plain).toContain('code');
+    expect(plain).toContain('after');
+    expect(plain).not.toContain('```');
+  });
+
+  it('maps code block content offsets back to correct clean-markdown positions', () => {
+    const md = 'abc\n```\nxyz\n```\ndef';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    const xyzInPlain = plain.indexOf('xyz');
+    expect(xyzInPlain).toBeGreaterThan(-1);
+    const cleanOff = toCleanOffset(xyzInPlain);
+    expect(md.slice(cleanOff, cleanOff + 3)).toBe('xyz');
+  });
+
+  it('handles multiple code blocks', () => {
+    const md = '```\nfirst\n```\n\n```\nsecond\n```';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('first');
+    expect(plain).toContain('second');
+    expect(plain).not.toContain('```');
+  });
+
+  it('requires closing fence to match opening fence character', () => {
+    // Backtick open should not be closed by tilde
+    const md = '```\ncontent\n~~~\nmore\n```';
+    const { plain } = stripInlineFormatting(md);
+    // ~~~ inside backtick block is content, not a closing fence
+    expect(plain).toContain('~~~');
+    expect(plain).toContain('content');
+    expect(plain).toContain('more');
+  });
+
+  it('requires closing fence length >= opening fence length', () => {
+    const md = '````\nshort ``` not closing\n````';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('short ``` not closing');
+  });
+
+  it('still strips inline backticks outside code blocks', () => {
+    const md = 'Use `code` here';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('Use code here');
+  });
+
+  it('handles code block at end of file without trailing newline', () => {
+    const md = '```\ncode\n```';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('code');
+    expect(plain).not.toContain('```');
+  });
+});
+
+describe('insertComment inside fenced code blocks', () => {
+  it('places marker before a mermaid code block, not inside it', () => {
+    const raw = '# Diagram\n\n```mermaid\ngraph TD\n    A --> B\n```\n\nEnd.';
+    const result = insertComment(raw, 'graph TD', 'fix diagram');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].anchor).toBe('graph TD');
+    // The marker must NOT appear inside the code block (would be literal text)
+    const codeBlockMatch = result.match(/```mermaid\n[\s\S]*?```/);
+    expect(codeBlockMatch).toBeTruthy();
+    expect(codeBlockMatch![0]).not.toContain('@comment');
+  });
+
+  it('places marker before a generic fenced code block', () => {
+    const raw = 'Text before\n\n```js\nconst x = 1;\n```\n\nText after';
+    const result = insertComment(raw, 'const x = 1;', 'refactor');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const codeBlockMatch = result.match(/```js\n[\s\S]*?```/);
+    expect(codeBlockMatch).toBeTruthy();
+    expect(codeBlockMatch![0]).not.toContain('@comment');
+  });
+
+  it('places marker before a tilde-fenced code block', () => {
+    const raw = 'Before\n\n~~~\nsome code\n~~~\n\nAfter';
+    const result = insertComment(raw, 'some code', 'review');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const codeBlockMatch = result.match(/~~~\n[\s\S]*?~~~/);
+    expect(codeBlockMatch).toBeTruthy();
+    expect(codeBlockMatch![0]).not.toContain('@comment');
+  });
+
+  it('still handles inline backticks correctly', () => {
+    const raw = 'Use `foo` for this';
+    const result = insertComment(raw, 'foo', 'rename');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].anchor).toBe('foo');
+  });
+
+  it('comment on code block round-trips through parse', () => {
+    const raw = 'Intro\n\n```python\ndef hello():\n    pass\n```\n\nOutro';
+    const result = insertComment(raw, 'def hello():', 'add docstring');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // Clean markdown should restore original content
+    expect(parsed.cleanMarkdown).toBe(raw);
+  });
+
+  it('handles anchor that appears both in and outside a code block with hintOffset', () => {
+    const raw = 'hello world\n\n```\nhello world\n```';
+    // hintOffset pointing to the code block occurrence (past the first "hello world")
+    const { plain } = stripInlineFormatting(parseComments(raw).cleanMarkdown);
+    const secondOccurrence = plain.indexOf('hello world', plain.indexOf('hello world') + 1);
+    const result = insertComment(raw, 'hello world', 'inside code', 'User', undefined, undefined, secondOccurrence);
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // Marker should be placed before the code block, not inside it
+    const codeBlockMatch = result.match(/```\n[\s\S]*?```/);
+    expect(codeBlockMatch![0]).not.toContain('@comment');
+  });
+
+  it('does not interfere with comments on text outside code blocks', () => {
+    const raw = 'Normal text\n\n```\ncode\n```\n\nMore text';
+    const result = insertComment(raw, 'Normal text', 'edit this');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // Marker should be before "Normal text", not near the code block
+    expect(result.indexOf('@comment')).toBeLessThan(result.indexOf('Normal text'));
+  });
+
+  it('handles multiple code blocks in the same document', () => {
+    const raw = '```\nfirst\n```\n\nMiddle\n\n```\nsecond\n```';
+    const result = insertComment(raw, 'second', 'check this');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // Marker should be before the second code block
+    const markerIdx = result.indexOf('@comment');
+    const secondFenceIdx = result.indexOf('```', result.indexOf('```\n\nMiddle') + 1);
+    expect(markerIdx).toBeLessThanOrEqual(secondFenceIdx);
+    // First code block should be untouched
+    expect(result.slice(0, result.indexOf('\n\nMiddle'))).not.toContain('@comment');
   });
 });
 

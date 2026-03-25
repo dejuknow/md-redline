@@ -140,7 +140,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
 
   const handleMaxLengthBlur = useCallback(() => {
     const num = parseInt(draftMaxLength);
-    const valid = !isNaN(num) && num > 0 ? num : 500;
+    const valid = !isNaN(num) && num > 0 ? num : 1000;
     setDraftMaxLength(String(valid));
     updateCommentMaxLength(valid);
   }, [draftMaxLength, updateCommentMaxLength]);

@@ -26,7 +26,7 @@ export const DEFAULT_TEMPLATES: CommentTemplate[] = [
 
 export const DEFAULT_SETTINGS: AppSettings = {
   templates: DEFAULT_TEMPLATES,
-  commentMaxLength: 500,
+  commentMaxLength: 1000,
   showTemplatesByDefault: false,
   enableResolve: false,
   quickComment: false,
