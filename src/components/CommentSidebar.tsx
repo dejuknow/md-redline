@@ -3,6 +3,7 @@ import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { CommentCard } from './CommentCard';
 import { useSettings } from '../contexts/SettingsContext';
+import { ActionButton } from './ActionButton';
 
 export interface SidebarContextMenuInfo {
   commentId: string;
@@ -256,42 +257,33 @@ export function CommentSidebar({
             {resolveEnabled ? (
               <>
                 {openCount > 0 && onBulkResolve && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onBulkResolve();
-                    }}
-                    className="text-[10px] px-2 py-0.5 rounded text-success-text hover:bg-success-bg font-medium transition-colors"
+                  <ActionButton
+                    intent="success"
+                    onClick={(e) => { e.stopPropagation(); onBulkResolve(); }}
                     title="Resolve all open comments"
                   >
                     Resolve All
-                  </button>
+                  </ActionButton>
                 )}
                 {resolvedCount > 0 && onBulkDeleteResolved && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onBulkDeleteResolved();
-                    }}
-                    className="text-[10px] px-2 py-0.5 rounded text-danger hover:bg-danger-bg font-medium transition-colors"
+                  <ActionButton
+                    intent="danger"
+                    onClick={(e) => { e.stopPropagation(); onBulkDeleteResolved(); }}
                     title="Delete all resolved comments"
                   >
                     Clear Resolved
-                  </button>
+                  </ActionButton>
                 )}
               </>
             ) : (
               comments.length > 0 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onBulkDelete();
-                  }}
-                  className="text-[10px] px-2 py-0.5 rounded text-danger hover:bg-danger-bg font-medium transition-colors"
+                <ActionButton
+                  intent="danger"
+                  onClick={(e) => { e.stopPropagation(); onBulkDelete(); }}
                   title="Delete all comments"
                 >
                   Delete All
-                </button>
+                </ActionButton>
               )
             )}
           </div>
