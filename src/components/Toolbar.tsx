@@ -14,8 +14,6 @@ interface Props {
   onToggleExplorer: () => void;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
-  onSearch: () => void;
-  searchActive: boolean;
 }
 
 export function Toolbar({
@@ -29,8 +27,6 @@ export function Toolbar({
   onToggleExplorer,
   onToggleSidebar,
   onOpenSettings,
-  onSearch,
-  searchActive,
 }: Props) {
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft] = useState(author);
@@ -141,22 +137,6 @@ export function Toolbar({
           {author}
         </button>
       )}
-
-      {/* Search */}
-      <button
-        onClick={onSearch}
-        className={`p-1 rounded transition-colors ${
-          searchActive
-            ? 'text-primary-text bg-primary-bg'
-            : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
-        }`}
-        title="Find in document (Cmd+F)"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <circle cx="11" cy="11" r="8" />
-          <path strokeLinecap="round" d="m21 21-4.35-4.35" />
-        </svg>
-      </button>
 
       {/* Settings */}
       <button

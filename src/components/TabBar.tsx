@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import type { ViewMode } from './Toolbar';
 
 interface Tab {
@@ -22,7 +23,6 @@ interface Props {
   // Document actions (moved from Toolbar)
   viewMode: ViewMode;
   hasSnapshot: boolean;
-  hasExternalChange: boolean;
   showReviewSummary: boolean;
   commentCount: number;
   enableResolve?: boolean;
@@ -30,7 +30,161 @@ interface Props {
   onSnapshot: () => void;
   onJumpToNext: () => void;
   onToggleReviewSummary: () => void;
-  onReload: () => void;
+  onSearch: () => void;
+  searchActive: boolean;
+  onCopyAgentPrompt?: (filePaths: string[]) => void;
+}
+
+function HandOffButton({
+  activeFilePath,
+  commentCounts,
+  onCopyAgentPrompt,
+}: {
+  activeFilePath: string;
+  commentCounts: Map<string, number>;
+  onCopyAgentPrompt: (filePaths: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [chevronHover, setChevronHover] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // All files with comments
+  const filesWithComments = Array.from(commentCounts.entries())
+    .filter(([, count]) => count > 0)
+    .map(([path, count]) => ({ path, count }));
+
+  const hasMultipleFiles = filesWithComments.length > 1;
+
+  // Close on click outside
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Reset selection when dropdown opens — pre-select all
+  useEffect(() => {
+    if (open) {
+      setSelected(new Set(filesWithComments.map((f) => f.path)));
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCopySelected = () => {
+    const paths = Array.from(selected);
+    if (paths.length === 0) return;
+    onCopyAgentPrompt(paths);
+    setOpen(false);
+  };
+
+  const toggle = (path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  return (
+    <>
+      <div className="h-4 w-px bg-border mx-1" />
+      <div className="group/handoff relative flex items-center" ref={ref} data-testid="handoff-group">
+        {/* Paper-plane — hand off active file */}
+        <button
+          onClick={() => onCopyAgentPrompt([activeFilePath])}
+          data-testid="handoff-button"
+          className={`transition-[color,background-color,border-radius] duration-150 p-1 ${hasMultipleFiles ? 'rounded-l' : 'rounded'} ${
+            chevronHover
+              ? 'text-content-secondary bg-surface-inset'
+              : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
+          }`}
+          title="Hand off to agent — copy instructions for this file"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
+            />
+          </svg>
+        </button>
+        {/* Chevron — always rendered for stable layout; invisible when single file */}
+        <button
+          onClick={() => hasMultipleFiles && setOpen((p) => !p)}
+          onMouseEnter={() => hasMultipleFiles && setChevronHover(true)}
+          onMouseLeave={() => setChevronHover(false)}
+          data-testid="handoff-chevron"
+          className={`pl-0 pr-0.5 self-stretch flex items-center rounded-r transition-[color,background-color,opacity] duration-150 ${
+            !hasMultipleFiles
+              ? 'opacity-0 pointer-events-none'
+              : open
+                ? 'text-content-secondary bg-surface-inset'
+                : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
+          }`}
+          title={hasMultipleFiles ? 'Hand off multiple files' : undefined}
+          tabIndex={hasMultipleFiles ? 0 : -1}
+          aria-hidden={!hasMultipleFiles}
+        >
+          <svg className="w-2 h-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
+
+        {/* Dropdown */}
+        {open && (
+          <div className="absolute right-0 top-full mt-1 z-50 bg-surface border border-border rounded-lg shadow-lg py-1.5 min-w-[240px]">
+            {filesWithComments.map(({ path, count }) => {
+              const isSelected = selected.has(path);
+              const isActive = path === activeFilePath;
+              return (
+                <button
+                  key={path}
+                  onClick={() => toggle(path)}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-surface-inset transition-colors"
+                  title={path}
+                >
+                  <span className="w-3 h-3 shrink-0 flex items-center justify-center">
+                    {isSelected && (
+                      <svg className="w-3 h-3 text-primary-text" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    )}
+                  </span>
+                  <span className={`text-xs truncate flex-1 text-left ${isActive ? 'text-content font-medium' : 'text-content'}`}>
+                    {path.split('/').pop()}
+                  </span>
+                  <span className="text-[10px] text-content-muted">{count}</span>
+                </button>
+              );
+            })}
+
+            {/* Action button */}
+            <div className="border-t border-border mt-1.5 pt-1.5 px-3 pb-1">
+              <button
+                onClick={handleCopySelected}
+                disabled={selected.size === 0}
+                className={`w-full text-xs px-2 py-1.5 rounded-md font-medium transition-opacity ${
+                  selected.size > 0
+                    ? 'bg-primary-bg-strong text-primary-text hover:opacity-90'
+                    : 'bg-surface-inset text-content-muted cursor-not-allowed'
+                }`}
+              >
+                {selected.size === 0
+                  ? 'Select files to hand off'
+                  : `Copy handoff for ${selected.size} file${selected.size !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 
 export function TabBar({
@@ -43,7 +197,6 @@ export function TabBar({
   onTabContextMenu,
   viewMode,
   hasSnapshot,
-  hasExternalChange,
   showReviewSummary,
   commentCount,
   enableResolve,
@@ -51,7 +204,9 @@ export function TabBar({
   onSnapshot,
   onJumpToNext,
   onToggleReviewSummary,
-  onReload,
+  onSearch,
+  searchActive,
+  onCopyAgentPrompt,
 }: Props) {
   return (
     <div className="h-9 bg-surface-secondary border-b border-border flex items-stretch shrink-0">
@@ -139,11 +294,30 @@ export function TabBar({
 
       {/* Document actions (right side) */}
       <div className="flex items-center gap-0.5 px-2 shrink-0">
+        {/* Search */}
+        <button
+          onClick={onSearch}
+          className={`p-1 rounded transition-colors ${
+            searchActive
+              ? 'text-primary-text bg-primary-bg'
+              : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
+          }`}
+          title="Find in document (Cmd+F)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <circle cx="11" cy="11" r="8" />
+            <path strokeLinecap="round" d="m21 21-4.35-4.35" />
+          </svg>
+        </button>
+
+        {/* Separator */}
+        <div className="h-4 w-px bg-border mx-1" />
+
         {/* Comment navigation group */}
         {commentCount > 0 && (
           <button
             onClick={onJumpToNext}
-            className="text-content-muted hover:text-primary-text transition-colors p-1 rounded hover:bg-primary-bg"
+            className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-surface-inset"
             title={enableResolve ? "Jump to next open comment (N)" : "Jump to next comment (N)"}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -232,28 +406,14 @@ export function TabBar({
           </svg>
         </button>
 
-        {/* Separator */}
-        <div className="h-4 w-px bg-border mx-1" />
-
-        {/* File actions */}
-        {hasExternalChange && (
-          <span className="text-[10px] bg-warning-bg text-warning-text px-1.5 py-0.5 rounded-full font-medium animate-pulse mr-1">
-            Changed
-          </span>
+        {/* Separator + Hand off (primary action with multi-file dropdown) */}
+        {commentCount > 0 && onCopyAgentPrompt && activeFilePath && (
+          <HandOffButton
+            activeFilePath={activeFilePath}
+            commentCounts={commentCounts}
+            onCopyAgentPrompt={onCopyAgentPrompt}
+          />
         )}
-        <button
-          onClick={onReload}
-          className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-surface-inset"
-          title="Reload file"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"
-            />
-          </svg>
-        </button>
       </div>
     </div>
   );
