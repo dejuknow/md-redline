@@ -202,7 +202,6 @@ export function useTabs() {
   const rawMarkdown = activeTab?.rawMarkdown ?? '';
   const isLoading = activeTab?.isLoading ?? false;
   const error = activeTab?.error ?? null;
-  const lastSaved = activeTab?.lastSaved ?? null;
   const filePath = activeTab?.filePath ?? '';
 
   const setRawMarkdown = useCallback(
@@ -263,7 +262,6 @@ export function useTabs() {
     setRawMarkdown,
     isLoading,
     error,
-    lastSaved,
     openTab,
     openTabInBackground,
     closeTab,

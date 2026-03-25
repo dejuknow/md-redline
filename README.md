@@ -45,7 +45,7 @@ Auto-starts the app if it's not running and opens the file in your browser. You 
 Comments are stored like this:
 
 ```markdown
-Some text <!-- @comment{"anchor":"highlighted text","text":"Please rewrite this","status":"open",...} -->highlighted text continues.
+Some text highlighted text continues.
 ```
 
 No sidecar files, no database — everything lives in the markdown. Comments are invisible in standard markdown renderers (GitHub, VS Code, Zed) but fully readable by AI agents.
@@ -109,7 +109,7 @@ Open tabs, active filters, view mode, sidebar state, and recent files are all re
 
 The comment format is designed to be consumed by AI agents like Claude Code. Add this to your `CLAUDE.md` or system prompt:
 
-> When editing markdown files, look for `<!-- @comment{...} -->` markers. Each contains JSON with:
+> When editing markdown files, look for `` markers. Each contains JSON with:
 > - `anchor`: the text being commented on
 > - `text`: the reviewer's feedback
 > - `status`: `open`, `addressed`, `accepted`, or `reopened`
