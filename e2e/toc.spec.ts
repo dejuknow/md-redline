@@ -175,6 +175,71 @@ test.describe('Table of Contents', () => {
     await expect(activeTocItem).toBeVisible();
   });
 
+  test('clicking a heading highlights it immediately and keeps it highlighted after scroll completes', async ({ page }) => {
+    await openFixture(page);
+    await ensureLeftPanelOpen(page);
+    await switchToOutline(page);
+
+    // Click "Conclusion" (the last heading — furthest scroll distance)
+    await page.locator('button[title="Conclusion"]').click();
+
+    // Should be active immediately (state is set synchronously in the click handler)
+    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+
+    // Wait longer than the smooth scroll animation to confirm the spy
+    // doesn't override the clicked heading after the animation finishes
+    await page.waitForTimeout(800);
+    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+    await expect(page.locator('button[title="Project Specification"]')).not.toHaveClass(/bg-primary-bg/);
+  });
+
+  test('clicking a heading updates the active heading from a previous one', async ({ page }) => {
+    await openFixture(page);
+    await ensureLeftPanelOpen(page);
+    await switchToOutline(page);
+
+    // First click a mid-document heading
+    await page.locator('button[title="Requirements"]').click();
+    await expect(page.locator('button[title="Requirements"]')).toHaveClass(/bg-primary-bg/);
+    await page.waitForTimeout(800);
+
+    // Now click a different heading — it should become active and stay active
+    await page.locator('button[title="Conclusion"]').click();
+    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+    await expect(page.locator('button[title="Requirements"]')).not.toHaveClass(/bg-primary-bg/);
+    await page.waitForTimeout(800);
+    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+  });
+
+  test('manual wheel scroll re-enables the spy after a heading click', async ({ page }) => {
+    await openFixture(page);
+    await ensureLeftPanelOpen(page);
+    await switchToOutline(page);
+
+    // Click "Conclusion" to lock the spy to it
+    await page.locator('button[title="Conclusion"]').click();
+    await page.waitForTimeout(800); // wait for smooth scroll
+
+    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+
+    // Dispatch a wheel event to re-enable the spy, then scroll to the top
+    // (wheel fires onManualScroll → spyDisabledRef = false;
+    //  scrollTop assignment fires the scroll event → runSpy detects top position)
+    await page.evaluate(() => {
+      const scrollEl = document.querySelector('.prose')?.closest('.overflow-y-auto');
+      if (!scrollEl) return;
+      scrollEl.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+      (scrollEl as HTMLElement).scrollTop = 0;
+    });
+
+    // Wait for the rAF inside runSpy to fire and React to update
+    await page.waitForTimeout(200);
+
+    // The first heading should now be active (spy is tracking scroll position again)
+    await expect(page.locator('button[title="Project Specification"]')).toHaveClass(/bg-primary-bg/);
+    await expect(page.locator('button[title="Conclusion"]')).not.toHaveClass(/bg-primary-bg/);
+  });
+
   test('outline shows empty state when no headings', async ({ page }) => {
     // Write a file with no headings
     writeFileSync(FIXTURE, 'Just a paragraph.\n\nAnother paragraph.');

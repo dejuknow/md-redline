@@ -192,6 +192,9 @@ export default function App() {
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const rawViewRef = useRef<RawViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // When true, spy is suppressed until the user manually scrolls (wheel/touch).
+  const spyDisabledRef = useRef(false);
+  const scrollSpyRafRef = useRef(0);
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
   const rawMarkdownRef = useRef(rawMarkdown);
@@ -235,26 +238,62 @@ export default function App() {
     const scrollEl = containerRef.current;
     if (!scrollEl || tocHeadings.length === 0) return;
     const ids = tocHeadings.map((h) => h.id);
-    let raf = 0;
-    const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const threshold = 60;
-        let activeId: string | null = null;
+
+    const runSpy = () => {
+      cancelAnimationFrame(scrollSpyRafRef.current);
+      scrollSpyRafRef.current = requestAnimationFrame(() => {
+        const containerTop = scrollEl.getBoundingClientRect().top;
+        // 60% threshold: near-bottom headings that can only scroll to ~50% viewport
+        // (due to pb-[50vh]) are still detected as the active section.
+        const firstVisibleThreshold = scrollEl.clientHeight * 0.6;
+
+        let lastAboveFoldId: string | null = null;
+        let firstVisibleId: string | null = null;
+        let firstVisibleTop = Infinity;
         for (const id of ids) {
           const el = scrollEl.querySelector(`#${CSS.escape(id)}`) as HTMLElement | null;
-          if (el && el.offsetTop <= scrollEl.scrollTop + threshold) {
-            activeId = id;
+          if (!el) continue;
+          const elTop = el.getBoundingClientRect().top - containerTop;
+          if (elTop <= 0) {
+            lastAboveFoldId = id;
+          } else if (elTop < firstVisibleTop) {
+            firstVisibleTop = elTop;
+            firstVisibleId = id;
           }
         }
+
+        const activeId =
+          firstVisibleId !== null && firstVisibleTop < firstVisibleThreshold
+            ? firstVisibleId
+            : (lastAboveFoldId ?? firstVisibleId);
         setActiveHeadingId(activeId);
       });
     };
+
+    const onScroll = () => {
+      // Cancel any stale rAF regardless — prevents a pending rAF from a previous
+      // scroll from firing after a click has set the heading explicitly.
+      cancelAnimationFrame(scrollSpyRafRef.current);
+      if (spyDisabledRef.current) return;
+      runSpy();
+    };
+
+    // Re-enable the spy the moment the user manually scrolls (wheel or touch).
+    // This means a programmatic outline-click never races with the spy —
+    // the clicked heading stays active until the user intentionally scrolls.
+    const onManualScroll = () => {
+      spyDisabledRef.current = false;
+    };
+
     scrollEl.addEventListener('scroll', onScroll, { passive: true });
-    onScroll(); // initial check
+    scrollEl.addEventListener('wheel', onManualScroll, { passive: true });
+    scrollEl.addEventListener('touchstart', onManualScroll, { passive: true });
+    runSpy(); // initial detection on load
     return () => {
       scrollEl.removeEventListener('scroll', onScroll);
-      cancelAnimationFrame(raf);
+      scrollEl.removeEventListener('wheel', onManualScroll);
+      scrollEl.removeEventListener('touchstart', onManualScroll);
+      cancelAnimationFrame(scrollSpyRafRef.current);
     };
   }, [tocHeadings]);
 
@@ -1277,6 +1316,13 @@ After you're done, give me a brief summary:
                     headings={tocHeadings}
                     activeHeadingId={activeHeadingId}
                     onHeadingClick={(id) => {
+                      // Cancel any pending spy rAF so it can't override the heading
+                      // we're setting. Spy stays disabled until the user manually
+                      // scrolls (wheel/touch), so the clicked heading is never
+                      // overridden regardless of scroll distance or animation duration.
+                      cancelAnimationFrame(scrollSpyRafRef.current);
+                      spyDisabledRef.current = true;
+                      setActiveHeadingId(id);
                       const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
                       el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }}
@@ -1309,7 +1355,7 @@ After you're done, give me a brief summary:
               )}
               <div
                 ref={containerRef}
-                className="h-full overflow-y-auto px-8 py-6 lg:px-12 xl:px-16 relative"
+                className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
               >
                 <div className="max-w-3xl mx-auto">
                   {viewMode === 'raw' ? (
