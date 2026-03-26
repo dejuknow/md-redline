@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,10 +8,29 @@ const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
 const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
 const FIXTURE_1_ORIGINAL = readFileSync(FIXTURE_1, 'utf-8');
 const FIXTURE_2_ORIGINAL = readFileSync(FIXTURE_2, 'utf-8');
+const OVERFLOW_FIXTURES = Array.from({ length: 6 }, (_, index) =>
+  resolve(__dirname, `fixtures/overflow-tab-${index + 1}.md`),
+);
+
+function resetOverflowFixtures() {
+  OVERFLOW_FIXTURES.forEach((fixture, index) => {
+    writeFileSync(
+      fixture,
+      FIXTURE_1_ORIGINAL.replace('# Test Document', `# Overflow Tab ${index + 1}`),
+    );
+  });
+}
+
+function cleanupOverflowFixtures() {
+  OVERFLOW_FIXTURES.forEach((fixture) => {
+    if (existsSync(fixture)) unlinkSync(fixture);
+  });
+}
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
+  resetOverflowFixtures();
   await page.goto('/');
   await page.evaluate(() => localStorage.clear());
 });
@@ -19,6 +38,7 @@ test.beforeEach(async ({ page }) => {
 test.afterAll(() => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
+  cleanupOverflowFixtures();
 });
 
 async function openFixture(page: Page, fixture: string = FIXTURE_1) {
@@ -71,12 +91,18 @@ function getCard(page: Page, commentText: string) {
   return page.locator('.group.rounded-lg', { hasText: commentText });
 }
 
+async function openFile(page: Page, fixture: string, expectedHeading: string) {
+  await page.locator('button[title="Open file"]').click();
+  await page.getByPlaceholder('File path or name...').fill(fixture);
+  await page.getByPlaceholder('File path or name...').press('Enter');
+  await expect(page.getByRole('heading', { name: expectedHeading })).toBeVisible({
+    timeout: 10_000,
+  });
+}
+
 /** Open a second file via the + tab button and the file input form. */
 async function openSecondFile(page: Page) {
-  await page.locator('button[title="Open file"]').click();
-  await page.getByPlaceholder('File path or name...').fill(FIXTURE_2);
-  await page.getByPlaceholder('File path or name...').press('Enter');
-  await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({ timeout: 10_000 });
+  await openFile(page, FIXTURE_2, 'Second Test Document');
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +130,29 @@ test.describe('Multi-tab support', () => {
     // Switch back to second tab
     await tab2.click();
     await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+  });
+
+  test('open file shortcut handler opens the picker and loads a second tab', async ({ page }) => {
+    await openFixture(page, FIXTURE_1);
+
+    await page.evaluate((isMac) => {
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'o',
+          bubbles: true,
+          cancelable: true,
+          metaKey: isMac,
+          ctrlKey: !isMac,
+        }),
+      );
+    }, process.platform === 'darwin');
+    const fileInput = page.getByPlaceholder('File path or name...');
+    await expect(fileInput).toBeVisible();
+    await fileInput.fill(FIXTURE_2);
+    await fileInput.press('Enter');
+
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+    await expect(page.locator('.h-9 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
   });
 
   test('closing a tab switches to an adjacent tab', async ({ page }) => {
@@ -164,6 +213,42 @@ test.describe('Multi-tab support', () => {
 
     await addComment(page, 'brute force attacks', 'Second tab badge comment');
     await expect(badge).toHaveText('2');
+  });
+
+  test('browser-safe shortcuts cycle tabs', async ({ page }) => {
+    await openFixture(page, FIXTURE_1);
+    await openSecondFile(page);
+
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+
+    await page.keyboard.press('Alt+Shift+Comma');
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
+
+    await page.keyboard.press('Alt+Shift+Period');
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+  });
+
+  test('overflow keeps open-file control visible and exposes hidden tabs via menu', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 900, height: 900 });
+    await openFixture(page, FIXTURE_1);
+
+    for (const [index, fixture] of OVERFLOW_FIXTURES.entries()) {
+      await openFile(page, fixture, `Overflow Tab ${index + 1}`);
+    }
+
+    await expect(page.locator('button[title="Open file"]')).toBeVisible();
+    await expect(page.locator('button[title="Scroll tabs left"]')).toBeVisible();
+    await expect(page.locator('button[title="Scroll tabs right"]')).toBeVisible();
+
+    await page.getByTestId('tab-list-button').click();
+    const tabListMenu = page.getByTestId('tab-list-menu');
+    await expect(tabListMenu).toBeVisible();
+    await tabListMenu.locator('button', { hasText: 'test-doc.md' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
+    await expect(page.locator('button[title="Open file"]')).toBeVisible();
   });
 });
 
@@ -235,7 +320,9 @@ test.describe('Highlight and sidebar sync', () => {
     await expect(card).toHaveClass(/ring-1/);
   });
 
-  test('activating a comment in sidebar scrolls to and highlights it in viewer', async ({ page }) => {
+  test('activating a comment in sidebar scrolls to and highlights it in viewer', async ({
+    page,
+  }) => {
     await openFixture(page);
 
     await addComment(page, 'double-submit cookie pattern', 'Scroll sync comment');
@@ -254,7 +341,6 @@ test.describe('Highlight and sidebar sync', () => {
     await expect(activeMark.first()).toBeVisible();
     await expect(activeMark.first()).toBeInViewport();
   });
-
 });
 
 // ---------------------------------------------------------------------------
@@ -273,11 +359,15 @@ test.describe('Session persistence', () => {
 
     // Both tabs should still be open
     const tabBar = page.locator('.h-9');
-    await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible();
 
     // Active tab should be the second file
-    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test('sidebar visibility persists across reload', async ({ page }) => {
@@ -287,7 +377,7 @@ test.describe('Session persistence', () => {
     // Use the toolbar button instead of keyboard shortcut (unreliable in headless)
     const toggleBtn = page.locator('button[title*="Toggle comments sidebar"]');
     await toggleBtn.click();
-    let cls = await toggleBtn.getAttribute('class') ?? '';
+    let cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
 
     await page.waitForTimeout(1000);
@@ -295,7 +385,8 @@ test.describe('Session persistence', () => {
     await page.locator('.prose').waitFor({ timeout: 10_000 });
 
     // Sidebar should still be hidden after reload (toggle not active)
-    cls = await page.locator('button[title*="Toggle comments sidebar"]').getAttribute('class') ?? '';
+    cls =
+      (await page.locator('button[title*="Toggle comments sidebar"]').getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
   });
 
@@ -308,7 +399,9 @@ test.describe('Session persistence', () => {
     await page.waitForTimeout(1000);
     await page.reload();
 
-    await expect(page.locator('.raw-view-table', { hasText: '# Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.raw-view-table', { hasText: '# Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test('URL file parameter wins over restored tabs', async ({ page }) => {
@@ -370,7 +463,9 @@ test.describe('SSE file watching', () => {
     writeFileSync(FIXTURE_1, modified);
 
     // The content should update via SSE (150ms debounce + rendering time)
-    await expect(page.getByRole('heading', { name: 'Modified Section' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'Modified Section' })).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test('external reply addition shows toast notification', async ({ page }) => {
@@ -437,7 +532,10 @@ test.describe('Drag-resize anchors', () => {
     // Drag the end handle to the right to expand
     await endHandle.hover();
     await page.mouse.down();
-    await page.mouse.move(handleBox!.x + handleBox!.width + 80, handleBox!.y + handleBox!.height / 2);
+    await page.mouse.move(
+      handleBox!.x + handleBox!.width + 80,
+      handleBox!.y + handleBox!.height / 2,
+    );
     await page.mouse.up();
 
     await page.waitForTimeout(500);

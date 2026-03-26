@@ -330,6 +330,16 @@
   background: var(--theme-scrollbar-thumb-hover);
 }
 
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* ========== Prose Theme Overrides ========== */
 .prose {
   --tw-prose-body: var(--theme-text-secondary);

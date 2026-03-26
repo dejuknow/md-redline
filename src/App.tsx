@@ -12,10 +12,7 @@ import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
 import { useResizablePanel } from './hooks/useResizablePanel';
-import {
-  useSessionPersistence,
-  loadSession,
-} from './hooks/useSessionPersistence';
+import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import {
   parseComments,
   insertComment,
@@ -32,7 +29,12 @@ import {
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import { renderMarkdown } from './markdown/pipeline';
-import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, type TocHeading } from './components/MarkdownViewer';
+import {
+  MarkdownViewer,
+  type MarkdownViewerHandle,
+  type ViewerContextMenuInfo,
+  type TocHeading,
+} from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
@@ -88,10 +90,14 @@ export default function App() {
   const { theme, setTheme } = useTheme();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
   const {
-    explorerVisible, setExplorerVisible,
-    sidebarVisible, setSidebarVisible,
-    leftPanelView, setLeftPanelView,
-    viewMode, setViewMode,
+    explorerVisible,
+    setExplorerVisible,
+    sidebarVisible,
+    setSidebarVisible,
+    leftPanelView,
+    setLeftPanelView,
+    viewMode,
+    setViewMode,
   } = usePaneLayout();
 
   // Session persistence (tabs only — pane layout is persisted by usePaneLayout)
@@ -114,7 +120,10 @@ export default function App() {
       for (const path of savedSession.openTabs) {
         openTab(path);
       }
-      if (savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)) {
+      if (
+        savedSession.activeFilePath &&
+        savedSession.openTabs.includes(savedSession.activeFilePath)
+      ) {
         setTimeout(() => switchTab(savedSession.activeFilePath!), 50);
       }
     }
@@ -136,7 +145,6 @@ export default function App() {
     setToast((prev) => ({ ...prev, visible: false }));
   }, []);
 
-
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
 
@@ -144,6 +152,28 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showFileOpener, setShowFileOpener] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+
+  const openFilePicker = useCallback(() => {
+    setShowCommandPalette(false);
+    setShowFileOpener(true);
+  }, []);
+
+  const switchTabByOffset = useCallback(
+    (offset: number) => {
+      if (tabs.length === 0) return;
+
+      const activeIndex = activeFilePath
+        ? tabs.findIndex((tab) => tab.filePath === activeFilePath)
+        : -1;
+
+      const fallbackIndex = offset >= 0 ? 0 : tabs.length - 1;
+      const nextIndex =
+        activeIndex === -1 ? fallbackIndex : (activeIndex + offset + tabs.length) % tabs.length;
+
+      switchTab(tabs[nextIndex].filePath);
+    },
+    [tabs, activeFilePath, switchTab],
+  );
 
   // Text search state
   const [showSearch, setShowSearch] = useState(false);
@@ -155,11 +185,14 @@ export default function App() {
   // Platform info for context menu labels
   const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
   useEffect(() => {
-    fetch('/api/platform').then(r => r.json()).then(({ platform }) => {
-      if (platform === 'darwin') setRevealLabel('Reveal in Finder');
-      else if (platform === 'win32') setRevealLabel('Show in Explorer');
-      else setRevealLabel('Show in File Manager');
-    }).catch(() => {});
+    fetch('/api/platform')
+      .then((r) => r.json())
+      .then(({ platform }) => {
+        if (platform === 'darwin') setRevealLabel('Reveal in Finder');
+        else if (platform === 'win32') setRevealLabel('Show in Explorer');
+        else setRevealLabel('Show in File Manager');
+      })
+      .catch(() => {});
   }, []);
 
   // Context menu state
@@ -212,7 +245,10 @@ export default function App() {
   );
 
   // Parse comments from raw markdown
-  const { cleanMarkdown, comments } = useMemo(() => parseComments(rawMarkdown ?? ''), [rawMarkdown]);
+  const { cleanMarkdown, comments } = useMemo(
+    () => parseComments(rawMarkdown ?? ''),
+    [rawMarkdown],
+  );
 
   // Render markdown to HTML
   const html = useMemo(() => (cleanMarkdown ? renderMarkdown(cleanMarkdown) : ''), [cleanMarkdown]);
@@ -340,7 +376,9 @@ export default function App() {
         // Detect comment changes before updating
         let cleanContentChanged = false;
         try {
-          const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(rawMarkdownRef.current);
+          const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(
+            rawMarkdownRef.current,
+          );
           const { comments: newComments, cleanMarkdown: newClean } = parseComments(content);
           cleanContentChanged = oldClean !== newClean;
           const newById = new Map(newComments.map((c) => [c.id, c]));
@@ -373,13 +411,9 @@ export default function App() {
               `${resolvedCount} comment${resolvedCount > 1 ? 's' : ''} resolved externally`,
             );
           } else if (deletedCount > 0) {
-            showToast(
-              `${deletedCount} comment${deletedCount > 1 ? 's' : ''} addressed externally`,
-            );
+            showToast(`${deletedCount} comment${deletedCount > 1 ? 's' : ''} addressed externally`);
           } else if (newReplyCount > 0) {
-            showToast(
-              `${newReplyCount} new repl${newReplyCount > 1 ? 'ies' : 'y'} added`,
-            );
+            showToast(`${newReplyCount} new repl${newReplyCount > 1 ? 'ies' : 'y'} added`);
           }
         } catch {
           // Ignore parse errors — still update the content
@@ -391,7 +425,6 @@ export default function App() {
         if (cleanContentChanged && currentSnapshotRef.current) {
           setViewMode('diff');
         }
-
       },
       [setRawMarkdown, showToast],
     ),
@@ -466,7 +499,13 @@ export default function App() {
 
   // Feature 7: handleAddComment now accepts context for fuzzy re-matching
   const handleAddComment = useCallback(
-    (anchor: string, text: string, contextBefore?: string, contextAfter?: string, hintOffset?: number) => {
+    (
+      anchor: string,
+      text: string,
+      contextBefore?: string,
+      contextAfter?: string,
+      hintOffset?: number,
+    ) => {
       const newRaw = insertComment(
         rawMarkdownRef.current,
         anchor,
@@ -531,23 +570,27 @@ export default function App() {
     updateAndSave(removeResolvedComments(rawMarkdownRef.current));
   }, [updateAndSave]);
 
-  const handleCopyAgentPrompt = useCallback((filePaths: string[]) => {
-    if (filePaths.length === 0) return;
+  const handleCopyAgentPrompt = useCallback(
+    (filePaths: string[]) => {
+      if (filePaths.length === 0) return;
 
-    const afterAction = settings.enableResolve
-      ? 'After addressing a comment, **resolve it** by setting `"status":"resolved"` and `"resolved":true` in the marker JSON'
-      : 'After addressing a comment, **remove the entire `<!-- @comment{...} -->` marker** from the file';
+      const afterAction = settings.enableResolve
+        ? 'After addressing a comment, **resolve it** by setting `"status":"resolved"` and `"resolved":true` in the marker JSON'
+        : 'After addressing a comment, **remove the entire `<!-- @comment{...} -->` marker** from the file';
 
-    const isSingle = filePaths.length === 1;
-    const fileRef = isSingle ? filePaths[0] : 'the files listed below';
-    const fileList = isSingle
-      ? ''
-      : '\n\n## Files to review\n' + filePaths.map((p, i) => {
-          const count = commentCounts.get(p) ?? 0;
-          return `${i + 1}. ${p} (${count} comment${count !== 1 ? 's' : ''})`;
-        }).join('\n');
+      const isSingle = filePaths.length === 1;
+      const fileRef = isSingle ? filePaths[0] : 'the files listed below';
+      const fileList = isSingle
+        ? ''
+        : '\n\n## Files to review\n' +
+          filePaths
+            .map((p, i) => {
+              const count = commentCounts.get(p) ?? 0;
+              return `${i + 1}. ${p} (${count} comment${count !== 1 ? 's' : ''})`;
+            })
+            .join('\n');
 
-    const prompt = `I've left review comments in ${fileRef} using inline comment markers. Please read ${isSingle ? 'the file' : 'each file'} and address them.${fileList}
+      const prompt = `I've left review comments in ${fileRef} using inline comment markers. Please read ${isSingle ? 'the file' : 'each file'} and address them.${fileList}
 
 ## Comment format
 
@@ -572,12 +615,15 @@ After you're done, give me a brief summary:
 - For each one, a one-line description of what you changed
 - Any comments you left in place and why`;
 
-    const fileCount = filePaths.length;
-    navigator.clipboard.writeText(prompt).then(
-      () => showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}`),
-      () => showToast("Couldn't copy to clipboard. Try from localhost."),
-    );
-  }, [commentCounts, showToast, settings.enableResolve]);
+      const fileCount = filePaths.length;
+      navigator.clipboard.writeText(prompt).then(
+        () =>
+          showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}`),
+        () => showToast("Couldn't copy to clipboard. Try from localhost."),
+      );
+    },
+    [commentCounts, showToast, settings.enableResolve],
+  );
 
   const handleHighlightClick = useCallback((commentId: string) => {
     setActiveCommentId(commentId);
@@ -613,9 +659,7 @@ After you're done, give me a brief summary:
       : comments;
     if (navigable.length === 0) return;
 
-    const currentIdx = activeCommentId
-      ? navigable.findIndex((c) => c.id === activeCommentId)
-      : -1;
+    const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
     const nextIdx = (currentIdx + 1) % navigable.length;
     const next = navigable[nextIdx];
     setActiveCommentId(next.id);
@@ -629,9 +673,7 @@ After you're done, give me a brief summary:
       : comments;
     if (navigable.length === 0) return;
 
-    const currentIdx = activeCommentId
-      ? navigable.findIndex((c) => c.id === activeCommentId)
-      : -1;
+    const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
     const prevIdx = currentIdx <= 0 ? navigable.length - 1 : currentIdx - 1;
     const prev = navigable[prevIdx];
     setActiveCommentId(prev.id);
@@ -758,7 +800,21 @@ After you're done, give me a brief summary:
         viewerCtxMenu.open(info.x, info.y);
       }
     },
-    [comments, settings.enableResolve, handleResolve, handleUnresolve, handleDelete, handleAddComment, lockSelection, triggerEdit, triggerReply, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [
+      comments,
+      settings.enableResolve,
+      handleResolve,
+      handleUnresolve,
+      handleDelete,
+      handleAddComment,
+      lockSelection,
+      triggerEdit,
+      triggerReply,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
+    ],
   );
 
   const handleExplorerContextMenu = useCallback(
@@ -833,7 +889,17 @@ After you're done, give me a brief summary:
         explorerCtxMenu.open(info.x, info.y);
       }
     },
-    [handleExplorerOpenFile, openTabInBackground, addRecentFile, revealInFinder, revealLabel, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [
+      handleExplorerOpenFile,
+      openTabInBackground,
+      addRecentFile,
+      revealInFinder,
+      revealLabel,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
+    ],
   );
 
   const handleTabContextMenu = useCallback(
@@ -883,7 +949,19 @@ After you're done, give me a brief summary:
       setTabCtxMenuItems(items);
       tabCtxMenu.open(info.x, info.y);
     },
-    [tabs, closeTab, closeOtherTabs, closeAllTabs, closeTabsToRight, revealInFinder, revealLabel, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [
+      tabs,
+      closeTab,
+      closeOtherTabs,
+      closeAllTabs,
+      closeTabsToRight,
+      revealInFinder,
+      revealLabel,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
+    ],
   );
 
   const handleSidebarContextMenu = useCallback(
@@ -931,7 +1009,17 @@ After you're done, give me a brief summary:
       setSidebarCtxMenuItems(items);
       sidebarCtxMenu.open(info.x, info.y);
     },
-    [comments, settings.enableResolve, handleResolve, handleUnresolve, handleDelete, viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu],
+    [
+      comments,
+      settings.enableResolve,
+      handleResolve,
+      handleUnresolve,
+      handleDelete,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
+    ],
   );
 
   // --- Text search callbacks ---
@@ -940,11 +1028,11 @@ After you're done, give me a brief summary:
   }, []);
 
   const handleSearchNext = useCallback(() => {
-    setActiveSearchIndex(prev => (prev < searchMatchCount - 1 ? prev + 1 : 0));
+    setActiveSearchIndex((prev) => (prev < searchMatchCount - 1 ? prev + 1 : 0));
   }, [searchMatchCount]);
 
   const handleSearchPrev = useCallback(() => {
-    setActiveSearchIndex(prev => (prev > 0 ? prev - 1 : Math.max(0, searchMatchCount - 1)));
+    setActiveSearchIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, searchMatchCount - 1)));
   }, [searchMatchCount]);
 
   const handleSearchClose = useCallback(() => {
@@ -1014,8 +1102,7 @@ After you're done, give me a brief summary:
       // Cmd+O : Open file
       if (mod && e.key === 'o') {
         e.preventDefault();
-        setShowCommandPalette(false);
-        setShowFileOpener((prev) => !prev);
+        openFilePicker();
         return;
       }
 
@@ -1030,7 +1117,7 @@ After you're done, give me a brief summary:
       if (mod && e.key === 'f') {
         e.preventDefault();
         setShowSearch(true);
-        setSearchFocusTrigger(t => t + 1);
+        setSearchFocusTrigger((t) => t + 1);
         return;
       }
 
@@ -1063,7 +1150,13 @@ After you're done, give me a brief summary:
         if (idx < templates.length) {
           e.preventDefault();
           const sel = selectionRef.current;
-          handleAddComment(sel.text, templates[idx].text, sel.contextBefore, sel.contextAfter, sel.offset);
+          handleAddComment(
+            sel.text,
+            templates[idx].text,
+            sel.contextBefore,
+            sel.contextAfter,
+            sel.offset,
+          );
           return;
         }
       }
@@ -1075,6 +1168,21 @@ After you're done, give me a brief summary:
           lockSelection();
         }
         return;
+      }
+
+      // Browser-safe tab shortcuts: Alt+Shift+, / .
+      if (!mod && !isInput && !showCommandPalette && e.altKey && e.shiftKey) {
+        if (e.code === 'Comma') {
+          e.preventDefault();
+          switchTabByOffset(-1);
+          return;
+        }
+
+        if (e.code === 'Period') {
+          e.preventDefault();
+          switchTabByOffset(1);
+          return;
+        }
       }
 
       // Keys below only work outside inputs and when command palette is closed
@@ -1136,47 +1244,193 @@ After you're done, give me a brief summary:
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [lockSelection, handleJumpToNext, handleJumpToPrev, handleAddComment, handleResolve, handleUnresolve, viewMode, activeCommentId, comments, settings.enableResolve, showCommandPalette, showSearch, handleSearchClose, explorerVisible, leftPanelView]);
+  }, [
+    lockSelection,
+    handleJumpToNext,
+    handleJumpToPrev,
+    handleAddComment,
+    handleResolve,
+    handleUnresolve,
+    viewMode,
+    activeCommentId,
+    comments,
+    settings.enableResolve,
+    showCommandPalette,
+    showSearch,
+    handleSearchClose,
+    explorerVisible,
+    leftPanelView,
+    openFilePicker,
+    switchTabByOffset,
+  ]);
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
+  const prevTabShortcut = isMac ? '\u2325\u21e7,' : 'Alt+Shift+,';
+  const nextTabShortcut = isMac ? '\u2325\u21e7.' : 'Alt+Shift+.';
 
   // Command palette commands
   const paletteCommands = useMemo((): Command[] => {
     const cmds: Command[] = [
-      { id: 'next-comment', label: 'Jump to next comment', shortcut: 'N / J', section: 'Navigation', onExecute: handleJumpToNext },
-      { id: 'prev-comment', label: 'Jump to previous comment', shortcut: 'P / K', section: 'Navigation', onExecute: handleJumpToPrev },
-      { id: 'toggle-sidebar', label: 'Toggle sidebar', shortcut: `${modKey}+\\`, section: 'View', onExecute: () => setSidebarVisible((p) => !p) },
-      { id: 'view-rendered', label: 'Switch to rendered view', section: 'View', onExecute: () => setViewMode('rendered') },
-      { id: 'view-raw', label: 'Switch to raw markdown', section: 'View', onExecute: () => setViewMode('raw') },
+      {
+        id: 'next-comment',
+        label: 'Jump to next comment',
+        shortcut: 'N / J',
+        section: 'Navigation',
+        onExecute: handleJumpToNext,
+      },
+      {
+        id: 'prev-comment',
+        label: 'Jump to previous comment',
+        shortcut: 'P / K',
+        section: 'Navigation',
+        onExecute: handleJumpToPrev,
+      },
+      {
+        id: 'toggle-sidebar',
+        label: 'Toggle sidebar',
+        shortcut: `${modKey}+\\`,
+        section: 'View',
+        onExecute: () => setSidebarVisible((p) => !p),
+      },
+      {
+        id: 'prev-tab',
+        label: 'Previous tab',
+        shortcut: prevTabShortcut,
+        section: 'Tabs',
+        onExecute: () => switchTabByOffset(-1),
+      },
+      {
+        id: 'next-tab',
+        label: 'Next tab',
+        shortcut: nextTabShortcut,
+        section: 'Tabs',
+        onExecute: () => switchTabByOffset(1),
+      },
+      {
+        id: 'view-rendered',
+        label: 'Switch to rendered view',
+        section: 'View',
+        onExecute: () => setViewMode('rendered'),
+      },
+      {
+        id: 'view-raw',
+        label: 'Switch to raw markdown',
+        section: 'View',
+        onExecute: () => setViewMode('raw'),
+      },
       { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
-      { id: 'take-snapshot', label: 'Take diff snapshot', section: 'File', onExecute: handleSnapshot },
-      { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: () => setShowFileOpener(true) },
+      {
+        id: 'take-snapshot',
+        label: 'Take diff snapshot',
+        section: 'File',
+        onExecute: handleSnapshot,
+      },
+      {
+        id: 'open-file',
+        label: 'Open file',
+        shortcut: `${modKey}+O`,
+        section: 'File',
+        onExecute: openFilePicker,
+      },
 
-      { id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View', onExecute: () => setExplorerVisible((p) => !p) },
-      { id: 'toggle-outline', label: 'Toggle document outline', shortcut: `${modKey}+Shift+O`, section: 'View', onExecute: () => {
-        if (!explorerVisible) { setExplorerVisible(true); setLeftPanelView('outline'); }
-        else if (leftPanelView === 'explorer') { setLeftPanelView('outline'); }
-        else { setExplorerVisible(false); setLeftPanelView('explorer'); }
-      } },
-      { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
-      { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } },
-      { id: 'theme-light', label: 'Theme: Light', section: 'Theme', onExecute: () => setTheme('light') },
-      { id: 'theme-dark', label: 'Theme: Dark', section: 'Theme', onExecute: () => setTheme('dark') },
-      { id: 'theme-sepia', label: 'Theme: Sepia', section: 'Theme', onExecute: () => setTheme('sepia') },
-      { id: 'theme-nord', label: 'Theme: Nord', section: 'Theme', onExecute: () => setTheme('nord') },
+      {
+        id: 'toggle-explorer',
+        label: 'Toggle file explorer',
+        shortcut: `${modKey}+B`,
+        section: 'View',
+        onExecute: () => setExplorerVisible((p) => !p),
+      },
+      {
+        id: 'toggle-outline',
+        label: 'Toggle document outline',
+        shortcut: `${modKey}+Shift+O`,
+        section: 'View',
+        onExecute: () => {
+          if (!explorerVisible) {
+            setExplorerVisible(true);
+            setLeftPanelView('outline');
+          } else if (leftPanelView === 'explorer') {
+            setLeftPanelView('outline');
+          } else {
+            setExplorerVisible(false);
+            setLeftPanelView('explorer');
+          }
+        },
+      },
+      {
+        id: 'open-settings',
+        label: 'Open settings',
+        shortcut: `${modKey}+,`,
+        section: 'General',
+        onExecute: () => setShowSettings(true),
+      },
+      {
+        id: 'find',
+        label: 'Find in document',
+        shortcut: `${modKey}+F`,
+        section: 'Navigation',
+        onExecute: () => {
+          setShowSearch(true);
+          setSearchFocusTrigger((t) => t + 1);
+        },
+      },
+      {
+        id: 'theme-light',
+        label: 'Theme: Light',
+        section: 'Theme',
+        onExecute: () => setTheme('light'),
+      },
+      {
+        id: 'theme-dark',
+        label: 'Theme: Dark',
+        section: 'Theme',
+        onExecute: () => setTheme('dark'),
+      },
+      {
+        id: 'theme-sepia',
+        label: 'Theme: Sepia',
+        section: 'Theme',
+        onExecute: () => setTheme('sepia'),
+      },
+      {
+        id: 'theme-nord',
+        label: 'Theme: Nord',
+        section: 'Theme',
+        onExecute: () => setTheme('nord'),
+      },
     ];
 
     if (currentSnapshot) {
-      cmds.push({ id: 'view-diff', label: 'Toggle diff view', section: 'View', onExecute: () => setViewMode((m) => m === 'diff' ? 'rendered' : 'diff') });
+      cmds.push({
+        id: 'view-diff',
+        label: 'Toggle diff view',
+        section: 'View',
+        onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')),
+      });
     }
 
     if (settings.enableResolve && commentCount > 0) {
-      cmds.push({ id: 'resolve-all', label: 'Resolve all open comments', section: 'Comments', onExecute: handleBulkResolve });
+      cmds.push({
+        id: 'resolve-all',
+        label: 'Resolve all open comments',
+        section: 'Comments',
+        onExecute: handleBulkResolve,
+      });
     }
     if (commentCount > 0) {
-      cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
-      cmds.push({ id: 'copy-agent-prompt', label: 'Hand off to agent (copy instructions)', section: 'Comments', onExecute: () => activeFilePath && handleCopyAgentPrompt([activeFilePath]) });
+      cmds.push({
+        id: 'delete-all',
+        label: 'Delete all comments',
+        section: 'Comments',
+        onExecute: handleBulkDelete,
+      });
+      cmds.push({
+        id: 'copy-agent-prompt',
+        label: 'Hand off to agent (copy instructions)',
+        section: 'Comments',
+        onExecute: () => activeFilePath && handleCopyAgentPrompt([activeFilePath]),
+      });
     }
 
     if (activeCommentId) {
@@ -1185,14 +1439,31 @@ After you're done, give me a brief summary:
         if (activeComment) {
           const status = getEffectiveStatus(activeComment);
           if (status === 'open') {
-            cmds.push({ id: 'resolve-active', label: 'Resolve active comment', shortcut: 'A', section: 'Comments', onExecute: () => handleResolve(activeCommentId) });
+            cmds.push({
+              id: 'resolve-active',
+              label: 'Resolve active comment',
+              shortcut: 'A',
+              section: 'Comments',
+              onExecute: () => handleResolve(activeCommentId),
+            });
           }
           if (status === 'resolved') {
-            cmds.push({ id: 'unresolve-active', label: 'Reopen active comment', shortcut: 'U', section: 'Comments', onExecute: () => handleUnresolve(activeCommentId) });
+            cmds.push({
+              id: 'unresolve-active',
+              label: 'Reopen active comment',
+              shortcut: 'U',
+              section: 'Comments',
+              onExecute: () => handleUnresolve(activeCommentId),
+            });
           }
         }
       }
-      cmds.push({ id: 'delete-active', label: 'Delete active comment', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
+      cmds.push({
+        id: 'delete-active',
+        label: 'Delete active comment',
+        section: 'Comments',
+        onExecute: () => handleDelete(activeCommentId),
+      });
     }
 
     // Heading navigation entries
@@ -1210,7 +1481,33 @@ After you're done, give me a brief summary:
     }
 
     return cmds;
-  }, [modKey, handleJumpToNext, handleJumpToPrev, reloadFile, handleSnapshot, currentSnapshot, commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleCopyAgentPrompt, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete, setTheme, tocHeadings, explorerVisible, leftPanelView]);
+  }, [
+    modKey,
+    prevTabShortcut,
+    nextTabShortcut,
+    openFilePicker,
+    switchTabByOffset,
+    handleJumpToNext,
+    handleJumpToPrev,
+    reloadFile,
+    handleSnapshot,
+    currentSnapshot,
+    commentCount,
+    settings.enableResolve,
+    handleBulkDelete,
+    handleBulkResolve,
+    handleCopyAgentPrompt,
+    activeFilePath,
+    activeCommentId,
+    comments,
+    handleResolve,
+    handleUnresolve,
+    handleDelete,
+    setTheme,
+    tocHeadings,
+    explorerVisible,
+    leftPanelView,
+  ]);
 
   return (
     <div className="h-screen flex flex-col bg-surface">
@@ -1231,7 +1528,7 @@ After you're done, give me a brief summary:
         commentCounts={commentCounts}
         onSwitchTab={switchTab}
         onCloseTab={closeTab}
-        onOpenFile={() => setShowFileOpener(true)}
+        onOpenFile={openFilePicker}
         onTabContextMenu={handleTabContextMenu}
         viewMode={viewMode}
         hasSnapshot={currentSnapshot !== null}
@@ -1243,234 +1540,271 @@ After you're done, give me a brief summary:
         }}
         onSnapshot={handleSnapshot}
         onJumpToNext={handleJumpToNext}
-        onSearch={() => { if (showSearch) { handleSearchClose(); } else { setShowSearch(true); setSearchFocusTrigger(t => t + 1); } }}
+        onSearch={() => {
+          if (showSearch) {
+            handleSearchClose();
+          } else {
+            setShowSearch(true);
+            setSearchFocusTrigger((t) => t + 1);
+          }
+        }}
         searchActive={showSearch}
         onCopyAgentPrompt={handleCopyAgentPrompt}
       />
 
       <>
-          <div className="flex-1 flex min-h-0 relative">
-            {/* Left pane (Explorer / Outline) */}
-            <div
-              className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
-                explorerVisible ? '' : 'w-0 border-r-0'
-              } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
-              style={explorerVisible ? { width: explorerWidth } : undefined}
-            >
-              <div className="h-full flex flex-col" style={{ minWidth: explorerWidth }}>
-                {/* Tab bar */}
-                <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
-                  <div className="flex items-center gap-0.5">
-                    <button
-                      onClick={() => setLeftPanelView('explorer')}
-                      className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
-                        leftPanelView === 'explorer'
-                          ? 'bg-surface-inset text-content'
-                          : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
-                      }`}
-                      title="File explorer"
-                    >
-                      <svg className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
-                      </svg>
-                      Explorer
-                    </button>
-                    <button
-                      onClick={() => setLeftPanelView('outline')}
-                      className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
-                        leftPanelView === 'outline'
-                          ? 'bg-surface-inset text-content'
-                          : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
-                      }`}
-                      title="Document outline"
-                    >
-                      <svg className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                      </svg>
-                      Outline
-                    </button>
-                  </div>
+        <div className="flex-1 flex min-h-0 relative">
+          {/* Left pane (Explorer / Outline) */}
+          <div
+            className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
+              explorerVisible ? '' : 'w-0 border-r-0'
+            } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
+            style={explorerVisible ? { width: explorerWidth } : undefined}
+          >
+            <div className="h-full flex flex-col" style={{ minWidth: explorerWidth }}>
+              {/* Tab bar */}
+              <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
+                <div className="flex items-center gap-0.5">
                   <button
-                    onClick={() => setExplorerVisible(false)}
-                    className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
-                    title="Close panel"
+                    onClick={() => setLeftPanelView('explorer')}
+                    className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                      leftPanelView === 'explorer'
+                        ? 'bg-surface-inset text-content'
+                        : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
+                    }`}
+                    title="File explorer"
                   >
-                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    <svg
+                      className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
+                      />
                     </svg>
+                    Explorer
+                  </button>
+                  <button
+                    onClick={() => setLeftPanelView('outline')}
+                    className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                      leftPanelView === 'outline'
+                        ? 'bg-surface-inset text-content'
+                        : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
+                    }`}
+                    title="Document outline"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+                      />
+                    </svg>
+                    Outline
                   </button>
                 </div>
-                {/* Panel content */}
-                {leftPanelView === 'explorer' ? (
-                  <FileExplorer
-                    initialDir={explorerDir}
-                    activeFilePath={activeFilePath}
-                    onOpenFile={handleExplorerOpenFile}
-                    onClose={() => setExplorerVisible(false)}
-                    onContextMenu={handleExplorerContextMenu}
-                    hideHeader
+                <button
+                  onClick={() => setExplorerVisible(false)}
+                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+                  title="Close panel"
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {/* Panel content */}
+              {leftPanelView === 'explorer' ? (
+                <FileExplorer
+                  initialDir={explorerDir}
+                  activeFilePath={activeFilePath}
+                  onOpenFile={handleExplorerOpenFile}
+                  onClose={() => setExplorerVisible(false)}
+                  onContextMenu={handleExplorerContextMenu}
+                  hideHeader
+                />
+              ) : (
+                <TableOfContents
+                  headings={tocHeadings}
+                  activeHeadingId={activeHeadingId}
+                  onHeadingClick={(id) => {
+                    // Cancel any pending spy rAF so it can't override the heading
+                    // we're setting. Spy stays disabled until the user manually
+                    // scrolls (wheel/touch), so the clicked heading is never
+                    // overridden regardless of scroll distance or animation duration.
+                    cancelAnimationFrame(scrollSpyRafRef.current);
+                    spyDisabledRef.current = true;
+                    setActiveHeadingId(id);
+                    const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                />
+              )}
+            </div>
+          </div>
+          {explorerVisible && (
+            <div
+              className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              onMouseDown={(e) => onResizeStart('explorer', e)}
+            >
+              <div className="absolute inset-y-0 -left-1 -right-1" />
+            </div>
+          )}
+
+          {/* Markdown viewer */}
+          <div className="flex-1 min-h-0 min-w-0 relative">
+            {showSearch && (
+              <SearchBar
+                query={searchQuery}
+                onQueryChange={handleSearchQueryChange}
+                matchCount={searchMatchCount}
+                activeIndex={activeSearchIndex}
+                onNext={handleSearchNext}
+                onPrev={handleSearchPrev}
+                onClose={handleSearchClose}
+                focusTrigger={searchFocusTrigger}
+              />
+            )}
+            <div
+              ref={containerRef}
+              className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
+            >
+              <div className="max-w-3xl mx-auto">
+                {viewMode === 'raw' ? (
+                  <RawView
+                    ref={rawViewRef}
+                    rawMarkdown={rawMarkdown}
+                    searchQuery={showSearch ? searchQuery : undefined}
+                    searchActiveIndex={activeSearchIndex}
+                    onSearchCount={handleRawSearchCount}
+                    activeCommentId={activeCommentId}
                   />
+                ) : viewMode === 'diff' && currentSnapshot ? (
+                  <DiffViewer oldRaw={currentSnapshot} newRaw={rawMarkdown} />
                 ) : (
-                  <TableOfContents
-                    headings={tocHeadings}
-                    activeHeadingId={activeHeadingId}
-                    onHeadingClick={(id) => {
-                      // Cancel any pending spy rAF so it can't override the heading
-                      // we're setting. Spy stays disabled until the user manually
-                      // scrolls (wheel/touch), so the clicked heading is never
-                      // overridden regardless of scroll distance or animation duration.
-                      cancelAnimationFrame(scrollSpyRafRef.current);
-                      spyDisabledRef.current = true;
-                      setActiveHeadingId(id);
-                      const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
-                      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }}
-                  />
+                  <>
+                    <MarkdownViewer
+                      ref={viewerRef}
+                      html={html}
+                      cleanMarkdown={cleanMarkdown}
+                      comments={comments}
+                      activeCommentId={activeCommentId}
+                      selectionText={selection?.text ?? null}
+                      selectionOffset={selection?.offset ?? null}
+                      onHighlightClick={handleHighlightClick}
+                      onContextMenu={handleViewerContextMenu}
+                      enableResolve={settings.enableResolve}
+                      searchQuery={showSearch ? searchQuery : undefined}
+                      searchActiveIndex={activeSearchIndex}
+                      onSearchCount={handleSearchCount}
+                      theme={theme}
+                    />
+                    <DragHandles
+                      startPos={handlePositions?.start ?? null}
+                      endPos={handlePositions?.end ?? null}
+                      onMouseDown={onHandleMouseDown}
+                    />
+                  </>
                 )}
               </div>
             </div>
-            {explorerVisible && (
-              <div
-                className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-                onMouseDown={e => onResizeStart('explorer', e)}
-              >
-                <div className="absolute inset-y-0 -left-1 -right-1" />
-              </div>
-            )}
-
-            {/* Markdown viewer */}
-            <div className="flex-1 min-h-0 min-w-0 relative">
-              {showSearch && (
-                <SearchBar
-                  query={searchQuery}
-                  onQueryChange={handleSearchQueryChange}
-                  matchCount={searchMatchCount}
-                  activeIndex={activeSearchIndex}
-                  onNext={handleSearchNext}
-                  onPrev={handleSearchPrev}
-                  onClose={handleSearchClose}
-                  focusTrigger={searchFocusTrigger}
-                />
-              )}
-              <div
-                ref={containerRef}
-                className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
-              >
-                <div className="max-w-3xl mx-auto">
-                  {viewMode === 'raw' ? (
-                    <RawView
-                      ref={rawViewRef}
-                      rawMarkdown={rawMarkdown}
-                      searchQuery={showSearch ? searchQuery : undefined}
-                      searchActiveIndex={activeSearchIndex}
-                      onSearchCount={handleRawSearchCount}
-                      activeCommentId={activeCommentId}
-                    />
-                  ) : viewMode === 'diff' && currentSnapshot ? (
-                    <DiffViewer oldRaw={currentSnapshot} newRaw={rawMarkdown} />
-                  ) : (
-                    <>
-                      <MarkdownViewer
-                        ref={viewerRef}
-                        html={html}
-                        cleanMarkdown={cleanMarkdown}
-                        comments={comments}
-                        activeCommentId={activeCommentId}
-                        selectionText={selection?.text ?? null}
-                        selectionOffset={selection?.offset ?? null}
-                        onHighlightClick={handleHighlightClick}
-                        onContextMenu={handleViewerContextMenu}
-                        enableResolve={settings.enableResolve}
-                        searchQuery={showSearch ? searchQuery : undefined}
-                        searchActiveIndex={activeSearchIndex}
-                        onSearchCount={handleSearchCount}
-                        theme={theme}
-                      />
-                      <DragHandles
-                        startPos={handlePositions?.start ?? null}
-                        endPos={handlePositions?.end ?? null}
-                        onMouseDown={onHandleMouseDown}
-                      />
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Comment sidebar */}
-            {sidebarVisible && (
-              <div
-                className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-                onMouseDown={e => onResizeStart('sidebar', e)}
-              >
-                <div className="absolute inset-y-0 -left-1 -right-1" />
-              </div>
-            )}
-            <div
-              className={`border-l border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
-                sidebarVisible ? '' : 'w-0 border-l-0'
-              } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
-              style={sidebarVisible ? { width: sidebarWidth } : undefined}
-            >
-              <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
-                <div className="h-10 border-b border-border flex items-center justify-between px-4 shrink-0">
-                  <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider">
-                    Comments
-                  </h2>
-                  <button
-                    onClick={() => setSidebarVisible(false)}
-                    className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
-                    title="Close comments sidebar"
-                  >
-                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="flex-1 min-h-0">
-                  <CommentSidebar
-                    comments={comments}
-                    activeCommentId={activeCommentId}
-                    missingAnchors={missingAnchors}
-                    onActivate={handleSidebarActivate}
-                    onResolve={handleResolve}
-                    onUnresolve={handleUnresolve}
-                    onDelete={handleDelete}
-                    onEdit={handleEdit}
-                    onReply={handleReply}
-                    onBulkDelete={handleBulkDelete}
-                    onBulkResolve={handleBulkResolve}
-                    onBulkDeleteResolved={handleBulkDeleteResolved}
-                    onContextMenu={handleSidebarContextMenu}
-                    requestEditId={requestEditId}
-                    requestEditToken={requestEditToken}
-                    requestReplyId={requestReplyId}
-                    requestReplyToken={requestReplyToken}
-                  />
-                </div>
-              </div>
-            </div>
-
-
           </div>
 
-          {/* Floating comment form (disabled in raw/diff view) */}
-          {selection && viewMode === 'rendered' && (
-            <CommentForm
-              selection={selection}
-              autoExpand={autoExpandForm}
-              onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
-                handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
-                setAutoExpandForm(false);
-              }}
-              onCancel={() => {
-                clearSelection();
-                setAutoExpandForm(false);
-              }}
-              onLock={lockSelection}
-            />
+          {/* Comment sidebar */}
+          {sidebarVisible && (
+            <div
+              className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              onMouseDown={(e) => onResizeStart('sidebar', e)}
+            >
+              <div className="absolute inset-y-0 -left-1 -right-1" />
+            </div>
           )}
-        </>
+          <div
+            className={`border-l border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
+              sidebarVisible ? '' : 'w-0 border-l-0'
+            } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
+            style={sidebarVisible ? { width: sidebarWidth } : undefined}
+          >
+            <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
+              <div className="h-10 border-b border-border flex items-center justify-between px-4 shrink-0">
+                <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider">
+                  Comments
+                </h2>
+                <button
+                  onClick={() => setSidebarVisible(false)}
+                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+                  title="Close comments sidebar"
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">
+                <CommentSidebar
+                  comments={comments}
+                  activeCommentId={activeCommentId}
+                  missingAnchors={missingAnchors}
+                  onActivate={handleSidebarActivate}
+                  onResolve={handleResolve}
+                  onUnresolve={handleUnresolve}
+                  onDelete={handleDelete}
+                  onEdit={handleEdit}
+                  onReply={handleReply}
+                  onBulkDelete={handleBulkDelete}
+                  onBulkResolve={handleBulkResolve}
+                  onBulkDeleteResolved={handleBulkDeleteResolved}
+                  onContextMenu={handleSidebarContextMenu}
+                  requestEditId={requestEditId}
+                  requestEditToken={requestEditToken}
+                  requestReplyId={requestReplyId}
+                  requestReplyToken={requestReplyToken}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Floating comment form (disabled in raw/diff view) */}
+        {selection && viewMode === 'rendered' && (
+          <CommentForm
+            selection={selection}
+            autoExpand={autoExpandForm}
+            onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
+              handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
+              setAutoExpandForm(false);
+            }}
+            onCancel={() => {
+              clearSelection();
+              setAutoExpandForm(false);
+            }}
+            onLock={lockSelection}
+          />
+        )}
+      </>
 
       {/* Toast notification (Feature 8) */}
       <Toast message={toast.message} visible={toast.visible} onDismiss={dismissToast} />
@@ -1546,6 +1880,16 @@ After you're done, give me a brief summary:
             {modKey}+F
           </kbd>{' '}
           Find
+        </span>
+        <span>
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+            {prevTabShortcut}
+          </kbd>{' '}
+          /{' '}
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+            {nextTabShortcut}
+          </kbd>{' '}
+          Tabs
         </span>
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
