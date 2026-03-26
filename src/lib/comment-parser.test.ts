@@ -9,6 +9,7 @@ import {
   serializeComment,
   detectMissingAnchors,
   stripInlineFormatting,
+  pickBestOccurrence,
 } from './comment-parser';
 import type { MdComment } from '../types';
 
@@ -427,6 +428,48 @@ describe('detectMissingAnchors', () => {
   it('does not flag anchor spanning across blockquote lines', () => {
     const clean = '> First line of quote\n> Second line continues';
     const comments = [{ id: 'a', anchor: 'First line of quote\nSecond line continues' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning bold formatting', () => {
+    const clean = 'the **initial** implementation is ready';
+    const comments = [{ id: 'a', anchor: 'initial implementation' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning italic with underscores', () => {
+    const clean = 'the _initial_ implementation is ready';
+    const comments = [{ id: 'a', anchor: 'initial implementation' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning inline code', () => {
+    const clean = 'use `myFunction` to process data';
+    const comments = [{ id: 'a', anchor: 'use myFunction to process' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning strikethrough', () => {
+    const clean = 'the ~~old~~ new approach works';
+    const comments = [{ id: 'a', anchor: 'old new approach' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning mixed formatting', () => {
+    const clean = '> *Note: This is **important** and _critical_ for the `release` process.*';
+    const comments = [{ id: 'a', anchor: 'Note: This is important and critical for the release process.' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning link syntax', () => {
+    const clean = 'See [the docs](https://example.com) for details';
+    const comments = [{ id: 'a', anchor: 'See the docs for details' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -935,6 +978,64 @@ describe('insertComment inside fenced code blocks', () => {
     expect(parsed.cleanMarkdown).toBe(raw);
   });
 
+  it('does not break fence syntax when placing marker before code block', () => {
+    const raw = 'Text before\n\n```mermaid\ngraph TD\n    A --> B\n```\n\nText after';
+    const result = insertComment(raw, 'graph TD', 'fix diagram');
+    // The fence must remain at line start — the marker must NOT be on the same line as ```
+    const lines = result.split('\n');
+    const fenceLine = lines.find(l => l.startsWith('```mermaid'));
+    expect(fenceLine).toBe('```mermaid');
+    // Marker should be on a separate line
+    const markerLine = lines.find(l => l.includes('@comment'));
+    expect(markerLine).toBeTruthy();
+    expect(markerLine).not.toContain('```');
+  });
+
+  it('preserves fence syntax with tilde code blocks', () => {
+    const raw = 'Before\n\n~~~\nsome code\n~~~\n\nAfter';
+    const result = insertComment(raw, 'some code', 'review');
+    const lines = result.split('\n');
+    const fenceLine = lines.find(l => l.startsWith('~~~'));
+    expect(fenceLine).toBe('~~~');
+  });
+
+  it('preserves fence when code block is at document start', () => {
+    const raw = '```js\nconst x = 1;\n```\n\nEnd.';
+    const result = insertComment(raw, 'const x = 1;', 'refactor');
+    // Fence must be at line start (possibly after a marker line)
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // The code block should still render correctly
+    const fenceMatch = result.match(/^```js$/m);
+    expect(fenceMatch).toBeTruthy();
+  });
+
+  it('preserves fence when adding second comment on duplicate text inside code block', () => {
+    // Simulates the user's scenario: "user account" appears both outside and
+    // inside a mermaid code block. First comment is on the outside occurrence,
+    // second comment targets the code block occurrence.
+    const outsideText = 'System creates user account and assigns the User Type.';
+    const mermaidBlock = '```mermaid\ngraph TD\n    A[creates user account] --> B\n```';
+    const raw = `${outsideText}\n\n${mermaidBlock}\n\nEnd.`;
+
+    // First comment on the outside "user account"
+    let result = insertComment(raw, 'user account', 'first comment');
+    // Second comment targeting code block "user account"
+    const { plain } = stripInlineFormatting(parseComments(result).cleanMarkdown);
+    const secondOcc = plain.indexOf('user account', plain.indexOf('user account') + 1);
+    result = insertComment(result, 'user account', 'second comment', 'User', undefined, undefined, secondOcc);
+
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(2);
+    // The mermaid fence must still be at line start
+    const fenceMatch = result.match(/^```mermaid$/m);
+    expect(fenceMatch).toBeTruthy();
+    // Neither marker should be inside the code block
+    const codeBlockMatch = result.match(/```mermaid\n[\s\S]*?```/);
+    expect(codeBlockMatch).toBeTruthy();
+    expect(codeBlockMatch![0]).not.toContain('@comment');
+  });
+
   it('handles anchor that appears both in and outside a code block with hintOffset', () => {
     const raw = 'hello world\n\n```\nhello world\n```';
     // hintOffset pointing to the code block occurrence (past the first "hello world")
@@ -1017,5 +1118,303 @@ describe('comment text containing -->', () => {
     const serialized = serializeComment(comment);
     expect(serialized).not.toContain('"has -->');
     expect(serialized).toContain('--\\u003e');
+  });
+});
+
+describe('pickBestOccurrence', () => {
+  it('returns the only occurrence when there is just one', () => {
+    expect(pickBestOccurrence('hello world', [6], 'world', 6)).toBe(6);
+  });
+
+  it('falls back to nearest hintOffset when no context is provided', () => {
+    // "foo" at 0, 8, 16; hintOffset=15 → pick 16
+    expect(pickBestOccurrence('foo bar foo bar foo', [0, 8, 16], 'foo', 15)).toBe(16);
+  });
+
+  it('uses context to pick correct occurrence even when hintOffset is wrong', () => {
+    const plain = 'alpha foo beta gamma foo delta';
+    // "foo" at 6 and 21. Suppose hintOffset is wrong (say 5, closer to 1st "foo")
+    // but context uniquely identifies the 2nd "foo"
+    const result = pickBestOccurrence(
+      plain, [6, 21], 'foo', 5,
+      'gamma ', ' delta',
+    );
+    expect(result).toBe(21);
+  });
+
+  it('uses context to pick correct occurrence with many duplicates', () => {
+    const plain = 'x foo y foo z foo w';
+    // "foo" at 2, 8, 14. Context identifies 2nd one.
+    const result = pickBestOccurrence(
+      plain, [2, 8, 14], 'foo', 0,
+      'y ', ' z',
+    );
+    expect(result).toBe(8);
+  });
+
+  it('handles whitespace-normalized context matching (blank line drift)', () => {
+    // Plain text has \n\n between paragraphs (markdown), DOM has \n (rendered HTML).
+    // The whitespace normalization in pickBestOccurrence should handle this drift.
+    const plain = 'alpha foo beta\n\ngamma\n\ndelta foo epsilon';
+    // "foo" at positions 6 and 29
+    // In DOM text, 2nd "foo" would be preceded by "delta " (same after normalization)
+    const result = pickBestOccurrence(
+      plain, [6, 29], 'foo', 5, // hintOffset=5 is closer to 1st foo
+      'delta ',    // contextBefore from DOM (uniquely identifies 2nd occurrence)
+      ' epsilon',  // contextAfter
+    );
+    // Should pick 2nd "foo" despite wrong hintOffset, thanks to context matching
+    expect(result).toBe(29);
+  });
+
+  it('uses hintOffset as tiebreaker when context scores are equal', () => {
+    // Identical surrounding context — context can't disambiguate
+    const plain = 'x foo y x foo y';
+    const result = pickBestOccurrence(
+      plain, [2, 10], 'foo', 9,
+      'x ', ' y',
+    );
+    // Both have identical context ("x " before, " y" after), so hintOffset breaks tie
+    expect(result).toBe(10);
+  });
+
+  it('handles empty context strings gracefully', () => {
+    const plain = 'foo bar foo';
+    const result = pickBestOccurrence(plain, [0, 8], 'foo', 7, '', '');
+    // Empty context → fall back to hintOffset
+    expect(result).toBe(8);
+  });
+});
+
+describe('context-based disambiguation in insertComment', () => {
+  it('uses context to pick correct duplicate when hintOffset has drift', () => {
+    // Document with a link that causes offset drift between DOM and plain text.
+    // "foo" appears twice. The link adds chars to plain text that aren't in DOM text.
+    const raw = 'See [details](https://example.com/long-url) for foo info.\n\nAnother foo here.';
+    // In DOM text: "See details for foo info.\n\nAnother foo here." (no link syntax)
+    // hintOffset from DOM for 2nd "foo" ≈ 35 (in DOM text)
+    // But in plain text (with link stripping), 2nd "foo" is also around 35
+    // Without link stripping, 2nd "foo" would be at ~65 (much further from hintOffset=35)
+    // Context uniquely identifies the 2nd "foo" regardless
+    const result = insertComment(
+      raw, 'foo', 'check this', 'User',
+      'Another ', // contextBefore (from DOM, last few chars before 2nd "foo")
+      ' here.',   // contextAfter
+      35,         // hintOffset in DOM space (may not match plain space exactly)
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // The marker should be before the SECOND "foo" (in "Another foo here")
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toContain('Another ');
+    expect(textBefore).not.toContain('<!-- @comment');
+  });
+
+  it('uses context to pick correct duplicate across multiple paragraphs', () => {
+    const raw = 'First paragraph with target word.\n\nSecond paragraph.\n\nThird paragraph with target word.';
+    // User selected "target" in the third paragraph
+    const result = insertComment(
+      raw, 'target', 'fix', 'User',
+      'with ',     // contextBefore
+      ' word.',    // contextAfter
+      70,          // hintOffset (approximate, may have drift)
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // Both "target" have "with " before and " word." after — identical local context!
+    // So hintOffset breaks the tie. With hintOffset=70 (closer to 2nd occurrence):
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toContain('Third paragraph with ');
+  });
+
+  it('context disambiguates when surrounding text differs', () => {
+    const raw = 'The cat sat on the mat. The dog saw the cat run.';
+    // "the cat" appears at offsets 0 (as "The cat") and 38 (as "the cat")
+    // But the clean text search is case-sensitive, so "the cat" only matches at 38
+    // Let's use a proper duplicate:
+    const raw2 = 'the cat sat on the mat.\nthe dog saw the cat run.';
+    const result = insertComment(
+      raw2, 'the cat', 'which one', 'User',
+      'saw ',       // contextBefore: chars before 2nd "the cat"
+      ' run.',      // contextAfter
+      39,
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toBe('the cat sat on the mat.\nthe dog saw ');
+  });
+
+  it('still works when only contextBefore is available', () => {
+    const raw = 'start foo end\nstart foo end';
+    const result = insertComment(
+      raw, 'foo', 'note', 'User',
+      '\nstart ', // contextBefore identifies 2nd occurrence (has newline prefix)
+      undefined,
+      15,
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toBe('start foo end\nstart ');
+  });
+
+  it('still works when only contextAfter is available', () => {
+    const raw = 'foo alpha\nfoo beta';
+    const result = insertComment(
+      raw, 'foo', 'note', 'User',
+      undefined,
+      ' beta', // contextAfter identifies 2nd occurrence
+      10,
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toBe('foo alpha\n');
+  });
+});
+
+describe('stripInlineFormatting with links and images', () => {
+  it('strips link syntax, keeping only text', () => {
+    const md = 'See [click here](https://example.com) for details';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('See click here for details');
+    expect(plain).not.toContain('[');
+    expect(plain).not.toContain('](');
+    expect(plain).not.toContain('example.com');
+  });
+
+  it('strips image syntax entirely', () => {
+    const md = 'Before ![alt text](image.png) after';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('Before  after');
+    expect(plain).not.toContain('alt text');
+    expect(plain).not.toContain('image.png');
+  });
+
+  it('handles multiple links', () => {
+    const md = '[a](u1) and [b](u2) and [c](u3)';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('a and b and c');
+  });
+
+  it('handles link with formatting inside', () => {
+    const md = 'See [**bold link**](url) here';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('See bold link here');
+  });
+
+  it('maps link text offsets back correctly', () => {
+    const md = 'before [link text](url) after';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    const linkIdx = plain.indexOf('link text');
+    expect(linkIdx).toBeGreaterThan(-1);
+    // "link text" in clean markdown is at position 8 (after "before [")
+    const cleanOff = toCleanOffset(linkIdx);
+    expect(md.slice(cleanOff, cleanOff + 9)).toBe('link text');
+  });
+
+  it('maps offsets correctly after image removal', () => {
+    const md = 'before ![img](url) after';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    const afterIdx = plain.indexOf('after');
+    expect(afterIdx).toBeGreaterThan(-1);
+    const cleanOff = toCleanOffset(afterIdx);
+    expect(md.slice(cleanOff, cleanOff + 5)).toBe('after');
+  });
+
+  it('does not strip brackets that are not links', () => {
+    const md = 'array[0] is valid';
+    const { plain } = stripInlineFormatting(md);
+    // [0] is not followed by (...), so it stays as-is
+    expect(plain).toBe('array[0] is valid');
+  });
+
+  it('handles link at start of document', () => {
+    const md = '[first](url) rest';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('first rest');
+  });
+
+  it('handles link at end of document', () => {
+    const md = 'start [last](url)';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('start last');
+  });
+
+  it('handles image next to link', () => {
+    const md = '![img](pic.png)[link](url)';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('link');
+  });
+
+  it('preserves links inside fenced code blocks', () => {
+    const md = '```\n[not a link](url)\n```';
+    const { plain } = stripInlineFormatting(md);
+    // Inside code blocks, content is preserved as-is
+    expect(plain).toContain('[not a link](url)');
+  });
+
+  it('toPlainOffset handles link-adjusted positions', () => {
+    const md = 'aa [link](url) bb';
+    const { toPlainOffset } = stripInlineFormatting(md);
+    // "bb" is at clean offset 15 (after "aa [link](url) ")
+    // In plain text, it's at offset 8 (after "aa link " = 8 chars)
+    const plainOff = toPlainOffset(15);
+    expect(plainOff).toBe(8);
+  });
+});
+
+describe('insertComment with links causing offset drift', () => {
+  it('places marker correctly when links shift offsets', () => {
+    // Without link stripping, "foo" positions in plain text would be wrong
+    // because [text](url) keeps the full syntax. With link stripping,
+    // the plain text more closely matches DOM textContent.
+    const raw = '[intro](url1) has foo. Then [outro](url2) has foo too.';
+    // In DOM text: "intro has foo. Then outro has foo too."
+    // User selects 2nd "foo" — hintOffset in DOM is ~33
+    const result = insertComment(
+      raw, 'foo', 'second', 'User',
+      'has ', // contextBefore
+      ' too.', // contextAfter
+      33,
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    expect(textBefore).toContain('has ');
+    expect(textBefore).toContain('[outro]');
+  });
+
+  it('handles document with many links and duplicate text', () => {
+    const raw = [
+      '# [Project](url1) Overview',
+      '',
+      'The [system](url2) has a key component.',
+      '',
+      '## [Details](url3) Section',
+      '',
+      'The [framework](url4) has a key component.',
+    ].join('\n');
+    // "key" appears twice. User selects 2nd one.
+    // Context: "has a " before, " component" after
+    const result = insertComment(
+      raw, 'key', 'review', 'User',
+      'has a ',
+      ' component.',
+      80, // approximate DOM offset
+    );
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    const markerIdx = result.indexOf('<!-- @comment');
+    const textBefore = result.slice(0, markerIdx);
+    // Should be in the second paragraph (after "Details Section")
+    expect(textBefore).toContain('[framework]');
   });
 });

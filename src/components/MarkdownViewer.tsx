@@ -113,7 +113,7 @@ export const MarkdownViewer = memo(
       // so wrapText can correctly match against DOM text node positions.
       const highlightGroups = new Map<
         string,
-        { ids: string[]; anchor: string; plainOffset?: number }
+        { ids: string[]; anchor: string; plainOffset?: number; contextBefore?: string; contextAfter?: string }
       >();
       for (const comment of comments) {
         if (enableResolve && getEffectiveStatus(comment) === 'resolved') continue;
@@ -123,12 +123,14 @@ export const MarkdownViewer = memo(
           ids: [],
           anchor: comment.anchor,
           plainOffset,
+          contextBefore: comment.contextBefore,
+          contextAfter: comment.contextAfter,
         };
         group.ids.push(comment.id);
         highlightGroups.set(key, group);
       }
 
-      for (const { anchor, ids, plainOffset } of highlightGroups.values()) {
+      for (const { anchor, ids, plainOffset, contextBefore, contextAfter } of highlightGroups.values()) {
         wrapText(
           container,
           anchor,
@@ -140,6 +142,8 @@ export const MarkdownViewer = memo(
             }
           },
           plainOffset,
+          contextBefore,
+          contextAfter,
         );
       }
 
@@ -222,12 +226,16 @@ export const MarkdownViewer = memo(
 
 /** Find an occurrence of `text` in the container's text nodes and wrap it in <mark> elements.
  *  When `hintOffset` is provided (in rendered/plain-text space), uses it to disambiguate
- *  duplicate anchor text. Handles text that spans multiple DOM elements. */
+ *  duplicate anchor text. When `contextBefore`/`contextAfter` are provided, uses them as
+ *  primary disambiguation (more reliable than offset across coordinate spaces).
+ *  Handles text that spans multiple DOM elements. */
 function wrapText(
   container: HTMLElement,
   text: string,
   configure: (mark: HTMLElement) => void,
   hintOffset?: number,
+  contextBefore?: string,
+  contextAfter?: string,
 ) {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -253,41 +261,71 @@ function wrapText(
   let matchEnd: number;
 
   if (hintOffset != null) {
-    // Position-based: use hintOffset (in rendered-text space, same coordinate system
-    // as fullText) to find the right occurrence among duplicates.
-    // When the anchor is drag-expanded backwards, it can start well before
-    // the hint (the marker stays put but the anchor grows leftward).
-    // Use the anchor length as additional search window to handle this.
-    const searchWindow = Math.max(20, text.length);
-    const exactIdx = fullText.indexOf(text, Math.max(0, hintOffset - searchWindow));
-    if (exactIdx !== -1 && exactIdx <= hintOffset + 20) {
-      matchStart = exactIdx;
-      matchEnd = exactIdx + text.length;
-    } else {
-      // Find ALL occurrences and pick the closest to hintOffset.
-      let bestIdx = -1;
-      let bestDist = Infinity;
-      let searchFrom = 0;
-      while (searchFrom < fullText.length) {
-        const idx = fullText.indexOf(text, searchFrom);
-        if (idx === -1) break;
-        const dist = Math.abs(idx - hintOffset);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestIdx = idx;
+    // Collect ALL occurrences to support context-based disambiguation
+    const allOccs: number[] = [];
+    let sf = 0;
+    while (sf < fullText.length) {
+      const idx = fullText.indexOf(text, sf);
+      if (idx === -1) break;
+      allOccs.push(idx);
+      sf = idx + 1;
+    }
+
+    if (allOccs.length > 0) {
+      let best: number;
+      if (allOccs.length === 1) {
+        best = allOccs[0];
+      } else if (contextBefore || contextAfter) {
+        // Context-based disambiguation: context strings are from the same
+        // DOM textContent space as fullText, so compare directly (no normalization).
+        let bestScore = -1;
+        let bestDist = Infinity;
+        best = allOccs[0];
+        for (const occ of allOccs) {
+          let score = 0;
+          if (contextBefore) {
+            const before = fullText.slice(Math.max(0, occ - contextBefore.length), occ);
+            for (let j = 1; j <= Math.min(before.length, contextBefore.length); j++) {
+              if (before[before.length - j] === contextBefore[contextBefore.length - j]) score++;
+              else break;
+            }
+          }
+          if (contextAfter) {
+            const after = fullText.slice(occ + text.length, occ + text.length + contextAfter.length);
+            for (let j = 0; j < Math.min(after.length, contextAfter.length); j++) {
+              if (after[j] === contextAfter[j]) score++;
+              else break;
+            }
+          }
+          const dist = Math.abs(occ - hintOffset);
+          if (score > bestScore || (score === bestScore && dist < bestDist)) {
+            bestScore = score;
+            best = occ;
+            bestDist = dist;
+          }
         }
-        searchFrom = idx + 1;
-      }
-      if (bestIdx !== -1) {
-        matchStart = bestIdx;
-        matchEnd = bestIdx + text.length;
       } else {
-        // Flexible whitespace fallback (no startFrom constraint)
-        const result = flexibleSearch(fullText, text);
-        if (!result) return;
-        matchStart = result.start;
-        matchEnd = result.end;
+        // No context — use the existing hintOffset proximity with search window.
+        // When the anchor is drag-expanded backwards, it can start well before
+        // the hint (the marker stays put but the anchor grows leftward).
+        const searchWindow = Math.max(20, text.length);
+        const exactIdx = fullText.indexOf(text, Math.max(0, hintOffset - searchWindow));
+        if (exactIdx !== -1 && exactIdx <= hintOffset + 20) {
+          best = exactIdx;
+        } else {
+          best = allOccs.reduce((b, idx) =>
+            Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
+          );
+        }
       }
+      matchStart = best;
+      matchEnd = best + text.length;
+    } else {
+      // No exact match — try flexible whitespace search
+      const result = flexibleSearch(fullText, text);
+      if (!result) return;
+      matchStart = result.start;
+      matchEnd = result.end;
     }
   } else {
     // No offset — first occurrence (used for selection highlights)
