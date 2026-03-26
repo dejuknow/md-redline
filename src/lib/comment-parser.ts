@@ -47,9 +47,16 @@ export function parseComments(rawMarkdown: string): ParseResult {
     } catch {
       // Malformed JSON — still strip the marker
     }
+    let rawEnd = match.index + match[0].length;
+    // If the marker sits alone on its own line (e.g. before a code fence),
+    // also consume the trailing newline so stripping restores the original content.
+    const isStartOfLine = match.index === 0 || rawMarkdown[match.index - 1] === '\n';
+    if (isStartOfLine && rawMarkdown[rawEnd] === '\n') {
+      rawEnd += 1;
+    }
     strippedRegions.push({
       rawStart: match.index,
-      rawEnd: match.index + match[0].length,
+      rawEnd,
       parsed,
     });
   }
@@ -266,6 +273,7 @@ export function insertComment(
 
   // If the insertion point falls inside a fenced code block, move it before the block.
   // HTML comment markers are literal text inside code blocks, so the marker must go outside.
+  let movedBeforeFence = false;
   {
     const fenceRegex = /^(`{3,}|~{3,}).*$/gm;
     let fm: RegExpExecArray | null;
@@ -277,16 +285,22 @@ export function insertComment(
       } else if (marker[0] === openF.marker[0] && marker.length >= openF.marker.length) {
         if (insertionCleanOffset >= openF.start && insertionCleanOffset <= fm.index + fm[0].length) {
           insertionCleanOffset = openF.start;
+          movedBeforeFence = true;
         }
         openF = null;
       }
     }
   }
 
-  // Insert marker BEFORE the anchor text in the raw markdown
+  // Insert marker BEFORE the anchor text in the raw markdown.
+  // When moved before a code fence, place the marker on its own line so the
+  // opening fence stays at column 0 (otherwise other renderers won't parse it).
   const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
+  if (movedBeforeFence) {
+    return rawMarkdown.slice(0, rawInsertionPoint) + marker + '\n' + rawMarkdown.slice(rawInsertionPoint);
+  }
   return rawMarkdown.slice(0, rawInsertionPoint) + marker + rawMarkdown.slice(rawInsertionPoint);
 }
 

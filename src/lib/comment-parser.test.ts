@@ -918,6 +918,68 @@ describe('insertComment inside fenced code blocks', () => {
     expect(codeBlockMatch![0]).not.toContain('@comment');
   });
 
+  it('places marker on its own line so the code fence stays at column 0', () => {
+    const raw = '# Diagram\n\n```mermaid\ngraph TD\n    A[Start] --> B\n```\n\nEnd.';
+    const result = insertComment(raw, 'graph TD', 'fix diagram');
+    // The fence must still start at column 0 — the marker gets its own line
+    expect(result).toMatch(/\n```mermaid\n/);
+    // Marker should NOT be on the same line as the fence
+    expect(result).not.toMatch(/@comment.*```mermaid/);
+  });
+
+  it('marker before fence preserves valid markdown for other renderers', () => {
+    const raw = 'Intro\n\n```mermaid\ngraph TD\n    A[Start] --> B\n```\n\nEnd.';
+    const result = insertComment(raw, 'A[Start]', 'rename node');
+    // Every opening fence in the result should be at column 0
+    for (const line of result.split('\n')) {
+      if (line.includes('```') && !line.startsWith('<!--')) {
+        expect(line).toMatch(/^`{3}/);
+      }
+    }
+  });
+
+  it('round-trips through insert+parse for tilde-fenced code blocks', () => {
+    const raw = 'Before\n\n~~~python\nprint("hi")\n~~~\n\nAfter';
+    const result = insertComment(raw, 'print("hi")', 'log instead');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe(raw);
+  });
+
+  it('round-trips through insert+parse for mermaid blocks', () => {
+    const raw = 'Title\n\n```mermaid\nsequenceDiagram\n    A->>B: Hello\n```\n\nDone.';
+    const result = insertComment(raw, 'A->>B: Hello', 'wrong direction');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe(raw);
+  });
+
+  it('multiple comments on different code blocks all round-trip', () => {
+    const raw = '```js\nfoo()\n```\n\nText\n\n```py\nbar()\n```';
+    let result = insertComment(raw, 'foo()', 'remove this');
+    result = insertComment(result, 'bar()', 'rename');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(2);
+    expect(parsed.cleanMarkdown).toBe(raw);
+  });
+
+  it('does not consume trailing newline for inline markers (not before a fence)', () => {
+    const raw = 'Hello world\nSecond line';
+    const result = insertComment(raw, 'Hello world', 'rewrite');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    // The marker is inline (not on its own line before a fence), so no extra newline handling
+    expect(parsed.cleanMarkdown).toBe(raw);
+  });
+
+  it('code block at the very start of the document round-trips', () => {
+    const raw = '```js\nconst x = 1;\n```\n\nEnd.';
+    const result = insertComment(raw, 'const x = 1;', 'use let');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe(raw);
+  });
+
   it('still handles inline backticks correctly', () => {
     const raw = 'Use `foo` for this';
     const result = insertComment(raw, 'foo', 'rename');

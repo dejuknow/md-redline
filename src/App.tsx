@@ -1337,6 +1337,7 @@ After you're done, give me a brief summary:
                         searchQuery={showSearch ? searchQuery : undefined}
                         searchActiveIndex={activeSearchIndex}
                         onSearchCount={handleSearchCount}
+                        theme={theme}
                       />
                       <DragHandles
                         startPos={handlePositions?.start ?? null}

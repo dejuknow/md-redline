@@ -3,6 +3,7 @@ import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 import { assignHeadingIds } from '../lib/heading-slugs';
+import { useMermaidRenderer } from '../hooks/useMermaidRenderer';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
@@ -27,6 +28,7 @@ interface Props {
   searchQuery?: string;
   searchActiveIndex?: number;
   onSearchCount?: (count: number) => void;
+  theme?: string;
 }
 
 export interface TocHeading {
@@ -48,13 +50,16 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu, enableResolve, searchQuery, searchActiveIndex, onSearchCount },
+    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu, enableResolve, searchQuery, searchActiveIndex, onSearchCount, theme },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const activeMarkRef = useRef<HTMLElement | null>(null);
     const searchCountCb = useRef(onSearchCount);
     searchCountCb.current = onSearchCount;
+
+    // Mermaid rendering
+    const mermaidSvgMap = useMermaidRenderer(cleanMarkdown, theme || 'light');
 
     // Build a mapping from clean markdown offsets to rendered/plain text offsets.
     // cleanOffset lives in clean-markdown space (with ** ## etc), but DOM text is
@@ -106,6 +111,33 @@ export const MarkdownViewer = memo(
 
       // --- Heading IDs ---
       assignHeadingIds(container);
+
+      // --- Mermaid blocks ---
+      const mermaidPres = container.querySelectorAll('pre');
+      for (const pre of mermaidPres) {
+        const code = pre.querySelector('code.language-mermaid');
+        if (!code) continue;
+
+        const source = (code.textContent || '').trim();
+        if (!source) continue;
+
+        const result = mermaidSvgMap.get(source);
+        if (result?.svg) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'mermaid-block';
+          const svgDiv = document.createElement('div');
+          svgDiv.className = 'mermaid-svg';
+          svgDiv.innerHTML = result.svg;
+          wrapper.appendChild(svgDiv);
+          pre.replaceWith(wrapper);
+        } else if (result?.error) {
+          const errDiv = document.createElement('div');
+          errDiv.className = 'mermaid-block mermaid-error';
+          errDiv.textContent = `Mermaid error: ${result.error}`;
+          pre.replaceWith(errDiv);
+        }
+        // If no result yet (loading), leave the code block as-is until SVGs are ready
+      }
 
       // --- Comment highlights ---
       // Group comments that share the same anchor AND cleanOffset (exact same highlight).
@@ -167,7 +199,7 @@ export const MarkdownViewer = memo(
       activeMarkRef.current = container.querySelector(
         'mark.comment-highlight-active',
       ) as HTMLElement | null;
-    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, enableResolve, searchQuery, searchActiveIndex]);
+    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, enableResolve, searchQuery, searchActiveIndex, mermaidSvgMap]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
