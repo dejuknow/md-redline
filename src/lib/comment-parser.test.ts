@@ -473,6 +473,27 @@ describe('detectMissingAnchors', () => {
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
+
+  it('does not flag anchor from rendered mermaid diagram text', () => {
+    const clean = '# Flow\n\n```mermaid\ngraph TD\n    A[Admin clicks Add] --> B[Admin enters name]\n```\n';
+    const comments = [{ id: 'a', anchor: "clicks Add Admin enters" }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag single-node mermaid anchor', () => {
+    const clean = '```mermaid\ngraph TD\n    A[User submits form]\n```\n';
+    const comments = [{ id: 'a', anchor: 'User submits form' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('flags truly missing anchor even with mermaid blocks present', () => {
+    const clean = '```mermaid\ngraph TD\n    A[Step one]\n```\n';
+    const comments = [{ id: 'a', anchor: 'completely unrelated text' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(true);
+  });
 });
 
 describe('insertComment with formatted markdown (stripInlineFormatting)', () => {

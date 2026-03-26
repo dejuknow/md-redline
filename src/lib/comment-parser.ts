@@ -740,6 +740,34 @@ function partsAppearContiguously(text: string, parts: string[]): boolean {
 }
 
 /**
+ * Extract visible text labels from mermaid code blocks.
+ * Mermaid nodes use shapes like A[text], A(text), A{text}, A([text]), A((text)),
+ * A>text], etc. Edge labels use |text| or -->|text|. We concatenate all labels
+ * so anchor text from rendered SVG can be matched against them.
+ */
+function extractMermaidText(cleanMarkdown: string): string {
+  const mermaidRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
+  const labels: string[] = [];
+  let match;
+  while ((match = mermaidRegex.exec(cleanMarkdown)) !== null) {
+    const source = match[1];
+    // Node labels: text inside [...], (...), {...}
+    const nodeRegex = /[\[({]([^\])}]+)[\])}]/g;
+    let nodeMatch;
+    while ((nodeMatch = nodeRegex.exec(source)) !== null) {
+      labels.push(nodeMatch[1].trim());
+    }
+    // Edge labels: |text|
+    const edgeRegex = /\|([^|]+)\|/g;
+    let edgeMatch;
+    while ((edgeMatch = edgeRegex.exec(source)) !== null) {
+      labels.push(edgeMatch[1].trim());
+    }
+  }
+  return labels.join(' ');
+}
+
+/**
  * Detect comments whose anchor text can no longer be found in the clean markdown.
  * Returns a set of comment IDs with missing anchors.
  * Parts must appear contiguously (with only whitespace between them) to count as found.
@@ -755,12 +783,19 @@ export function detectMissingAnchors(
   // **, _, `, ~~, etc. Without this, anchors spanning formatted text would
   // always be flagged as "changed".
   const { plain } = stripInlineFormatting(cleanMarkdown);
+  // Also extract rendered text from mermaid blocks — anchors from mermaid SVG
+  // won't match the raw source syntax, but will match the extracted labels.
+  const mermaidText = extractMermaidText(cleanMarkdown);
   for (const c of comments) {
     if (getEffectiveStatus(c) === 'resolved') continue;
     if (!plain.includes(c.anchor)) {
       const parts = c.anchor.split(/\s+/).filter(Boolean);
       if (parts.length === 0) continue;
       if (!partsAppearContiguously(plain, parts)) {
+        // Check mermaid rendered text as fallback
+        if (mermaidText && (mermaidText.includes(c.anchor) || partsAppearContiguously(mermaidText, parts))) {
+          continue;
+        }
         missing.add(c.id);
       }
     }
