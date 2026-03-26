@@ -488,6 +488,31 @@ describe('detectMissingAnchors', () => {
     expect(missing.has('a')).toBe(false);
   });
 
+  it('does not flag anchor from mermaid edge label', () => {
+    const clean = '```mermaid\ngraph TD\n    A -->|Yes| B -->|No| C\n```\n';
+    const comments = [{ id: 'a', anchor: 'Yes' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor in mermaid when file also has regular markdown', () => {
+    const clean = '# Title\n\nSome **bold** paragraph.\n\n```mermaid\ngraph TD\n    A[User clicks button]\n```\n\nMore text here.\n';
+    const comments = [{ id: 'a', anchor: 'User clicks button' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('matches across multiple mermaid blocks', () => {
+    const clean = '```mermaid\ngraph TD\n    A[First]\n```\n\nText\n\n```mermaid\ngraph TD\n    B[Second]\n```\n';
+    const comments = [
+      { id: 'a', anchor: 'First' },
+      { id: 'b', anchor: 'Second' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+    expect(missing.has('b')).toBe(false);
+  });
+
   it('flags truly missing anchor even with mermaid blocks present', () => {
     const clean = '```mermaid\ngraph TD\n    A[Step one]\n```\n';
     const comments = [{ id: 'a', anchor: 'completely unrelated text' }] as MdComment[];

@@ -741,11 +741,16 @@ function partsAppearContiguously(text: string, parts: string[]): boolean {
 
 /**
  * Extract visible text labels from mermaid code blocks.
- * Mermaid nodes use shapes like A[text], A(text), A{text}, A([text]), A((text)),
- * A>text], etc. Edge labels use |text| or -->|text|. We concatenate all labels
- * so anchor text from rendered SVG can be matched against them.
+ * Mermaid nodes use shapes like A[text], A(text), A{text}, A([text]), A((text)).
+ * Edge labels use |text| or -->|text|. We concatenate all labels so anchor text
+ * from rendered SVG can be matched against them.
+ *
+ * Note: labels are joined with spaces, so `partsAppearContiguously` can match
+ * anchors that span adjacent node labels (e.g. "Add Admin" across two nodes).
+ * This is intentional — rendered SVG text flows continuously.
  */
 function extractMermaidText(cleanMarkdown: string): string {
+  if (!/^```mermaid\s*$/m.test(cleanMarkdown)) return '';
   const mermaidRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
   const labels: string[] = [];
   let match;
