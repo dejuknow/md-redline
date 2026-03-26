@@ -32,7 +32,7 @@ import {
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import { renderMarkdown } from './markdown/pipeline';
-import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, highlightSearchMatches, type TocHeading } from './components/MarkdownViewer';
+import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, type TocHeading } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
@@ -42,6 +42,7 @@ import { FileExplorer, type ExplorerContextMenuInfo } from './components/FileExp
 import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { DiffViewer } from './components/DiffViewer';
+import { RawView, type RawViewHandle } from './components/RawView';
 import { Toast } from './components/Toast';
 
 import { CommandPalette, type Command } from './components/CommandPalette';
@@ -189,7 +190,7 @@ export default function App() {
   }, []);
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
-  const rawViewRef = useRef<HTMLPreElement>(null);
+  const rawViewRef = useRef<RawViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
@@ -547,6 +548,7 @@ After you're done, give me a brief summary:
   const handleSidebarActivate = useCallback((commentId: string) => {
     setActiveCommentId(commentId);
     viewerRef.current?.scrollToComment(commentId);
+    rawViewRef.current?.scrollToComment(commentId);
   }, []);
 
   const handleAnchorChange = useCallback(
@@ -919,17 +921,10 @@ After you're done, give me a brief summary:
     setActiveSearchIndex(0);
   }, []);
 
-  // Raw view: set textContent via ref and apply search highlights
-  useLayoutEffect(() => {
-    if (viewMode !== 'raw' || !rawViewRef.current) return;
-    rawViewRef.current.textContent = rawMarkdown;
-    if (showSearch && searchQuery) {
-      const count = highlightSearchMatches(rawViewRef.current, searchQuery, activeSearchIndex);
-      setSearchMatchCount(count);
-    } else {
-      setSearchMatchCount(0);
-    }
-  }, [viewMode, rawMarkdown, showSearch, searchQuery, activeSearchIndex]);
+  // Raw view search count callback
+  const handleRawSearchCount = useCallback((count: number) => {
+    setSearchMatchCount(count);
+  }, []);
 
   // Reset match count in diff view (no search support)
   useEffect(() => {
@@ -1318,7 +1313,14 @@ After you're done, give me a brief summary:
               >
                 <div className="max-w-3xl mx-auto">
                   {viewMode === 'raw' ? (
-                    <pre ref={rawViewRef} className="text-sm text-content whitespace-pre-wrap break-words font-mono leading-relaxed" />
+                    <RawView
+                      ref={rawViewRef}
+                      rawMarkdown={rawMarkdown}
+                      searchQuery={showSearch ? searchQuery : undefined}
+                      searchActiveIndex={activeSearchIndex}
+                      onSearchCount={handleRawSearchCount}
+                      activeCommentId={activeCommentId}
+                    />
                   ) : viewMode === 'diff' && currentSnapshot ? (
                     <DiffViewer oldRaw={currentSnapshot} newRaw={rawMarkdown} />
                   ) : (

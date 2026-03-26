@@ -228,13 +228,13 @@ test.describe('Search in raw view', () => {
 
     // Switch to raw view
     await page.locator('button[title="View raw markdown"]').click();
-    await expect(page.locator('pre')).toBeVisible();
+    await expect(page.locator('.raw-view-table')).toBeVisible();
 
     await page.keyboard.press('Meta+f');
     await searchInput(page).fill('##');
 
     // The fixture has "## Overview", "## Section One", "## Section Two", "## Section Three"
-    const highlights = page.locator('pre mark.search-highlight');
+    const highlights = page.locator('.raw-view-table mark.search-highlight');
     const count = await highlights.count();
     expect(count).toBe(4);
   });

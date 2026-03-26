@@ -272,12 +272,12 @@ test.describe('Session persistence', () => {
     await openFixture(page);
 
     await page.locator('button[title="View raw markdown"]').click();
-    await expect(page.locator('pre', { hasText: '# Test Document' })).toBeVisible();
+    await expect(page.locator('.raw-view-table', { hasText: '# Test Document' })).toBeVisible();
 
     await page.waitForTimeout(1000);
     await page.reload();
 
-    await expect(page.locator('pre', { hasText: '# Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.raw-view-table', { hasText: '# Test Document' })).toBeVisible({ timeout: 10_000 });
   });
 });
 

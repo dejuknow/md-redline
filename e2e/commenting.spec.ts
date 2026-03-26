@@ -212,7 +212,7 @@ test.describe('View modes', () => {
     await openFixture(page);
 
     await page.locator('button[title="View raw markdown"]').click();
-    await expect(page.locator('pre', { hasText: '# Test Document' })).toBeVisible();
+    await expect(page.locator('.raw-view-table', { hasText: '# Test Document' })).toBeVisible();
 
     await page.locator('button[title="Switch to rendered view"]').click();
     await expect(page.locator('h1', { hasText: 'Test Document' })).toBeVisible();

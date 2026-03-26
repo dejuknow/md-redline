@@ -533,3 +533,167 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: pre-wrap;
 }
+
+/* ========== Raw View Styles ========== */
+.raw-view {
+  position: relative;
+}
+
+.raw-view-table {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.625;
+}
+
+.raw-line {
+  display: flex;
+  align-items: baseline;
+}
+
+.raw-line-number {
+  flex-shrink: 0;
+  width: 3rem;
+  padding-right: 1rem;
+  text-align: right;
+  color: var(--theme-text-faint);
+  user-select: none;
+  border-right: 1px solid var(--theme-border-subtle);
+  box-sizing: border-box;
+}
+
+.raw-line-content {
+  flex: 1;
+  min-width: 0;
+  padding-left: 1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--theme-text-secondary);
+}
+
+/* Ensure empty lines still have height */
+.raw-line-content:empty::after {
+  content: '\a0';
+}
+
+/* Copy clean button */
+.raw-copy-clean-btn {
+  position: absolute;
+  top: -0.25rem;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  background-color: var(--theme-bg-secondary);
+  border: 1px solid var(--theme-border);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 5;
+}
+
+.raw-copy-clean-btn:hover {
+  color: var(--theme-text-secondary);
+  background-color: var(--theme-bg-inset);
+  border-color: var(--theme-border);
+}
+
+.raw-copy-clean-btn:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 1px;
+}
+
+/* --- Syntax highlighting --- */
+.raw-heading {
+  color: var(--theme-text);
+  font-weight: 600;
+}
+
+.raw-bold {
+  color: var(--theme-text);
+  font-weight: 600;
+}
+
+.raw-italic {
+  color: var(--theme-text);
+  font-style: italic;
+}
+
+.raw-inline-code {
+  color: var(--theme-accent-text);
+  background-color: var(--theme-accent-bg);
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+}
+
+.raw-code-block {
+  color: var(--theme-text-secondary);
+  background-color: var(--theme-bg-inset);
+  border-radius: 4px;
+  display: inline;
+}
+
+.raw-link {
+  color: var(--theme-accent-text);
+  text-decoration: underline;
+  text-decoration-color: var(--theme-accent-border);
+  text-underline-offset: 2px;
+}
+
+.raw-blockquote {
+  color: var(--theme-text-muted);
+  border-left: 2px solid var(--theme-border);
+  padding-left: 0.5em;
+}
+
+.raw-list-marker {
+  color: var(--theme-text-muted);
+}
+
+.raw-hr {
+  color: var(--theme-text-faint);
+}
+
+.raw-table {
+  color: var(--theme-text-secondary);
+}
+
+.raw-frontmatter {
+  color: var(--theme-text-muted);
+  background-color: var(--theme-bg-inset);
+  border-radius: 4px;
+}
+
+.raw-html-comment {
+  color: var(--theme-text-faint);
+  font-style: italic;
+}
+
+/* --- Comment marker highlighting --- */
+.raw-comment-marker {
+  background-color: var(--theme-comment-bg);
+  color: var(--theme-comment-anchor-text);
+  border-radius: 3px;
+  padding: 0.1em 0.2em;
+  border-bottom: 2px solid var(--theme-comment-underline);
+  cursor: default;
+}
+
+.raw-comment-marker-active {
+  background-color: var(--theme-comment-bg-hover);
+  border-bottom-color: var(--theme-comment-underline-active);
+  outline: 1px solid var(--theme-comment-ring);
+}
+
+/* Flash animation when scrolling to a comment marker */
+@keyframes raw-marker-flash {
+  0% { background-color: var(--theme-comment-bg-hover); }
+  30% { background-color: var(--theme-warning-bg); outline: 2px solid var(--theme-warning); }
+  100% { background-color: var(--theme-comment-bg); outline: none; }
+}
+
+.raw-comment-marker-flash {
+  animation: raw-marker-flash 1.5s ease-out;
+}
