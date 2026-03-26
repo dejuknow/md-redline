@@ -292,9 +292,9 @@ export const CommentCard = memo(function CommentCard({
 
       {/* Reply input */}
       {!isResolved && (
-        <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
+        <div className="px-3 pb-3">
           {isReplying ? (
-            <div>
+            <div onClick={(e) => e.stopPropagation()}>
               <textarea
                 ref={replyRef}
                 value={replyText}
