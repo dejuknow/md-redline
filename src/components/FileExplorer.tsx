@@ -21,9 +21,10 @@ interface Props {
   onOpenFile: (path: string) => void;
   onClose: () => void;
   onContextMenu?: (info: ExplorerContextMenuInfo) => void;
+  hideHeader?: boolean;
 }
 
-export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, onContextMenu: onCtxMenu }: Props) {
+export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, onContextMenu: onCtxMenu, hideHeader }: Props) {
   const [data, setData] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,20 +54,22 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="h-10 border-b border-border flex items-center justify-between px-3 shrink-0">
-        <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider truncate">
-          Explorer
-        </h2>
-        <button
-          onClick={onClose}
-          className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
-          title="Close explorer"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+      {!hideHeader && (
+        <div className="h-10 border-b border-border flex items-center justify-between px-3 shrink-0">
+          <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider truncate">
+            Explorer
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+            title="Close explorer"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Breadcrumb */}
       {data && (

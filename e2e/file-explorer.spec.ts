@@ -143,7 +143,7 @@ test.describe('File explorer', () => {
     await ensureExplorerVisible(page);
     expect(await isExplorerOpen(page)).toBe(true);
 
-    await page.locator('button[title="Close explorer"]').click();
+    await page.locator('button[title="Close panel"]').click();
     // The toolbar toggle button should lose its active state
     expect(await isExplorerOpen(page)).toBe(false);
   });

@@ -2,6 +2,7 @@ import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
+import { assignHeadingIds } from '../lib/heading-slugs';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
@@ -28,11 +29,18 @@ interface Props {
   onSearchCount?: (count: number) => void;
 }
 
+export interface TocHeading {
+  id: string;
+  text: string;
+  level: number; // 1-6
+}
+
 export interface MarkdownViewerHandle {
   getContainer: () => HTMLElement | null;
   scrollToComment: (commentId: string) => void;
   getActiveMark: () => HTMLElement | null;
   getActiveMarks: () => HTMLElement[];
+  getHeadings: () => TocHeading[];
 }
 
 // React.memo prevents re-renders from parent state changes that don't affect our props.
@@ -75,6 +83,15 @@ export const MarkdownViewer = memo(
           containerRef.current.querySelectorAll('mark.comment-highlight-active'),
         ) as HTMLElement[];
       },
+      getHeadings: () => {
+        if (!containerRef.current) return [];
+        const els = containerRef.current.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        return Array.from(els).map((el) => ({
+          id: el.id,
+          text: el.textContent?.trim() || '',
+          level: parseInt(el.tagName[1], 10),
+        }));
+      },
     }));
 
     // Set innerHTML and apply highlights after React commits.
@@ -86,6 +103,9 @@ export const MarkdownViewer = memo(
 
       // Set innerHTML from scratch — guarantees a clean starting state
       container.innerHTML = html;
+
+      // --- Heading IDs ---
+      assignHeadingIds(container);
 
       // --- Comment highlights ---
       // Group comments that share the same anchor AND cleanOffset (exact same highlight).
