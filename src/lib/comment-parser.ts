@@ -175,6 +175,86 @@ export function serializeComment(comment: MdComment): string {
   return `<!-- @comment${json} -->`;
 }
 
+/**
+ * Among multiple occurrences of an anchor in plain text, pick the one that
+ * best matches the user's original selection using whitespace-normalized
+ * context matching, with hintOffset proximity as tiebreaker.
+ *
+ * Context strings come from container.textContent (DOM space) while the
+ * plain text comes from stripInlineFormatting (markdown space). These can
+ * differ in whitespace around block boundaries (\n\n vs \n) and unhandled
+ * constructs (links, images). Whitespace normalization makes the comparison
+ * robust against this drift.
+ */
+export function pickBestOccurrence(
+  plain: string,
+  occurrences: number[],
+  anchor: string,
+  hintOffset: number,
+  contextBefore?: string,
+  contextAfter?: string,
+): number {
+  if (occurrences.length <= 1) return occurrences[0];
+
+  // When no context is available, fall back to nearest hintOffset
+  if (!contextBefore && !contextAfter) {
+    return occurrences.reduce((b, idx) =>
+      Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
+    );
+  }
+
+  // Normalize whitespace: collapse runs into single spaces to handle
+  // blank-line drift (\n\n in markdown vs \n in rendered HTML)
+  const normCtxBefore = contextBefore?.replace(/\s+/g, ' ') ?? '';
+  const normCtxAfter = contextAfter?.replace(/\s+/g, ' ') ?? '';
+
+  let bestOcc = occurrences[0];
+  let bestScore = -1;
+  let bestDist = Infinity;
+
+  for (const occ of occurrences) {
+    let score = 0;
+
+    // Score by matching suffix of contextBefore (working backwards from anchor start)
+    if (normCtxBefore) {
+      const windowSize = normCtxBefore.length * 2; // extra room for pre-normalization whitespace
+      const rawBefore = plain.slice(Math.max(0, occ - windowSize), occ);
+      const normBefore = rawBefore.replace(/\s+/g, ' ');
+      for (let j = 1; j <= Math.min(normBefore.length, normCtxBefore.length); j++) {
+        if (normBefore[normBefore.length - j] === normCtxBefore[normCtxBefore.length - j]) {
+          score++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Score by matching prefix of contextAfter (working forwards from anchor end)
+    if (normCtxAfter) {
+      const afterStart = occ + anchor.length;
+      const windowSize = normCtxAfter.length * 2;
+      const rawAfter = plain.slice(afterStart, afterStart + windowSize);
+      const normAfter = rawAfter.replace(/\s+/g, ' ');
+      for (let j = 0; j < Math.min(normAfter.length, normCtxAfter.length); j++) {
+        if (normAfter[j] === normCtxAfter[j]) {
+          score++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    const dist = Math.abs(occ - hintOffset);
+    if (score > bestScore || (score === bestScore && dist < bestDist)) {
+      bestScore = score;
+      bestOcc = occ;
+      bestDist = dist;
+    }
+  }
+
+  return bestOcc;
+}
+
 export function insertComment(
   rawMarkdown: string,
   anchor: string,
@@ -231,9 +311,9 @@ export function insertComment(
     }
 
     if (plainOccs.length > 0) {
-      const best = plainOccs.reduce((b, idx) =>
-        Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-      );
+      const best = plainOccs.length === 1
+        ? plainOccs[0]
+        : pickBestOccurrence(plain, plainOccs, anchor, hintOffset, contextBefore, contextAfter);
       insertionCleanOffset = toCleanOffset(best);
     }
   }
@@ -495,7 +575,20 @@ export function stripInlineFormatting(md: string): {
   const len = md.length;
   const atLineStart = (pos: number) => pos === 0 || md[pos - 1] === '\n';
 
+  // Track pending link URL skip: when we see [text](url), we skip [,
+  // process text normally, then skip ](url) when we reach the ].
+  let pendingLinkSkipAt = -1;
+  let pendingLinkSkipTo = -1;
+
   while (i < len) {
+    // Handle pending link URL skip: we reached ], jump past ](url)
+    if (pendingLinkSkipAt !== -1 && i >= pendingLinkSkipAt) {
+      i = pendingLinkSkipTo;
+      pendingLinkSkipAt = -1;
+      pendingLinkSkipTo = -1;
+      continue;
+    }
+
     // Fenced code blocks: skip fence lines, keep content as-is
     if (atLineStart(i) && (md[i] === '`' || md[i] === '~')) {
       const fenceChar = md[i];
@@ -525,6 +618,32 @@ export function stripInlineFormatting(md: string): {
           i++;
         }
         continue;
+      }
+    }
+
+    // Markdown images: ![alt](url) → skip entirely (no text content in rendered DOM)
+    if (md[i] === '!' && i + 1 < len && md[i + 1] === '[') {
+      const cb = md.indexOf(']', i + 2);
+      if (cb !== -1 && cb + 1 < len && md[cb + 1] === '(') {
+        const cp = md.indexOf(')', cb + 2);
+        if (cp !== -1) {
+          i = cp + 1;
+          continue;
+        }
+      }
+    }
+
+    // Markdown links: [text](url) → skip [ and ](url), keep text
+    if (md[i] === '[' && pendingLinkSkipAt === -1) {
+      const cb = md.indexOf(']', i + 1);
+      if (cb !== -1 && cb + 1 < len && md[cb + 1] === '(') {
+        const cp = md.indexOf(')', cb + 2);
+        if (cp !== -1) {
+          pendingLinkSkipAt = cb;
+          pendingLinkSkipTo = cp + 1;
+          i++; // skip '['
+          continue;
+        }
       }
     }
 
@@ -631,12 +750,17 @@ export function detectMissingAnchors(
 ): Set<string> {
   const missing = new Set<string>();
   if (!cleanMarkdown) return missing;
+  // Compare against plain text (formatting stripped) since anchors come from
+  // DOM textContent which doesn't include markdown formatting markers like
+  // **, _, `, ~~, etc. Without this, anchors spanning formatted text would
+  // always be flagged as "changed".
+  const { plain } = stripInlineFormatting(cleanMarkdown);
   for (const c of comments) {
     if (getEffectiveStatus(c) === 'resolved') continue;
-    if (!cleanMarkdown.includes(c.anchor)) {
+    if (!plain.includes(c.anchor)) {
       const parts = c.anchor.split(/\s+/).filter(Boolean);
       if (parts.length === 0) continue;
-      if (!partsAppearContiguously(cleanMarkdown, parts)) {
+      if (!partsAppearContiguously(plain, parts)) {
         missing.add(c.id);
       }
     }
