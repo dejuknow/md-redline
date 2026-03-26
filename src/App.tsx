@@ -36,7 +36,7 @@ import { MarkdownViewer, type MarkdownViewerHandle, type ViewerContextMenuInfo, 
 import { TableOfContents } from './components/TableOfContents';
 import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
-import { Toolbar, type ViewMode } from './components/Toolbar';
+import { Toolbar } from './components/Toolbar';
 import { TabBar, type TabContextMenuInfo } from './components/TabBar';
 import { FileExplorer, type ExplorerContextMenuInfo } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
@@ -93,7 +93,6 @@ export default function App() {
     leftPanelView, setLeftPanelView,
     viewMode, setViewMode,
   } = usePaneLayout();
-  const sidebarFilter = 'all' as const;
 
   // Session persistence (tabs only — pane layout is persisted by usePaneLayout)
   const { persist } = useSessionPersistence();
@@ -109,13 +108,13 @@ export default function App() {
   useEffect(() => {
     if (sessionRestoredRef.current) return;
     sessionRestoredRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('file') || params.get('dir')) return;
     if (savedSession && savedSession.openTabs.length > 0) {
       for (const path of savedSession.openTabs) {
         openTab(path);
       }
-      // Switch to the saved active tab — unless a URL ?file= param takes precedence
-      const urlFile = new URLSearchParams(window.location.search).get('file');
-      if (!urlFile && savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)) {
+      if (savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)) {
         setTimeout(() => switchTab(savedSession.activeFilePath!), 50);
       }
     }

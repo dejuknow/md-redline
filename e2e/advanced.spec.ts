@@ -121,6 +121,37 @@ test.describe('Multi-tab support', () => {
     await expect(tab2).not.toBeVisible();
   });
 
+  test('closing a loading tab does not poison reopening the same file', async ({ page }) => {
+    await openFixture(page, FIXTURE_1);
+
+    let delayNextLoad = true;
+    await page.route('**/api/file?path=*test-doc-2.md*', async (route) => {
+      if (delayNextLoad) {
+        delayNextLoad = false;
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+      await route.continue();
+    });
+
+    await openSecondFile(page);
+
+    const tabBar = page.locator('.h-9');
+    const loadingTab = tabBar.locator('button', { hasText: 'test-doc-2.md' });
+    await expect(loadingTab).toBeVisible();
+    await loadingTab.click({ button: 'middle' });
+    await expect(loadingTab).not.toBeVisible();
+
+    // Let the delayed response resolve; it should not reinsert hidden tab state.
+    await page.waitForTimeout(1500);
+
+    await openSecondFile(page);
+
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible();
+  });
+
   test('tab badges show comment counts', async ({ page }) => {
     await openFixture(page, FIXTURE_1);
 
@@ -278,6 +309,31 @@ test.describe('Session persistence', () => {
     await page.reload();
 
     await expect(page.locator('.raw-view-table', { hasText: '# Test Document' })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('URL file parameter wins over restored tabs', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(
+      ([fixture1, fixture2]) => {
+        localStorage.setItem(
+          'md-review-session',
+          JSON.stringify({
+            openTabs: [fixture1, fixture2],
+            activeFilePath: fixture2,
+          }),
+        );
+      },
+      [FIXTURE_1, FIXTURE_2],
+    );
+
+    await page.goto(`/?file=${FIXTURE_1}`);
+
+    const tabBar = page.locator('.h-9');
+    await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
   });
 });
 

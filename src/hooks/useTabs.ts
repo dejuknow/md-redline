@@ -16,6 +16,31 @@ export function useTabs() {
   // Use ref to avoid openTab depending on tabData (which changes every render)
   const tabDataRef = useRef(tabData);
   tabDataRef.current = tabData;
+  const loadRequestIdsRef = useRef(new Map<string, number>());
+  const nextLoadRequestIdRef = useRef(1);
+
+  const startLoadRequest = useCallback((path: string) => {
+    const requestId = nextLoadRequestIdRef.current++;
+    loadRequestIdsRef.current.set(path, requestId);
+    return requestId;
+  }, []);
+
+  const isCurrentLoadRequest = useCallback((path: string, requestId: number) => {
+    return (
+      loadRequestIdsRef.current.get(path) === requestId &&
+      tabDataRef.current.has(path)
+    );
+  }, []);
+
+  const finishLoadRequest = useCallback((path: string, requestId: number) => {
+    if (loadRequestIdsRef.current.get(path) === requestId) {
+      loadRequestIdsRef.current.delete(path);
+    }
+  }, []);
+
+  const cancelLoadRequest = useCallback((path: string) => {
+    loadRequestIdsRef.current.delete(path);
+  }, []);
 
   const updateTab = useCallback((path: string, updates: Partial<TabState>) => {
     setTabData((prev) => {
@@ -46,12 +71,14 @@ export function useTabs() {
     setTabData((prev) => new Map(prev).set(path, newTab));
     setTabOrder((prev) => [...prev, path]);
     setActiveFilePath(path);
+    const requestId = startLoadRequest(path);
 
     // Fetch file content
     try {
       const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      if (!isCurrentLoadRequest(path, requestId)) return;
       setTabData((prev) => {
         const next = new Map(prev);
         next.set(path, {
@@ -63,7 +90,9 @@ export function useTabs() {
         });
         return next;
       });
+      finishLoadRequest(path, requestId);
     } catch (err) {
+      if (!isCurrentLoadRequest(path, requestId)) return;
       setTabData((prev) => {
         const next = new Map(prev);
         const existing = next.get(path);
@@ -76,8 +105,9 @@ export function useTabs() {
         }
         return next;
       });
+      finishLoadRequest(path, requestId);
     }
-  }, []);
+  }, [finishLoadRequest, isCurrentLoadRequest, startLoadRequest]);
 
   const openTabInBackground = useCallback(async (path: string) => {
     // If already open, do nothing (don't switch)
@@ -92,11 +122,13 @@ export function useTabs() {
     };
     setTabData((prev) => new Map(prev).set(path, newTab));
     setTabOrder((prev) => [...prev, path]);
+    const requestId = startLoadRequest(path);
 
     try {
       const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      if (!isCurrentLoadRequest(path, requestId)) return;
       setTabData((prev) => {
         const next = new Map(prev);
         next.set(path, {
@@ -108,7 +140,9 @@ export function useTabs() {
         });
         return next;
       });
+      finishLoadRequest(path, requestId);
     } catch (err) {
+      if (!isCurrentLoadRequest(path, requestId)) return;
       setTabData((prev) => {
         const next = new Map(prev);
         const existing = next.get(path);
@@ -121,10 +155,12 @@ export function useTabs() {
         }
         return next;
       });
+      finishLoadRequest(path, requestId);
     }
-  }, []);
+  }, [finishLoadRequest, isCurrentLoadRequest, startLoadRequest]);
 
   const closeTab = useCallback((path: string) => {
+    cancelLoadRequest(path);
     setTabOrder((prev) => {
       const idx = prev.indexOf(path);
       const next = prev.filter((p) => p !== path);
@@ -143,9 +179,12 @@ export function useTabs() {
       next.delete(path);
       return next;
     });
-  }, []);
+  }, [cancelLoadRequest]);
 
   const closeOtherTabs = useCallback((keepPath: string) => {
+    for (const path of tabDataRef.current.keys()) {
+      if (path !== keepPath) cancelLoadRequest(path);
+    }
     setTabOrder((prev) => {
       const next = prev.filter((p) => p === keepPath);
       setActiveFilePath(keepPath);
@@ -157,9 +196,10 @@ export function useTabs() {
       if (kept) next.set(keepPath, kept);
       return next;
     });
-  }, []);
+  }, [cancelLoadRequest]);
 
   const closeAllTabs = useCallback(() => {
+    loadRequestIdsRef.current.clear();
     setTabOrder([]);
     setTabData(new Map());
     setActiveFilePath(null);
@@ -177,6 +217,7 @@ export function useTabs() {
       // Clean up removed tab data
       const removed = prev.slice(idx + 1);
       if (removed.length > 0) {
+        for (const removedPath of removed) cancelLoadRequest(removedPath);
         setTabData((prevData) => {
           const nextData = new Map(prevData);
           for (const p of removed) nextData.delete(p);
@@ -185,7 +226,7 @@ export function useTabs() {
       }
       return next;
     });
-  }, []);
+  }, [cancelLoadRequest]);
 
   const switchTab = useCallback((path: string) => {
     setActiveFilePath(path);

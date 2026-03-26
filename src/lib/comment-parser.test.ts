@@ -1338,7 +1338,6 @@ describe('context-based disambiguation in insertComment', () => {
   });
 
   it('context disambiguates when surrounding text differs', () => {
-    const raw = 'The cat sat on the mat. The dog saw the cat run.';
     // "the cat" appears at offsets 0 (as "The cat") and 38 (as "the cat")
     // But the clean text search is case-sensitive, so "the cat" only matches at 38
     // Let's use a proper duplicate:
