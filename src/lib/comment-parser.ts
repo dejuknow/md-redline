@@ -681,9 +681,16 @@ export function stripInlineFormatting(md: string): {
       }
     }
 
-    // Backticks and tildes — always formatting
-    if (md[i] === '`' || md[i] === '~') {
+    // Backticks are always formatting.
+    if (md[i] === '`') {
       i++;
+      continue;
+    }
+
+    // Single tildes are literal text (for example ~/docs paths); only paired
+    // tildes represent strikethrough formatting.
+    if (md[i] === '~' && md[i + 1] === '~') {
+      i += 2;
       continue;
     }
 

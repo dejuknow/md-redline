@@ -317,6 +317,39 @@ describe('edge cases', () => {
     expect(parsed.cleanMarkdown).toBe(`Start ${longText} end`);
   });
 
+  it('uses hintOffset to place repeated punctuation-heavy anchors in a large document', () => {
+    const anchor = 'GET /api/files?dir=~/docs&mode=full';
+    const raw = Array.from(
+      { length: 220 },
+      (_, index) =>
+        `Section ${index + 1}\nRequest: ${anchor}\nNotes: keep section ${index + 1} in sync.\n`,
+    ).join('\n');
+    const occurrences: number[] = [];
+    let searchFrom = 0;
+    while (true) {
+      const idx = raw.indexOf(anchor, searchFrom);
+      if (idx === -1) break;
+      occurrences.push(idx);
+      searchFrom = idx + 1;
+    }
+
+    const targetOccurrence = 173;
+    const result = insertComment(
+      raw,
+      anchor,
+      'late duplicate anchor',
+      'User',
+      undefined,
+      undefined,
+      occurrences[targetOccurrence - 1],
+    );
+    const parsed = parseComments(result);
+
+    expect(result.indexOf('<!-- @comment')).toBe(occurrences[targetOccurrence - 1]);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].cleanOffset).toBe(occurrences[targetOccurrence - 1]);
+  });
+
   it('round-trips: parse then re-serialize preserves comments', () => {
     const raw = `${marker({ id: 'rt1', text: 'hello' })}some text ${marker({ id: 'rt2', text: 'world' })}more text`;
     const { comments, cleanMarkdown } = parseComments(raw);
@@ -474,6 +507,15 @@ describe('detectMissingAnchors', () => {
     expect(missing.has('a')).toBe(false);
   });
 
+  it('does not flag punctuation-heavy anchors spanning links and inline code', () => {
+    const clean = 'Review [the beta spec](https://example.com/spec) at `C:\\docs\\review?.md` before release.';
+    const comments = [
+      { id: 'a', anchor: 'Review the beta spec at C:\\docs\\review?.md before release.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
   it('does not flag anchor from rendered mermaid diagram text', () => {
     const clean = '# Flow\n\n```mermaid\ngraph TD\n    A[Admin clicks Add] --> B[Admin enters name]\n```\n';
     const comments = [{ id: 'a', anchor: "clicks Add Admin enters" }] as MdComment[];
@@ -511,6 +553,28 @@ describe('detectMissingAnchors', () => {
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
     expect(missing.has('b')).toBe(false);
+  });
+
+  it('matches anchors in mermaid-heavy documents with many diagrams', () => {
+    const clean = `${Array.from(
+      { length: 18 },
+      (_, index) => `## Flow ${index + 1}
+
+\`\`\`mermaid
+flowchart TD
+  A${index}[Stage ${index + 1} intake] --> B${index}[Stage ${index + 1} approved]
+\`\`\`
+`,
+    ).join('\n')}
+Final checklist is complete.
+`;
+    const comments = [
+      { id: 'a', anchor: 'Stage 17 intake Stage 17 approved' },
+      { id: 'b', anchor: 'Final checklist is complete.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+
+    expect(missing.size).toBe(0);
   });
 
   it('flags truly missing anchor even with mermaid blocks present', () => {

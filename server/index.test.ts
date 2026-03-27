@@ -21,9 +21,12 @@ let docsFile: string;
 let homeFile: string;
 let textFile: string;
 let externalFile: string;
+let allowedSymlinkFile: string;
 let outsideSymlinkFile: string;
+let allowedSymlinkDir: string;
 let outsideSymlinkDir: string;
 let writtenFile: string;
+let initialSiblingFile: string;
 
 function createExecFileStub(stdout: string) {
   const calls: Array<{ file: string; args: string[] }> = [];
@@ -70,9 +73,12 @@ beforeAll(async () => {
   homeFile = join(fakeHome, 'home.md');
   textFile = join(docsDir, 'notes.txt');
   externalFile = join(externalDir, 'outside.md');
+  allowedSymlinkFile = join(docsDir, 'home-link.md');
   outsideSymlinkFile = join(docsDir, 'outside-link.md');
+  allowedSymlinkDir = join(cwdRoot, 'home-dir');
   outsideSymlinkDir = join(cwdRoot, 'outside-dir');
   writtenFile = join(docsDir, 'written.md');
+  initialSiblingFile = join(initialDir, 'follow-up.md');
 
   await writeFile(rootFile, '# Root\n');
   await writeFile(docsFile, '# Alpha\n\nHello world\n');
@@ -85,8 +91,11 @@ beforeAll(async () => {
   await writeFile(join(nestedDir, 'nested.md'), '# Nested\n');
   await writeFile(join(hiddenDir, 'secret.md'), '# Secret\n');
   await writeFile(join(initialDir, 'initial.md'), '# Initial\n');
+  await writeFile(initialSiblingFile, '# Follow-up\n\nInitial sibling\n');
 
+  await symlink(homeFile, allowedSymlinkFile);
   await symlink(externalFile, outsideSymlinkFile);
+  await symlink(fakeHome, allowedSymlinkDir);
   await symlink(externalDir, outsideSymlinkDir);
 
   app = createApp({
@@ -205,6 +214,19 @@ describe('/api/file', () => {
     expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
 
+  it('reads symlinked files that resolve inside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent(allowedSymlinkFile)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      path: homeFile,
+      content: '# Home\n',
+    });
+  });
+
   it('rejects symlinked files that resolve outside allowed roots', async () => {
     const { response, body } = await requestJson(
       app,
@@ -213,6 +235,19 @@ describe('/api/file', () => {
 
     expect(response.status).toBe(403);
     expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
+  });
+
+  it('reads the configured initial file even when it is outside the default roots', async () => {
+    const { response, body } = await requestJson(
+      initialFileApp,
+      `/api/file?path=${encodeURIComponent(join(initialDir, 'initial.md'))}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      path: join(initialDir, 'initial.md'),
+      content: '# Initial\n',
+    });
   });
 });
 
@@ -252,6 +287,19 @@ describe('PUT /api/file', () => {
     expect(response.status).toBe(403);
     expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
+
+  it('writes sibling files next to the configured initial file outside the repo', async () => {
+    const newContent = '# Follow-up\n\nOpened from CLI\n';
+    const { response, body } = await requestJson(initialFileApp, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: initialSiblingFile, content: newContent }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true, path: initialSiblingFile });
+    await expect(readFile(initialSiblingFile, 'utf-8')).resolves.toBe(newContent);
+  });
 });
 
 describe('/api/files', () => {
@@ -280,6 +328,42 @@ describe('/api/files', () => {
 
     expect(response.status).toBe(403);
     expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
+  });
+
+  it('lists files through symlinked directories that resolve inside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/files?dir=${encodeURIComponent(allowedSymlinkDir)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      dir: fakeHome,
+      files: [homeFile],
+    });
+  });
+
+  it('rejects symlinked directories that resolve outside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/files?dir=${encodeURIComponent(outsideSymlinkDir)}`,
+    );
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
+  });
+
+  it('lists files in the configured initial directory outside the repo', async () => {
+    const { response, body } = await requestJson(
+      initialDirApp,
+      `/api/files?dir=${encodeURIComponent(initialDir)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      dir: initialDir,
+      files: [initialSiblingFile, join(initialDir, 'initial.md')],
+    });
   });
 });
 
@@ -311,6 +395,49 @@ describe('/api/browse', () => {
 
     expect(response.status).toBe(400);
     expect(body).toEqual({ error: 'Not a directory' });
+  });
+
+  it('browses symlinked directories that resolve inside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/browse?dir=${encodeURIComponent(allowedSymlinkDir)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      dir: fakeHome,
+      parent: null,
+      directories: [],
+      files: [{ name: 'home.md', path: homeFile }],
+    });
+  });
+
+  it('rejects symlinked directories that resolve outside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/browse?dir=${encodeURIComponent(outsideSymlinkDir)}`,
+    );
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
+  });
+
+  it('browses the configured initial directory outside the repo', async () => {
+    const { response, body } = await requestJson(
+      initialDirApp,
+      `/api/browse?dir=${encodeURIComponent(initialDir)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      dir: initialDir,
+      parent: null,
+      directories: [],
+      files: [
+        { name: 'follow-up.md', path: initialSiblingFile },
+        { name: 'initial.md', path: join(initialDir, 'initial.md') },
+      ],
+    });
   });
 });
 
