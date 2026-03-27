@@ -136,6 +136,14 @@ npm run eval:dry
 npm run test:e2e
 ```
 
+On Windows, you can use the helper script to set up and run tests:
+
+```powershell
+.\bin\test-windows.ps1 -Headed  # Run E2E tests with a visible browser
+.\bin\test-windows.ps1 -UI      # Open Playwright UI
+.\bin\test-windows.ps1          # Standard headless run
+```
+
 Useful scripts:
 
 - `npm run dev:server`
