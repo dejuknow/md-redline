@@ -49,9 +49,7 @@ That design keeps the feedback:
 
 - macOS: supported
 - Linux: supported for the core app; the system file picker requires `zenity`
-- Windows: not officially supported yet
-
-The `md-review` CLI script is currently intended for macOS and Linux.
+- Windows: supported for the core app and CLI; the system file picker uses PowerShell
 
 ## Quick start
 
@@ -69,10 +67,19 @@ npm link
 md-review /path/to/spec.md
 ```
 
+On Windows, the same CLI works with paths like:
+
+```powershell
+md-review C:\docs\spec.md
+md-review .\spec.md
+```
+
 You can also open a file or directory directly by URL:
 
 - `http://localhost:5173?file=/absolute/path/to/file.md`
 - `http://localhost:5173?dir=/absolute/path/to/folder`
+
+On Windows, absolute paths like `C:\docs\spec.md` work as well.
 
 ## Review workflows
 
@@ -93,12 +100,12 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+K` | Toggle command palette |
-| `Cmd+B` | Toggle file explorer |
-| `Cmd+Enter` | Submit comment / expand comment form |
-| `Cmd+1-8` | Apply quick template |
-| `Cmd+Shift+M` | Start commenting on selection |
-| `Cmd+\` | Toggle comments sidebar |
+| `Cmd+K` / `Ctrl+K` | Toggle command palette |
+| `Cmd+B` / `Ctrl+B` | Toggle file explorer |
+| `Cmd+Enter` / `Ctrl+Enter` | Submit comment / expand comment form |
+| `Cmd+1-8` / `Ctrl+1-8` | Apply quick template |
+| `Cmd+Shift+M` / `Ctrl+Shift+M` | Start commenting on selection |
+| `Cmd+\` / `Ctrl+\` | Toggle comments sidebar |
 | `N` / `J` | Next comment |
 | `P` / `K` | Previous comment |
 | `A` / `X` | Resolve active comment when resolve workflow is enabled |

@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { MOD_LABEL } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -133,7 +134,7 @@ test.describe('Author management', () => {
     await openFixture(page);
 
     // Open settings
-    await page.locator('button[title="Settings (Cmd+,)"]').click();
+    await page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`).click();
     await expect(page.getByText('Author Name')).toBeVisible();
 
     // Change the author name
@@ -157,7 +158,7 @@ test.describe('Author management', () => {
     await openFixture(page);
 
     // Open settings and change author
-    await page.locator('button[title="Settings (Cmd+,)"]').click();
+    await page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`).click();
     const input = authorInput(page);
     await input.fill('PersistentUser');
     await input.blur();
@@ -170,7 +171,7 @@ test.describe('Author management', () => {
     await page.reload();
     await page.locator('.prose').waitFor({ timeout: 10_000 });
 
-    await page.locator('button[title="Settings (Cmd+,)"]').click();
+    await page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`).click();
     await expect(authorInput(page)).toHaveValue('PersistentUser');
   });
 

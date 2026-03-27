@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { MOD_LABEL } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -28,7 +29,7 @@ async function openFixture(page: Page) {
 
 /** Toggle explorer via the toolbar button. */
 const explorerToggle = (page: Page) =>
-  page.locator('button[title="Toggle file explorer (Cmd+B)"]');
+  page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
 
 async function toggleExplorer(page: Page) {
   await explorerToggle(page).click();

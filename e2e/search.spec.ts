@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { MOD_LABEL, withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -31,18 +32,18 @@ const matchCount = (page: Page) => searchBar(page).locator('[data-testid="search
 // ---------------------------------------------------------------------------
 
 test.describe('Search bar open/close', () => {
-  test('Cmd+F opens search bar and focuses input', async ({ page }) => {
+  test(`${MOD_LABEL}+F opens search bar and focuses input`, async ({ page }) => {
     await openFixture(page);
     await expect(searchBar(page)).not.toBeVisible();
 
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await expect(searchBar(page)).toBeVisible();
     await expect(searchInput(page)).toBeFocused();
   });
 
   test('Escape closes search bar', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await expect(searchBar(page)).toBeVisible();
 
     await page.keyboard.press('Escape');
@@ -51,7 +52,7 @@ test.describe('Search bar open/close', () => {
 
   test('clicking search icon toggles search bar', async ({ page }) => {
     await openFixture(page);
-    const btn = page.locator('button[title="Find in document (Cmd+F)"]');
+    const btn = page.locator(`button[title="Find in document (${MOD_LABEL}+F)"]`);
 
     await btn.click();
     await expect(searchBar(page)).toBeVisible();
@@ -60,9 +61,9 @@ test.describe('Search bar open/close', () => {
     await expect(searchBar(page)).not.toBeVisible();
   });
 
-  test('Cmd+F when already open re-focuses input', async ({ page }) => {
+  test(`${MOD_LABEL}+F when already open re-focuses input`, async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('test');
 
     // Click away to lose focus
@@ -70,7 +71,7 @@ test.describe('Search bar open/close', () => {
     await expect(searchInput(page)).not.toBeFocused();
 
     // Cmd+F again should re-focus and select the text
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await expect(searchInput(page)).toBeFocused();
   });
 });
@@ -82,7 +83,7 @@ test.describe('Search bar open/close', () => {
 test.describe('Search highlighting (rendered view)', () => {
   test('typing a query highlights matches in the document', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     // The fixture has "Section One", "Section Two", "Section Three" as headings
@@ -92,7 +93,7 @@ test.describe('Search highlighting (rendered view)', () => {
 
   test('match count displays correctly', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     await expect(matchCount(page)).toHaveText('1 of 3');
@@ -100,7 +101,7 @@ test.describe('Search highlighting (rendered view)', () => {
 
   test('no results shows "No results"', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('xyznonexistent');
 
     await expect(matchCount(page)).toHaveText('No results');
@@ -109,7 +110,7 @@ test.describe('Search highlighting (rendered view)', () => {
 
   test('active match has distinct styling', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     const activeMarks = page.locator('mark.search-highlight-active');
@@ -118,7 +119,7 @@ test.describe('Search highlighting (rendered view)', () => {
 
   test('search is case-insensitive', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('section');
 
     const highlights = page.locator('mark.search-highlight');
@@ -127,7 +128,7 @@ test.describe('Search highlighting (rendered view)', () => {
 
   test('clearing search removes all highlights', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
     await expect(page.locator('mark.search-highlight')).toHaveCount(3);
 
@@ -137,7 +138,7 @@ test.describe('Search highlighting (rendered view)', () => {
 
   test('closing search bar removes highlights', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
     await expect(page.locator('mark.search-highlight')).toHaveCount(3);
 
@@ -153,7 +154,7 @@ test.describe('Search highlighting (rendered view)', () => {
 test.describe('Match navigation', () => {
   test('Enter advances to next match', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     await expect(matchCount(page)).toHaveText('1 of 3');
@@ -167,7 +168,7 @@ test.describe('Match navigation', () => {
 
   test('Shift+Enter goes to previous match', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     await page.keyboard.press('Enter');
@@ -179,7 +180,7 @@ test.describe('Match navigation', () => {
 
   test('navigation wraps around', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     // Go past the last match
@@ -195,7 +196,7 @@ test.describe('Match navigation', () => {
 
   test('prev/next buttons work', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
 
     await searchBar(page).getByTitle('Next match (Enter)').click();
@@ -207,7 +208,7 @@ test.describe('Match navigation', () => {
 
   test('changing query resets active index', async ({ page }) => {
     await openFixture(page);
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('Section');
     await page.keyboard.press('Enter'); // 2 of 3
     await expect(matchCount(page)).toHaveText('2 of 3');
@@ -230,7 +231,7 @@ test.describe('Search in raw view', () => {
     await page.locator('button[title="View raw markdown"]').click();
     await expect(page.locator('.raw-view-table')).toBeVisible();
 
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('##');
 
     // The fixture has "## Overview", "## Section One", "## Section Two", "## Section Three"
@@ -243,7 +244,7 @@ test.describe('Search in raw view', () => {
     await openFixture(page);
     await page.locator('button[title="View raw markdown"]').click();
 
-    await page.keyboard.press('Meta+f');
+    await page.keyboard.press(withMod('f'));
     await searchInput(page).fill('##');
 
     await expect(matchCount(page)).toHaveText('1 of 4');
@@ -261,7 +262,7 @@ test.describe('Command palette integration', () => {
   test('"Find in document" command opens search bar', async ({ page }) => {
     await openFixture(page);
 
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('Find');
     await page.keyboard.press('Enter');
 
@@ -272,7 +273,7 @@ test.describe('Command palette integration', () => {
   test('theme commands are available in command palette', async ({ page }) => {
     await openFixture(page);
 
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('Theme');
 
     await expect(page.getByText('Theme: Light')).toBeVisible();
@@ -284,7 +285,7 @@ test.describe('Command palette integration', () => {
   test('selecting a theme command changes the theme', async ({ page }) => {
     await openFixture(page);
 
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('Theme: Dark');
     await page.keyboard.press('Enter');
 

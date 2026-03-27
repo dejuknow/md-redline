@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -90,7 +91,7 @@ test.describe('Hand-off button', () => {
     await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
 
     // Delete all comments via command palette
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('Delete all');
     await page.getByText('Delete all comments').click();
 
@@ -262,7 +263,7 @@ test.describe('Command palette hand-off', () => {
     await openFixture(page);
     await addComment(page, 'authentication system', 'Needs more detail');
 
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('hand off');
     await expect(page.getByText('Hand off to agent')).toBeVisible();
   });
@@ -270,7 +271,7 @@ test.describe('Command palette hand-off', () => {
   test('hand-off command does not appear without comments', async ({ page }) => {
     await openFixture(page);
 
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('hand off');
     await expect(page.getByText('Hand off to agent')).not.toBeVisible();
   });

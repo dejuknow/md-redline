@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -222,7 +223,7 @@ test.describe('Quick comment mode', () => {
     await textarea.fill('Quick comment test');
 
     // Submit via keyboard shortcut
-    await page.keyboard.press('Meta+Enter');
+    await page.keyboard.press(withMod('Enter'));
 
     await expect(page.getByText('Quick comment test', { exact: true })).toBeVisible();
   });

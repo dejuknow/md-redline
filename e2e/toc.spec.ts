@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { MOD_LABEL, withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/toc-doc.md');
@@ -31,7 +32,7 @@ async function switchToOutline(page: Page) {
 async function ensureLeftPanelOpen(page: Page) {
   const panel = page.locator('button[title="Document outline"]');
   if (!(await panel.isVisible())) {
-    await page.locator('button[title="Toggle file explorer (Cmd+B)"]').click();
+    await page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`).click();
     await page.waitForTimeout(300);
   }
 }
@@ -115,20 +116,20 @@ test.describe('Table of Contents', () => {
     await expect(page.locator('h3#technical-constraints')).toBeVisible();
   });
 
-  test('Cmd+Shift+O toggles outline view', async ({ page }) => {
+  test(`${MOD_LABEL}+Shift+O toggles outline view`, async ({ page }) => {
     await openFixture(page);
 
     // Close the left panel first
-    await page.keyboard.press('Meta+b');
+    await page.keyboard.press(withMod('b'));
     await page.waitForTimeout(300);
 
     // Cmd+Shift+O should open panel with outline
-    await page.keyboard.press('Meta+Shift+o');
+    await page.keyboard.press(withMod('Shift+o'));
     await page.waitForTimeout(300);
     await expect(page.locator('button[title="Project Specification"]')).toBeVisible();
 
     // Cmd+Shift+O again should close the panel
-    await page.keyboard.press('Meta+Shift+o');
+    await page.keyboard.press(withMod('Shift+o'));
     await page.waitForTimeout(300);
     await expect(page.locator('button[title="Project Specification"]')).not.toBeVisible();
   });
@@ -137,7 +138,7 @@ test.describe('Table of Contents', () => {
     await openFixture(page);
 
     // Open command palette
-    await page.keyboard.press('Meta+k');
+    await page.keyboard.press(withMod('k'));
     const input = page.locator('input[placeholder="Type a command..."]');
     await expect(input).toBeVisible();
 

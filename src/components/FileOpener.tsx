@@ -14,7 +14,11 @@ function looksLikeDirectPath(value: string): boolean {
   return (
     value.startsWith('/') ||
     value.startsWith('~/') ||
+    value.startsWith('~\\') ||
     value.startsWith('./') ||
+    value.startsWith('.\\') ||
+    value.startsWith('../') ||
+    value.startsWith('..\\') ||
     /^[a-zA-Z]:[\\/]/.test(value) ||
     value.startsWith('\\\\')
   );

@@ -1,83 +1,153 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env node
 
-# md-review — open a markdown file or folder in md-review for reviewing
-# Usage: md-review <file.md>
-#        md-review <directory>
-#        md-review              (opens the app with no file pre-loaded)
+import { spawn } from 'child_process';
+import { stat } from 'fs/promises';
+import { homedir } from 'os';
+import { dirname, resolve } from 'path';
+import process from 'process';
+import { fileURLToPath } from 'url';
 
-# Resolve symlinks (e.g. when invoked via npm-linked `mdr`)
-SCRIPT="$0"
-if [[ -L "$SCRIPT" ]]; then
-  SCRIPT="$(readlink "$SCRIPT")"
-  # Handle relative symlinks
-  [[ "$SCRIPT" != /* ]] && SCRIPT="$(dirname "$0")/$SCRIPT"
-fi
-APP_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
-SERVER_PORT=3001
-CLIENT_PORT=5173
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "Usage: md-review [file.md | directory]"
-  echo "Opens a markdown file or folder in md-review for inline commenting."
-  echo "Starts the app automatically if it's not already running."
-  echo "Supported platforms: macOS and Linux."
-  exit 0
-fi
+const APP_DIR = resolve(__dirname, '..');
+const SERVER_PORT = 3001;
+const CLIENT_PORT = 5173;
+const START_TIMEOUT_MS = 15_000;
+const POLL_INTERVAL_MS = 500;
 
-# Resolve the path — supports both files and directories
-FILE=""
-DIR=""
-if [[ -n "${1:-}" ]]; then
-  if [[ -d "$1" ]]; then
-    DIR="$(cd "$1" && pwd)"
-  elif [[ -f "$1" ]]; then
-    FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-  else
-    echo "Error: not found: $1" >&2
-    exit 1
-  fi
-fi
-
-# Check if the server is already running
-server_running() {
-  curl -sf "http://localhost:${SERVER_PORT}/api/config" >/dev/null 2>&1
+function printHelp() {
+  console.log('Usage: md-review [file.md | directory]');
+  console.log('Opens a markdown file or folder in md-review for inline commenting.');
+  console.log('Starts the app automatically if it is not already running.');
+  console.log('Supported platforms: macOS, Linux, and Windows.');
 }
 
-if ! server_running; then
-  echo "Starting md-review..."
-  cd "$APP_DIR"
-  npm run dev >/dev/null 2>&1 &
-  APP_PID=$!
+function expandHomePath(inputPath) {
+  if (inputPath === '~') return homedir();
+  if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) {
+    return resolve(homedir(), inputPath.slice(2));
+  }
+  return inputPath;
+}
 
-  # Wait up to 15 seconds for the server
-  for i in $(seq 1 30); do
-    if server_running; then
-      break
-    fi
-    if ! kill -0 "$APP_PID" 2>/dev/null; then
-      echo "Error: app failed to start. Run 'npm run dev' manually for details." >&2
-      exit 1
-    fi
-    sleep 0.5
-  done
+async function resolveTarget(arg) {
+  if (!arg) return { file: '', dir: '' };
 
-  if ! server_running; then
-    echo "Error: server did not start within 15 seconds." >&2
-    exit 1
-  fi
-  echo "md-review is running."
-fi
+  const target = resolve(expandHomePath(arg));
+  let targetStat;
+  try {
+    targetStat = await stat(target);
+  } catch {
+    throw new Error(`not found: ${arg}`);
+  }
 
-# Build the URL
-URL="http://localhost:${CLIENT_PORT}"
-if [[ -n "$FILE" ]]; then
-  ENCODED=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$FILE")
-  URL="${URL}?file=${ENCODED}"
-elif [[ -n "$DIR" ]]; then
-  ENCODED=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$DIR")
-  URL="${URL}?dir=${ENCODED}"
-fi
+  if (targetStat.isDirectory()) return { file: '', dir: target };
+  if (targetStat.isFile()) return { file: target, dir: '' };
+  throw new Error(`not a file or directory: ${arg}`);
+}
 
-# Open in the default browser
-open "$URL" 2>/dev/null || xdg-open "$URL" 2>/dev/null || echo "Open in your browser: $URL"
+async function serverRunning() {
+  try {
+    const response = await fetch(`http://localhost:${SERVER_PORT}/api/config`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+function spawnDetached(command, args) {
+  return new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: APP_DIR,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+
+    child.once('error', rejectSpawn);
+    child.once('spawn', () => {
+      child.unref();
+      resolveSpawn(child);
+    });
+  });
+}
+
+async function ensureServerRunning() {
+  if (await serverRunning()) return;
+
+  console.log('Starting md-review...');
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  let childExited = false;
+  const child = await spawnDetached(npmCommand, ['run', 'dev']);
+  child.once('exit', () => {
+    childExited = true;
+  });
+
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await serverRunning()) {
+      console.log('md-review is running.');
+      return;
+    }
+    if (childExited) {
+      throw new Error("app failed to start. Run 'npm run dev' manually for details.");
+    }
+    await delay(POLL_INTERVAL_MS);
+  }
+
+  throw new Error('server did not start within 15 seconds.');
+}
+
+function buildUrl(file, dir) {
+  const baseUrl = `http://localhost:${CLIENT_PORT}`;
+  if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
+  if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
+  return baseUrl;
+}
+
+async function openInBrowser(url) {
+  if (process.platform === 'darwin') {
+    await spawnDetached('open', [url]);
+    return;
+  }
+  if (process.platform === 'win32') {
+    await spawnDetached('cmd', ['/c', 'start', '', url]);
+    return;
+  }
+  if (process.platform === 'linux') {
+    await spawnDetached('xdg-open', [url]);
+    return;
+  }
+  console.log(`Open in your browser: ${url}`);
+}
+
+async function main() {
+  if (process.argv[2] === '-h' || process.argv[2] === '--help') {
+    printHelp();
+    return;
+  }
+
+  try {
+    const { file, dir } = await resolveTarget(process.argv[2] ?? '');
+    await ensureServerRunning();
+    const url = buildUrl(file, dir);
+
+    try {
+      await openInBrowser(url);
+    } catch {
+      console.log(`Open in your browser: ${url}`);
+    }
+  } catch (error) {
+    console.error(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
+    process.exitCode = 1;
+  }
+}
+
+await main();

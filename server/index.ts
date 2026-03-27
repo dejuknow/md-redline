@@ -29,6 +29,14 @@ function isMdFile(resolved: string): boolean {
   return extname(resolved).toLowerCase() === '.md';
 }
 
+function expandHomePath(inputPath: string, homeDir: string): string {
+  if (inputPath === '~') return homeDir;
+  if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) {
+    return join(homeDir, inputPath.slice(2));
+  }
+  return inputPath;
+}
+
 function sseFrame(event: string, data: string): Uint8Array {
   const lines = data.split('\n');
   const frame = `event: ${event}\n${lines.map((l) => `data: ${l}`).join('\n')}\n\n`;
@@ -77,7 +85,7 @@ export function createApp(options: CreateAppOptions = {}) {
   }
 
   async function resolveAndValidate(inputPath: string): Promise<string> {
-    const expanded = inputPath.startsWith('~/') ? join(homeDir, inputPath.slice(2)) : inputPath;
+    const expanded = expandHomePath(inputPath, homeDir);
     const resolved = resolve(cwd, expanded);
     let real: string;
     try {
@@ -246,6 +254,20 @@ export function createApp(options: CreateAppOptions = {}) {
               '--file-selection',
               '--title=Choose a markdown file',
               '--file-filter=Markdown files | *.md *.markdown',
+            ],
+            (err, stdout) => {
+              if (err) return reject(err);
+              promiseResolve(stdout.trim());
+            },
+          );
+        } else if (platformName === 'win32') {
+          execFileImpl(
+            'powershell',
+            [
+              '-NoProfile',
+              '-STA',
+              '-Command',
+              'Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Filter = "Markdown files (*.md;*.markdown)|*.md;*.markdown|All files (*.*)|*.*"; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }',
             ],
             (err, stdout) => {
               if (err) return reject(err);

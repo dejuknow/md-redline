@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { MOD_LABEL } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -118,7 +119,7 @@ test.describe('Context menu on tab', () => {
     await openFixture(page);
 
     // Close the explorer so tab area is fully unobscured
-    const explorerBtn = page.locator('button[title="Toggle file explorer (Cmd+B)"]');
+    const explorerBtn = page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
     const cls = await explorerBtn.getAttribute('class') ?? '';
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
@@ -138,7 +139,7 @@ test.describe('Context menu on tab', () => {
     await openFixture(page);
     await openSecondFile(page);
 
-    const explorerBtn = page.locator('button[title="Toggle file explorer (Cmd+B)"]');
+    const explorerBtn = page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
     const cls = await explorerBtn.getAttribute('class') ?? '';
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
@@ -160,7 +161,7 @@ test.describe('Context menu on sidebar comment', () => {
     await openFixture(page);
 
     // Close the explorer to give sidebar more room
-    await page.locator('button[title="Toggle file explorer (Cmd+B)"]').click();
+    await page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`).click();
     await page.waitForTimeout(300);
 
     await addComment(page, 'valid credentials', 'Sidebar ctx test');

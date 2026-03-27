@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
+import { getPrimaryModifierLabel } from '../lib/platform';
 
 interface Props {
   selection: SelectionInfo;
@@ -15,6 +16,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const { settings } = useSettings();
   const TEMPLATES = settings.templates;
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
+  const modLabel = getPrimaryModifierLabel();
   const [isExpanded, setIsExpanded] = useState(!!settings.quickComment);
   const [text, setText] = useState('');
   const [showTemplates, setShowTemplates] = useState(settings.showTemplatesByDefault);
@@ -189,7 +191,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-content-muted">
-              {/Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '\u2318' : 'Ctrl'}+Enter
+              {modLabel}+Enter
             </span>
             <button
               onClick={() => setShowTemplates(!showTemplates)}

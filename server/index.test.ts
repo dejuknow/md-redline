@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createApp } from './index';
+import { createApp, type CreateAppOptions } from './index';
 
 type AppInstance = ReturnType<typeof createApp>;
 
@@ -24,6 +24,20 @@ let externalFile: string;
 let outsideSymlinkFile: string;
 let outsideSymlinkDir: string;
 let writtenFile: string;
+
+function createExecFileStub(stdout: string) {
+  const calls: Array<{ file: string; args: string[] }> = [];
+  const execFileImpl = ((
+    file: string,
+    args: readonly string[],
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ) => {
+    calls.push({ file, args: [...args] });
+    callback(null, stdout, '');
+  }) as unknown as CreateAppOptions['execFileImpl'];
+
+  return { calls, execFileImpl };
+}
 
 async function requestJson(appInstance: AppInstance, path: string, init?: RequestInit) {
   const response = await appInstance.request(`http://localhost${path}`, init);
@@ -149,6 +163,19 @@ describe('/api/file', () => {
     const { response, body } = await requestJson(
       app,
       `/api/file?path=${encodeURIComponent('~/home.md')}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      path: homeFile,
+      content: '# Home\n',
+    });
+  });
+
+  it('expands Windows-style tilde paths against the configured home directory', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent('~\\home.md')}`,
     );
 
     expect(response.status).toBe(200);
@@ -293,5 +320,52 @@ describe('/api/platform', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ platform: 'linux' });
+  });
+});
+
+describe('/api/pick-file', () => {
+  it('uses PowerShell on Windows to launch the system picker', async () => {
+    const { calls, execFileImpl } = createExecFileStub('C:\\docs\\spec.md\n');
+    const windowsApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'win32',
+      execFileImpl,
+    });
+
+    const { response, body } = await requestJson(windowsApp, '/api/pick-file');
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ path: 'C:\\docs\\spec.md' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('powershell');
+    expect(calls[0].args).toContain('-STA');
+    expect(calls[0].args.join(' ')).toContain('OpenFileDialog');
+  });
+});
+
+describe('/api/reveal', () => {
+  it('uses Explorer on Windows to reveal a file', async () => {
+    const { calls, execFileImpl } = createExecFileStub('');
+    const windowsApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'win32',
+      execFileImpl,
+    });
+
+    const { response, body } = await requestJson(windowsApp, '/api/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: docsFile }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      file: 'explorer',
+      args: ['/select,', docsFile],
+    });
   });
 });

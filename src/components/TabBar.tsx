@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { ViewMode } from './Toolbar';
+import { getPrimaryModifierLabel } from '../lib/platform';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
 
@@ -240,6 +241,7 @@ export function TabBar({
   searchActive,
   onCopyAgentPrompt,
 }: Props) {
+  const modLabel = getPrimaryModifierLabel();
   const tabsViewportRef = useRef<HTMLDivElement>(null);
   const tabsContentRef = useRef<HTMLDivElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -554,7 +556,7 @@ export function TabBar({
           variant="active"
           active={searchActive}
           onClick={onSearch}
-          title="Find in document (Cmd+F)"
+          title={`Find in document (${modLabel}+F)`}
         >
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <circle cx="11" cy="11" r="8" />
