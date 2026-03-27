@@ -91,7 +91,7 @@ export function Toolbar({
             strokeWidth="1"
           />
         </svg>
-        <span className="text-sm font-semibold text-content">md-review</span>
+        <span className="text-sm font-semibold text-content">md-redline</span>
       </div>
 
       {/* Center spacer with status */}

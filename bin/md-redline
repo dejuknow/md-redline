@@ -22,7 +22,7 @@ function printHelp() {
   console.log('Starts the app automatically if it is not already running.');
   console.log('Supported platforms: macOS, Linux, and Windows.');
   console.log('');
-  console.log('Alias: md-review');
+  console.log('Alias: md-redline');
 }
 
 function expandHomePath(inputPath) {

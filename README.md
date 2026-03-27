@@ -1,4 +1,4 @@
-# md-review
+# md-redline
 
 `mdr` is a local review app for markdown files.
 
@@ -67,7 +67,7 @@ npm link
 mdr /path/to/spec.md
 ```
 
-`md-review` also works as an alias for `mdr`.
+`md-redline` also works as an alias for `mdr`.
 
 On Windows, the same CLI works with paths like:
 
@@ -117,7 +117,7 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 ## Architecture
 
 ```text
-bin/md-review              CLI entry point (invoked as `mdr` or `md-review`)
+bin/md-redline             CLI entry point (invoked as `mdr` or `md-redline`)
 server/index.ts            Hono server for file I/O, browsing, SSE, and local integrations
 src/App.tsx                Main application shell
 src/components/            Viewer, sidebar, raw view, diff view, TOC, explorer, settings, etc.

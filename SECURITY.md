@@ -19,7 +19,7 @@ I will acknowledge receipt as soon as possible and work with you on a fix and di
 
 ## Local file access model
 
-`md-review` is a local tool. The server can read and write markdown files inside:
+`md-redline` is a local tool. The server can read and write markdown files inside:
 
 - the current working directory
 - the current user's home directory

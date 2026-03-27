@@ -421,7 +421,7 @@ const isMainModule =
 
 if (isMainModule) {
   serve({ fetch: app.fetch, port }, () => {
-    console.log(`md-review server running on http://localhost:${port}`);
+    console.log(`md-redline server running on http://localhost:${port}`);
     const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
     if (initialArg) {
       console.log(`Initial path: ${initialArg}`);

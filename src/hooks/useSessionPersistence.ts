@@ -5,7 +5,7 @@ export interface SessionState {
   activeFilePath: string | null;
 }
 
-const STORAGE_KEY = 'md-review-session';
+const STORAGE_KEY = 'md-redline-session';
 const DEBOUNCE_MS = 500;
 
 export function loadSession(): SessionState | null {

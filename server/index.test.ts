@@ -51,10 +51,10 @@ async function requestJson(appInstance: AppInstance, path: string, init?: Reques
 }
 
 beforeAll(async () => {
-  cwdRoot = await mkdtemp(join(tmpdir(), 'md-review-server-cwd-'));
-  fakeHome = await mkdtemp(join(tmpdir(), 'md-review-server-home-'));
-  initialDir = await mkdtemp(join(tmpdir(), 'md-review-server-initial-'));
-  externalDir = await mkdtemp(join(tmpdir(), 'md-review-server-external-'));
+  cwdRoot = await mkdtemp(join(tmpdir(), 'md-redline-server-cwd-'));
+  fakeHome = await mkdtemp(join(tmpdir(), 'md-redline-server-home-'));
+  initialDir = await mkdtemp(join(tmpdir(), 'md-redline-server-initial-'));
+  externalDir = await mkdtemp(join(tmpdir(), 'md-redline-server-external-'));
   cwdRoot = await realpath(cwdRoot);
   fakeHome = await realpath(fakeHome);
   initialDir = await realpath(initialDir);

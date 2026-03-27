@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-const STORAGE_KEY = 'md-review-panel-widths';
+const STORAGE_KEY = 'md-redline-panel-widths';
 
 interface PanelWidths {
   explorer: number;

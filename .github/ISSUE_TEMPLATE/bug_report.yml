@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in md-review.
+description: Report a reproducible problem in md-redline.
 title: "[Bug]: "
 labels:
   - bug
@@ -63,8 +63,8 @@ body:
     id: version
     attributes:
       label: Node.js / app version
-      description: Include `node -v` and the md-review version or commit if you know it.
-      placeholder: Node 22.13.1, md-review 0.1.0
+      description: Include `node -v` and the md-redline version or commit if you know it.
+      placeholder: Node 22.13.1, md-redline 0.1.0
   - type: textarea
     id: diagnostics
     attributes:

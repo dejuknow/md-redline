@@ -24,80 +24,80 @@ describe('loadSettings', () => {
   });
 
   it('returns defaults when stored value is invalid JSON', () => {
-    store['md-review-settings'] = 'not-json!!!';
+    store['md-redline-settings'] = 'not-json!!!';
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
 
   it('returns defaults for empty object', () => {
-    store['md-review-settings'] = '{}';
+    store['md-redline-settings'] = '{}';
     const result = loadSettings();
     expect(result).toEqual(DEFAULT_SETTINGS);
   });
 
   it('preserves valid enableResolve value', () => {
-    store['md-review-settings'] = JSON.stringify({ enableResolve: true });
+    store['md-redline-settings'] = JSON.stringify({ enableResolve: true });
     expect(loadSettings().enableResolve).toBe(true);
   });
 
   it('falls back to default when enableResolve is not a boolean', () => {
-    store['md-review-settings'] = JSON.stringify({ enableResolve: 'yes' });
+    store['md-redline-settings'] = JSON.stringify({ enableResolve: 'yes' });
     expect(loadSettings().enableResolve).toBe(false);
   });
 
   it('preserves valid quickComment value', () => {
-    store['md-review-settings'] = JSON.stringify({ quickComment: true });
+    store['md-redline-settings'] = JSON.stringify({ quickComment: true });
     expect(loadSettings().quickComment).toBe(true);
   });
 
   it('falls back to default when quickComment is not a boolean', () => {
-    store['md-review-settings'] = JSON.stringify({ quickComment: 42 });
+    store['md-redline-settings'] = JSON.stringify({ quickComment: 42 });
     expect(loadSettings().quickComment).toBe(false);
   });
 
   it('preserves valid showTemplatesByDefault value', () => {
-    store['md-review-settings'] = JSON.stringify({ showTemplatesByDefault: true });
+    store['md-redline-settings'] = JSON.stringify({ showTemplatesByDefault: true });
     expect(loadSettings().showTemplatesByDefault).toBe(true);
   });
 
   it('falls back to default when showTemplatesByDefault is not a boolean', () => {
-    store['md-review-settings'] = JSON.stringify({ showTemplatesByDefault: null });
+    store['md-redline-settings'] = JSON.stringify({ showTemplatesByDefault: null });
     expect(loadSettings().showTemplatesByDefault).toBe(false);
   });
 
   it('preserves valid commentMaxLength', () => {
-    store['md-review-settings'] = JSON.stringify({ commentMaxLength: 1000 });
+    store['md-redline-settings'] = JSON.stringify({ commentMaxLength: 1000 });
     expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('falls back to default for zero commentMaxLength', () => {
-    store['md-review-settings'] = JSON.stringify({ commentMaxLength: 0 });
+    store['md-redline-settings'] = JSON.stringify({ commentMaxLength: 0 });
     expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('falls back to default for negative commentMaxLength', () => {
-    store['md-review-settings'] = JSON.stringify({ commentMaxLength: -10 });
+    store['md-redline-settings'] = JSON.stringify({ commentMaxLength: -10 });
     expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('falls back to default for non-numeric commentMaxLength', () => {
-    store['md-review-settings'] = JSON.stringify({ commentMaxLength: 'big' });
+    store['md-redline-settings'] = JSON.stringify({ commentMaxLength: 'big' });
     expect(loadSettings().commentMaxLength).toBe(1000);
   });
 
   it('preserves valid templates array', () => {
     const templates = [{ label: 'Custom', text: 'Custom text' }];
-    store['md-review-settings'] = JSON.stringify({ templates });
+    store['md-redline-settings'] = JSON.stringify({ templates });
     expect(loadSettings().templates).toEqual(templates);
   });
 
   it('falls back to default templates when templates is not an array', () => {
-    store['md-review-settings'] = JSON.stringify({ templates: 'not-an-array' });
+    store['md-redline-settings'] = JSON.stringify({ templates: 'not-an-array' });
     expect(loadSettings().templates).toEqual(DEFAULT_TEMPLATES);
   });
 
   it('handles missing new fields gracefully (migration from older version)', () => {
     // Simulate stored settings from before enableResolve and quickComment existed
-    store['md-review-settings'] = JSON.stringify({
+    store['md-redline-settings'] = JSON.stringify({
       templates: DEFAULT_TEMPLATES,
       commentMaxLength: 1000,
       showTemplatesByDefault: false,
@@ -117,7 +117,7 @@ describe('loadSettings', () => {
       enableResolve: true,
       quickComment: true,
     };
-    store['md-review-settings'] = JSON.stringify(full);
+    store['md-redline-settings'] = JSON.stringify(full);
     expect(loadSettings()).toEqual(full);
   });
 });
@@ -126,7 +126,7 @@ describe('saveSettings', () => {
   it('persists settings to localStorage', () => {
     saveSettings(DEFAULT_SETTINGS);
     expect(localStorageMock.setItem).toHaveBeenCalledWith(
-      'md-review-settings',
+      'md-redline-settings',
       JSON.stringify(DEFAULT_SETTINGS),
     );
   });

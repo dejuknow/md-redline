@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-const STORAGE_KEY = 'md-review-author';
+const STORAGE_KEY = 'md-redline-author';
 
 // 8 distinct hues for author color coding
 const AUTHOR_COLORS = [

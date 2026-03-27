@@ -2,7 +2,7 @@
 
 ## Our pledge
 
-We want `md-review` to be a welcoming, low-friction project for contributors of all experience levels. We expect everyone participating in the project to be respectful, constructive, and generous with context.
+We want `md-redline` to be a welcoming, low-friction project for contributors of all experience levels. We expect everyone participating in the project to be respectful, constructive, and generous with context.
 
 ## Expected behavior
 

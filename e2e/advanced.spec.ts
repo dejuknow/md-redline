@@ -409,7 +409,7 @@ test.describe('Session persistence', () => {
     await page.evaluate(
       ([fixture1, fixture2]) => {
         localStorage.setItem(
-          'md-review-session',
+          'md-redline-session',
           JSON.stringify({
             openTabs: [fixture1, fixture2],
             activeFilePath: fixture2,

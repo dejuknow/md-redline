@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quickComment: false,
 };
 
-const STORAGE_KEY = 'md-review-settings';
+const STORAGE_KEY = 'md-redline-settings';
 
 export function loadSettings(): AppSettings {
   try {

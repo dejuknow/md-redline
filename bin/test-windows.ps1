@@ -8,7 +8,7 @@ param(
 # Move to project root
 Push-Location $ProjectRoot
 
-Write-Host "`n--- md-review Windows Test Runner ---" -ForegroundColor Cyan
+Write-Host "`n--- md-redline Windows Test Runner ---" -ForegroundColor Cyan
 
 # 1. Check for Node.js
 if (!(Get-Command node -ErrorAction SilentlyContinue)) {

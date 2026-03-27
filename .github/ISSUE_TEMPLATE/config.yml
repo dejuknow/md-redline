@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security policy
-    url: https://github.com/dejuknow/md-reviewer/blob/main/SECURITY.md
+    url: https://github.com/dejuknow/md-redline/blob/main/SECURITY.md
     about: Please report security issues privately using the process described in SECURITY.md.
   - name: Contributing guide
-    url: https://github.com/dejuknow/md-reviewer/blob/main/CONTRIBUTING.md
+    url: https://github.com/dejuknow/md-redline/blob/main/CONTRIBUTING.md
     about: Read the contribution workflow, setup steps, and testing expectations before opening a PR.

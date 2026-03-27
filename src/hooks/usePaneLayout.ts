@@ -10,7 +10,7 @@ interface PaneLayout {
   viewMode: ViewMode;
 }
 
-const STORAGE_KEY = 'md-review-pane-layout';
+const STORAGE_KEY = 'md-redline-pane-layout';
 
 const DEFAULTS: PaneLayout = {
   explorerVisible: true,

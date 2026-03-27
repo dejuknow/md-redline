@@ -1,17 +1,17 @@
 {
-  "name": "md-review",
+  "name": "md-redline",
   "description": "Local inline review for markdown files with agent-friendly comment markers.",
   "private": true,
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
-  "homepage": "https://github.com/dejuknow/md-reviewer",
+  "homepage": "https://github.com/dejuknow/md-redline",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dejuknow/md-reviewer.git"
+    "url": "git+https://github.com/dejuknow/md-redline.git"
   },
   "bugs": {
-    "url": "https://github.com/dejuknow/md-reviewer/issues"
+    "url": "https://github.com/dejuknow/md-redline/issues"
   },
   "keywords": [
     "markdown",
@@ -24,8 +24,8 @@
     "node": ">=20"
   },
   "bin": {
-    "mdr": "bin/md-review",
-    "md-review": "bin/md-review"
+    "mdr": "bin/md-redline",
+    "md-redline": "bin/md-redline"
   },
   "files": [
     "bin/",
