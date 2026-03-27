@@ -426,7 +426,7 @@ export default function App() {
           setViewMode('diff');
         }
       },
-      [setRawMarkdown, showToast],
+      [setRawMarkdown, setViewMode, settings.enableResolve, showToast],
     ),
   });
 
@@ -461,7 +461,7 @@ export default function App() {
         }
       })
       .catch(() => {});
-  }, [openTab, addRecentFile]);
+  }, [openTab, addRecentFile, setExplorerVisible]);
 
   const handleOpenFile = useCallback(
     (path: string) => {
@@ -803,11 +803,13 @@ After you're done, give me a brief summary:
     [
       comments,
       settings.enableResolve,
+      settings.templates,
       handleResolve,
       handleUnresolve,
       handleDelete,
       handleAddComment,
       lockSelection,
+      setSidebarVisible,
       triggerEdit,
       triggerReply,
       viewerCtxMenu,
@@ -895,6 +897,7 @@ After you're done, give me a brief summary:
       addRecentFile,
       revealInFinder,
       revealLabel,
+      setExplorerVisible,
       viewerCtxMenu,
       explorerCtxMenu,
       tabCtxMenu,
@@ -934,7 +937,7 @@ After you're done, give me a brief summary:
         },
         { type: 'divider' as const },
         {
-          label: 'Reveal in Finder',
+          label: revealLabel,
           onClick: () => revealInFinder(info.filePath),
         },
         {
@@ -1261,6 +1264,9 @@ After you're done, give me a brief summary:
     explorerVisible,
     leftPanelView,
     openFilePicker,
+    setExplorerVisible,
+    setLeftPanelView,
+    setSidebarVisible,
     switchTabByOffset,
   ]);
 
@@ -1503,6 +1509,10 @@ After you're done, give me a brief summary:
     handleResolve,
     handleUnresolve,
     handleDelete,
+    setExplorerVisible,
+    setLeftPanelView,
+    setSidebarVisible,
+    setViewMode,
     setTheme,
     tocHeadings,
     explorerVisible,

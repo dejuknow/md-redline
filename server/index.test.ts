@@ -1,409 +1,297 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { writeFile, unlink, mkdir, rmdir, symlink, realpath } from 'fs/promises';
-import { realpathSync } from 'fs';
-import { join, resolve, extname, dirname } from 'path';
-import { tmpdir, homedir } from 'os';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { createApp } from './index';
 
-/** Canonicalize a path via realpathSync, matching the production server's startup logic. */
-function canonicalize(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
+type AppInstance = ReturnType<typeof createApp>;
+
+let app: AppInstance;
+let initialFileApp: AppInstance;
+let initialDirApp: AppInstance;
+
+let cwdRoot: string;
+let fakeHome: string;
+let initialDir: string;
+let externalDir: string;
+let docsDir: string;
+
+let rootFile: string;
+let docsFile: string;
+let homeFile: string;
+let textFile: string;
+let externalFile: string;
+let outsideSymlinkFile: string;
+let outsideSymlinkDir: string;
+let writtenFile: string;
+
+async function requestJson(appInstance: AppInstance, path: string, init?: RequestInit) {
+  const response = await appInstance.request(`http://localhost${path}`, init);
+  return {
+    response,
+    body: (await response.json()) as Record<string, unknown>,
+  };
 }
 
-// The server is an Hono app — we test it via fetch against the running process.
-// For isolated unit testing, we import the app directly if exported,
-// but since it's not, we test the security logic functions directly.
-
-const TEST_DIR = join(tmpdir(), 'md-review-test-' + Date.now());
-const TEST_FILE = join(TEST_DIR, 'test.md');
-const TEST_FILE_TXT = join(TEST_DIR, 'test.txt');
-const EXTERNAL_DIR = join(tmpdir(), 'md-review-external-' + Date.now());
-
 beforeAll(async () => {
-  await mkdir(TEST_DIR, { recursive: true });
-  await mkdir(EXTERNAL_DIR, { recursive: true });
-  await writeFile(TEST_FILE, '# Test\n\nHello world');
-  await writeFile(TEST_FILE_TXT, 'not markdown');
+  cwdRoot = await mkdtemp(join(tmpdir(), 'md-review-server-cwd-'));
+  fakeHome = await mkdtemp(join(tmpdir(), 'md-review-server-home-'));
+  initialDir = await mkdtemp(join(tmpdir(), 'md-review-server-initial-'));
+  externalDir = await mkdtemp(join(tmpdir(), 'md-review-server-external-'));
+  cwdRoot = await realpath(cwdRoot);
+  fakeHome = await realpath(fakeHome);
+  initialDir = await realpath(initialDir);
+  externalDir = await realpath(externalDir);
+
+  docsDir = join(cwdRoot, 'docs');
+  const nestedDir = join(docsDir, 'nested');
+  const hiddenDir = join(docsDir, '.hidden-dir');
+
+  await mkdir(docsDir, { recursive: true });
+  await mkdir(nestedDir, { recursive: true });
+  await mkdir(hiddenDir, { recursive: true });
+
+  rootFile = join(cwdRoot, 'root.md');
+  docsFile = join(docsDir, 'alpha.md');
+  homeFile = join(fakeHome, 'home.md');
+  textFile = join(docsDir, 'notes.txt');
+  externalFile = join(externalDir, 'outside.md');
+  outsideSymlinkFile = join(docsDir, 'outside-link.md');
+  outsideSymlinkDir = join(cwdRoot, 'outside-dir');
+  writtenFile = join(docsDir, 'written.md');
+
+  await writeFile(rootFile, '# Root\n');
+  await writeFile(docsFile, '# Alpha\n\nHello world\n');
+  await writeFile(homeFile, '# Home\n');
+  await writeFile(textFile, 'not markdown');
+  await writeFile(externalFile, '# Outside\n');
+  await writeFile(writtenFile, '# Previous\n');
+  await writeFile(join(docsDir, 'zeta.md'), '# Zeta\n');
+  await writeFile(join(docsDir, 'README.MD'), '# Uppercase\n');
+  await writeFile(join(nestedDir, 'nested.md'), '# Nested\n');
+  await writeFile(join(hiddenDir, 'secret.md'), '# Secret\n');
+  await writeFile(join(initialDir, 'initial.md'), '# Initial\n');
+
+  await symlink(externalFile, outsideSymlinkFile);
+  await symlink(externalDir, outsideSymlinkDir);
+
+  app = createApp({
+    cwd: cwdRoot,
+    homeDir: fakeHome,
+    platformName: 'linux',
+  });
+  initialFileApp = createApp({
+    cwd: cwdRoot,
+    homeDir: fakeHome,
+    initialArg: join(initialDir, 'initial.md'),
+    platformName: 'linux',
+  });
+  initialDirApp = createApp({
+    cwd: cwdRoot,
+    homeDir: fakeHome,
+    initialArg: initialDir,
+    platformName: 'linux',
+  });
 });
 
 afterAll(async () => {
-  try {
-    await unlink(TEST_FILE);
-    await unlink(TEST_FILE_TXT);
-    // Clean up symlink if created
-    try {
-      await unlink(join(TEST_DIR, 'link.md'));
-    } catch {
-      /* ignore */
-    }
-    try {
-      await unlink(join(TEST_DIR, 'ext-link'));
-    } catch {
-      /* ignore */
-    }
-    await rmdir(TEST_DIR);
-    await rmdir(EXTERNAL_DIR);
-  } catch {
-    /* ignore cleanup errors */
-  }
+  await rm(cwdRoot, { recursive: true, force: true });
+  await rm(fakeHome, { recursive: true, force: true });
+  await rm(initialDir, { recursive: true, force: true });
+  await rm(externalDir, { recursive: true, force: true });
 });
 
-describe('path security logic', () => {
-  // Test the security invariants without starting the full server.
-  // We replicate the core validation logic here for unit testing.
+describe('/api/config', () => {
+  it('returns empty initial paths by default', async () => {
+    const { response, body } = await requestJson(app, '/api/config');
 
-  const ALLOWED_ROOTS = [resolve(process.cwd())];
-
-  function isPathAllowed(real: string): boolean {
-    return ALLOWED_ROOTS.some((root) => real.startsWith(root + '/') || real === root);
-  }
-
-  it('allows paths under cwd', () => {
-    expect(isPathAllowed(resolve('./test.md'))).toBe(true);
-    expect(isPathAllowed(resolve('./subdir/file.md'))).toBe(true);
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ initialFile: '', initialDir: '' });
   });
 
-  it('rejects paths outside allowed roots', () => {
-    expect(isPathAllowed('/etc/passwd')).toBe(false);
-    expect(isPathAllowed('/tmp/evil.md')).toBe(false);
-  });
+  it('returns the configured initial file or directory', async () => {
+    const fileConfig = await requestJson(initialFileApp, '/api/config');
+    const dirConfig = await requestJson(initialDirApp, '/api/config');
 
-  it('rejects path traversal attempts', () => {
-    // resolve normalizes these, but the resulting path is outside allowed roots
-    const traversal = resolve('../../etc/passwd');
-    expect(isPathAllowed(traversal)).toBe(false);
-  });
-
-  it('allows the root itself', () => {
-    expect(isPathAllowed(resolve(process.cwd()))).toBe(true);
-  });
-
-  it('rejects prefix-spoofing (cwd path as prefix of another dir)', () => {
-    // e.g., if cwd is /home/user, reject /home/user-evil/file.md
-    const spoofed = resolve(process.cwd()) + '-evil/file.md';
-    expect(isPathAllowed(spoofed)).toBe(false);
+    expect(fileConfig.body).toEqual({
+      initialFile: join(initialDir, 'initial.md'),
+      initialDir: '',
+    });
+    expect(dirConfig.body).toEqual({
+      initialFile: '',
+      initialDir,
+    });
   });
 });
 
-describe('file extension validation', () => {
-  function isMdFile(resolved: string): boolean {
-    return extname(resolved).toLowerCase() === '.md';
-  }
+describe('/api/file', () => {
+  it('requires a path query parameter', async () => {
+    const { response, body } = await requestJson(app, '/api/file');
 
-  it('accepts .md files', () => {
-    expect(isMdFile('/path/to/file.md')).toBe(true);
-    expect(isMdFile('/path/to/FILE.MD')).toBe(true);
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'path query parameter is required' });
   });
 
-  it('rejects non-.md files', () => {
-    expect(isMdFile('/path/to/file.txt')).toBe(false);
-    expect(isMdFile('/path/to/file.js')).toBe(false);
-    expect(isMdFile('/path/to/file.md.bak')).toBe(false);
-    expect(isMdFile('/path/to/.env')).toBe(false);
+  it('reads markdown files under allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent(docsFile)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      path: docsFile,
+      content: '# Alpha\n\nHello world\n',
+    });
   });
 
-  it('rejects files with no extension', () => {
-    expect(isMdFile('/path/to/Makefile')).toBe(false);
-  });
-});
+  it('expands tilde paths against the configured home directory', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent('~/home.md')}`,
+    );
 
-describe('symlink handling', () => {
-  it('realpath resolves symlinks to their target', async () => {
-    const { realpath: rp } = await import('fs/promises');
-    const linkPath = join(TEST_DIR, 'link.md');
-
-    try {
-      await symlink(TEST_FILE, linkPath);
-      const realLink = await rp(linkPath);
-      const realTarget = await rp(TEST_FILE);
-      // Both should resolve to the same real path
-      expect(realLink).toBe(realTarget);
-    } finally {
-      try {
-        await unlink(linkPath);
-      } catch {
-        /* ignore */
-      }
-    }
-  });
-});
-
-describe('SSE frame encoding', () => {
-  // Test the SSE frame format used by /api/watch
-  function sseFrame(event: string, data: string): string {
-    const lines = data.split('\n');
-    return `event: ${event}\n${lines.map((l) => `data: ${l}`).join('\n')}\n\n`;
-  }
-
-  it('encodes a simple event correctly', () => {
-    const frame = sseFrame('change', '{"content":"hello"}');
-    expect(frame).toBe('event: change\ndata: {"content":"hello"}\n\n');
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      path: homeFile,
+      content: '# Home\n',
+    });
   });
 
-  it('handles newlines in JSON data by splitting into multiple data lines', () => {
-    const data = JSON.stringify({ content: 'line1\nline2' });
-    const frame = sseFrame('change', data);
-    // The JSON will contain a literal \n inside the string value
-    // JSON.stringify escapes newlines as \\n, so no actual newlines in the data
-    expect(frame).toBe(`event: change\ndata: ${data}\n\n`);
+  it('rejects non-markdown files', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent(textFile)}`,
+    );
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'Only .md files are supported' });
   });
 
-  it('handles actual newlines in data by splitting into data: lines', () => {
-    // If data somehow contains real newlines (not JSON-escaped)
-    const frame = sseFrame('change', 'line1\nline2');
-    expect(frame).toBe('event: change\ndata: line1\ndata: line2\n\n');
+  it('rejects files outside the allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent(externalFile)}`,
+    );
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
 
-  it('produces valid SSE for connected event', () => {
-    const frame = sseFrame('connected', JSON.stringify({ path: '/foo/bar.md' }));
-    expect(frame).toContain('event: connected\n');
-    expect(frame).toContain('data: ');
-    expect(frame.endsWith('\n\n')).toBe(true);
-  });
+  it('rejects symlinked files that resolve outside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/file?path=${encodeURIComponent(outsideSymlinkFile)}`,
+    );
 
-  it('handles empty data', () => {
-    const frame = sseFrame('ping', '');
-    expect(frame).toBe('event: ping\ndata: \n\n');
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
 });
 
-describe('ALLOWED_ROOTS with initial file', () => {
-  it('adds initial file directory to allowed roots when outside cwd/home', () => {
-    // Simulate the server startup logic
-    const cwd = '/home/user/project';
-    const home = '/home/user';
-    const roots = [cwd, home];
-    const initialDir = '/opt/docs';
+describe('PUT /api/file', () => {
+  it('rejects invalid JSON bodies', async () => {
+    const { response, body } = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not valid json',
+    });
 
-    if (!roots.some((r) => initialDir.startsWith(r + '/') || initialDir === r)) {
-      roots.push(initialDir);
-    }
-
-    expect(roots).toContain('/opt/docs');
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'Invalid JSON body' });
   });
 
-  it('does not duplicate if initial file is under cwd', () => {
-    const cwd = '/home/user/project';
-    const home = '/home/user';
-    const roots = [cwd, home];
-    const initialDir = '/home/user/project/docs';
+  it('writes markdown content inside allowed roots', async () => {
+    const newContent = '# Written\n\nSaved from test\n';
+    const { response, body } = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: writtenFile, content: newContent }),
+    });
 
-    if (!roots.some((r) => initialDir.startsWith(r + '/') || initialDir === r)) {
-      roots.push(initialDir);
-    }
-
-    expect(roots).toHaveLength(2); // Not added since it's under cwd
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true, path: writtenFile });
+    await expect(readFile(writtenFile, 'utf-8')).resolves.toBe(newContent);
   });
-});
 
-describe('PUT /api/file JSON body validation', () => {
-  it('rejects non-JSON body gracefully', async () => {
-    // Simulates the server's try/catch pattern around JSON.parse
-    async function parseRequestBody(rawBody: string) {
-      try {
-        const body = JSON.parse(rawBody);
-        if (!body.path || body.content === undefined) {
-          return { error: 'path and content are required', status: 400 };
-        }
-        return { data: body, status: 200 };
-      } catch {
-        return { error: 'Invalid JSON body', status: 400 };
-      }
-    }
+  it('rejects new files under symlinked directories that point outside allowed roots', async () => {
+    const targetFile = join(outsideSymlinkDir, 'new.md');
+    const { response, body } = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: targetFile, content: '# Nope\n' }),
+    });
 
-    // Invalid JSON
-    const invalid = await parseRequestBody('not json at all');
-    expect(invalid.status).toBe(400);
-    expect(invalid.error).toBe('Invalid JSON body');
-
-    // Empty body
-    const empty = await parseRequestBody('');
-    expect(empty.status).toBe(400);
-    expect(empty.error).toBe('Invalid JSON body');
-
-    // Valid JSON but missing fields
-    const missingPath = await parseRequestBody('{"content":"hello"}');
-    expect(missingPath.status).toBe(400);
-    expect(missingPath.error).toBe('path and content are required');
-
-    // Valid JSON with all fields
-    const valid = await parseRequestBody('{"path":"/test.md","content":"# Hello"}');
-    expect(valid.status).toBe(200);
-    expect(valid.data).toEqual({ path: '/test.md', content: '# Hello' });
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
 });
 
-describe('lastWrittenContent self-write detection', () => {
-  it('skips SSE notification when file content matches last write', () => {
-    const lastWrittenContent = new Map<string, string>();
-    const path = '/test/file.md';
-    const content = '# Hello\n\nWorld';
+describe('/api/files', () => {
+  it('lists only lowercase .md files in the requested directory', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/files?dir=${encodeURIComponent(docsDir)}`,
+    );
 
-    // Simulate app saving the file
-    lastWrittenContent.set(path, content);
-
-    // Simulate watcher reading the file — content matches, so skip
-    const fileContent = content;
-    const isOwnWrite = lastWrittenContent.get(path) === fileContent;
-    expect(isOwnWrite).toBe(true);
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      dir: docsDir,
+      files: [
+        join(docsDir, 'alpha.md'),
+        writtenFile,
+        join(docsDir, 'zeta.md'),
+      ],
+    });
   });
 
-  it('detects external change when content differs from last write', () => {
-    const lastWrittenContent = new Map<string, string>();
-    const path = '/test/file.md';
+  it('rejects directories outside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/files?dir=${encodeURIComponent(externalDir)}`,
+    );
 
-    // Simulate app saving the file
-    lastWrittenContent.set(path, '# Hello');
-
-    // Simulate external edit
-    const fileContent = '# Hello\n\nNew content';
-    const isOwnWrite = lastWrittenContent.get(path) === fileContent;
-    expect(isOwnWrite).toBe(false);
-  });
-
-  it('detects change when no prior write is tracked', () => {
-    const lastWrittenContent = new Map<string, string>();
-    const path = '/test/file.md';
-
-    const isOwnWrite = lastWrittenContent.get(path) === '# Hello';
-    expect(isOwnWrite).toBe(false);
-  });
-
-  it('clears entry after detecting an external change', () => {
-    const lastWrittenContent = new Map<string, string>();
-    const path = '/test/file.md';
-
-    lastWrittenContent.set(path, '# Hello');
-
-    // External change detected — delete the entry
-    const fileContent = '# Changed';
-    if (lastWrittenContent.get(path) !== fileContent) {
-      lastWrittenContent.delete(path);
-    }
-
-    expect(lastWrittenContent.has(path)).toBe(false);
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
 });
 
-describe('symlink bypass prevention for new files', () => {
-  // Replicates resolveAndValidate logic: when realpath fails (file doesn't exist),
-  // resolve the parent directory to catch symlinked parents pointing outside allowed roots.
-  async function resolveAndValidate(inputPath: string, allowedRoots: string[]): Promise<string> {
-    const expanded = inputPath.startsWith('~/') ? join(homedir(), inputPath.slice(2)) : inputPath;
-    const resolved = resolve(expanded);
-    let real: string;
-    try {
-      real = await realpath(resolved);
-    } catch {
-      const parent = dirname(resolved);
-      try {
-        const realParent = await realpath(parent);
-        real = join(realParent, resolved.slice(parent.length + 1));
-      } catch {
-        real = resolved;
-      }
-    }
-    const allowed = allowedRoots.some((root) => real.startsWith(root + '/') || real === root);
-    if (!allowed) {
-      throw new Error('Access denied: path outside allowed directories');
-    }
-    return real;
-  }
+describe('/api/browse', () => {
+  it('lists visible directories and markdown files with an allowed parent', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/browse?dir=${encodeURIComponent(docsDir)}`,
+    );
 
-  it('rejects new file under a symlinked directory pointing outside allowed roots', async () => {
-    // Create a symlink inside TEST_DIR pointing to EXTERNAL_DIR
-    const linkPath = join(TEST_DIR, 'ext-link');
-    try {
-      await symlink(EXTERNAL_DIR, linkPath);
-    } catch {
-      // Symlink already exists from a previous run
-    }
-
-    // The lexical path is inside TEST_DIR (allowed), but the real parent is EXTERNAL_DIR.
-    // Use canonicalize() for allowed roots — matching the production server's startup.
-    const maliciousPath = join(linkPath, 'new.md');
-    await expect(
-      resolveAndValidate(maliciousPath, [canonicalize(TEST_DIR)]),
-    ).rejects.toThrow('Access denied');
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      dir: docsDir,
+      parent: cwdRoot,
+      directories: [{ name: 'nested', path: join(docsDir, 'nested') }],
+      files: [
+        { name: 'alpha.md', path: join(docsDir, 'alpha.md') },
+        { name: 'written.md', path: writtenFile },
+        { name: 'zeta.md', path: join(docsDir, 'zeta.md') },
+      ],
+    });
   });
 
-  it('allows new file under a real (non-symlinked) allowed directory', async () => {
-    // Use canonicalize() for allowed roots — matching production.
-    // On macOS, /tmp -> /private/tmp, so this tests that both sides are canonical.
-    const newFilePath = join(TEST_DIR, 'new-file.md');
-    const result = await resolveAndValidate(newFilePath, [canonicalize(TEST_DIR)]);
-    expect(result).toContain('new-file.md');
+  it('returns 400 when the path points to a file instead of a directory', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/browse?dir=${encodeURIComponent(docsFile)}`,
+    );
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'Not a directory' });
   });
 });
 
-describe('tilde expansion', () => {
-  async function resolveAndValidate(inputPath: string, allowedRoots: string[]): Promise<string> {
-    const expanded = inputPath.startsWith('~/') ? join(homedir(), inputPath.slice(2)) : inputPath;
-    const resolved = resolve(expanded);
-    let real: string;
-    try {
-      real = await realpath(resolved);
-    } catch {
-      const parent = dirname(resolved);
-      try {
-        const realParent = await realpath(parent);
-        real = join(realParent, resolved.slice(parent.length + 1));
-      } catch {
-        real = resolved;
-      }
-    }
-    const allowed = allowedRoots.some((root) => real.startsWith(root + '/') || real === root);
-    if (!allowed) {
-      throw new Error('Access denied: path outside allowed directories');
-    }
-    return real;
-  }
+describe('/api/platform', () => {
+  it('returns the injected platform value', async () => {
+    const { response, body } = await requestJson(app, '/api/platform');
 
-  it('expands ~/path to homedir/path', async () => {
-    const home = canonicalize(homedir());
-    const result = await resolveAndValidate('~/test.md', [home]);
-    expect(result).toBe(join(home, 'test.md'));
-  });
-
-  it('does not expand ~ in the middle of a path', async () => {
-    // "foo/~/bar.md" should NOT expand the ~
-    const cwd = canonicalize(process.cwd());
-    await expect(
-      resolveAndValidate('foo/~/bar.md', [cwd]),
-    ).resolves.toContain('foo/~/bar.md');
-  });
-});
-
-describe('SSE watcher error handling', () => {
-  it('watcher cleanup function clears all clients', () => {
-    const clients = new Set<{ closed: boolean }>();
-    const client1 = { closed: false };
-    const client2 = { closed: false };
-    clients.add(client1);
-    clients.add(client2);
-
-    // Simulate cleanUpWatcher
-    for (const client of clients) {
-      client.closed = true;
-    }
-    clients.clear();
-
-    expect(clients.size).toBe(0);
-    expect(client1.closed).toBe(true);
-    expect(client2.closed).toBe(true);
-  });
-
-  it('fileWatchers map is cleaned up on file deletion', () => {
-    const fileWatchers = new Map<string, { clients: Set<unknown> }>();
-    const path = '/test/file.md';
-    fileWatchers.set(path, { clients: new Set() });
-
-    // Simulate cleanup (what happens when readFile throws in the watcher callback)
-    fileWatchers.delete(path);
-
-    expect(fileWatchers.has(path)).toBe(false);
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ platform: 'linux' });
   });
 });

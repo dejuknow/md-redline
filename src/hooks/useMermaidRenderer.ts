@@ -20,7 +20,7 @@ export function useMermaidRenderer(
 
   useEffect(() => {
     if (!hasMermaidBlocks(cleanMarkdown)) {
-      if (svgMap.size > 0) setSvgMap(new Map());
+      setSvgMap((prev) => (prev.size > 0 ? new Map() : prev));
       return;
     }
 
@@ -32,7 +32,7 @@ export function useMermaidRenderer(
       blocks.push(match[1].trim());
     }
     if (blocks.length === 0) {
-      if (svgMap.size > 0) setSvgMap(new Map());
+      setSvgMap((prev) => (prev.size > 0 ? new Map() : prev));
       return;
     }
 

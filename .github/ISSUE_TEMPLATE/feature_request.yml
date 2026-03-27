@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest an improvement or new workflow for md-review.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are most helpful when they start from a concrete review workflow or pain point.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What are you trying to do, and where does the current experience fall short?
+      placeholder: I review long specs with dozens of comments and need a faster way to batch-copy agent prompts per section.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or UX you would expect.
+      placeholder: Add a command-palette action that copies prompts for the active heading only.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workaround or different approach you tried.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Commenting workflow
+        - Resolve workflow
+        - Diff view
+        - File management
+        - Keyboard shortcuts
+        - CLI
+        - Server / file access
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add examples, screenshots, or related tools that inspired the idea.

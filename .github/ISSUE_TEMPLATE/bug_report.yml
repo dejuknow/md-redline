@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible problem in md-review.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please include enough detail for us to reproduce the problem locally.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing the issue.
+      placeholder: Selecting text inside a table opens the comment form, but the highlight disappears after save.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps, including the markdown content or file shape if relevant.
+      placeholder: |
+        1. Open a markdown file with a table
+        2. Select text across two table cells
+        3. Add a comment with Cmd+Enter
+        4. Save the file
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The comment highlight should remain anchored to the selected text after saving.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: The sidebar comment appears, but the highlight disappears and the anchor is marked missing.
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample markdown
+      description: Paste the smallest markdown example that still reproduces the bug.
+      render: markdown
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Node.js / app version
+      description: Include `node -v` and the md-review version or commit if you know it.
+      placeholder: Node 22.13.1, md-review 0.1.0
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Logs, screenshots, or extra context
+      description: Paste terminal output, browser console errors, or screenshots if they help.
