@@ -1,12 +1,12 @@
 # md-review
 
-`md-review` is a local review app for markdown files.
+`mdr` is a local review app for markdown files.
 
 It lets you highlight text in rendered markdown, attach inline review comments, and hand the file back to an AI agent or teammate. Comments are stored directly in the `.md` file as HTML comment markers, so the file itself remains the source of truth.
 
 ## Why it exists
 
-Most markdown review workflows break down once AI tools are involved. The document is local, the reviewer wants precise inline feedback, and the agent only knows how to read files. `md-review` keeps that loop simple:
+Most markdown review workflows break down once AI tools are involved. The document is local, the reviewer wants precise inline feedback, and the agent only knows how to read files. `mdr` keeps that loop simple:
 
 1. open a markdown file
 2. highlight text
@@ -64,14 +64,16 @@ Then open [http://localhost:5173](http://localhost:5173).
 
 ```bash
 npm link
-md-review /path/to/spec.md
+mdr /path/to/spec.md
 ```
+
+`md-review` also works as an alias for `mdr`.
 
 On Windows, the same CLI works with paths like:
 
 ```powershell
-md-review C:\docs\spec.md
-md-review .\spec.md
+mdr C:\docs\spec.md
+mdr .\spec.md
 ```
 
 You can also open a file or directory directly by URL:
@@ -115,7 +117,7 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 ## Architecture
 
 ```text
-bin/md-review              CLI helper for opening files in the app
+bin/md-review              CLI entry point (invoked as `mdr` or `md-review`)
 server/index.ts            Hono server for file I/O, browsing, SSE, and local integrations
 src/App.tsx                Main application shell
 src/components/            Viewer, sidebar, raw view, diff view, TOC, explorer, settings, etc.
@@ -154,7 +156,7 @@ Useful scripts:
 
 ## Security model
 
-`md-review` is a local app. The server can read and write markdown files inside:
+`mdr` is a local app. The server can read and write markdown files inside:
 
 - the current working directory
 - the current user's home directory

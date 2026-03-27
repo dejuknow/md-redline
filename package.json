@@ -24,8 +24,8 @@
     "node": ">=20"
   },
   "bin": {
-    "md-review": "bin/md-review",
-    "mdr": "bin/md-review"
+    "mdr": "bin/md-review",
+    "md-review": "bin/md-review"
   },
   "files": [
     "bin/",

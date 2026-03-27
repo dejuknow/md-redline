@@ -11,12 +11,12 @@ npm install
 npm run dev   # Starts Hono server (port 3001) + Vite dev server (port 5173)
 ```
 
-### Quick-open a file with `md-review`
+### Quick-open a file with `mdr`
 
 The fastest way to open a file for reviewing:
 
 ```bash
-md-review /path/to/spec.md
+mdr /path/to/spec.md
 ```
 
 This auto-starts the app if it's not running and opens the file in your browser. To make it available globally:
@@ -24,6 +24,8 @@ This auto-starts the app if it's not running and opens the file in your browser.
 ```bash
 npm link   # one-time setup
 ```
+
+`md-review` also works as an alias for `mdr`.
 
 You can also open a file via URL: `http://localhost:5173?file=/path/to/spec.md`
 
@@ -35,7 +37,7 @@ You can also open a file via URL: `http://localhost:5173?file=/path/to/spec.md`
 - **Comment storage**: Inline comment markers in the `.md` file: `<!-- @comment{JSON} -->`
 - **Comment parser**: `src/lib/comment-parser.ts` — extracts, inserts, removes, edits, replies, bulk operations on comments
 - **Highlighting**: Done in `useLayoutEffect` inside `MarkdownViewer.tsx` using ref-based innerHTML (React never manages the container's children) + DOM manipulation (`surroundContents` with `extractContents` fallback). `React.memo` prevents unnecessary re-renders.
-- **CLI entry**: `bin/md-review` — shell script to auto-start the app and open a file in the browser
+- **CLI entry**: `bin/md-review` — invoked as `mdr` (or `md-review`), auto-starts the app and opens a file in the browser
 
 ## UI features
 

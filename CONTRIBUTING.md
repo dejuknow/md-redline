@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve `md-review`.
+Thanks for helping improve `mdr`.
 
 ## Development setup
 
@@ -37,7 +37,7 @@ npm run test:e2e
 When filing an issue, include:
 
 - your OS and Node version
-- how you opened the file (`md-review`, URL param, or file browser)
+- how you opened the file (`mdr`, URL param, or file browser)
 - whether the problem happens in rendered, raw, or diff view
 - a minimal markdown example if the issue is selection, highlighting, or parsing related
 

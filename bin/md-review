@@ -17,10 +17,12 @@ const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
 
 function printHelp() {
-  console.log('Usage: md-review [file.md | directory]');
-  console.log('Opens a markdown file or folder in md-review for inline commenting.');
+  console.log('Usage: mdr [file.md | directory]');
+  console.log('Opens a markdown file or folder in mdr for inline commenting.');
   console.log('Starts the app automatically if it is not already running.');
   console.log('Supported platforms: macOS, Linux, and Windows.');
+  console.log('');
+  console.log('Alias: md-review');
 }
 
 function expandHomePath(inputPath) {
@@ -82,7 +84,7 @@ function spawnDetached(command, args) {
 async function ensureServerRunning() {
   if (await serverRunning()) return;
 
-  console.log('Starting md-review...');
+  console.log('Starting mdr...');
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   let childExited = false;
   const child = await spawnDetached(npmCommand, ['run', 'dev']);
@@ -93,7 +95,7 @@ async function ensureServerRunning() {
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (await serverRunning()) {
-      console.log('md-review is running.');
+      console.log('mdr is running.');
       return;
     }
     if (childExited) {
