@@ -34,6 +34,8 @@ Thumbs.db
 # Test artifacts
 .playwright-mcp
 test-results/
+playwright-report/
+coverage/
 
 # Eval results
 eval/results/
@@ -46,3 +48,4 @@ sample.md
 # Claude Code
 .claude/
 .gstack/
+AGENTS.md

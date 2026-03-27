@@ -20,7 +20,6 @@ export function score(
   const inputParsed = parseComments(inputRaw);
   const outputParsed = parseComments(outputRaw);
 
-  const inputById = new Map(inputParsed.comments.map((c) => [c.id, c]));
   const outputById = new Map(outputParsed.comments.map((c) => [c.id, c]));
 
   // --- 1. Parsing: Were comment markers handled correctly? ---

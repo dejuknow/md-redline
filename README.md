@@ -1,17 +1,57 @@
 # md-review
 
-A local review tool for markdown files. Select text, leave comments, and hand the file to an AI agent — the agent reads your feedback, makes changes, and you verify the results in a built-in diff view.
+`md-review` is a local review app for markdown files.
 
-md-review is built for the workflow that emerges when AI agents generate your specs, stories, and documentation. You need to review what the agent wrote, leave precise feedback on specific sections, and send it back for revision — the same loop you'd do with a human writer, except the other side is an agent that reads files instead of checking email. md-review gives you a visual interface for that conversation: highlight text, type your feedback, and the agent picks it up on its next read of the file.
+It lets you highlight text in rendered markdown, attach inline review comments, and hand the file back to an AI agent or teammate. Comments are stored directly in the `.md` file as HTML comment markers, so the file itself remains the source of truth.
 
-### Inline comments — no sidecar files, no external tools
+## Why it exists
 
-The key design decision is that comments are stored as HTML comment markers directly in the markdown file. No sidecar JSON, no database, no external service. This has several practical consequences:
+Most markdown review workflows break down once AI tools are involved. The document is local, the reviewer wants precise inline feedback, and the agent only knows how to read files. `md-review` keeps that loop simple:
 
-- **Zero-integration agent access.** The agent reads the file and sees the comments. No API calls, no MCP servers, no tool configuration. `cat spec.md` is the entire integration.
-- **Portable.** Comments travel with the file. Copy it, move it to another repo, drop it in a Slack thread — the review context stays attached. There's no dependency on a review tool being available.
-- **Invisible to renderers.** GitHub, VS Code preview, Obsidian, and Zed all silently skip HTML comments. The file renders cleanly everywhere while the feedback remains embedded for anyone who looks at the source.
-- **The file is the source of truth.** The agent addresses a comment and removes the marker. You diff the file to see what changed. No status syncing, no webhooks, no reconciling state across two systems.
+1. open a markdown file
+2. highlight text
+3. leave inline comments
+4. let an agent address them in-place
+5. review the result in raw or diff view
+
+No sidecar files, no database, and no external service are required.
+
+## How comments work
+
+Comments are stored immediately before the text they refer to:
+
+```markdown
+Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"Rewrite this section to be clearer.","author":"User","timestamp":"2026-03-26T12:00:00.000Z","replies":[]} -->highlighted text continues here.
+```
+
+That design keeps the feedback:
+
+- visible to AI agents with a plain file read
+- portable with the markdown file
+- invisible in normal markdown renderers like GitHub and VS Code preview
+
+## Current feature set
+
+- Inline comments with overlapping anchors
+- Threaded replies
+- Drag-resize comment anchors
+- Multi-tab editing
+- File explorer and recent files
+- Command palette and keyboard shortcuts
+- Rendered, raw, and diff views
+- Table of contents with active heading tracking
+- Real-time reload via SSE when files change outside the app
+- Optional resolve workflow for human review
+- Agent hand-off prompt copying for one or multiple files
+- Mermaid rendering with commentable diagram text
+
+## Supported platforms
+
+- macOS: supported
+- Linux: supported for the core app; the system file picker requires `zenity`
+- Windows: not officially supported yet
+
+The `md-review` CLI script is currently intended for macOS and Linux.
 
 ## Quick start
 
@@ -20,167 +60,103 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and browse to a markdown file.
+Then open [http://localhost:5173](http://localhost:5173).
 
-### One-command file open
+## Open a file quickly
 
 ```bash
-# One-time setup to make md-review available globally:
 npm link
-
-# Then from anywhere:
-md-review ~/specs/my-feature.md
+md-review /path/to/spec.md
 ```
 
-Auto-starts the app if it's not running and opens the file in your browser. You can also open files via URL: `http://localhost:5173?file=/path/to/file.md`
+You can also open a file or directory directly by URL:
 
-## How it works
+- `http://localhost:5173?file=/absolute/path/to/file.md`
+- `http://localhost:5173?dir=/absolute/path/to/folder`
 
-1. **Select text** in the rendered markdown
-2. **Add a comment** with `Cmd+Enter` or click "Comment"
-3. Comments are saved as **inline HTML comment markers** directly in the `.md` file
-4. AI agents can read the comments with a simple file read and address them
-5. **Accept or reopen** comments as the agent makes changes
+## Review workflows
 
-Comments are stored like this:
+### Default workflow: comments as agent instructions
 
-```markdown
-Some text highlighted text continues.
-```
+By default, comments are instructions to an agent:
 
-No sidecar files, no database — everything lives in the markdown. Comments are invisible in standard markdown renderers (GitHub, VS Code, Zed) but fully readable by AI agents.
+1. the reviewer adds comments
+2. the agent reads the file and updates the content
+3. the agent deletes the addressed markers
+4. the reviewer checks the result in diff view
 
-## Features
+### Optional resolve workflow
 
-### Commenting
-- Select any text to add inline comments
-- 8 quick templates (`Cmd+1-8`): Rewrite, Add detail, Remove, Needs example, Too vague, Fix formatting, Factually wrong, Out of scope
-- Threaded replies on any comment
-- Overlapping comments supported
-- Drag handles to resize comment anchors
-- Fuzzy re-matching when anchor text is edited externally
+If you enable the resolve workflow in Settings, comments get explicit `open` and `resolved` states for human-to-human review.
 
-### Comment workflow
-- **Open** → **Addressed** → **Accepted** (or **Reopened**)
-- Bulk resolve all or clear accepted comments
-- Filter sidebar by status (All / Open / Addressed / Accepted)
-- Full-text search across comments, anchors, authors, and replies
-
-### File management
-- Multi-tab support with unresolved comment count badges
-- File browser with directory navigation and breadcrumbs
-- Recent files list (last 10, persistent)
-- Open files via CLI, URL query param, or file browser
-
-### Real-time collaboration with AI agents
-- Detects external file changes via Server-Sent Events
-- Auto-reloads and notifies when an agent addresses comments or adds replies
-- Diff view to compare current content against a snapshot
-
-### Review summary
-- Cross-file summary popover showing comment stats per file
-- Aggregate open/addressed/accepted counts across all tabs
-- Click any file in the summary to jump to it
-
-### Navigation
-- `N` / `P` to jump between unresolved comments
-- Click highlighted text to select the comment in the sidebar
-- Sidebar auto-scrolls to active comment
-- Cycling wraps around and skips accepted comments
-
-### Themes
-Light, Dark, Sepia, and Nord — persistent across sessions.
-
-### Session persistence
-Open tabs, active filters, view mode, sidebar state, and recent files are all restored on reload.
-
-### Keyboard shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+Enter` | Add comment on selection |
+| `Cmd+K` | Toggle command palette |
+| `Cmd+B` | Toggle file explorer |
+| `Cmd+Enter` | Submit comment / expand comment form |
 | `Cmd+1-8` | Apply quick template |
 | `Cmd+Shift+M` | Start commenting on selection |
-| `Cmd+\` | Toggle sidebar |
-| `N` / `P` | Next / previous unresolved comment |
-| `Escape` | Cancel / dismiss |
-
-## Using with AI agents
-
-The comment format is designed to be consumed by AI agents like Claude Code. Add this to your `CLAUDE.md` or system prompt:
-
-> When editing markdown files, look for `` markers. Each contains JSON with:
-> - `anchor`: the text being commented on
-> - `text`: the reviewer's feedback
-> - `status`: `open`, `addressed`, `accepted`, or `reopened`
->
-> Address each comment by updating the document. Set the comment's status to `addressed` when done, or remove the marker entirely.
-
-The agent only needs the `anchor` and `text` fields. The `id`, `timestamp`, `author`, and `replies` fields are for the UI.
+| `Cmd+\` | Toggle comments sidebar |
+| `N` / `J` | Next comment |
+| `P` / `K` | Previous comment |
+| `A` / `X` | Resolve active comment when resolve workflow is enabled |
+| `U` | Reopen active comment when resolve workflow is enabled |
+| `Escape` | Cancel form, unlock selection, or cancel drag |
 
 ## Architecture
 
+```text
+bin/md-review              CLI helper for opening files in the app
+server/index.ts            Hono server for file I/O, browsing, SSE, and local integrations
+src/App.tsx                Main application shell
+src/components/            Viewer, sidebar, raw view, diff view, TOC, explorer, settings, etc.
+src/hooks/                 State, persistence, selection, file watching, drag handles, tabs
+src/lib/comment-parser.ts  Inline comment parsing and mutation helpers
+src/markdown/pipeline.ts   Markdown rendering pipeline
+eval/                      Eval harness for agent behavior against inline comments
+e2e/                       Playwright end-to-end coverage
 ```
-├── bin/
-│   └── md-review            # CLI: auto-start app + open file in browser
-├── server/
-│   └── index.ts             # Hono backend (file I/O, directory browsing, SSE)
-├── src/
-│   ├── App.tsx              # Main app: landing page + editor layout
-│   ├── components/
-│   │   ├── MarkdownViewer.tsx   # Renders markdown, applies comment highlights
-│   │   ├── CommentSidebar.tsx   # Comment list with filters, search, bulk actions
-│   │   ├── CommentCard.tsx      # Individual comment with status actions + replies
-│   │   ├── CommentForm.tsx      # Floating form with templates for new comments
-│   │   ├── DragHandles.tsx      # Drag handles for resizing comment anchors
-│   │   ├── DiffViewer.tsx       # Side-by-side diff view
-│   │   ├── ReviewSummary.tsx    # Cross-file comment summary popover
-│   │   ├── FileBrowser.tsx      # Directory browser for opening files
-│   │   ├── TabBar.tsx           # Multi-tab bar with comment count badges
-│   │   ├── ThemeSelector.tsx    # Theme picker (Light/Dark/Sepia/Nord)
-│   │   ├── Toast.tsx            # Auto-dismiss notification toasts
-│   │   └── Toolbar.tsx          # Top bar with file info, status, actions
-│   ├── hooks/
-│   │   ├── useTabs.ts           # Multi-tab state management
-│   │   ├── useSelection.ts      # Text selection detection + context capture
-│   │   ├── useDragHandles.ts    # Drag-to-resize comment anchors
-│   │   ├── useFileWatcher.ts    # SSE-based external change detection
-│   │   ├── useSessionPersistence.ts  # Save/restore session to localStorage
-│   │   ├── useRecentFiles.ts    # Recent files tracking
-│   │   └── useFile.ts           # Single-file load/save (legacy)
-│   ├── lib/
-│   │   ├── comment-parser.ts    # Parse/insert/remove/update comments in markdown
-│   │   ├── selection-resolver.ts # DOM selection → text + context
-│   │   └── diff.ts              # Line-level diff algorithm
-│   ├── markdown/
-│   │   └── pipeline.ts          # unified/remark/rehype rendering pipeline
-│   └── types.ts                 # TypeScript types
-├── sample.md                    # Example spec for testing
-└── index.html                   # Vite entry point
-```
-
-### Tech stack
-
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Vite 8
-- **Markdown**: unified + remark-parse + remark-gfm + remark-rehype + rehype-raw + rehype-stringify
-- **Backend**: Hono + @hono/node-server (file I/O, SSE file watching)
-- **Dev**: concurrently (runs Vite + Hono together), tsx, vitest
 
 ## Development
 
 ```bash
-npm run dev          # Start both servers (Vite + Hono)
-npm run dev:client   # Vite only
-npm run dev:server   # Hono only
-npm run build        # Production build
-npm test             # Run tests
-npm run format       # Format code with Prettier
+npm run dev
+npm run lint
+npm test
+npm run eval:dry
+npm run test:e2e
 ```
 
-## Known issues
+Useful scripts:
 
-- **Vite file watch**: Saving `.md` files in the project directory can trigger Vite reloads. The `vite.config.ts` has `watch.ignored: [/\.md$/]` but this doesn't fully suppress it.
+- `npm run dev:server`
+- `npm run dev:client`
+- `npm run build`
+- `npm run test:watch`
+- `npm run test:e2e:ui`
+
+## Security model
+
+`md-review` is a local app. The server can read and write markdown files inside:
+
+- the current working directory
+- the current user's home directory
+- any initial file or directory passed at startup
+
+This is intentional so the tool can work with real docs on your machine, but it also means you should only run it in environments you trust.
+
+If you find a vulnerability, please use the process in [SECURITY.md](./SECURITY.md).
+
+## Known issue
+
+- Saving `.md` files inside the project can still trigger Vite reload behavior in some setups.
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-MIT
+[MIT](./LICENSE)

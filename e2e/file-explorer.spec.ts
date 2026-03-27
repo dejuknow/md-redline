@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
-const FIXTURE_DIR = resolve(__dirname, 'fixtures');
 const FIXTURE_ORIGINAL = readFileSync(FIXTURE, 'utf-8');
 
 test.beforeEach(async ({ page }) => {
@@ -110,8 +109,6 @@ test.describe('File explorer', () => {
     const dirCount = await dirButtons.count();
 
     if (dirCount > 0) {
-      // Get the directory name before clicking
-      const dirName = await dirButtons.first().textContent();
       await dirButtons.first().click();
 
       // After navigating, the "Go up" button should appear

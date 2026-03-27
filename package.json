@@ -1,18 +1,54 @@
 {
   "name": "md-review",
+  "description": "Local inline review for markdown files with agent-friendly comment markers.",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/dejuknow/md-reviewer",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dejuknow/md-reviewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dejuknow/md-reviewer/issues"
+  },
+  "keywords": [
+    "markdown",
+    "review",
+    "comments",
+    "documentation",
+    "agents"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "md-review": "bin/md-review",
     "mdr": "bin/md-review"
   },
+  "files": [
+    "bin/",
+    "public/",
+    "server/",
+    "src/",
+    "index.html",
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "tsconfig.json",
+    "tsconfig.app.json",
+    "tsconfig.node.json",
+    "vite.config.ts"
+  ],
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"tsx server/index.ts\" \"vite\"",
     "dev:server": "tsx server/index.ts",
     "dev:client": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "npm run build && npm run test:unit",
     "test:unit": "vitest run",
     "test:watch": "vitest",

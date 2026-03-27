@@ -21,6 +21,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: md-review [file.md | directory]"
   echo "Opens a markdown file or folder in md-review for inline commenting."
   echo "Starts the app automatically if it's not already running."
+  echo "Supported platforms: macOS and Linux."
   exit 0
 fi
 
@@ -71,10 +72,10 @@ fi
 # Build the URL
 URL="http://localhost:${CLIENT_PORT}"
 if [[ -n "$FILE" ]]; then
-  ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$FILE")
+  ENCODED=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$FILE")
   URL="${URL}?file=${ENCODED}"
 elif [[ -n "$DIR" ]]; then
-  ENCODED=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$DIR")
+  ENCODED=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$DIR")
   URL="${URL}?dir=${ENCODED}"
 fi
 

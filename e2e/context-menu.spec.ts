@@ -113,22 +113,6 @@ test.describe('Context menu on comment highlight', () => {
   });
 });
 
-/** Right-click an element by dispatching a contextmenu event from JS with correct coordinates. */
-async function rightClick(page: Page, locator: ReturnType<Page['locator']>) {
-  await locator.evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    el.dispatchEvent(
-      new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-        button: 2,
-      }),
-    );
-  });
-}
-
 test.describe('Context menu on tab', () => {
   test('right-clicking a tab shows tab context menu', async ({ page }) => {
     await openFixture(page);

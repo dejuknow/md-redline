@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile, writeFile, mkdtemp, cp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter } from '../types.js';
@@ -54,7 +54,7 @@ Read the file, make the requested changes, and write the result back to the same
 
 function runClaude(prompt: string, cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(
+    execFile(
       'claude',
       ['-p', prompt, '--allowedTools', 'Read,Edit,Write'],
       { cwd, timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },

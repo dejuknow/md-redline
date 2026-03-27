@@ -105,7 +105,7 @@ export function ContextMenu({ items, position, onClose }: Props) {
 
     // Default: open to the right
     let x = rect.right;
-    let y = rect.top;
+    const y = rect.top;
 
     // If not enough space on the right, open to the left
     if (menuRect && x + 180 > vw - 8) {

@@ -757,6 +757,7 @@ function extractMermaidText(cleanMarkdown: string): string {
   while ((match = mermaidRegex.exec(cleanMarkdown)) !== null) {
     const source = match[1];
     // Node labels: text inside [...], (...), {...}
+    // eslint-disable-next-line no-useless-escape
     const nodeRegex = /[\[({]([^\])}]+)[\])}]/g;
     let nodeMatch;
     while ((nodeMatch = nodeRegex.exec(source)) !== null) {

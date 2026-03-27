@@ -10,6 +10,16 @@ interface Props {
   onClearRecent: () => void;
 }
 
+function looksLikeDirectPath(value: string): boolean {
+  return (
+    value.startsWith('/') ||
+    value.startsWith('~/') ||
+    value.startsWith('./') ||
+    /^[a-zA-Z]:[\\/]/.test(value) ||
+    value.startsWith('\\\\')
+  );
+}
+
 export function FileOpener({
   open,
   onClose,
@@ -98,7 +108,7 @@ export function FileOpener({
       setSelectedIndex((i) => (i - 1 + itemCount) % itemCount);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (query.trim() && (query.startsWith('/') || query.startsWith('~/') || query.startsWith('./'))) {
+      if (query.trim() && looksLikeDirectPath(query.trim())) {
         // Looks like a path — open it directly
         handleOpen(query.trim());
       } else {
@@ -224,14 +234,14 @@ export function FileOpener({
           )}
 
           {/* Empty state when filtering yields no results */}
-          {filtered.length === 0 && query && !query.startsWith('/') && !query.startsWith('~/') && !query.startsWith('./') && (
+          {filtered.length === 0 && query && !looksLikeDirectPath(query) && (
             <div className="px-4 py-6 text-center text-sm text-content-muted">
               No matching files
             </div>
           )}
 
           {/* Path hint when typing a path */}
-          {query && (query.startsWith('/') || query.startsWith('~/') || query.startsWith('./')) && (
+          {query && looksLikeDirectPath(query) && (
             <div className="px-4 py-3 text-xs text-content-muted border-b border-border-subtle">
               Press <kbd className="px-1 py-0.5 rounded border border-border bg-surface text-[10px]">Enter</kbd> to open <span className="text-content font-medium">{query}</span>
             </div>
