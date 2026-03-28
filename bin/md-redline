@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { spawn } from 'child_process';
-import { readFile, stat } from 'fs/promises';
+import { execSync, spawn } from 'child_process';
+import { readFile, stat, unlink } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import process from 'process';
@@ -20,9 +20,15 @@ const POLL_INTERVAL_MS = 500;
 
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
+  console.log('       mdr --stop');
+  console.log('');
   console.log('Opens a markdown file or folder in mdr for inline commenting.');
   console.log('Starts the app automatically if it is not already running.');
   console.log('Supported platforms: macOS, Linux, and Windows.');
+  console.log('');
+  console.log('Options:');
+  console.log('  --stop       Stop the running mdr server');
+  console.log('  -h, --help   Show this help message');
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -110,6 +116,44 @@ function spawnDetached(command, args) {
   });
 }
 
+function killPort(port) {
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8' });
+      const pids = new Set(output.trim().split('\n').map(line => line.trim().split(/\s+/).pop()));
+      for (const pid of pids) {
+        if (pid && pid !== '0') execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+      }
+    } else {
+      execSync(`lsof -ti:${port} | xargs kill 2>/dev/null`, { stdio: 'ignore' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function stopServer() {
+  const serverPort = await findServerPort();
+  if (!serverPort) {
+    console.log('mdr is not running.');
+    return;
+  }
+
+  console.log('Stopping mdr...');
+  killPort(serverPort);
+
+  // Also kill the Vite client if running
+  for (let p = DEFAULT_CLIENT_PORT; p < DEFAULT_CLIENT_PORT + MAX_PORT_SCAN; p++) {
+    killPort(p);
+  }
+
+  // Clean up port file
+  try { await unlink(PORT_FILE); } catch {}
+
+  console.log('mdr stopped.');
+}
+
 async function ensureServerRunning() {
   const existing = await findServerPort();
   if (existing) return;
@@ -164,6 +208,11 @@ async function openInBrowser(url) {
 async function main() {
   if (process.argv[2] === '-h' || process.argv[2] === '--help') {
     printHelp();
+    return;
+  }
+
+  if (process.argv[2] === '--stop') {
+    await stopServer();
     return;
   }
 
