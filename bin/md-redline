@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'child_process';
-import { stat } from 'fs/promises';
-import { homedir } from 'os';
-import { dirname, resolve } from 'path';
+import { readFile, stat } from 'fs/promises';
+import { homedir, tmpdir } from 'os';
+import { dirname, join, resolve } from 'path';
 import process from 'process';
 import { fileURLToPath } from 'url';
 
@@ -11,8 +11,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const APP_DIR = resolve(__dirname, '..');
-const SERVER_PORT = 3001;
-const CLIENT_PORT = 5173;
+const DEFAULT_SERVER_PORT = 3001;
+const DEFAULT_CLIENT_PORT = 5173;
+const MAX_PORT_SCAN = 10;
+const PORT_FILE = join(tmpdir(), 'md-redline.port');
 const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
 
@@ -49,15 +51,42 @@ async function resolveTarget(arg) {
   throw new Error(`not a file or directory: ${arg}`);
 }
 
-async function serverRunning() {
+async function checkServer(port) {
   try {
-    const response = await fetch(`http://localhost:${SERVER_PORT}/api/config`, {
+    const response = await fetch(`http://localhost:${port}/api/config`, {
       signal: AbortSignal.timeout(1_000),
     });
     return response.ok;
   } catch {
     return false;
   }
+}
+
+async function findServerPort() {
+  // Try the port file first (fast path)
+  try {
+    const saved = (await readFile(PORT_FILE, 'utf8')).trim();
+    const port = Number(saved);
+    if (port && await checkServer(port)) return port;
+  } catch {}
+
+  // Scan the port range as fallback
+  for (let p = DEFAULT_SERVER_PORT; p < DEFAULT_SERVER_PORT + MAX_PORT_SCAN; p++) {
+    if (await checkServer(p)) return p;
+  }
+  return null;
+}
+
+async function findClientPort() {
+  for (let p = DEFAULT_CLIENT_PORT; p < DEFAULT_CLIENT_PORT + MAX_PORT_SCAN; p++) {
+    try {
+      const response = await fetch(`http://localhost:${p}/`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.ok) return p;
+    } catch {}
+  }
+  return DEFAULT_CLIENT_PORT;
 }
 
 function delay(ms) {
@@ -82,7 +111,8 @@ function spawnDetached(command, args) {
 }
 
 async function ensureServerRunning() {
-  if (await serverRunning()) return;
+  const existing = await findServerPort();
+  if (existing) return;
 
   console.log('Starting mdr...');
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -94,7 +124,7 @@ async function ensureServerRunning() {
 
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await serverRunning()) {
+    if (await findServerPort()) {
       console.log('mdr is running.');
       return;
     }
@@ -107,8 +137,9 @@ async function ensureServerRunning() {
   throw new Error('server did not start within 15 seconds.');
 }
 
-function buildUrl(file, dir) {
-  const baseUrl = `http://localhost:${CLIENT_PORT}`;
+async function buildUrl(file, dir) {
+  const clientPort = await findClientPort();
+  const baseUrl = `http://localhost:${clientPort}`;
   if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
   if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
   return baseUrl;
@@ -139,7 +170,7 @@ async function main() {
   try {
     const { file, dir } = await resolveTarget(process.argv[2] ?? '');
     await ensureServerRunning();
-    const url = buildUrl(file, dir);
+    const url = await buildUrl(file, dir);
 
     try {
       await openInBrowser(url);

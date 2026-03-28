@@ -3,9 +3,9 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import { readFile, writeFile, readdir, stat, realpath } from 'fs/promises';
-import { watch, statSync, realpathSync, type FSWatcher } from 'fs';
+import { watch, statSync, realpathSync, writeFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
-import { homedir, platform } from 'os';
+import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { pathToFileURL } from 'url';
 
@@ -414,17 +414,50 @@ export function createApp(options: CreateAppOptions = {}) {
 
 export const app = createApp();
 
-const port = 3001;
+const DEFAULT_PORT = 3001;
+const MAX_PORT_ATTEMPTS = 10;
+const PORT_FILE = join(tmpdir(), 'md-redline.port');
+
+function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
+  return new Promise((res, rej) => {
+    const server = serve({ fetch: appFetch, port }, () => res(port));
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') rej(err);
+      else rej(err);
+    });
+  });
+}
+
+async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
+  for (let p = DEFAULT_PORT; p < DEFAULT_PORT + MAX_PORT_ATTEMPTS; p++) {
+    try {
+      return await tryListen(appFetch, p);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
+    }
+  }
+  throw new Error(`No available port found (tried ${DEFAULT_PORT}-${DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1})`);
+}
+
 const isMainModule =
   typeof process.argv[1] === 'string' &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
 if (isMainModule) {
-  serve({ fetch: app.fetch, port }, () => {
+  findAvailablePort(app.fetch).then((port) => {
+    writeFileSync(PORT_FILE, String(port));
     console.log(`md-redline server running on http://localhost:${port}`);
     const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
     if (initialArg) {
       console.log(`Initial path: ${initialArg}`);
     }
+
+    const cleanup = () => { try { unlinkSync(PORT_FILE); } catch {} };
+    process.on('exit', cleanup);
+    process.on('SIGINT', () => { cleanup(); process.exit(0); });
+    process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+  }).catch((err) => {
+    console.error(err.message);
+    process.exit(1);
   });
 }
