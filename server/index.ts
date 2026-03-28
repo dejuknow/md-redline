@@ -452,7 +452,7 @@ if (isMainModule) {
       console.log(`Initial path: ${initialArg}`);
     }
 
-    const cleanup = () => { try { unlinkSync(PORT_FILE); } catch {} };
+    const cleanup = () => { try { unlinkSync(PORT_FILE); } catch { /* ignore */ } };
     process.on('exit', cleanup);
     process.on('SIGINT', () => { cleanup(); process.exit(0); });
     process.on('SIGTERM', () => { cleanup(); process.exit(0); });
