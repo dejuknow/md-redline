@@ -622,14 +622,16 @@ The JSON contains these fields:
 
 1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
 2. For each comment, read the \`text\` field and address the feedback by editing the document
-3. ${afterAction}
-4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it
+${settings.enableResolve ? `3. If a comment is a question or doesn't require a document edit, **add a reply** to the \`replies\` array in the marker JSON instead: \`"replies":[{"id":"<unique-id>","text":"your answer","author":"Agent","timestamp":"<ISO-8601>"}]\` (append to any existing replies)
+4. ${afterAction}
+5. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it` : `3. ${afterAction}
+4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`}
 
 ## How to respond
 
 After you're done, give me a brief summary:
 - How many comments you addressed${isSingle ? '' : ' (grouped by file)'}
-- For each one, a one-line description of what you changed
+- For each one, a one-line description of what you ${settings.enableResolve ? 'changed or replied' : 'changed'}
 - Any comments you left in place and why`;
 
       const fileCount = filePaths.length;

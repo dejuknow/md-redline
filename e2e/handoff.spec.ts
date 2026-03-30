@@ -147,6 +147,51 @@ test.describe('Single-file hand-off', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Resolve-mode hand-off prompt
+// ---------------------------------------------------------------------------
+
+async function toggleSetting(page: Page, settingName: string) {
+  await page.locator('button[title*="Settings"]').click();
+  const panel = page.locator('.fixed.inset-0');
+  await expect(panel.getByText('Settings').first()).toBeVisible({ timeout: 5000 });
+  const settingLabel = panel.locator('label', { hasText: settingName });
+  await settingLabel.locator('button[role="switch"]').click();
+  await page.keyboard.press('Escape');
+  await expect(panel).not.toBeVisible();
+}
+
+test.describe('Resolve-mode hand-off', () => {
+  test('prompt includes reply instruction when resolve workflow is enabled', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    await addComment(page, 'authentication system', 'How important is this?');
+    await toggleSetting(page, 'Enable resolve workflow');
+    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId('handoff-button').click();
+
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboard).toContain('add a reply');
+    expect(clipboard).toContain('"author":"Agent"');
+    expect(clipboard).toContain('resolve it');
+    expect(clipboard).not.toContain('remove the entire');
+  });
+
+  test('default mode prompt does not include reply instruction', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    await addComment(page, 'authentication system', 'Needs more detail');
+    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId('handoff-button').click();
+
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboard).toContain('remove the entire');
+    expect(clipboard).not.toContain('add a reply');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Multi-file hand-off
 // ---------------------------------------------------------------------------
 
