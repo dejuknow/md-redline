@@ -61,7 +61,7 @@ describe('loadSettings', () => {
 
   it('falls back to default when showTemplatesByDefault is not a boolean', () => {
     store['md-redline-settings'] = JSON.stringify({ showTemplatesByDefault: null });
-    expect(loadSettings().showTemplatesByDefault).toBe(false);
+    expect(loadSettings().showTemplatesByDefault).toBe(true);
   });
 
   it('preserves valid commentMaxLength', () => {
