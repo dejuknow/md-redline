@@ -3,20 +3,7 @@ import { useTheme } from 'next-themes';
 import { useSettings } from '../contexts/SettingsContext';
 import type { CommentTemplate } from '../lib/settings';
 import { DEFAULT_TEMPLATES } from '../lib/settings';
-
-const LIGHT_THEMES = [
-  { key: 'light', label: 'Light', colors: ['#ffffff', '#4f46e5', '#f59e0b'] },
-  { key: 'sepia', label: 'Sepia', colors: ['#faf6f1', '#8b5e3c', '#d4a04a'] },
-  { key: 'solarized', label: 'Solarized', colors: ['#fdf6e3', '#268bd2', '#b58900'] },
-  { key: 'github', label: 'GitHub', colors: ['#ffffff', '#0969da', '#bf8700'] },
-];
-
-const DARK_THEMES = [
-  { key: 'dark', label: 'Dark', colors: ['#0f172a', '#818cf8', '#f59e0b'] },
-  { key: 'nord', label: 'Nord', colors: ['#2e3440', '#88c0d0', '#ebcb8b'] },
-  { key: 'rose-pine', label: 'Rosé Pine', colors: ['#191724', '#c4a7e7', '#f6c177'] },
-  { key: 'catppuccin', label: 'Catppuccin', colors: ['#1e1e2e', '#cba6f7', '#f9e2af'] },
-];
+import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
 
 type Section = 'templates' | 'general' | 'theme';
 

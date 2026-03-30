@@ -288,14 +288,15 @@ export function insertComment(
   if (hintOffset !== undefined) {
     const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
 
-    // Direct search for anchor in plain text
+    // Direct search for anchor in plain text (flexible whitespace matching
+    // so browser-collapsed newlines in sel.toString() match source newlines)
     const plainOccs: number[] = [];
     let pSearch = 0;
     while (true) {
-      const pIdx = plain.indexOf(anchor, pSearch);
-      if (pIdx === -1) break;
-      plainOccs.push(pIdx);
-      pSearch = pIdx + 1;
+      const fm = flexibleIndexOf(plain, anchor, pSearch);
+      if (!fm) break;
+      plainOccs.push(fm.start);
+      pSearch = fm.start + 1;
     }
 
     // Also try segment-based search for cross-element selections (newlines/tabs)
@@ -342,9 +343,9 @@ export function insertComment(
       // If that fails, try in formatting-stripped text and map back
       if (insertionCleanOffset === null) {
         const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
-        const plainIdx = plain.indexOf(segments[0]);
-        if (plainIdx !== -1) {
-          insertionCleanOffset = toCleanOffset(plainIdx);
+        const fm = flexibleIndexOf(plain, segments[0]);
+        if (fm) {
+          insertionCleanOffset = toCleanOffset(fm.start);
         }
       }
     }
@@ -533,15 +534,62 @@ export function removeResolvedComments(rawMarkdown: string): string {
 }
 
 /** Search for ordered segments in text starting from a given offset, return the start and end offsets or null. */
+/**
+ * Whitespace-flexible indexOf: find `needle` in `haystack` starting from `startFrom`,
+ * allowing any single whitespace char in the needle to match any single whitespace char
+ * in the haystack (e.g. space matches newline). Returns {start, end} in haystack coords
+ * or null if not found.
+ */
+function flexibleIndexOf(haystack: string, needle: string, startFrom = 0): { start: number; end: number } | null {
+  // Fast path: exact match
+  const exact = haystack.indexOf(needle, startFrom);
+  if (exact !== -1) return { start: exact, end: exact + needle.length };
+
+  // Split needle on whitespace runs, then search for the parts in order
+  // with flexible whitespace between them
+  const parts = needle.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) {
+    const idx = haystack.indexOf(parts[0], startFrom);
+    return idx === -1 ? null : { start: idx, end: idx + parts[0].length };
+  }
+
+  let search = startFrom;
+  while (search < haystack.length) {
+    const firstIdx = haystack.indexOf(parts[0], search);
+    if (firstIdx === -1) return null;
+
+    let pos = firstIdx + parts[0].length;
+    let matched = true;
+    for (let i = 1; i < parts.length; i++) {
+      // Must have at least one whitespace char between parts
+      if (pos >= haystack.length || !/\s/.test(haystack[pos])) {
+        matched = false;
+        break;
+      }
+      while (pos < haystack.length && /\s/.test(haystack[pos])) pos++;
+      if (haystack.startsWith(parts[i], pos)) {
+        pos += parts[i].length;
+      } else {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return { start: firstIdx, end: pos };
+    search = firstIdx + 1;
+  }
+  return null;
+}
+
 function findSegments(text: string, segments: string[], startFrom = 0): { start: number; end: number } | null {
   let searchFrom = startFrom;
   let firstStart = -1;
   let lastEnd = -1;
   for (let i = 0; i < segments.length; i++) {
-    const idx = text.indexOf(segments[i], searchFrom);
-    if (idx === -1) return null;
-    if (i === 0) firstStart = idx;
-    lastEnd = idx + segments[i].length;
+    const match = flexibleIndexOf(text, segments[i], searchFrom);
+    if (!match) return null;
+    if (i === 0) firstStart = match.start;
+    lastEnd = match.end;
     searchFrom = lastEnd;
   }
   return firstStart === -1 ? null : { start: firstStart, end: lastEnd };

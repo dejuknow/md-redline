@@ -827,6 +827,19 @@ describe('insertComment cross-element segments', () => {
     expect(parsed.comments[0].cleanOffset).toBe(0);
   });
 
+  it('handles cross-paragraph selection where browser collapses newline to space', () => {
+    // In markdown, bold header and body text are on separate lines (joined by \n).
+    // The browser renders this as a space, so sel.toString() gives a space where
+    // the source has a newline. The anchor must still be found.
+    const raw = '**Primary: Builder**\nThe admin builds apps.\n\n**Secondary: User**\nThe user interacts.';
+    // sel.toString() would give space (not \n) between "Secondary: User" and "The user"
+    // because the browser collapses the line break. hintOffset is always provided by CommentForm.
+    const result = insertComment(raw, 'Secondary: User The user interacts', 'test', 'User', undefined, undefined, 40);
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].anchor).toBe('Secondary: User The user interacts');
+  });
+
   it('finds segments with tabs (table selections)', () => {
     const raw = 'Cell A\tCell B\tCell C';
     const result = insertComment(raw, 'Cell A\tCell B', 'spans cells');

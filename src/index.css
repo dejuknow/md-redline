@@ -338,7 +338,7 @@
   --theme-border: #403d52;
   --theme-border-subtle: #26233a;
   --theme-text: #e0def4;
-  --theme-text-secondary: #c4a7e7;
+  --theme-text-secondary: #908caa;
   --theme-text-muted: #6e6a86;
   --theme-text-faint: #524f67;
   --theme-accent: #c4a7e7;
@@ -688,6 +688,12 @@ mark.comment-highlight {
   line-height: inherit;
 }
 
+/* Override mermaid inline styles inside highlights */
+mark.comment-highlight span,
+mark.comment-highlight-active span {
+  color: inherit !important;
+}
+
 .prose mark.comment-highlight:hover,
 mark.comment-highlight:hover {
   background-color: var(--theme-comment-bg-hover);
@@ -811,7 +817,6 @@ body {
 }
 
 .mermaid-block .mermaid-svg svg {
-  max-width: 100%;
   height: auto;
 }
 

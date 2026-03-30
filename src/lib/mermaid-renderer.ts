@@ -9,6 +9,11 @@ async function getMermaid() {
       startOnLoad: false,
       securityLevel: 'strict',
       theme: 'default',
+      flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        wrappingWidth: 200,
+      },
     });
     initTheme = 'default';
   }
@@ -44,6 +49,11 @@ export async function renderMermaidBlock(
             startOnLoad: false,
             securityLevel: 'strict',
             theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
+            flowchart: {
+              useMaxWidth: true,
+              htmlLabels: true,
+              wrappingWidth: 200,
+            },
           });
           initTheme = mermaidTheme;
           themeChangePromise = null;

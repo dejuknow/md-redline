@@ -57,6 +57,7 @@ import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
 import { useTheme } from 'next-themes';
+import { ALL_THEMES } from './lib/themes';
 import { usePaneLayout } from './hooks/usePaneLayout';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -1360,10 +1361,13 @@ After you're done, give me a brief summary:
   const generalCommands = useMemo((): Command[] => [
     { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setActiveModal('settings') },
     { id: 'keyboard-shortcuts', label: 'Keyboard shortcuts', shortcut: '?', section: 'General', onExecute: () => setActiveModal('shortcuts') },
-    { id: 'theme-light', label: 'Theme: Light', section: 'Theme', onExecute: () => setTheme('light') },
-    { id: 'theme-dark', label: 'Theme: Dark', section: 'Theme', onExecute: () => setTheme('dark') },
-    { id: 'theme-sepia', label: 'Theme: Sepia', section: 'Theme', onExecute: () => setTheme('sepia') },
-    { id: 'theme-nord', label: 'Theme: Nord', section: 'Theme', onExecute: () => setTheme('nord') },
+    { id: 'theme-system', label: 'Theme: System', section: 'Theme', onExecute: () => setTheme('system') },
+    ...ALL_THEMES.map((t) => ({
+      id: `theme-${t.key}`,
+      label: `Theme: ${t.label}`,
+      section: 'Theme',
+      onExecute: () => setTheme(t.key),
+    })),
   ], [setTheme]);
 
   const commentCommands = useMemo((): Command[] => {
