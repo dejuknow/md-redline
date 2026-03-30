@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   message: string;
@@ -8,6 +8,14 @@ interface Props {
 
 export function Toast({ message, visible, onDismiss }: Props) {
   const [show, setShow] = useState(false);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Clean up fade timer on unmount
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -15,9 +23,13 @@ export function Toast({ message, visible, onDismiss }: Props) {
       requestAnimationFrame(() => setShow(true));
       const timer = setTimeout(() => {
         setShow(false);
-        setTimeout(onDismiss, 200); // Wait for fade-out
+        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+        fadeTimerRef.current = setTimeout(onDismiss, 200);
       }, 5000);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      };
     } else {
       setShow(false);
     }
@@ -39,7 +51,8 @@ export function Toast({ message, visible, onDismiss }: Props) {
         <button
           onClick={() => {
             setShow(false);
-            setTimeout(onDismiss, 200);
+            if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+            fadeTimerRef.current = setTimeout(onDismiss, 200);
           }}
           className="ml-2 opacity-70 hover:opacity-100 transition-opacity"
         >

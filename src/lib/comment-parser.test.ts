@@ -10,6 +10,11 @@ import {
   detectMissingAnchors,
   stripInlineFormatting,
   pickBestOccurrence,
+  resolveComment,
+  unresolveComment,
+  removeAllComments,
+  resolveAllComments,
+  removeResolvedComments,
 } from './comment-parser';
 import type { MdComment } from '../types';
 
@@ -761,8 +766,8 @@ describe('fuzzy re-matching', () => {
     const clean = parsed.cleanMarkdown;
     expect(clean).toBe('prefix text changed text and the rest follows here.');
     const afterIdx = clean.indexOf(' and the rest follows');
-    // cleanOffset estimated as afterIdx - old anchor length
-    expect(parsed.comments[0].cleanOffset).toBe(afterIdx - 'old text'.length);
+    // cleanOffset is positioned at the start of contextAfter (best guess without anchor length)
+    expect(parsed.comments[0].cleanOffset).toBe(Math.max(0, afterIdx));
   });
 
   it('rejects fuzzy match when gap between contexts is too large (>500 chars)', () => {
@@ -1587,5 +1592,176 @@ describe('insertComment with links causing offset drift', () => {
     const textBefore = result.slice(0, markerIdx);
     // Should be in the second paragraph (after "Details Section")
     expect(textBefore).toContain('[framework]');
+  });
+});
+
+describe('resolveComment', () => {
+  it('sets resolved and status on a comment', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const result = resolveComment(raw, 'c1');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].resolved).toBe(true);
+    expect(parsed.comments[0].status).toBe('resolved');
+    expect(parsed.cleanMarkdown).toBe('hello world');
+  });
+
+  it('does not modify other comments', () => {
+    const raw =
+      `${marker({ id: 'c1', anchor: 'hello' })}hello ` +
+      `${marker({ id: 'c2', anchor: 'world' })}world`;
+    const result = resolveComment(raw, 'c1');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(2);
+    expect(parsed.comments[0].resolved).toBe(true);
+    expect(parsed.comments[1].resolved).toBeUndefined();
+  });
+
+  it('is idempotent — resolving an already resolved comment keeps it resolved', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hi', resolved: true, status: 'resolved' })}hi`;
+    const result = resolveComment(raw, 'c1');
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].resolved).toBe(true);
+    expect(parsed.comments[0].status).toBe('resolved');
+  });
+});
+
+describe('unresolveComment', () => {
+  it('sets resolved to false and status to open', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hello', resolved: true, status: 'resolved' })}hello world`;
+    const result = unresolveComment(raw, 'c1');
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].resolved).toBe(false);
+    expect(parsed.comments[0].status).toBe('open');
+  });
+
+  it('round-trips: resolve then unresolve restores open state', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const resolved = resolveComment(raw, 'c1');
+    const unresolved = unresolveComment(resolved, 'c1');
+    const parsed = parseComments(unresolved);
+    expect(parsed.comments[0].resolved).toBe(false);
+    expect(parsed.comments[0].status).toBe('open');
+  });
+});
+
+describe('removeAllComments', () => {
+  it('removes all comment markers, leaving clean content', () => {
+    const raw =
+      `${marker({ id: 'c1', anchor: 'hello' })}hello ` +
+      `${marker({ id: 'c2', anchor: 'world' })}world`;
+    const result = removeAllComments(raw);
+    expect(result).toBe('hello world');
+    expect(result).not.toContain('<!-- @comment');
+  });
+
+  it('returns unchanged text when there are no comments', () => {
+    const raw = '# Hello\n\nSome text';
+    expect(removeAllComments(raw)).toBe(raw);
+  });
+
+  it('handles a single comment', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'test' })}test content`;
+    const result = removeAllComments(raw);
+    expect(result).toBe('test content');
+  });
+});
+
+describe('resolveAllComments', () => {
+  it('resolves all open comments', () => {
+    const raw =
+      `${marker({ id: 'c1', anchor: 'hello' })}hello ` +
+      `${marker({ id: 'c2', anchor: 'world' })}world`;
+    const result = resolveAllComments(raw);
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(2);
+    expect(parsed.comments[0].resolved).toBe(true);
+    expect(parsed.comments[0].status).toBe('resolved');
+    expect(parsed.comments[1].resolved).toBe(true);
+    expect(parsed.comments[1].status).toBe('resolved');
+  });
+
+  it('does not double-resolve already resolved comments', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hi', resolved: true, status: 'resolved' })}hi`;
+    const result = resolveAllComments(raw);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].resolved).toBe(true);
+  });
+
+  it('preserves clean markdown content', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const result = resolveAllComments(raw);
+    const parsed = parseComments(result);
+    expect(parsed.cleanMarkdown).toBe('hello world');
+  });
+});
+
+describe('removeResolvedComments', () => {
+  it('removes only resolved comments', () => {
+    const raw =
+      `${marker({ id: 'c1', anchor: 'hello', resolved: true, status: 'resolved' })}hello ` +
+      `${marker({ id: 'c2', anchor: 'world' })}world`;
+    const result = removeResolvedComments(raw);
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].id).toBe('c2');
+    expect(parsed.cleanMarkdown).toBe('hello world');
+  });
+
+  it('does nothing when there are no resolved comments', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const result = removeResolvedComments(raw);
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+  });
+
+  it('removes all comments when all are resolved', () => {
+    const raw =
+      `${marker({ id: 'c1', anchor: 'a', resolved: true, status: 'resolved' })}a ` +
+      `${marker({ id: 'c2', anchor: 'b', resolved: true, status: 'resolved' })}b`;
+    const result = removeResolvedComments(raw);
+    expect(result).toBe('a b');
+    expect(result).not.toContain('<!-- @comment');
+  });
+});
+
+describe('isInsideCodeBlock boundary', () => {
+  it('comment marker immediately after closing fence is NOT inside code block', () => {
+    const raw = '```\ncode\n```\n' + `${marker({ id: 'c1', anchor: 'after' })}after the fence`;
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].id).toBe('c1');
+    expect(parsed.cleanMarkdown).toBe('```\ncode\n```\nafter the fence');
+  });
+
+  it('comment marker inside code block is ignored', () => {
+    const raw = '```\n' + `${marker({ id: 'c1', anchor: 'inside' })}inside\n` + '```\nafter';
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(0);
+  });
+});
+
+describe('cleanToRawOffset multi-marker', () => {
+  it('maps offsets correctly with multiple markers', () => {
+    const m1 = marker({ id: 'c1', anchor: 'hello' });
+    const m2 = marker({ id: 'c2', anchor: 'world' });
+    const raw = `${m1}hello ${m2}world end`;
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(2);
+    // Clean text is "hello world end"
+    expect(parsed.cleanMarkdown).toBe('hello world end');
+    // cleanOffset 0 → start of "hello" → rawOffset should be after m1
+    expect(parsed.comments[0].cleanOffset).toBe(0);
+    expect(parsed.comments[1].cleanOffset).toBe(6); // "hello " = 6 chars
+  });
+
+  it('maps offsets correctly with trailing marker', () => {
+    const m1 = marker({ id: 'c1', anchor: 'end' });
+    const raw = `Some text at the ${m1}end`;
+    const parsed = parseComments(raw);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe('Some text at the end');
+    expect(parsed.comments[0].cleanOffset).toBe(17); // "Some text at the " = 17
   });
 });

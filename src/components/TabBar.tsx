@@ -367,7 +367,8 @@ export function TabBar({
                     </span>
                   )}
                   {tab.error && <span className="w-1.5 h-1.5 rounded-full bg-danger shrink-0" />}
-                  <span
+                  <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onCloseTab(tab.filePath);
@@ -375,6 +376,8 @@ export function TabBar({
                     className={`ml-1 p-0.5 rounded hover:bg-tint shrink-0 transition-opacity ${
                       isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     }`}
+                    aria-label={`Close ${tab.filePath.split('/').pop()}`}
+                    tabIndex={-1}
                   >
                     <svg
                       className="w-3 h-3"
@@ -385,7 +388,7 @@ export function TabBar({
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                  </span>
+                  </button>
                 </button>
               );
             })}

@@ -1,8 +1,6 @@
-import { useRef, useLayoutEffect, useImperativeHandle, forwardRef, useCallback, useMemo, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, useCallback, useMemo, useState } from 'react';
 import { highlightSearchMatches } from './MarkdownViewer';
-
-// Match comment markers — same pattern as comment-parser.ts
-const COMMENT_MARKER_RE = /<!-- @comment\{.*?\} -->/gs;
+import { COMMENT_MARKER_RE } from '../lib/comment-parser';
 
 // Markdown syntax highlighting patterns (order matters — first match wins per region)
 interface SyntaxRule {
@@ -147,6 +145,13 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
   const tableRef = useRef<HTMLDivElement>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+
+  // Clean up flash timer on unmount
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    };
+  }, []);
 
   const highlightedHtml = useMemo(() => buildHighlightedHtml(rawMarkdown), [rawMarkdown]);
 

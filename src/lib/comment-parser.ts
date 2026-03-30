@@ -4,6 +4,9 @@ import { getEffectiveStatus, type MdComment, type ParseResult, type CommentReply
 // newlines in string values is matched correctly.
 const COMMENT_PATTERN = /<!-- @comment(\{.*?\}) -->/gs;
 
+/** Shared regex for matching comment markers (without capture group). Reset lastIndex before use. */
+export const COMMENT_MARKER_RE = /<!-- @comment\{.*?\} -->/gs;
+
 export function parseComments(rawMarkdown: string): ParseResult {
   const comments: MdComment[] = [];
   const strippedRegions: { rawStart: number; rawEnd: number; parsed: boolean }[] = [];
@@ -25,7 +28,7 @@ export function parseComments(rawMarkdown: string): ParseResult {
 
   function isInsideCodeBlock(offset: number): boolean {
     for (const range of codeBlockRanges) {
-      if (offset >= range.start && offset <= range.end) return true;
+      if (offset >= range.start && offset < range.end) return true;
     }
     return false;
   }
@@ -143,21 +146,19 @@ function fuzzyReMatch(cleanMarkdown: string, comment: MdComment): number | null 
     }
   }
 
-  // Fallback: try contextBefore only
+  // Fallback: try contextBefore only (only if it appears exactly once)
   if (contextBefore && contextBefore.length >= 10) {
-    const beforeIdx = cleanMarkdown.indexOf(contextBefore);
-    if (beforeIdx !== -1) {
-      return beforeIdx + contextBefore.length;
+    const firstIdx = cleanMarkdown.indexOf(contextBefore);
+    if (firstIdx !== -1 && cleanMarkdown.indexOf(contextBefore, firstIdx + 1) === -1) {
+      return firstIdx + contextBefore.length;
     }
   }
 
-  // Fallback: try contextAfter only
+  // Fallback: try contextAfter only (only if it appears exactly once)
   if (contextAfter && contextAfter.length >= 10) {
-    const afterIdx = cleanMarkdown.indexOf(contextAfter);
-    if (afterIdx !== -1 && afterIdx > 0) {
-      // Estimate: anchor was just before contextAfter, use original anchor length as hint
-      const estimatedStart = Math.max(0, afterIdx - comment.anchor.length);
-      return estimatedStart;
+    const firstIdx = cleanMarkdown.indexOf(contextAfter);
+    if (firstIdx !== -1 && firstIdx > 0 && cleanMarkdown.indexOf(contextAfter, firstIdx + 1) === -1) {
+      return Math.max(0, firstIdx);
     }
   }
 
@@ -730,9 +731,13 @@ function partsAppearContiguously(text: string, parts: string[]): boolean {
     let pos = firstIdx + parts[0].length;
     let matched = true;
     for (let i = 1; i < parts.length; i++) {
-      // Skip whitespace and markdown block-level markers (list bullets, blockquote)
-      // so cross-line selections spanning list items or blockquotes still match
-      while (pos < text.length && /[\s\-*+>]/.test(text[pos])) pos++;
+      // Skip whitespace so cross-line selections still match
+      while (pos < text.length && /\s/.test(text[pos])) pos++;
+      // After whitespace, skip optional block-level markers at line start (list bullets, blockquote)
+      if (pos < text.length && /[-*+>]/.test(text[pos]) && (pos === 0 || text[pos - 1] === '\n')) {
+        pos++;
+        while (pos < text.length && text[pos] === ' ') pos++;
+      }
       if (text.startsWith(parts[i], pos)) {
         pos += parts[i].length;
       } else {

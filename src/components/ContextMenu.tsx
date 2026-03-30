@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState } from 'react';
 
 export interface ContextMenuItem {
   label: string;
@@ -41,30 +41,27 @@ export function ContextMenu({ items, position, onClose }: Props) {
   const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const submenuRef = useRef<HTMLDivElement>(null);
 
-  // Adjust position to keep menu within viewport
-  useEffect(() => {
+  // Adjust position to keep menu within viewport (useLayoutEffect to avoid flash)
+  useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!menu) return;
 
-    // Let the browser lay out the element first, then measure
-    requestAnimationFrame(() => {
-      const rect = menu.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      let x = position.x;
-      let y = position.y;
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = position.x;
+    let y = position.y;
 
-      if (x + rect.width > vw - 8) {
-        x = vw - rect.width - 8;
-      }
-      if (y + rect.height > vh - 8) {
-        y = vh - rect.height - 8;
-      }
-      if (x < 8) x = 8;
-      if (y < 8) y = 8;
+    if (x + rect.width > vw - 8) {
+      x = vw - rect.width - 8;
+    }
+    if (y + rect.height > vh - 8) {
+      y = vh - rect.height - 8;
+    }
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
 
-      setAdjustedPos({ x, y });
-    });
+    setAdjustedPos({ x, y });
   }, [position]);
 
   // Close on click outside

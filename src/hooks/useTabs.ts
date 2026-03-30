@@ -13,9 +13,11 @@ export function useTabs() {
   const [tabData, setTabData] = useState<Map<string, TabState>>(new Map());
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
 
-  // Use ref to avoid openTab depending on tabData (which changes every render)
+  // Use refs to avoid closures depending on state (which changes every render)
   const tabDataRef = useRef(tabData);
   tabDataRef.current = tabData;
+  const tabOrderRef = useRef(tabOrder);
+  tabOrderRef.current = tabOrder;
   const loadRequestIdsRef = useRef(new Map<string, number>());
   const nextLoadRequestIdRef = useRef(1);
 
@@ -161,18 +163,16 @@ export function useTabs() {
 
   const closeTab = useCallback((path: string) => {
     cancelLoadRequest(path);
-    setTabOrder((prev) => {
-      const idx = prev.indexOf(path);
-      const next = prev.filter((p) => p !== path);
+    const currentOrder = tabOrderRef.current;
+    const idx = currentOrder.indexOf(path);
+    const remaining = currentOrder.filter((p) => p !== path);
 
-      // If closing the active tab, switch to an adjacent one
-      setActiveFilePath((currentActive) => {
-        if (path !== currentActive) return currentActive;
-        if (next.length === 0) return null;
-        return next[Math.min(idx, next.length - 1)];
-      });
-
-      return next;
+    setTabOrder(remaining);
+    // If closing the active tab, switch to an adjacent one
+    setActiveFilePath((currentActive) => {
+      if (path !== currentActive) return currentActive;
+      if (remaining.length === 0) return null;
+      return remaining[Math.min(idx, remaining.length - 1)];
     });
     setTabData((prev) => {
       const next = new Map(prev);
@@ -185,11 +185,8 @@ export function useTabs() {
     for (const path of tabDataRef.current.keys()) {
       if (path !== keepPath) cancelLoadRequest(path);
     }
-    setTabOrder((prev) => {
-      const next = prev.filter((p) => p === keepPath);
-      setActiveFilePath(keepPath);
-      return next;
-    });
+    setTabOrder((prev) => prev.filter((p) => p === keepPath));
+    setActiveFilePath(keepPath);
     setTabData((prev) => {
       const next = new Map<string, TabState>();
       const kept = prev.get(keepPath);
@@ -206,26 +203,26 @@ export function useTabs() {
   }, []);
 
   const closeTabsToRight = useCallback((path: string) => {
-    setTabOrder((prev) => {
-      const idx = prev.indexOf(path);
-      if (idx === -1) return prev;
-      const next = prev.slice(0, idx + 1);
-      setActiveFilePath((currentActive) => {
-        if (currentActive && next.includes(currentActive)) return currentActive;
-        return path;
-      });
-      // Clean up removed tab data
-      const removed = prev.slice(idx + 1);
-      if (removed.length > 0) {
-        for (const removedPath of removed) cancelLoadRequest(removedPath);
-        setTabData((prevData) => {
-          const nextData = new Map(prevData);
-          for (const p of removed) nextData.delete(p);
-          return nextData;
-        });
-      }
-      return next;
+    const currentOrder = tabOrderRef.current;
+    const idx = currentOrder.indexOf(path);
+    if (idx === -1) return;
+
+    const kept = currentOrder.slice(0, idx + 1);
+    const removed = currentOrder.slice(idx + 1);
+
+    setTabOrder(kept);
+    setActiveFilePath((currentActive) => {
+      if (currentActive && kept.includes(currentActive)) return currentActive;
+      return path;
     });
+    if (removed.length > 0) {
+      for (const removedPath of removed) cancelLoadRequest(removedPath);
+      setTabData((prevData) => {
+        const nextData = new Map(prevData);
+        for (const p of removed) nextData.delete(p);
+        return nextData;
+      });
+    }
   }, [cancelLoadRequest]);
 
   const switchTab = useCallback((path: string) => {

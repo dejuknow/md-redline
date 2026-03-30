@@ -92,7 +92,7 @@ async function findClientPort() {
       if (response.ok) return p;
     } catch {}
   }
-  return DEFAULT_CLIENT_PORT;
+  return null;
 }
 
 function delay(ms) {
@@ -143,9 +143,10 @@ async function stopServer() {
   console.log('Stopping mdr...');
   killPort(serverPort);
 
-  // Also kill the Vite client if running
-  for (let p = DEFAULT_CLIENT_PORT; p < DEFAULT_CLIENT_PORT + MAX_PORT_SCAN; p++) {
-    killPort(p);
+  // Also kill the Vite client if running (only kill ports that respond)
+  const clientPort = await findClientPort();
+  if (clientPort) {
+    killPort(clientPort);
   }
 
   // Clean up port file
@@ -167,22 +168,31 @@ async function ensureServerRunning() {
   });
 
   const deadline = Date.now() + START_TIMEOUT_MS;
+  // Wait for the API server
   while (Date.now() < deadline) {
-    if (await findServerPort()) {
-      console.log('mdr is running.');
-      return;
-    }
+    if (await findServerPort()) break;
     if (childExited) {
       throw new Error("app failed to start. Run 'npm run dev' manually for details.");
     }
     await delay(POLL_INTERVAL_MS);
   }
-
-  throw new Error('server did not start within 15 seconds.');
+  if (!(await findServerPort())) {
+    throw new Error('server did not start within 15 seconds.');
+  }
+  // Also wait for Vite client to be ready
+  while (Date.now() < deadline) {
+    if (await findClientPort()) {
+      console.log('mdr is running.');
+      return;
+    }
+    await delay(POLL_INTERVAL_MS);
+  }
+  // Server is up but client may still be starting — proceed anyway
+  console.log('mdr server is running (client may still be starting).');
 }
 
 async function buildUrl(file, dir) {
-  const clientPort = await findClientPort();
+  const clientPort = await findClientPort() ?? DEFAULT_CLIENT_PORT;
   const baseUrl = `http://localhost:${clientPort}`;
   if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
   if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;

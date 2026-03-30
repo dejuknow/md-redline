@@ -1,6 +1,7 @@
 import { parseComments } from '../src/lib/comment-parser.js';
 import type { ExpectedCriteria, ScoringResult, DimensionScores } from './types.js';
 
+// Regex with capture group for JSON parsing — different from the shared COMMENT_MARKER_RE
 const COMMENT_MARKER_RE = /<!-- @comment(\{.*?\}) -->/gs;
 
 const WEIGHTS: Record<keyof DimensionScores, number> = {
@@ -30,21 +31,20 @@ export function score(
     parsingScore = 1.0;
     details.push('parsing: no comments expected, score=1.0');
   } else {
+    const actionable = expected.comments.filter((c) => c.expectedAction === 'address');
     let correct = 0;
-    for (const exp of expected.comments) {
-      if (exp.expectedAction === 'address') {
-        // Marker should be removed after addressing
-        if (!outputById.has(exp.id)) {
-          correct++;
-          details.push(`parsing: ${exp.id} — marker correctly removed`);
-        } else {
-          details.push(`parsing: ${exp.id} — marker should have been removed but was preserved`);
-        }
+    for (const exp of actionable) {
+      // Marker should be removed after addressing
+      if (!outputById.has(exp.id)) {
+        correct++;
+        details.push(`parsing: ${exp.id} — marker correctly removed`);
+      } else {
+        details.push(`parsing: ${exp.id} — marker should have been removed but was preserved`);
       }
     }
-    parsingScore = expected.comments.length > 0 ? correct / expected.comments.length : 1.0;
+    parsingScore = actionable.length > 0 ? correct / actionable.length : 1.0;
     details.push(
-      `parsing: ${correct}/${expected.comments.length} markers correctly handled`,
+      `parsing: ${correct}/${actionable.length} markers correctly handled`,
     );
   }
 
@@ -84,6 +84,7 @@ export function score(
     }
 
     for (const exp of expected.comments) {
+      if (exp.expectedAction === 'skip') continue;
       if (!exp.contentHints) continue;
       for (const s of exp.contentHints.shouldContain ?? []) {
         const found = outputParsed.cleanMarkdown.includes(s);

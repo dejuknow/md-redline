@@ -59,10 +59,14 @@ import { useSettings } from './contexts/SettingsContext';
 import { useTheme } from 'next-themes';
 import { usePaneLayout } from './hooks/usePaneLayout';
 
-// Load saved session for initial state
-const savedSession = loadSession();
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+const modKey = isMac ? '\u2318' : 'Ctrl';
+const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
+const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 
 export default function App() {
+  // Load saved session lazily (deferred to first render, not module import time)
+  const [savedSession] = useState(() => loadSession());
   const {
     tabs,
     activeFilePath,
@@ -118,17 +122,18 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('file') || params.get('dir')) return;
     if (savedSession && savedSession.openTabs.length > 0) {
+      // Open inactive tabs in background first, then the active tab last
+      // (openTab sets it active, avoiding the setTimeout race)
+      const activeTarget = savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)
+        ? savedSession.activeFilePath
+        : savedSession.openTabs[0];
       for (const path of savedSession.openTabs) {
-        openTab(path);
+        if (path === activeTarget) continue;
+        openTabInBackground(path);
       }
-      if (
-        savedSession.activeFilePath &&
-        savedSession.openTabs.includes(savedSession.activeFilePath)
-      ) {
-        setTimeout(() => switchTab(savedSession.activeFilePath!), 50);
-      }
+      openTab(activeTarget);
     }
-  }, [openTab, switchTab]);
+  }, [openTab, openTabInBackground]);
 
   // Diff snapshot state: per-file snapshots persisted to localStorage
   const [snapshots, setSnapshots] = useState<Map<string, string>>(() => {
@@ -204,7 +209,8 @@ export default function App() {
   // Platform info for context menu labels
   const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
   useEffect(() => {
-    fetch('/api/platform')
+    const controller = new AbortController();
+    fetch('/api/platform', { signal: controller.signal })
       .then((r) => r.json())
       .then(({ platform }) => {
         if (platform === 'darwin') setRevealLabel('Reveal in Finder');
@@ -212,6 +218,7 @@ export default function App() {
         else setRevealLabel('Show in File Manager');
       })
       .catch(() => {});
+    return () => controller.abort();
   }, []);
 
   // Context menu state
@@ -375,17 +382,16 @@ export default function App() {
     return counts;
   }, [tabs, activeFilePath, comments, settings.enableResolve]);
 
-  // Clear transient state on tab switch — derive from activeFilePath change
-  const [prevFilePath, setPrevFilePath] = useState(activeFilePath);
-  if (prevFilePath !== activeFilePath) {
-    setPrevFilePath(activeFilePath);
-    setActiveCommentId(null);
-    if (viewMode === 'diff') setViewMode('rendered');
-  }
-  // clearSelection clears browser selection — must run as side effect
+  // Clear transient state on tab switch
+  const prevFilePathRef = useRef(activeFilePath);
   useEffect(() => {
-    clearSelection();
-  }, [activeFilePath, clearSelection]);
+    if (prevFilePathRef.current !== activeFilePath) {
+      prevFilePathRef.current = activeFilePath;
+      setActiveCommentId(null);
+      if (viewMode === 'diff') setViewMode('rendered');
+      clearSelection();
+    }
+  }, [activeFilePath, viewMode, setViewMode, clearSelection]);
 
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
   useFileWatcher({
@@ -1302,276 +1308,107 @@ After you're done, give me a brief summary:
     switchTabByOffset,
   ]);
 
-  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
-  const modKey = isMac ? '\u2318' : 'Ctrl';
-  const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
-  const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 
-  // Command palette commands
-  const paletteCommands = useMemo((): Command[] => {
+
+  // Command palette commands — split into categories for manageable dependency arrays
+  const navigationCommands = useMemo((): Command[] => [
+    { id: 'next-comment', label: 'Jump to next comment', shortcut: 'N / J', section: 'Navigation', onExecute: handleJumpToNext },
+    { id: 'prev-comment', label: 'Jump to previous comment', shortcut: 'P / K', section: 'Navigation', onExecute: handleJumpToPrev },
+    { id: 'prev-tab', label: 'Previous tab', shortcut: prevTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(-1) },
+    { id: 'next-tab', label: 'Next tab', shortcut: nextTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(1) },
+    { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setShowSearch(true); setSearchFocusTrigger((t) => t + 1); } },
+  ], [handleJumpToNext, handleJumpToPrev, switchTabByOffset]);
+
+  const viewCommands = useMemo((): Command[] => {
     const cmds: Command[] = [
+      { id: 'toggle-sidebar', label: 'Toggle sidebar', shortcut: `${modKey}+\\`, section: 'View', onExecute: () => setSidebarVisible((p) => !p) },
+      { id: 'view-rendered', label: 'Switch to rendered view', section: 'View', onExecute: () => setViewMode('rendered') },
+      { id: 'view-raw', label: 'Switch to raw markdown', section: 'View', onExecute: () => setViewMode('raw') },
       {
-        id: 'next-comment',
-        label: 'Jump to next comment',
-        shortcut: 'N / J',
-        section: 'Navigation',
-        onExecute: handleJumpToNext,
-      },
-      {
-        id: 'prev-comment',
-        label: 'Jump to previous comment',
-        shortcut: 'P / K',
-        section: 'Navigation',
-        onExecute: handleJumpToPrev,
-      },
-      {
-        id: 'toggle-sidebar',
-        label: 'Toggle sidebar',
-        shortcut: `${modKey}+\\`,
-        section: 'View',
-        onExecute: () => setSidebarVisible((p) => !p),
-      },
-      {
-        id: 'prev-tab',
-        label: 'Previous tab',
-        shortcut: prevTabShortcut,
-        section: 'Tabs',
-        onExecute: () => switchTabByOffset(-1),
-      },
-      {
-        id: 'next-tab',
-        label: 'Next tab',
-        shortcut: nextTabShortcut,
-        section: 'Tabs',
-        onExecute: () => switchTabByOffset(1),
-      },
-      {
-        id: 'view-rendered',
-        label: 'Switch to rendered view',
-        section: 'View',
-        onExecute: () => setViewMode('rendered'),
-      },
-      {
-        id: 'view-raw',
-        label: 'Switch to raw markdown',
-        section: 'View',
-        onExecute: () => setViewMode('raw'),
-      },
-      { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
-      {
-        id: 'take-snapshot',
-        label: currentSnapshot ? 'Update diff snapshot' : 'Take diff snapshot',
-        shortcut: `${modKey}+Shift+S`,
-        section: 'File',
-        onExecute: handleSnapshot,
-      },
-      {
-        id: 'open-file',
-        label: 'Open file',
-        shortcut: `${modKey}+O`,
-        section: 'File',
-        onExecute: openFilePicker,
-      },
-
-      {
-        id: 'toggle-explorer',
-        label: 'Toggle file explorer',
-        shortcut: `${modKey}+B`,
-        section: 'View',
+        id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View',
         onExecute: () => {
-          if (explorerVisible && leftPanelView === 'explorer') {
-            setExplorerVisible(false);
-          } else {
-            setExplorerVisible(true);
-            setLeftPanelView('explorer');
-          }
+          if (explorerVisible && leftPanelView === 'explorer') { setExplorerVisible(false); }
+          else { setExplorerVisible(true); setLeftPanelView('explorer'); }
         },
       },
       {
-        id: 'toggle-outline',
-        label: 'Toggle document outline',
-        shortcut: `${modKey}+Shift+O`,
-        section: 'View',
+        id: 'toggle-outline', label: 'Toggle document outline', shortcut: `${modKey}+Shift+O`, section: 'View',
         onExecute: () => {
-          if (explorerVisible && leftPanelView === 'outline') {
-            setExplorerVisible(false);
-          } else {
-            setExplorerVisible(true);
-            setLeftPanelView('outline');
-          }
+          if (explorerVisible && leftPanelView === 'outline') { setExplorerVisible(false); }
+          else { setExplorerVisible(true); setLeftPanelView('outline'); }
         },
-      },
-      {
-        id: 'open-settings',
-        label: 'Open settings',
-        shortcut: `${modKey}+,`,
-        section: 'General',
-        onExecute: () => setShowSettings(true),
-      },
-      {
-        id: 'keyboard-shortcuts',
-        label: 'Keyboard shortcuts',
-        shortcut: '?',
-        section: 'General',
-        onExecute: () => setShowShortcuts(true),
-      },
-      {
-        id: 'find',
-        label: 'Find in document',
-        shortcut: `${modKey}+F`,
-        section: 'Navigation',
-        onExecute: () => {
-          setShowSearch(true);
-          setSearchFocusTrigger((t) => t + 1);
-        },
-      },
-      {
-        id: 'theme-light',
-        label: 'Theme: Light',
-        section: 'Theme',
-        onExecute: () => setTheme('light'),
-      },
-      {
-        id: 'theme-dark',
-        label: 'Theme: Dark',
-        section: 'Theme',
-        onExecute: () => setTheme('dark'),
-      },
-      {
-        id: 'theme-sepia',
-        label: 'Theme: Sepia',
-        section: 'Theme',
-        onExecute: () => setTheme('sepia'),
-      },
-      {
-        id: 'theme-nord',
-        label: 'Theme: Nord',
-        section: 'Theme',
-        onExecute: () => setTheme('nord'),
       },
     ];
-
     if (currentSnapshot) {
-      cmds.push(
-        {
-          id: 'view-diff',
-          label: 'Toggle diff view',
-          section: 'View',
-          onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')),
-        },
-        {
-          id: 'clear-snapshot',
-          label: 'Clear diff snapshot',
-          section: 'File',
-          onExecute: handleClearSnapshot,
-        },
-      );
+      cmds.push({ id: 'view-diff', label: 'Toggle diff view', section: 'View', onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')) });
     }
+    return cmds;
+  }, [setSidebarVisible, setViewMode, setExplorerVisible, setLeftPanelView, explorerVisible, leftPanelView, currentSnapshot]);
 
+  const fileCommands = useMemo((): Command[] => {
+    const cmds: Command[] = [
+      { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
+      { id: 'take-snapshot', label: currentSnapshot ? 'Update diff snapshot' : 'Take diff snapshot', shortcut: `${modKey}+Shift+S`, section: 'File', onExecute: handleSnapshot },
+      { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: openFilePicker },
+    ];
+    if (currentSnapshot) {
+      cmds.push({ id: 'clear-snapshot', label: 'Clear diff snapshot', section: 'File', onExecute: handleClearSnapshot });
+    }
+    return cmds;
+  }, [reloadFile, handleSnapshot, openFilePicker, handleClearSnapshot, currentSnapshot]);
+
+  const generalCommands = useMemo((): Command[] => [
+    { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
+    { id: 'keyboard-shortcuts', label: 'Keyboard shortcuts', shortcut: '?', section: 'General', onExecute: () => setShowShortcuts(true) },
+    { id: 'theme-light', label: 'Theme: Light', section: 'Theme', onExecute: () => setTheme('light') },
+    { id: 'theme-dark', label: 'Theme: Dark', section: 'Theme', onExecute: () => setTheme('dark') },
+    { id: 'theme-sepia', label: 'Theme: Sepia', section: 'Theme', onExecute: () => setTheme('sepia') },
+    { id: 'theme-nord', label: 'Theme: Nord', section: 'Theme', onExecute: () => setTheme('nord') },
+  ], [setTheme]);
+
+  const commentCommands = useMemo((): Command[] => {
+    const cmds: Command[] = [];
     if (settings.enableResolve && commentCount > 0) {
-      cmds.push({
-        id: 'resolve-all',
-        label: 'Resolve all open comments',
-        section: 'Comments',
-        onExecute: handleBulkResolve,
-      });
+      cmds.push({ id: 'resolve-all', label: 'Resolve all open comments', section: 'Comments', onExecute: handleBulkResolve });
     }
     if (commentCount > 0) {
-      cmds.push({
-        id: 'delete-all',
-        label: 'Delete all comments',
-        section: 'Comments',
-        onExecute: handleBulkDelete,
-      });
-      cmds.push({
-        id: 'copy-agent-prompt',
-        label: 'Hand off to agent (copy instructions)',
-        section: 'Comments',
-        onExecute: () => activeFilePath && handleCopyAgentPrompt([activeFilePath]),
-      });
+      cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
+      cmds.push({ id: 'copy-agent-prompt', label: 'Hand off to agent (copy instructions)', section: 'Comments', onExecute: () => activeFilePath && handleCopyAgentPrompt([activeFilePath]) });
     }
-
     if (activeCommentId) {
       if (settings.enableResolve) {
         const activeComment = comments.find((c) => c.id === activeCommentId);
         if (activeComment) {
           const status = getEffectiveStatus(activeComment);
           if (status === 'open') {
-            cmds.push({
-              id: 'resolve-active',
-              label: 'Resolve active comment',
-              shortcut: 'A',
-              section: 'Comments',
-              onExecute: () => handleResolve(activeCommentId),
-            });
+            cmds.push({ id: 'resolve-active', label: 'Resolve active comment', shortcut: 'A', section: 'Comments', onExecute: () => handleResolve(activeCommentId) });
           }
           if (status === 'resolved') {
-            cmds.push({
-              id: 'unresolve-active',
-              label: 'Reopen active comment',
-              shortcut: 'U',
-              section: 'Comments',
-              onExecute: () => handleUnresolve(activeCommentId),
-            });
+            cmds.push({ id: 'unresolve-active', label: 'Reopen active comment', shortcut: 'U', section: 'Comments', onExecute: () => handleUnresolve(activeCommentId) });
           }
         }
       }
-      cmds.push({
-        id: 'delete-active',
-        label: 'Delete active comment',
-        shortcut: 'D',
-        section: 'Comments',
-        onExecute: () => handleDelete(activeCommentId),
-      });
+      cmds.push({ id: 'delete-active', label: 'Delete active comment', shortcut: 'D', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
     }
-
-    // Heading navigation entries
-    for (const h of tocHeadings) {
-      const indent = '\u2003'.repeat(h.level - 1);
-      cmds.push({
-        id: `heading-${h.id}`,
-        label: `${indent}${h.text}`,
-        section: 'Headings',
-        onExecute: () => {
-          const el = containerRef.current?.querySelector(`#${CSS.escape(h.id)}`);
-          el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        },
-      });
-    }
-
     return cmds;
-  }, [
-    modKey,
-    prevTabShortcut,
-    nextTabShortcut,
-    openFilePicker,
-    switchTabByOffset,
-    handleJumpToNext,
-    handleJumpToPrev,
-    reloadFile,
-    handleSnapshot,
-    handleClearSnapshot,
-    currentSnapshot,
-    commentCount,
-    settings.enableResolve,
-    handleBulkDelete,
-    handleBulkResolve,
-    handleCopyAgentPrompt,
-    activeFilePath,
-    activeCommentId,
-    comments,
-    handleResolve,
-    handleUnresolve,
-    handleDelete,
-    setExplorerVisible,
-    setLeftPanelView,
-    setSidebarVisible,
-    setViewMode,
-    setTheme,
-    tocHeadings,
-    explorerVisible,
-    leftPanelView,
-  ]);
+  }, [commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleCopyAgentPrompt, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
+
+  const headingCommands = useMemo((): Command[] =>
+    tocHeadings.map((h) => ({
+      id: `heading-${h.id}`,
+      label: `${'\u2003'.repeat(h.level - 1)}${h.text}`,
+      section: 'Headings' as const,
+      onExecute: () => {
+        const el = containerRef.current?.querySelector(`#${CSS.escape(h.id)}`);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+    })),
+  [tocHeadings]);
+
+  const paletteCommands = useMemo(
+    () => [...navigationCommands, ...viewCommands, ...fileCommands, ...generalCommands, ...commentCommands, ...headingCommands],
+    [navigationCommands, viewCommands, fileCommands, generalCommands, commentCommands, headingCommands],
+  );
 
   return (
     <div className="h-screen flex flex-col bg-surface">

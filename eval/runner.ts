@@ -1,13 +1,15 @@
 import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { score } from './scorer.js';
 import { getFormat } from './formats/index.js';
 import { claudeCli } from './agents/claude-cli.js';
 import type { AgentAdapter, EvalCase, ExpectedCriteria, ScoringResult } from './types.js';
 
-const FIXTURES_DIR = join(import.meta.dirname, 'fixtures');
-const RESULTS_DIR = join(import.meta.dirname, 'results');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = join(__dirname, 'fixtures');
+const RESULTS_DIR = join(__dirname, 'results');
 
 const agents: Record<string, AgentAdapter> = {
   'claude-cli': claudeCli,

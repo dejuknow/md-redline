@@ -71,6 +71,8 @@ export function createApp(options: CreateAppOptions = {}) {
   }
 
   const allowedRoots = [canonicalize(cwd), canonicalize(homeDir)];
+  // When opening a single file, grant access to its parent directory so
+  // the user can navigate to sibling files via the explorer.
   if (initialFile) {
     const fileDir = canonicalize(dirname(initialFile));
     if (!allowedRoots.some((root) => fileDir.startsWith(root + '/') || fileDir === root)) {
@@ -91,12 +93,14 @@ export function createApp(options: CreateAppOptions = {}) {
     try {
       real = await realpath(resolved);
     } catch {
+      // File may not exist yet — resolve via its parent
       const parent = dirname(resolved);
       try {
         const realParent = await realpath(parent);
         real = join(realParent, resolved.slice(parent.length + 1));
       } catch {
-        real = resolved;
+        // Parent doesn't exist either — cannot safely validate the path
+        throw new Error('Access denied: cannot resolve path');
       }
     }
     const allowed = allowedRoots.some((root) => real.startsWith(root + '/') || real === root);
@@ -107,6 +111,7 @@ export function createApp(options: CreateAppOptions = {}) {
   }
 
   const lastWrittenContent = new Map<string, string>();
+  const writeLocks = new Map<string, Promise<void>>();
   const fileWatchers = new Map<
     string,
     { watcher: FSWatcher; clients: Set<WritableStreamDefaultWriter> }
@@ -152,8 +157,18 @@ export function createApp(options: CreateAppOptions = {}) {
       if (!isMdFile(resolved)) {
         return c.json({ error: 'Only .md files are supported' }, 400);
       }
-      lastWrittenContent.set(resolved, body.content);
-      await writeFile(resolved, body.content, 'utf-8');
+      // Serialize writes to the same path to prevent concurrent write races
+      const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
+      const currentWrite = prevLock.then(async () => {
+        await writeFile(resolved, body.content, 'utf-8');
+        lastWrittenContent.set(resolved, body.content);
+      }).finally(() => {
+        if (writeLocks.get(resolved) === currentWrite) {
+          writeLocks.delete(resolved);
+        }
+      });
+      writeLocks.set(resolved, currentWrite);
+      await currentWrite;
       return c.json({ success: true, path: resolved });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
@@ -279,6 +294,23 @@ export function createApp(options: CreateAppOptions = {}) {
         }
       });
       if (!path) return c.json({ error: 'No file selected' }, 400);
+      // Validate the picked path (OS picker returns an absolute path)
+      if (!isMdFile(path)) {
+        return c.json({ error: 'Only .md files are supported' }, 400);
+      }
+      // Grant access to the file's directory so subsequent API calls work
+      const pickedDir = dirname(resolve(path));
+      try {
+        const realDir = canonicalize(pickedDir);
+        if (!allowedRoots.some((root) => realDir.startsWith(root + '/') || realDir === root)) {
+          allowedRoots.push(realDir);
+        }
+      } catch {
+        // Can't canonicalize — add the raw resolved dir
+        if (!allowedRoots.some((root) => pickedDir.startsWith(root + '/') || pickedDir === root)) {
+          allowedRoots.push(pickedDir);
+        }
+      }
       return c.json({ path });
     } catch {
       return c.json({ cancelled: true });
@@ -307,6 +339,7 @@ export function createApp(options: CreateAppOptions = {}) {
       const clients = new Set<WritableStreamDefaultWriter>();
       let debounce: ReturnType<typeof setTimeout> | null = null;
       const cleanUpWatcher = () => {
+        if (debounce) { clearTimeout(debounce); debounce = null; }
         for (const client of clients) {
           client.close().catch(() => {});
         }

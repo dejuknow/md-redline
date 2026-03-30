@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, memo, useCallback } from 'react';
 import type { MdComment, CommentStatus } from '../types';
 import { getEffectiveStatus } from '../types';
 import { getAuthorColor } from '../hooks/useAuthor';
@@ -66,7 +66,7 @@ export const CommentCard = memo(function CommentCard({
     if (el) setIsClamped(el.scrollHeight > el.clientHeight);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     checkClamped();
   }, [comment.text, isTextExpanded, checkClamped]);
 
@@ -90,7 +90,7 @@ export const CommentCard = memo(function CommentCard({
       setEditText(comment.text);
       setIsEditing(true);
     }
-  }, [requestEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [requestEdit, comment.text]);
 
   useEffect(() => {
     if (requestReply) {

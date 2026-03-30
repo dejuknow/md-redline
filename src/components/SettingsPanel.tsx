@@ -41,15 +41,17 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
   const authorInputRef = useRef<HTMLInputElement>(null);
   const newLabelRef = useRef<HTMLInputElement>(null);
 
-  // Sync drafts when settings change or panel opens
+  // Sync drafts when panel opens (not during editing to avoid discarding in-progress changes)
+  const prevOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       setDraftTemplates(settings.templates);
       setDraftAuthor(author);
       setDraftMaxLength(String(settings.commentMaxLength));
       setEditingIndex(null);
       setAddingNew(false);
     }
+    prevOpenRef.current = open;
   }, [open, settings.templates, author, settings.commentMaxLength]);
 
   // Focus new template label input when adding

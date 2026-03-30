@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface BrowseResult {
   dir: string;
@@ -29,19 +29,26 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const abortRef = useRef<AbortController | null>(null);
+
   const browse = useCallback(async (dir?: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setError(null);
     try {
       const params = dir ? `?dir=${encodeURIComponent(dir)}` : '';
-      const res = await fetch(`/api/browse${params}`);
+      const res = await fetch(`/api/browse${params}`, { signal: controller.signal });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error);
       setData(result);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Failed to browse');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 

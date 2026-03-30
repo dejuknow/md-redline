@@ -1,5 +1,6 @@
 let mermaidModule: typeof import('mermaid') | null = null;
 let initTheme: string | null = null;
+let themeChangePromise: Promise<void> | null = null;
 
 async function getMermaid() {
   if (!mermaidModule) {
@@ -35,14 +36,20 @@ export async function renderMermaidBlock(
     const mermaid = await getMermaid();
     const mermaidTheme = getMermaidTheme(appTheme);
 
-    // Re-initialize if theme changed
+    // Serialize theme changes to avoid concurrent re-initialization races
     if (mermaidTheme !== initTheme) {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
-      });
-      initTheme = mermaidTheme;
+      if (!themeChangePromise) {
+        themeChangePromise = (async () => {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
+          });
+          initTheme = mermaidTheme;
+          themeChangePromise = null;
+        })();
+      }
+      await themeChangePromise;
     }
 
     const id = `mermaid-svg-${++renderCounter}`;

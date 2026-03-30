@@ -8,7 +8,7 @@ export interface EvalCase {
 export interface CommentExpectation {
   id: string;
   /** What the agent should do with this comment */
-  expectedAction: 'address';
+  expectedAction: 'address' | 'skip';
   /** Content assertions near the anchor after the agent acts */
   contentHints?: {
     shouldContain?: string[];

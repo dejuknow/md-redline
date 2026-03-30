@@ -101,4 +101,40 @@ describe('computeDiff', () => {
     expect(diff[changeIdx + 1].type).toBe('added');
     expect(diff[changeIdx + 1].text).toBe('new');
   });
+
+  it('handles large files without hanging (prefix/suffix optimization)', () => {
+    // Create two 2000-line files with a small change in the middle
+    const lines = Array.from({ length: 2000 }, (_, i) => `line ${i + 1}`);
+    const oldText = lines.join('\n');
+    const newLines = [...lines];
+    newLines[1000] = 'CHANGED LINE';
+    const newText = newLines.join('\n');
+
+    const start = Date.now();
+    const diff = computeDiff(oldText, newText);
+    const elapsed = Date.now() - start;
+
+    // Should complete in well under 5 seconds (prefix/suffix optimization)
+    expect(elapsed).toBeLessThan(5000);
+    // Should detect the change
+    const removed = diff.filter((l) => l.type === 'removed');
+    const added = diff.filter((l) => l.type === 'added');
+    expect(removed).toHaveLength(1);
+    expect(removed[0].text).toBe('line 1001');
+    expect(added).toHaveLength(1);
+    expect(added[0].text).toBe('CHANGED LINE');
+  });
+
+  it('handles large files with completely different content', () => {
+    const oldLines = Array.from({ length: 1500 }, (_, i) => `old ${i}`);
+    const newLines = Array.from({ length: 1500 }, (_, i) => `new ${i}`);
+
+    const start = Date.now();
+    const diff = computeDiff(oldLines.join('\n'), newLines.join('\n'));
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(5000);
+    expect(diff.filter((l) => l.type === 'removed').length).toBe(1500);
+    expect(diff.filter((l) => l.type === 'added').length).toBe(1500);
+  });
 });

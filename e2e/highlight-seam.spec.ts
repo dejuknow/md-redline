@@ -17,8 +17,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/highlight-seam-doc.md');
 const FIXTURE_ORIGINAL = readFileSync(FIXTURE, 'utf-8');
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
 });
 
 test.afterAll(() => {
