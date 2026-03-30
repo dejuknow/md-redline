@@ -114,6 +114,10 @@
   --theme-tint-success: rgba(16, 185, 129, 0.18);
   --theme-tint-danger: rgba(239, 68, 68, 0.15);
   --theme-comment-bg: #fef3c7;
+  /* Pre-composited comment-bg over page-bg. Used for mermaid SVG highlights
+     where semi-transparent backgrounds don't work. For new themes, compute:
+     R = bg_R + (fg_R - bg_R) * alpha, same for G and B. */
+  --theme-comment-bg-opaque: #fef3c7;
   --theme-comment-bg-hover: #fde68a;
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #d97706;
@@ -178,6 +182,7 @@
   --theme-tint-success: rgba(52, 211, 153, 0.25);
   --theme-tint-danger: rgba(248, 113, 113, 0.2);
   --theme-comment-bg: rgba(245, 158, 11, 0.2);
+  --theme-comment-bg-opaque: #3d3224;
   --theme-comment-bg-hover: rgba(245, 158, 11, 0.3);
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #fbbf24;
@@ -242,6 +247,7 @@
   --theme-tint-success: rgba(39, 174, 96, 0.18);
   --theme-tint-danger: rgba(192, 57, 43, 0.15);
   --theme-comment-bg: rgba(212, 160, 74, 0.2);
+  --theme-comment-bg-opaque: #f2e5d0;
   --theme-comment-bg-hover: rgba(212, 160, 74, 0.3);
   --theme-comment-underline: #d4a04a;
   --theme-comment-underline-active: #b8862e;
@@ -306,6 +312,7 @@
   --theme-tint-success: rgba(163, 190, 140, 0.25);
   --theme-tint-danger: rgba(191, 97, 106, 0.2);
   --theme-comment-bg: rgba(235, 203, 139, 0.2);
+  --theme-comment-bg-opaque: #54524f;
   --theme-comment-bg-hover: rgba(235, 203, 139, 0.3);
   --theme-comment-underline: #ebcb8b;
   --theme-comment-underline-active: #d08770;
@@ -370,6 +377,7 @@
   --theme-tint-success: rgba(156, 207, 216, 0.25);
   --theme-tint-danger: rgba(235, 111, 146, 0.2);
   --theme-comment-bg: rgba(246, 193, 119, 0.2);
+  --theme-comment-bg-opaque: #453935;
   --theme-comment-bg-hover: rgba(246, 193, 119, 0.3);
   --theme-comment-underline: #f6c177;
   --theme-comment-underline-active: #ea9d34;
@@ -434,6 +442,7 @@
   --theme-tint-success: rgba(133, 153, 0, 0.18);
   --theme-tint-danger: rgba(220, 50, 47, 0.15);
   --theme-comment-bg: rgba(181, 137, 0, 0.18);
+  --theme-comment-bg-opaque: #f0e2ba;
   --theme-comment-bg-hover: rgba(181, 137, 0, 0.28);
   --theme-comment-underline: #b58900;
   --theme-comment-underline-active: #926e00;
@@ -498,6 +507,7 @@
   --theme-tint-success: rgba(26, 127, 55, 0.15);
   --theme-tint-danger: rgba(207, 34, 46, 0.12);
   --theme-comment-bg: rgba(191, 135, 0, 0.15);
+  --theme-comment-bg-opaque: #f5edd9;
   --theme-comment-bg-hover: rgba(191, 135, 0, 0.25);
   --theme-comment-underline: #bf8700;
   --theme-comment-underline-active: #9a6700;
@@ -562,6 +572,7 @@
   --theme-tint-success: rgba(166, 227, 161, 0.25);
   --theme-tint-danger: rgba(243, 139, 168, 0.2);
   --theme-comment-bg: rgba(249, 226, 175, 0.2);
+  --theme-comment-bg-opaque: #4a4548;
   --theme-comment-bg-hover: rgba(249, 226, 175, 0.3);
   --theme-comment-underline: #f9e2af;
   --theme-comment-underline-active: #f2c97d;
@@ -688,10 +699,10 @@ mark.comment-highlight {
   line-height: inherit;
 }
 
-/* Override mermaid inline styles inside highlights */
-mark.comment-highlight span,
-mark.comment-highlight-active span {
-  color: inherit !important;
+/* Mermaid highlights use inline styles — Chrome ignores class-based
+   background-color on inline elements inside SVG foreignObject. */
+.mermaid-comment-highlight {
+  cursor: pointer;
 }
 
 .prose mark.comment-highlight:hover,
@@ -820,6 +831,11 @@ body {
   height: auto;
 }
 
+/* Mermaid sets foreignObject to a tight calculated height that can clip text
+   when browser font metrics differ slightly from the measurement pass. */
+.mermaid-block .mermaid-svg foreignObject {
+  overflow: visible;
+}
 
 .mermaid-error {
   padding: 1rem;

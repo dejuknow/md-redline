@@ -73,7 +73,7 @@ export const MarkdownViewer = memo(
       getContainer: () => containerRef.current,
       scrollToComment: (commentId: string) => {
         if (!containerRef.current) return;
-        const marks = containerRef.current.querySelectorAll('mark.comment-highlight');
+        const marks = containerRef.current.querySelectorAll('.comment-highlight, .mermaid-comment-highlight');
         const mark = Array.from(marks).find((m) =>
           (m as HTMLElement).dataset.commentIds?.split(',').includes(commentId),
         );
@@ -85,7 +85,7 @@ export const MarkdownViewer = memo(
       getActiveMarks: () => {
         if (!containerRef.current) return [];
         return Array.from(
-          containerRef.current.querySelectorAll('mark.comment-highlight-active'),
+          containerRef.current.querySelectorAll('.comment-highlight-active, .mermaid-comment-highlight-active'),
         ) as HTMLElement[];
       },
       getHeadings: () => {
@@ -179,6 +179,28 @@ export const MarkdownViewer = memo(
         );
       }
 
+      // IMPORTANT: Mermaid highlight quirks (do NOT refactor to class-based styles):
+      // 1. Chrome ignores class-based background-color on inline elements inside
+      //    SVG foreignObject — only inline style="..." works.
+      // 2. CSS text-decoration on <mark> prevents text wrapping inside foreignObject.
+      // 3. CSS background shorthand (e.g. linear-gradient) also prevents wrapping.
+      // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
+      // Solution: keep the <mark> but swap class styles for inline styles.
+      const rootStyles = getComputedStyle(document.documentElement);
+      const mermaidBg = rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim();
+      const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
+      const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
+      for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight')) {
+        mark.classList.remove('comment-highlight');
+        mark.classList.add('mermaid-comment-highlight');
+        const el = mark as HTMLElement;
+        el.style.backgroundColor = mermaidBg;
+        el.style.color = mermaidColor;
+        el.style.textDecoration = 'none';
+        el.style.borderBottom = `2px solid ${mermaidUnderline}`;
+        el.style.transition = 'none';
+      }
+
       // --- Selection highlight ---
       if (selectionText) {
         wrapText(
@@ -201,13 +223,13 @@ export const MarkdownViewer = memo(
 
       // Store reference to the active mark for drag handles
       activeMarkRef.current = container.querySelector(
-        'mark.comment-highlight-active',
+        '.comment-highlight-active, .mermaid-comment-highlight-active',
       ) as HTMLElement | null;
     }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, enableResolve, searchQuery, searchActiveIndex, mermaidSvgMap]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
-        'mark.comment-highlight',
+        '.comment-highlight, .mermaid-comment-highlight',
       ) as HTMLElement | null;
       if (mark?.dataset.commentIds) {
         const ids = mark.dataset.commentIds.split(',');
@@ -220,7 +242,7 @@ export const MarkdownViewer = memo(
 
       // Check if right-click is on a comment highlight
       const mark = (e.target as HTMLElement).closest(
-        'mark.comment-highlight',
+        '.comment-highlight, .mermaid-comment-highlight',
       ) as HTMLElement | null;
       if (mark?.dataset.commentIds) {
         e.preventDefault();

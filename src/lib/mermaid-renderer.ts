@@ -7,11 +7,11 @@ async function getMermaid() {
     mermaidModule = await import('mermaid');
     mermaidModule.default.initialize({
       startOnLoad: false,
-      securityLevel: 'strict',
+      securityLevel: 'loose',
       theme: 'default',
+      htmlLabels: true,
       flowchart: {
         useMaxWidth: true,
-        htmlLabels: true,
         wrappingWidth: 200,
       },
     });
@@ -20,11 +20,17 @@ async function getMermaid() {
   return mermaidModule.default;
 }
 
+// Maps app theme keys (from src/lib/themes.ts) to mermaid theme names.
+// Keep in sync when adding new themes.
 const THEME_MAP: Record<string, string> = {
   light: 'default',
   dark: 'dark',
   sepia: 'neutral',
   nord: 'dark',
+  'rose-pine': 'dark',
+  solarized: 'default',
+  github: 'default',
+  catppuccin: 'dark',
 };
 
 export function getMermaidTheme(appTheme: string): string {
@@ -47,11 +53,11 @@ export async function renderMermaidBlock(
         themeChangePromise = (async () => {
           mermaid.initialize({
             startOnLoad: false,
-            securityLevel: 'strict',
+            securityLevel: 'loose',
             theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
+            htmlLabels: true,
             flowchart: {
               useMaxWidth: true,
-              htmlLabels: true,
               wrappingWidth: 200,
             },
           });
