@@ -49,8 +49,8 @@ test.describe('Diff view', () => {
     // Switch to diff view
     await page.locator('button[title="View diff since snapshot"]').click();
 
-    // Should show "No changes detected"
-    await expect(page.getByText('No changes detected')).toBeVisible();
+    // Should show "No changes yet"
+    await expect(page.getByText('No changes yet')).toBeVisible();
   });
 
   test('diff view shows changes after external file edit', async ({ page }) => {
@@ -86,7 +86,7 @@ test.describe('Diff view', () => {
     // Take snapshot and switch to diff
     await page.locator('button[title="Take diff snapshot"]').click();
     await page.locator('button[title="View diff since snapshot"]').click();
-    await expect(page.getByText('No changes detected')).toBeVisible();
+    await expect(page.getByText('No changes yet')).toBeVisible();
 
     // Switch back to rendered
     await page.locator('button[title="Switch to rendered view"]').click();

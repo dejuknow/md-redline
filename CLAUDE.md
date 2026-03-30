@@ -117,6 +117,7 @@ All of the following are saved to localStorage and restored on reload:
 - Recent files list
 - Theme selection
 - Author name
+- Diff snapshots (per-file)
 
 ### Keyboard shortcuts
 | Shortcut | Action |
@@ -126,6 +127,7 @@ All of the following are saved to localStorage and restored on reload:
 | `Cmd+Enter` | Submit comment / expand comment form |
 | `Cmd+1-8` | Apply quick template 1-8 on selection |
 | `Cmd+Shift+M` | Start commenting on selection |
+| `Cmd+Shift+S` | Take/update diff snapshot |
 | `Cmd+\` | Toggle sidebar |
 | `N` / `J` | Jump to next comment |
 | `P` / `K` | Jump to previous comment |

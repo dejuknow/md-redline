@@ -129,8 +129,25 @@ export default function App() {
     }
   }, [openTab, switchTab]);
 
-  // Diff snapshot state: per-file snapshots stored in a map
-  const [snapshots, setSnapshots] = useState<Map<string, string>>(new Map());
+  // Diff snapshot state: per-file snapshots persisted to localStorage
+  const [snapshots, setSnapshots] = useState<Map<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('md-redline-snapshots');
+      if (!raw) return new Map();
+      return new Map(Object.entries(JSON.parse(raw)));
+    } catch {
+      return new Map();
+    }
+  });
+  useEffect(() => {
+    try {
+      if (snapshots.size === 0) {
+        localStorage.removeItem('md-redline-snapshots');
+      } else {
+        localStorage.setItem('md-redline-snapshots', JSON.stringify(Object.fromEntries(snapshots)));
+      }
+    } catch { /* ignore quota errors */ }
+  }, [snapshots]);
   const currentSnapshot = activeFilePath ? (snapshots.get(activeFilePath) ?? null) : null;
 
   // Toast notification state (Feature 8)
@@ -649,8 +666,22 @@ After you're done, give me a brief summary:
   // Take diff snapshot
   const handleSnapshot = useCallback(() => {
     if (!activeFilePath) return;
+    const isUpdate = snapshots.has(activeFilePath);
     setSnapshots((prev) => new Map(prev).set(activeFilePath, rawMarkdownRef.current));
-  }, [activeFilePath]);
+    showToast(isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes');
+  }, [activeFilePath, snapshots, showToast]);
+
+  // Clear diff snapshot for current file
+  const handleClearSnapshot = useCallback(() => {
+    if (!activeFilePath) return;
+    setSnapshots((prev) => {
+      const next = new Map(prev);
+      next.delete(activeFilePath);
+      return next;
+    });
+    if (viewMode === 'diff') setViewMode('rendered');
+    showToast('Snapshot cleared');
+  }, [activeFilePath, viewMode, setViewMode, showToast]);
 
   // Jump to next comment (skip resolved when resolve is enabled)
   const handleJumpToNext = useCallback(() => {
@@ -1173,6 +1204,13 @@ After you're done, give me a brief summary:
         return;
       }
 
+      // Cmd+Shift+S : Take/update diff snapshot
+      if (mod && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSnapshot();
+        return;
+      }
+
       // Browser-safe tab shortcuts: Alt+Shift+, / .
       if (!mod && !isInput && !showCommandPalette && e.altKey && e.shiftKey) {
         if (e.code === 'Comma') {
@@ -1254,6 +1292,7 @@ After you're done, give me a brief summary:
     handleAddComment,
     handleResolve,
     handleUnresolve,
+    handleSnapshot,
     viewMode,
     activeCommentId,
     comments,
@@ -1328,7 +1367,8 @@ After you're done, give me a brief summary:
       { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
       {
         id: 'take-snapshot',
-        label: 'Take diff snapshot',
+        label: currentSnapshot ? 'Update diff snapshot' : 'Take diff snapshot',
+        shortcut: `${modKey}+Shift+S`,
         section: 'File',
         onExecute: handleSnapshot,
       },
@@ -1408,12 +1448,20 @@ After you're done, give me a brief summary:
     ];
 
     if (currentSnapshot) {
-      cmds.push({
-        id: 'view-diff',
-        label: 'Toggle diff view',
-        section: 'View',
-        onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')),
-      });
+      cmds.push(
+        {
+          id: 'view-diff',
+          label: 'Toggle diff view',
+          section: 'View',
+          onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')),
+        },
+        {
+          id: 'clear-snapshot',
+          label: 'Clear diff snapshot',
+          section: 'File',
+          onExecute: handleClearSnapshot,
+        },
+      );
     }
 
     if (settings.enableResolve && commentCount > 0) {
@@ -1497,6 +1545,7 @@ After you're done, give me a brief summary:
     handleJumpToPrev,
     reloadFile,
     handleSnapshot,
+    handleClearSnapshot,
     currentSnapshot,
     commentCount,
     settings.enableResolve,
@@ -1549,6 +1598,7 @@ After you're done, give me a brief summary:
           if (mode === 'raw') clearSelection();
         }}
         onSnapshot={handleSnapshot}
+        onClearSnapshot={handleClearSnapshot}
         onJumpToNext={handleJumpToNext}
         onSearch={() => {
           if (showSearch) {

@@ -32,9 +32,11 @@ export function DiffViewer({ oldRaw, newRaw }: Props) {
             d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <p className="text-sm font-medium text-content-secondary mb-1">No changes detected</p>
-        <p className="text-xs text-center leading-relaxed">
-          The file content matches your last snapshot.
+        <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
+        <p className="text-xs text-center leading-relaxed max-w-xs">
+          This view updates automatically when the file is modified.
+          <br />
+          Hand off to an agent and changes will appear here.
         </p>
       </div>
     );
