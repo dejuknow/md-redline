@@ -43,9 +43,6 @@ eval/results/
 *.png
 !public/**/*.png
 
-# Sample file (users modify locally for testing)
-sample.md
-
 # Claude Code
 .claude/
 .gstack/
