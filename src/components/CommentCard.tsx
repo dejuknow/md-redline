@@ -238,7 +238,7 @@ export const CommentCard = memo(function CommentCard({
       <div className="px-3 pb-2 flex items-center justify-between">
         <span className="text-xs text-content-muted flex items-center gap-1.5">
           <span
-            className="inline-block w-2 h-2 rounded-full shrink-0"
+            className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
             style={{ backgroundColor: getAuthorColor(comment.author).text }}
             title={comment.author}
           />
@@ -291,7 +291,7 @@ export const CommentCard = memo(function CommentCard({
               <p className="text-content-secondary leading-relaxed">{reply.text}</p>
               <span className="text-content-muted flex items-center gap-1">
                 <span
-                  className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                  className="inline-block w-2 h-2 rounded-full shrink-0"
                   style={{ backgroundColor: getAuthorColor(reply.author).text }}
                 />
                 {reply.author} &middot; {getTimeAgo(reply.timestamp)}

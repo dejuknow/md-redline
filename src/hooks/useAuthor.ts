@@ -2,16 +2,16 @@ import { useState, useCallback } from 'react';
 
 const STORAGE_KEY = 'md-redline-author';
 
-// 8 distinct hues for author color coding
+// 8 maximally distinct hues for author color coding
 const AUTHOR_COLORS = [
-  { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' }, // blue
-  { bg: '#fce7f3', text: '#9d174d', border: '#f9a8d4' }, // pink
-  { bg: '#d1fae5', text: '#065f46', border: '#6ee7b7' }, // green
-  { bg: '#fef3c7', text: '#92400e', border: '#fcd34d' }, // amber
-  { bg: '#ede9fe', text: '#5b21b6', border: '#c4b5fd' }, // violet
-  { bg: '#ffedd5', text: '#9a3412', border: '#fdba74' }, // orange
-  { bg: '#cffafe', text: '#155e75', border: '#67e8f9' }, // cyan
-  { bg: '#fce4ec', text: '#880e4f', border: '#f48fb1' }, // rose
+  { bg: '#dbeafe', text: '#2563eb', border: '#93c5fd' }, // blue
+  { bg: '#fce7f3', text: '#db2777', border: '#f9a8d4' }, // pink
+  { bg: '#d1fae5', text: '#059669', border: '#6ee7b7' }, // green
+  { bg: '#fef3c7', text: '#d97706', border: '#fcd34d' }, // amber
+  { bg: '#ede9fe', text: '#7c3aed', border: '#c4b5fd' }, // violet
+  { bg: '#ffedd5', text: '#ea580c', border: '#fdba74' }, // orange
+  { bg: '#cffafe', text: '#0891b2', border: '#67e8f9' }, // cyan
+  { bg: '#fce4ec', text: '#e11d48', border: '#f48fb1' }, // rose
 ];
 
 function hashString(str: string): number {

@@ -9,9 +9,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider
       attribute="data-theme"
-      defaultTheme="light"
-      themes={['light', 'dark', 'sepia', 'nord']}
-      enableSystem={false}
+      defaultTheme="system"
+      themes={['light', 'dark', 'sepia', 'nord', 'rose-pine', 'solarized', 'github', 'catppuccin']}
+      enableSystem={true}
     >
       <SettingsProvider>
         <App />

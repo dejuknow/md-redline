@@ -4,11 +4,18 @@ import { useSettings } from '../contexts/SettingsContext';
 import type { CommentTemplate } from '../lib/settings';
 import { DEFAULT_TEMPLATES } from '../lib/settings';
 
-const THEMES = [
+const LIGHT_THEMES = [
   { key: 'light', label: 'Light', colors: ['#ffffff', '#4f46e5', '#f59e0b'] },
-  { key: 'dark', label: 'Dark', colors: ['#0f172a', '#818cf8', '#f59e0b'] },
   { key: 'sepia', label: 'Sepia', colors: ['#faf6f1', '#8b5e3c', '#d4a04a'] },
+  { key: 'solarized', label: 'Solarized', colors: ['#fdf6e3', '#268bd2', '#b58900'] },
+  { key: 'github', label: 'GitHub', colors: ['#ffffff', '#0969da', '#bf8700'] },
+];
+
+const DARK_THEMES = [
+  { key: 'dark', label: 'Dark', colors: ['#0f172a', '#818cf8', '#f59e0b'] },
   { key: 'nord', label: 'Nord', colors: ['#2e3440', '#88c0d0', '#ebcb8b'] },
+  { key: 'rose-pine', label: 'Rosé Pine', colors: ['#191724', '#c4a7e7', '#f6c177'] },
+  { key: 'catppuccin', label: 'Catppuccin', colors: ['#1e1e2e', '#cba6f7', '#f9e2af'] },
 ];
 
 type Section = 'templates' | 'general' | 'theme';
@@ -230,7 +237,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
           </button>
         </div>
 
-        <div className="flex h-[500px]">
+        <div className="flex h-[580px]">
           {/* Sidebar navigation */}
           <div className="w-40 border-r border-border bg-surface-secondary shrink-0 py-2">
             {sections.map((s) => (
@@ -517,7 +524,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                 <div>
                   <h3 className="text-sm font-semibold text-content mb-1">Comment Max Length</h3>
                   <p className="text-xs text-content-muted mb-2">
-                    Maximum number of characters allowed in a comment.
+                    Maximum characters per comment. Long inline markers can confuse AI agents parsing the file.
                   </p>
                   <input
                     type="number"
@@ -546,8 +553,80 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                 <p className="text-xs text-content-muted mb-4">
                   Choose a color theme for the interface.
                 </p>
+
+                {/* System theme */}
+                <button
+                  onClick={() => setTheme('system')}
+                  className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-colors mb-5 flex items-center gap-3 ${
+                    theme === 'system'
+                      ? 'border-primary bg-primary-bg'
+                      : 'border-border hover:border-primary-border hover:bg-tint'
+                  }`}
+                >
+                  <svg className={`w-5 h-5 ${theme === 'system' ? 'text-primary-text' : 'text-content-muted'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
+                  </svg>
+                  <div>
+                    <span className={`text-sm font-medium ${theme === 'system' ? 'text-primary-text' : 'text-content'}`}>
+                      System
+                    </span>
+                    <p className="text-xs text-content-muted">Follows your OS appearance setting</p>
+                  </div>
+                  {theme === 'system' && (
+                    <svg className="w-3.5 h-3.5 ml-auto text-primary-text" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  )}
+                </button>
+
+                {/* Light themes */}
+                <p className="text-xs font-medium text-content-muted uppercase tracking-wider mb-2">Light</p>
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  {LIGHT_THEMES.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => setTheme(t.key)}
+                      className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
+                        theme === t.key
+                          ? 'border-primary bg-primary-bg'
+                          : 'border-border hover:border-primary-border hover:bg-tint'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex gap-1">
+                          {t.colors.map((c, i) => (
+                            <div
+                              key={i}
+                              className="w-4 h-4 rounded-full border border-border"
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <span className={`text-sm font-medium ${
+                        theme === t.key ? 'text-primary-text' : 'text-content'
+                      }`}>
+                        {t.label}
+                      </span>
+                      {theme === t.key && (
+                        <svg
+                          className="inline-block w-3.5 h-3.5 ml-1.5 text-primary-text"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dark themes */}
+                <p className="text-xs font-medium text-content-muted uppercase tracking-wider mb-2">Dark</p>
                 <div className="grid grid-cols-2 gap-3">
-                  {THEMES.map((t) => (
+                  {DARK_THEMES.map((t) => (
                     <button
                       key={t.key}
                       onClick={() => setTheme(t.key)}

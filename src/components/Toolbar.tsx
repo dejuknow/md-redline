@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react';
-import { getAuthorColor } from '../hooks/useAuthor';
 import { getPrimaryModifierLabel } from '../lib/platform';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
@@ -32,7 +31,6 @@ export function Toolbar({
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft] = useState(author);
   const authorInputRef = useRef<HTMLInputElement>(null);
-  const authorColor = getAuthorColor(author);
   const modLabel = getPrimaryModifierLabel();
 
   useEffect(() => {
@@ -126,10 +124,6 @@ export function Toolbar({
           className="flex items-center gap-1.5 text-xs text-content-secondary hover:text-content transition-colors px-1.5 py-0.5 rounded hover:bg-tint"
           title="Click to change author name"
         >
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: authorColor.text }}
-          />
           {author}
         </button>
       )}
