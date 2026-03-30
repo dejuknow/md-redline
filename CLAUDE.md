@@ -125,14 +125,20 @@ All of the following are saved to localStorage and restored on reload:
 | `Cmd+K` | Toggle command palette |
 | `Cmd+B` | Toggle file explorer |
 | `Cmd+Enter` | Submit comment / expand comment form |
-| `Cmd+1-8` | Apply quick template 1-8 on selection |
 | `Cmd+Shift+M` | Start commenting on selection |
 | `Cmd+Shift+S` | Take/update diff snapshot |
+| `Cmd+Shift+[` / `]` | Previous / next tab |
+| `Cmd+Shift+O` | Toggle document outline |
 | `Cmd+\` | Toggle sidebar |
+| `Cmd+F` | Find in document |
+| `Cmd+O` | Open file |
+| `Cmd+,` | Open settings |
 | `N` / `J` | Jump to next comment |
 | `P` / `K` | Jump to previous comment |
+| `D` | Delete active comment |
 | `A` / `X` | Resolve active comment (when resolve enabled) |
 | `U` | Reopen active resolved comment (when resolve enabled) |
+| `?` | Show keyboard shortcuts help |
 | `Escape` | Cancel comment form / unlock selection / cancel drag |
 
 ### Toast notifications

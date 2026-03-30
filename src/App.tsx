@@ -51,6 +51,7 @@ import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
+import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
 import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
@@ -169,6 +170,7 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showFileOpener, setShowFileOpener] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const openFilePicker = useCallback(() => {
     setShowCommandPalette(false);
@@ -1093,10 +1095,6 @@ After you're done, give me a brief summary:
     if (viewMode === 'diff') setSearchMatchCount(0);
   }, [viewMode]);
 
-  // Stable ref for templates to use in keyboard handler
-  const templatesRef = useRef(settings.templates);
-  templatesRef.current = settings.templates;
-
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1120,17 +1118,14 @@ After you're done, give me a brief summary:
         return;
       }
 
-      // Cmd+Shift+O : Toggle outline view in left panel (must come before Cmd+O)
+      // Cmd+Shift+O : Toggle outline (must come before Cmd+O)
       if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
-        if (!explorerVisible) {
+        if (explorerVisible && leftPanelView === 'outline') {
+          setExplorerVisible(false);
+        } else {
           setExplorerVisible(true);
           setLeftPanelView('outline');
-        } else if (leftPanelView === 'explorer') {
-          setLeftPanelView('outline');
-        } else {
-          setExplorerVisible(false);
-          setLeftPanelView('explorer');
         }
         return;
       }
@@ -1145,7 +1140,12 @@ After you're done, give me a brief summary:
       // Cmd+B : Toggle file explorer
       if (mod && e.key === 'b') {
         e.preventDefault();
-        setExplorerVisible((prev) => !prev);
+        if (explorerVisible && leftPanelView === 'explorer') {
+          setExplorerVisible(false);
+        } else {
+          setExplorerVisible(true);
+          setLeftPanelView('explorer');
+        }
         return;
       }
 
@@ -1188,15 +1188,15 @@ After you're done, give me a brief summary:
         return;
       }
 
-      // Browser-safe tab shortcuts: Alt+Shift+, / .
-      if (!mod && !isInput && !showCommandPalette && e.altKey && e.shiftKey) {
-        if (e.code === 'Comma') {
+      // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari)
+      if (mod && e.shiftKey && !isInput && !showCommandPalette) {
+        if (e.code === 'BracketLeft') {
           e.preventDefault();
           switchTabByOffset(-1);
           return;
         }
 
-        if (e.code === 'Period') {
+        if (e.code === 'BracketRight') {
           e.preventDefault();
           switchTabByOffset(1);
           return;
@@ -1205,6 +1205,14 @@ After you're done, give me a brief summary:
 
       // Keys below only work outside inputs and when command palette is closed
       if (isInput || showCommandPalette) return;
+
+      // ? : Toggle keyboard shortcuts help
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowShortcuts((prev) => !prev);
+        return;
+      }
+
       if (mod || e.shiftKey || e.altKey) return;
 
       const key = e.key.toLowerCase();
@@ -1258,6 +1266,13 @@ After you're done, give me a brief summary:
         }
         return;
       }
+
+      // D : Delete active comment
+      if (key === 'd' && activeCommentId) {
+        e.preventDefault();
+        handleDelete(activeCommentId);
+        return;
+      }
     };
 
     document.addEventListener('keydown', handler);
@@ -1267,6 +1282,7 @@ After you're done, give me a brief summary:
     handleJumpToNext,
     handleJumpToPrev,
     handleAddComment,
+    handleDelete,
     handleResolve,
     handleUnresolve,
     handleSnapshot,
@@ -1288,8 +1304,8 @@ After you're done, give me a brief summary:
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
   const modKey = isMac ? '\u2318' : 'Ctrl';
-  const prevTabShortcut = isMac ? '\u2325\u21e7,' : 'Alt+Shift+,';
-  const nextTabShortcut = isMac ? '\u2325\u21e7.' : 'Alt+Shift+.';
+  const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
+  const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 
   // Command palette commands
   const paletteCommands = useMemo((): Command[] => {
@@ -1362,7 +1378,14 @@ After you're done, give me a brief summary:
         label: 'Toggle file explorer',
         shortcut: `${modKey}+B`,
         section: 'View',
-        onExecute: () => setExplorerVisible((p) => !p),
+        onExecute: () => {
+          if (explorerVisible && leftPanelView === 'explorer') {
+            setExplorerVisible(false);
+          } else {
+            setExplorerVisible(true);
+            setLeftPanelView('explorer');
+          }
+        },
       },
       {
         id: 'toggle-outline',
@@ -1370,14 +1393,11 @@ After you're done, give me a brief summary:
         shortcut: `${modKey}+Shift+O`,
         section: 'View',
         onExecute: () => {
-          if (!explorerVisible) {
+          if (explorerVisible && leftPanelView === 'outline') {
+            setExplorerVisible(false);
+          } else {
             setExplorerVisible(true);
             setLeftPanelView('outline');
-          } else if (leftPanelView === 'explorer') {
-            setLeftPanelView('outline');
-          } else {
-            setExplorerVisible(false);
-            setLeftPanelView('explorer');
           }
         },
       },
@@ -1387,6 +1407,13 @@ After you're done, give me a brief summary:
         shortcut: `${modKey}+,`,
         section: 'General',
         onExecute: () => setShowSettings(true),
+      },
+      {
+        id: 'keyboard-shortcuts',
+        label: 'Keyboard shortcuts',
+        shortcut: '?',
+        section: 'General',
+        onExecute: () => setShowShortcuts(true),
       },
       {
         id: 'find',
@@ -1492,6 +1519,7 @@ After you're done, give me a brief summary:
       cmds.push({
         id: 'delete-active',
         label: 'Delete active comment',
+        shortcut: 'D',
         section: 'Comments',
         onExecute: () => handleDelete(activeCommentId),
       });
@@ -1903,6 +1931,11 @@ After you're done, give me a brief summary:
         author={author}
         onAuthorChange={setAuthor}
       />
+      <KeyboardShortcutsPanel
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+        resolveEnabled={settings.enableResolve}
+      />
 
       {/* Keyboard shortcuts hint */}
       <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-muted shrink-0">
@@ -1912,55 +1945,11 @@ After you're done, give me a brief summary:
           </kbd>{' '}
           Commands
         </span>
-        <span>
+        <span className="ml-auto">
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {modKey}+F
+            ?
           </kbd>{' '}
-          Find
-        </span>
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {prevTabShortcut}
-          </kbd>{' '}
-          /{' '}
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {nextTabShortcut}
-          </kbd>{' '}
-          Tabs
-        </span>
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            N
-          </kbd>{' '}
-          /{' '}
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            P
-          </kbd>{' '}
-          Next / Prev
-        </span>
-        {settings.enableResolve && (
-          <span>
-            <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-              A
-            </kbd>{' '}
-            Resolve{' '}
-            <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-              U
-            </kbd>{' '}
-            Reopen
-          </span>
-        )}
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {modKey}+Enter
-          </kbd>{' '}
-          Comment
-        </span>
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
-            {modKey}+Shift+O
-          </kbd>{' '}
-          Outline
+          Shortcuts
         </span>
       </div>
     </div>

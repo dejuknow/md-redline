@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { StyledShortcut } from '../lib/shortcut-label';
 
 export interface Command {
   id: string;
@@ -177,7 +178,7 @@ export function CommandPalette({ commands, open, onClose }: Props) {
                             : 'border-border text-content-muted bg-surface'
                         }`}
                       >
-                        {cmd.shortcut}
+                        <StyledShortcut text={cmd.shortcut} />
                       </kbd>
                     )}
                   </button>
