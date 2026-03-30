@@ -12,10 +12,10 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className
 }
 
 const intentClasses: Record<Intent, string> = {
-  neutral: 'text-content-secondary hover:bg-surface-inset',
-  primary: 'text-primary-text hover:bg-primary-bg',
-  success: 'text-success-text hover:bg-success-bg',
-  danger: 'text-danger hover:bg-danger-bg',
+  neutral: 'text-content-secondary hover:text-content hover:bg-tint',
+  primary: 'text-primary-text hover:bg-tint-primary',
+  success: 'text-success-text hover:bg-tint-success',
+  danger: 'text-danger hover:bg-tint-danger',
   submit: 'bg-primary text-on-primary hover:bg-primary-hover disabled:opacity-40',
 };
 

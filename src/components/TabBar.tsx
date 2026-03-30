@@ -39,10 +39,10 @@ interface Props {
 }
 
 const tabControlButtonClass =
-  'flex h-full w-8 items-center justify-center shrink-0 border-l border-border text-content-muted transition-colors hover:bg-surface-inset hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
+  'flex h-full w-8 items-center justify-center shrink-0 border-l border-border text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
 
 const tabActionButtonClass =
-  'sticky right-0 z-10 flex h-full items-center justify-center bg-surface-secondary px-2.5 shrink-0 border-r border-border text-content-muted transition-colors hover:bg-surface-inset hover:text-content';
+  'sticky right-0 z-10 flex h-full items-center justify-center bg-surface-secondary px-2.5 shrink-0 border-r border-border text-content-muted transition-colors hover:bg-tint hover:text-content';
 
 const handOffIcon = (
   <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -123,7 +123,7 @@ function HandOffButton({
                   <button
                     key={path}
                     onClick={() => toggle(path)}
-                    className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-surface-inset transition-colors"
+                    className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-tint transition-colors"
                     title={path}
                   >
                     <span className="w-3 h-3 shrink-0 flex items-center justify-center">
@@ -350,7 +350,7 @@ export function TabBar({
                   className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-r border-border border-b-2 shrink-0 max-w-[200px] transition-colors ${
                     isActive
                       ? 'bg-surface text-content font-medium border-b-primary'
-                      : 'border-b-transparent text-content-secondary hover:text-content hover:bg-surface-inset'
+                      : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
                   }`}
                   title={tab.filePath}
                 >
@@ -372,7 +372,7 @@ export function TabBar({
                       e.stopPropagation();
                       onCloseTab(tab.filePath);
                     }}
-                    className={`ml-1 p-0.5 rounded hover:bg-surface-inset shrink-0 transition-opacity ${
+                    className={`ml-1 p-0.5 rounded hover:bg-tint shrink-0 transition-opacity ${
                       isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     }`}
                   >
@@ -477,7 +477,7 @@ export function TabBar({
                           setTabListOpen(false);
                         }}
                         className={`w-full px-3 py-2 flex items-center gap-2 text-left transition-colors ${
-                          isActive ? 'bg-surface-inset' : 'hover:bg-surface-inset'
+                          isActive ? 'bg-surface-inset' : 'hover:bg-tint'
                         }`}
                         title={tab.filePath}
                       >

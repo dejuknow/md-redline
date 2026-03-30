@@ -123,7 +123,7 @@ export function Toolbar({
             setAuthorDraft(author);
             setEditingAuthor(true);
           }}
-          className="flex items-center gap-1.5 text-xs text-content-secondary hover:text-content transition-colors px-1.5 py-0.5 rounded hover:bg-surface-inset"
+          className="flex items-center gap-1.5 text-xs text-content-secondary hover:text-content transition-colors px-1.5 py-0.5 rounded hover:bg-tint"
           title="Click to change author name"
         >
           <span

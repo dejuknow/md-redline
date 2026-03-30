@@ -155,7 +155,7 @@ export function CommentSidebar({
                   className={`text-[10px] px-2 py-1 rounded-md font-medium transition-colors ${
                     filter === key
                       ? 'bg-primary-bg-strong text-primary-text'
-                      : 'text-content-secondary hover:bg-surface-inset'
+                      : 'text-content-secondary hover:bg-tint'
                   }`}
                 >
                   {label}
@@ -253,12 +253,13 @@ export function CommentSidebar({
               <>{comments.length} comment{comments.length !== 1 ? 's' : ''}</>
             )}
           </span>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             {resolveEnabled ? (
               <>
                 {openCount > 0 && onBulkResolve && (
                   <ActionButton
                     intent="success"
+                    size="sm"
                     onClick={(e) => { e.stopPropagation(); onBulkResolve(); }}
                     title="Resolve all open comments"
                   >
@@ -268,6 +269,7 @@ export function CommentSidebar({
                 {resolvedCount > 0 && onBulkDeleteResolved && (
                   <ActionButton
                     intent="danger"
+                    size="sm"
                     onClick={(e) => { e.stopPropagation(); onBulkDeleteResolved(); }}
                     title="Delete all resolved comments"
                   >
@@ -279,6 +281,7 @@ export function CommentSidebar({
               comments.length > 0 && (
                 <ActionButton
                   intent="danger"
+                  size="sm"
                   onClick={(e) => { e.stopPropagation(); onBulkDelete(); }}
                   title="Delete all comments"
                 >

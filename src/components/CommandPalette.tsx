@@ -165,7 +165,7 @@ export function CommandPalette({ commands, open, onClose }: Props) {
                     className={`w-full text-left px-4 py-2 flex items-center justify-between text-sm transition-colors ${
                       isSelected
                         ? 'bg-primary-bg text-primary-text'
-                        : 'text-content hover:bg-surface-inset'
+                        : 'text-content hover:bg-tint'
                     }`}
                   >
                     <span>{cmd.label}</span>

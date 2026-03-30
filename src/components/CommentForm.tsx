@@ -160,7 +160,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               <button
                 key={t.label}
                 onClick={() => handleTemplateClick(t.text)}
-                className="text-[10px] px-2 py-1 rounded-md bg-surface border border-border text-content-secondary hover:bg-primary-bg hover:text-primary-text hover:border-primary-border transition-colors"
+                className="text-[10px] px-2 py-1 rounded-md bg-surface border border-border text-content-secondary hover:bg-tint-primary hover:text-primary-text hover:border-primary-border transition-colors"
               >
                 {t.label}
               </button>
@@ -198,7 +198,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
                 showTemplates
                   ? 'bg-primary-bg-strong text-primary-text'
-                  : 'text-content-muted hover:text-primary-text hover:bg-primary-bg'
+                  : 'text-content-muted hover:text-primary-text hover:bg-tint-primary'
               }`}
               title="Quick templates"
             >
@@ -220,7 +220,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           <div className="flex gap-2">
             <button
               onClick={onCancel}
-              className="text-xs px-3 py-1.5 text-content-secondary hover:bg-surface-inset rounded-md transition-colors"
+              className="text-xs px-3 py-1.5 text-content-secondary hover:bg-tint rounded-md transition-colors"
             >
               Cancel
             </button>

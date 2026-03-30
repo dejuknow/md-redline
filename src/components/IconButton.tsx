@@ -16,16 +16,16 @@ const baseClasses = 'p-1 rounded transition-colors focus-visible:outline-none fo
 
 const variantClasses: Record<Variant, { on: string; off: string }> = {
   neutral: {
-    on: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
+    on: 'text-content-muted hover:text-content-secondary hover:bg-tint',
+    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
   },
   active: {
     on: 'text-primary-text bg-primary-bg',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
+    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
   },
   success: {
-    on: 'text-success-text hover:text-success hover:bg-success-bg',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
+    on: 'text-success-text hover:text-success hover:bg-tint-success',
+    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
   },
 };
 

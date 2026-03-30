@@ -61,7 +61,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
           </h2>
           <button
             onClick={onClose}
-            className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+            className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
             title="Close explorer"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -130,7 +130,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
                 e.preventDefault();
                 onCtxMenu({ type: 'directory', path: dir.path, name: dir.name, x: e.clientX, y: e.clientY });
               }}
-              className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-inset transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-tint transition-colors"
             >
               <svg
                 className="w-3.5 h-3.5 text-warning shrink-0"
@@ -164,7 +164,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
                 className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                   isActive
                     ? 'bg-primary-bg text-primary-text font-medium'
-                    : 'text-content hover:bg-surface-inset'
+                    : 'text-content hover:bg-tint'
                 }`}
                 title={file.path}
               >

@@ -202,7 +202,7 @@ export function FileOpener({
                     className={`w-full text-left px-4 py-2 flex items-center gap-3 transition-colors ${
                       isSelected
                         ? 'bg-primary-bg text-primary-text'
-                        : 'text-content hover:bg-surface-inset'
+                        : 'text-content hover:bg-tint'
                     }`}
                   >
                     <svg
@@ -263,7 +263,7 @@ export function FileOpener({
               className={`w-full text-left px-4 py-2.5 flex items-center gap-3 text-sm transition-colors ${
                 selectedIndex === SYSTEM_INDEX
                   ? 'bg-primary-bg text-primary-text'
-                  : 'text-content hover:bg-surface-inset'
+                  : 'text-content hover:bg-tint'
               }`}
             >
               <svg

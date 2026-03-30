@@ -25,7 +25,7 @@ export function ThemeSelector() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-surface-inset"
+        className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-tint"
         title="Switch theme"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -48,7 +48,7 @@ export function ThemeSelector() {
               className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${
                 theme === t.key
                   ? 'bg-primary-bg text-primary-text font-medium'
-                  : 'text-content-secondary hover:bg-surface-inset'
+                  : 'text-content-secondary hover:bg-tint'
               }`}
             >
               <div className="flex gap-0.5">

@@ -142,7 +142,7 @@ export function ContextMenu({ items, position, onClose }: Props) {
                 onMouseEnter={(e) => handleSubmenuHover(idx, e)}
                 onMouseLeave={() => setOpenSubmenuIdx(null)}
               >
-                <div className="flex items-center justify-between px-3 py-1.5 text-xs text-content hover:bg-surface-inset cursor-default transition-colors">
+                <div className="flex items-center justify-between px-3 py-1.5 text-xs text-content hover:bg-tint cursor-default transition-colors">
                   <span>{entry.label}</span>
                   <svg
                     className="w-3 h-3 text-content-muted ml-4"
@@ -176,8 +176,8 @@ export function ContextMenu({ items, position, onClose }: Props) {
                           subItem.disabled
                             ? 'text-content-muted cursor-not-allowed'
                             : subItem.danger
-                              ? 'text-danger hover:bg-danger-bg cursor-default'
-                              : 'text-content hover:bg-surface-inset cursor-default'
+                              ? 'text-danger hover:bg-tint-danger cursor-default'
+                              : 'text-content hover:bg-tint cursor-default'
                         }`}
                       >
                         {subItem.label}
@@ -199,8 +199,8 @@ export function ContextMenu({ items, position, onClose }: Props) {
                 entry.disabled
                   ? 'text-content-muted cursor-not-allowed'
                   : entry.danger
-                    ? 'text-danger hover:bg-danger-bg cursor-default'
-                    : 'text-content hover:bg-surface-inset cursor-default'
+                    ? 'text-danger hover:bg-tint-danger cursor-default'
+                    : 'text-content hover:bg-tint cursor-default'
               }`}
             >
               {entry.label}

@@ -82,6 +82,7 @@ function getCard(page: Page, commentText: string) {
 /**
  * Hover on a card and click an action button.
  * Action buttons have opacity-0 until hover, so we must force-click.
+ * For actions inside the overflow menu (e.g. Delete), opens the ··· menu first.
  */
 async function clickCardAction(page: Page, commentText: string, actionName: string) {
   const card = getCard(page, commentText);

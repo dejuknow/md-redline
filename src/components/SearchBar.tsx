@@ -55,7 +55,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
         <button
           onClick={onPrev}
           disabled={matchCount === 0}
-          className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset disabled:opacity-30 transition-colors"
+          className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint disabled:opacity-30 transition-colors"
           title="Previous match (Shift+Enter)"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -65,7 +65,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
         <button
           onClick={onNext}
           disabled={matchCount === 0}
-          className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset disabled:opacity-30 transition-colors"
+          className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint disabled:opacity-30 transition-colors"
           title="Next match (Enter)"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -74,7 +74,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
         </button>
         <button
           onClick={onClose}
-          className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+          className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
           title="Close (Escape)"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>

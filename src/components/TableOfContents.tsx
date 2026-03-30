@@ -47,7 +47,7 @@ export function TableOfContents({ headings, activeHeadingId, onHeadingClick }: P
             className={`w-full text-left py-1.5 pr-3 text-xs transition-colors ${INDENT[h.level] || 'pl-3'} ${
               isActive
                 ? 'bg-primary-bg text-primary-text font-medium'
-                : 'text-content hover:bg-surface-inset'
+                : 'text-content hover:bg-tint'
             }`}
             title={h.text}
           >

@@ -1172,31 +1172,6 @@ After you're done, give me a brief summary:
         return;
       }
 
-      // Cmd+1..8 : Quick-apply template when text is selected (Feature 3)
-      if (
-        mod &&
-        !isInput &&
-        selectionRef.current &&
-        viewMode === 'rendered' &&
-        e.key >= '1' &&
-        e.key <= '8'
-      ) {
-        const idx = parseInt(e.key) - 1;
-        const templates = templatesRef.current;
-        if (idx < templates.length) {
-          e.preventDefault();
-          const sel = selectionRef.current;
-          handleAddComment(
-            sel.text,
-            templates[idx].text,
-            sel.contextBefore,
-            sel.contextAfter,
-            sel.offset,
-          );
-          return;
-        }
-      }
-
       // Cmd+Shift+M : Start commenting on selection
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
@@ -1632,7 +1607,7 @@ After you're done, give me a brief summary:
                     className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                       leftPanelView === 'explorer'
                         ? 'bg-surface-inset text-content'
-                        : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
+                        : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
                     }`}
                     title="File explorer"
                   >
@@ -1656,7 +1631,7 @@ After you're done, give me a brief summary:
                     className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                       leftPanelView === 'outline'
                         ? 'bg-surface-inset text-content'
-                        : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset/50'
+                        : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
                     }`}
                     title="Document outline"
                   >
@@ -1678,7 +1653,7 @@ After you're done, give me a brief summary:
                 </div>
                 <button
                   onClick={() => setExplorerVisible(false)}
-                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
                   title="Close panel"
                 >
                   <svg
@@ -1811,7 +1786,7 @@ After you're done, give me a brief summary:
                 </h2>
                 <button
                   onClick={() => setSidebarVisible(false)}
-                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-surface-inset transition-colors"
+                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
                   title="Close comments sidebar"
                 >
                   <svg

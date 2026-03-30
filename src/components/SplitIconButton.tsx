@@ -37,18 +37,18 @@ const baseClasses =
 
 const variantClasses: Record<Variant, { on: string; off: string; coordinated: string }> = {
   neutral: {
-    on: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
+    on: 'text-content-muted hover:text-content-secondary hover:bg-tint',
+    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
     coordinated: 'text-content-secondary bg-surface-inset',
   },
   active: {
     on: 'text-primary-text bg-primary-bg',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
+    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
     coordinated: 'text-content-secondary bg-surface-inset',
   },
   success: {
-    on: 'text-success-text hover:text-success hover:bg-success-bg',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-surface-inset',
+    on: 'text-success-text hover:text-success hover:bg-tint-success',
+    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
     coordinated: 'text-content-secondary bg-surface-inset',
   },
 };
@@ -110,7 +110,7 @@ export function SplitIconButton({
         title={chevronTitle}
         data-testid={testId ? `${testId}-chevron` : undefined}
         className={`pl-0 pr-0.5 self-stretch flex items-center rounded-r ${baseClasses} ${
-          open ? v.coordinated : 'text-content-muted hover:text-content-secondary hover:bg-surface-inset'
+          open ? v.coordinated : 'text-content-muted hover:text-content-secondary hover:bg-tint'
         }`}
       >
         <svg
@@ -137,7 +137,7 @@ export function SplitIconButton({
                   item.onClick();
                   close();
                 }}
-                className="w-full px-3 py-1.5 text-xs text-left text-content hover:bg-surface-inset transition-colors"
+                className="w-full px-3 py-1.5 text-xs text-left text-content hover:bg-tint transition-colors"
               >
                 {item.label}
               </button>
