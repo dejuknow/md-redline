@@ -171,15 +171,16 @@ export default function App() {
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
 
-  // Command palette, file opener, & settings panel state
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showFileOpener, setShowFileOpener] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
+  // Modal state — only one modal can be open at a time
+  type ModalId = 'commandPalette' | 'fileOpener' | 'settings' | 'shortcuts' | 'search' | null;
+  const [activeModal, setActiveModal] = useState<ModalId>(null);
+
+  const toggleModal = useCallback((id: ModalId) => {
+    setActiveModal((prev) => (prev === id ? null : id));
+  }, []);
 
   const openFilePicker = useCallback(() => {
-    setShowCommandPalette(false);
-    setShowFileOpener(true);
+    setActiveModal('fileOpener');
   }, []);
 
   const switchTabByOffset = useCallback(
@@ -200,7 +201,7 @@ export default function App() {
   );
 
   // Text search state
-  const [showSearch, setShowSearch] = useState(false);
+  const showSearch = activeModal === 'search';
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [searchMatchCount, setSearchMatchCount] = useState(0);
@@ -1080,7 +1081,7 @@ After you're done, give me a brief summary:
   }, [searchMatchCount]);
 
   const handleSearchClose = useCallback(() => {
-    setShowSearch(false);
+    setActiveModal(null);
     setSearchQuery('');
     setActiveSearchIndex(0);
     setSearchMatchCount(0);
@@ -1112,15 +1113,14 @@ After you're done, give me a brief summary:
       // Cmd+K : Open command palette (works even in inputs)
       if (mod && e.key === 'k') {
         e.preventDefault();
-        setShowFileOpener(false);
-        setShowCommandPalette((prev) => !prev);
+        toggleModal('commandPalette');
         return;
       }
 
       // Cmd+, : Open settings (works even in inputs)
       if (mod && e.key === ',') {
         e.preventDefault();
-        setShowSettings((prev) => !prev);
+        toggleModal('settings');
         return;
       }
 
@@ -1158,7 +1158,7 @@ After you're done, give me a brief summary:
       // Cmd+F : Find in document
       if (mod && e.key === 'f') {
         e.preventDefault();
-        setShowSearch(true);
+        setActiveModal('search');
         setSearchFocusTrigger((t) => t + 1);
         return;
       }
@@ -1195,7 +1195,7 @@ After you're done, give me a brief summary:
       }
 
       // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari)
-      if (mod && e.shiftKey && !isInput && !showCommandPalette) {
+      if (mod && e.shiftKey && !isInput && activeModal !== 'commandPalette') {
         if (e.code === 'BracketLeft') {
           e.preventDefault();
           switchTabByOffset(-1);
@@ -1210,12 +1210,12 @@ After you're done, give me a brief summary:
       }
 
       // Keys below only work outside inputs and when command palette is closed
-      if (isInput || showCommandPalette) return;
+      if (isInput || activeModal === 'commandPalette') return;
 
       // ? : Toggle keyboard shortcuts help
       if (e.key === '?') {
         e.preventDefault();
-        setShowShortcuts((prev) => !prev);
+        toggleModal('shortcuts');
         return;
       }
 
@@ -1296,8 +1296,8 @@ After you're done, give me a brief summary:
     activeCommentId,
     comments,
     settings.enableResolve,
-    showCommandPalette,
-    showSearch,
+    activeModal,
+    toggleModal,
     handleSearchClose,
     explorerVisible,
     leftPanelView,
@@ -1316,7 +1316,7 @@ After you're done, give me a brief summary:
     { id: 'prev-comment', label: 'Jump to previous comment', shortcut: 'P / K', section: 'Navigation', onExecute: handleJumpToPrev },
     { id: 'prev-tab', label: 'Previous tab', shortcut: prevTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(-1) },
     { id: 'next-tab', label: 'Next tab', shortcut: nextTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(1) },
-    { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setShowSearch(true); setSearchFocusTrigger((t) => t + 1); } },
+    { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setActiveModal('search'); setSearchFocusTrigger((t) => t + 1); } },
   ], [handleJumpToNext, handleJumpToPrev, switchTabByOffset]);
 
   const viewCommands = useMemo((): Command[] => {
@@ -1358,8 +1358,8 @@ After you're done, give me a brief summary:
   }, [reloadFile, handleSnapshot, openFilePicker, handleClearSnapshot, currentSnapshot]);
 
   const generalCommands = useMemo((): Command[] => [
-    { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setShowSettings(true) },
-    { id: 'keyboard-shortcuts', label: 'Keyboard shortcuts', shortcut: '?', section: 'General', onExecute: () => setShowShortcuts(true) },
+    { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setActiveModal('settings') },
+    { id: 'keyboard-shortcuts', label: 'Keyboard shortcuts', shortcut: '?', section: 'General', onExecute: () => setActiveModal('shortcuts') },
     { id: 'theme-light', label: 'Theme: Light', section: 'Theme', onExecute: () => setTheme('light') },
     { id: 'theme-dark', label: 'Theme: Dark', section: 'Theme', onExecute: () => setTheme('dark') },
     { id: 'theme-sepia', label: 'Theme: Sepia', section: 'Theme', onExecute: () => setTheme('sepia') },
@@ -1421,7 +1421,7 @@ After you're done, give me a brief summary:
         onAuthorChange={setAuthor}
         onToggleExplorer={() => setExplorerVisible((p) => !p)}
         onToggleSidebar={() => setSidebarVisible((p) => !p)}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => setActiveModal('settings')}
       />
       <TabBar
         tabs={tabs}
@@ -1446,7 +1446,7 @@ After you're done, give me a brief summary:
           if (showSearch) {
             handleSearchClose();
           } else {
-            setShowSearch(true);
+            setActiveModal('search');
             setSearchFocusTrigger((t) => t + 1);
           }
         }}
@@ -1714,17 +1714,17 @@ After you're done, give me a brief summary:
       {/* Command palette */}
       <CommandPalette
         commands={paletteCommands}
-        open={showCommandPalette}
-        onClose={() => setShowCommandPalette(false)}
+        open={activeModal === 'commandPalette'}
+        onClose={() => setActiveModal(null)}
       />
 
       {/* File opener */}
       <FileOpener
-        open={showFileOpener}
-        onClose={() => setShowFileOpener(false)}
+        open={activeModal === 'fileOpener'}
+        onClose={() => setActiveModal(null)}
         onOpenFile={(path) => {
           handleOpenFile(path);
-          setShowFileOpener(false);
+          setActiveModal(null);
         }}
         recentFiles={recentFiles}
         activeFilePath={activeFilePath}
@@ -1763,14 +1763,14 @@ After you're done, give me a brief summary:
 
       {/* Settings panel */}
       <SettingsPanel
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
+        open={activeModal === 'settings'}
+        onClose={() => setActiveModal(null)}
         author={author}
         onAuthorChange={setAuthor}
       />
       <KeyboardShortcutsPanel
-        open={showShortcuts}
-        onClose={() => setShowShortcuts(false)}
+        open={activeModal === 'shortcuts'}
+        onClose={() => setActiveModal(null)}
         resolveEnabled={settings.enableResolve}
       />
 
