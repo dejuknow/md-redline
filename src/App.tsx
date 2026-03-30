@@ -13,34 +13,18 @@ import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
 import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
-import {
-  parseComments,
-  insertComment,
-  removeComment,
-  editComment,
-  updateCommentAnchor,
-  resolveComment,
-  unresolveComment,
-  addReply,
-  removeAllComments,
-  resolveAllComments,
-  removeResolvedComments,
-  detectMissingAnchors,
-} from './lib/comment-parser';
+import { parseComments } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
-import { renderMarkdown } from './markdown/pipeline';
 import {
   MarkdownViewer,
   type MarkdownViewerHandle,
-  type ViewerContextMenuInfo,
-  type TocHeading,
 } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
-import { CommentSidebar, type SidebarContextMenuInfo } from './components/CommentSidebar';
+import { CommentSidebar } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
-import { TabBar, type TabContextMenuInfo } from './components/TabBar';
-import { FileExplorer, type ExplorerContextMenuInfo } from './components/FileExplorer';
+import { TabBar } from './components/TabBar';
+import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { DiffViewer } from './components/DiffViewer';
@@ -48,7 +32,7 @@ import { RawView, type RawViewHandle } from './components/RawView';
 import { Toast } from './components/Toast';
 
 import { CommandPalette, type Command } from './components/CommandPalette';
-import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
+import { ContextMenu } from './components/ContextMenu';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
@@ -60,7 +44,15 @@ import { useThemePersistence } from './hooks/useThemePersistence';
 import { migrateLocalStorageToDisk } from './lib/preferences-client';
 import { ALL_THEMES } from './lib/themes';
 import { usePaneLayout } from './hooks/usePaneLayout';
-import { getPathBasename } from './lib/path-utils';
+import { useToast } from './hooks/useToast';
+import { useModalState } from './hooks/useModalState';
+import { useSearch } from './hooks/useSearch';
+import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
+import { useDiffSnapshot } from './hooks/useDiffSnapshot';
+import { useComments } from './hooks/useComments';
+import { useHeadingTracking } from './hooks/useHeadingTracking';
+import { useContextMenuItems } from './hooks/useContextMenuItems';
+
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -88,10 +80,7 @@ export default function App() {
     reloadFile,
   } = useTabs();
 
-  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
-  const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
-  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
@@ -141,53 +130,14 @@ export default function App() {
     }
   }, [openTab, openTabInBackground, savedSession]);
 
-  // Diff snapshot state: per-file snapshots persisted to localStorage
-  const [snapshots, setSnapshots] = useState<Map<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem('md-redline-snapshots');
-      if (!raw) return new Map();
-      return new Map(Object.entries(JSON.parse(raw)));
-    } catch {
-      return new Map();
-    }
-  });
-  useEffect(() => {
-    try {
-      if (snapshots.size === 0) {
-        localStorage.removeItem('md-redline-snapshots');
-      } else {
-        localStorage.setItem('md-redline-snapshots', JSON.stringify(Object.fromEntries(snapshots)));
-      }
-    } catch { /* ignore quota errors */ }
-  }, [snapshots]);
-  const currentSnapshot = activeFilePath ? (snapshots.get(activeFilePath) ?? null) : null;
-
-  // Toast notification state (Feature 8)
-  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
-    message: '',
-    visible: false,
-  });
-  const showToast = useCallback((message: string) => {
-    setToast({ message, visible: true });
-  }, []);
-  const dismissToast = useCallback(() => {
-    setToast((prev) => ({ ...prev, visible: false }));
-  }, []);
+  // Toast notification state
+  const { toast, showToast, dismissToast } = useToast();
 
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
 
   // Modal state — only one modal can be open at a time
-  type ModalId = 'commandPalette' | 'fileOpener' | 'settings' | 'shortcuts' | 'search' | null;
-  const [activeModal, setActiveModal] = useState<ModalId>(null);
-
-  const toggleModal = useCallback((id: ModalId) => {
-    setActiveModal((prev) => (prev === id ? null : id));
-  }, []);
-
-  const openFilePicker = useCallback(() => {
-    setActiveModal('fileOpener');
-  }, []);
+  const { activeModal, setActiveModal, toggleModal, openFilePicker } = useModalState();
 
   const switchTabByOffset = useCallback(
     (offset: number) => {
@@ -208,17 +158,19 @@ export default function App() {
 
   // Text search state
   const showSearch = activeModal === 'search';
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
-  const [searchMatchCount, setSearchMatchCount] = useState(0);
-  const [searchFocusTrigger, setSearchFocusTrigger] = useState(0);
+  const {
+    searchQuery, activeSearchIndex, searchMatchCount,
+    searchFocusTrigger, setSearchFocusTrigger,
+    handleSearchCount, handleSearchNext, handleSearchPrev,
+    handleSearchClose, handleSearchQueryChange, handleRawSearchCount,
+  } = useSearch(() => setActiveModal(null), viewMode);
 
   // Platform info for context menu labels
   const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/platform', { signal: controller.signal })
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then(({ platform }) => {
         if (platform === 'darwin') setRevealLabel('Reveal in Finder');
         else if (platform === 'win32') setRevealLabel('Show in Explorer');
@@ -233,39 +185,29 @@ export default function App() {
   const explorerCtxMenu = useContextMenu();
   const tabCtxMenu = useContextMenu();
   const sidebarCtxMenu = useContextMenu();
-  const [ctxMenuItems, setCtxMenuItems] = useState<ContextMenuEntry[]>([]);
-  const [explorerCtxMenuItems, setExplorerCtxMenuItems] = useState<ContextMenuEntry[]>([]);
-  const [tabCtxMenuItems, setTabCtxMenuItems] = useState<ContextMenuEntry[]>([]);
-  const [sidebarCtxMenuItems, setSidebarCtxMenuItems] = useState<ContextMenuEntry[]>([]);
+
 
   // Triggers for remotely entering edit/reply mode on a CommentCard
-  const [requestEditId, setRequestEditId] = useState<string | null>(null);
-  const [requestEditToken, setRequestEditToken] = useState(0);
-  const [requestReplyId, setRequestReplyId] = useState<string | null>(null);
-  const [requestReplyToken, setRequestReplyToken] = useState(0);
-
-  const triggerEdit = useCallback((commentId: string) => {
-    setRequestEditId(commentId);
-    setRequestEditToken(Date.now());
-  }, []);
-
-  const triggerReply = useCallback((commentId: string) => {
-    setRequestReplyId(commentId);
-    setRequestReplyToken(Date.now());
-  }, []);
+  const {
+    requestEditId, requestEditToken, requestReplyId, requestReplyToken,
+    triggerEdit, triggerReply,
+  } = useCommentCardTriggers();
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const rawViewRef = useRef<RawViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // When true, spy is suppressed until the user manually scrolls (wheel/touch).
-  const spyDisabledRef = useRef(false);
-  const scrollSpyRafRef = useRef(0);
+
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
   const rawMarkdownRef = useRef(rawMarkdown);
   useLayoutEffect(() => {
     rawMarkdownRef.current = rawMarkdown;
   }, [rawMarkdown]);
+
+  // Diff snapshot state
+  const { currentSnapshot, handleSnapshot, handleClearSnapshot } = useDiffSnapshot(
+    activeFilePath, rawMarkdownRef, showToast, viewMode, setViewMode,
+  );
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
   const currentSnapshotRef = useRef(currentSnapshot);
@@ -277,117 +219,26 @@ export default function App() {
     containerRef as RefObject<HTMLElement | null>,
   );
 
-  // Parse comments from raw markdown
-  const { cleanMarkdown, comments } = useMemo(
-    () => parseComments(rawMarkdown ?? ''),
-    [rawMarkdown],
-  );
+  // Comment state and operations
+  const {
+    activeCommentId, setActiveCommentId,
+    comments, cleanMarkdown, html, missingAnchors,
+    commentCounts, commentCount,
+    handleAddComment, handleResolve, handleUnresolve,
+    handleDelete, handleEdit, handleReply,
+    handleBulkDelete, handleBulkResolve, handleBulkDeleteResolved,
+    handleCopyAgentPrompt, handleHighlightClick, handleSidebarActivate,
+    handleAnchorChange, handleJumpToNext, handleJumpToPrev,
+  } = useComments({
+    rawMarkdown, rawMarkdownRef, setRawMarkdown, saveFile,
+    author, enableResolve: settings.enableResolve,
+    tabs, activeFilePath, viewerRef, rawViewRef,
+    showToast, clearSelection, setAutoExpandForm,
+  });
 
-  // Render markdown to HTML
-  const html = useMemo(() => (cleanMarkdown ? renderMarkdown(cleanMarkdown) : ''), [cleanMarkdown]);
-
-  // Detect missing anchors: comments whose anchor text can no longer be found in clean markdown
-  const missingAnchors = useMemo(
-    () => detectMissingAnchors(cleanMarkdown, comments),
-    [cleanMarkdown, comments],
-  );
-
-  // Extract headings from rendered HTML (runs after MarkdownViewer's useLayoutEffect sets innerHTML).
-  // Depends on html only — heading structure doesn't change with comment/selection state.
-  useEffect(() => {
-    const headings = viewerRef.current?.getHeadings() ?? [];
-    setTocHeadings(headings);
-  }, [html]);
-
-  // Track active heading based on scroll position.
-  // Elements are queried fresh each frame because MarkdownViewer rebuilds innerHTML
-  // on any prop change (activeCommentId, selection, etc.), replacing all DOM nodes.
-  useEffect(() => {
-    const scrollEl = containerRef.current;
-    if (!scrollEl || tocHeadings.length === 0) return;
-    const ids = tocHeadings.map((h) => h.id);
-
-    const runSpy = () => {
-      cancelAnimationFrame(scrollSpyRafRef.current);
-      scrollSpyRafRef.current = requestAnimationFrame(() => {
-        const containerTop = scrollEl.getBoundingClientRect().top;
-        // 60% threshold: near-bottom headings that can only scroll to ~50% viewport
-        // (due to pb-[50vh]) are still detected as the active section.
-        const firstVisibleThreshold = scrollEl.clientHeight * 0.6;
-
-        let lastAboveFoldId: string | null = null;
-        let firstVisibleId: string | null = null;
-        let firstVisibleTop = Infinity;
-        for (const id of ids) {
-          const el = scrollEl.querySelector(`#${CSS.escape(id)}`) as HTMLElement | null;
-          if (!el) continue;
-          const elTop = el.getBoundingClientRect().top - containerTop;
-          if (elTop <= 0) {
-            lastAboveFoldId = id;
-          } else if (elTop < firstVisibleTop) {
-            firstVisibleTop = elTop;
-            firstVisibleId = id;
-          }
-        }
-
-        const activeId =
-          firstVisibleId !== null && firstVisibleTop < firstVisibleThreshold
-            ? firstVisibleId
-            : (lastAboveFoldId ?? firstVisibleId);
-        setActiveHeadingId(activeId);
-      });
-    };
-
-    const onScroll = () => {
-      // Cancel any stale rAF regardless — prevents a pending rAF from a previous
-      // scroll from firing after a click has set the heading explicitly.
-      cancelAnimationFrame(scrollSpyRafRef.current);
-      if (spyDisabledRef.current) return;
-      runSpy();
-    };
-
-    // Re-enable the spy the moment the user manually scrolls (wheel or touch).
-    // This means a programmatic outline-click never races with the spy —
-    // the clicked heading stays active until the user intentionally scrolls.
-    const onManualScroll = () => {
-      spyDisabledRef.current = false;
-    };
-
-    scrollEl.addEventListener('scroll', onScroll, { passive: true });
-    scrollEl.addEventListener('wheel', onManualScroll, { passive: true });
-    scrollEl.addEventListener('touchstart', onManualScroll, { passive: true });
-    runSpy(); // initial detection on load
-    return () => {
-      scrollEl.removeEventListener('scroll', onScroll);
-      scrollEl.removeEventListener('wheel', onManualScroll);
-      scrollEl.removeEventListener('touchstart', onManualScroll);
-      cancelAnimationFrame(scrollSpyRafRef.current);
-    };
-  }, [tocHeadings]);
-
-  // Comment counts per tab (for badges)
-  const commentCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const tab of tabs) {
-      if (tab.filePath === activeFilePath) {
-        const count = settings.enableResolve
-          ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-          : comments.length;
-        counts.set(tab.filePath, count);
-      } else {
-        try {
-          const { comments: tabComments } = parseComments(tab.rawMarkdown);
-          const count = settings.enableResolve
-            ? tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-            : tabComments.length;
-          counts.set(tab.filePath, count);
-        } catch {
-          counts.set(tab.filePath, 0);
-        }
-      }
-    }
-    return counts;
-  }, [tabs, activeFilePath, comments, settings.enableResolve]);
+  // Heading tracking / table of contents
+  const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
+    useHeadingTracking(containerRef, viewerRef, html);
 
   // Clear transient state on tab switch
   const prevFilePathRef = useRef(activeFilePath);
@@ -398,7 +249,7 @@ export default function App() {
       if (viewMode === 'diff') setViewMode('rendered');
       clearSelection();
     }
-  }, [activeFilePath, viewMode, setViewMode, clearSelection]);
+  }, [activeFilePath, viewMode, setViewMode, clearSelection, setActiveCommentId]);
 
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
   useFileWatcher({
@@ -482,7 +333,7 @@ export default function App() {
     }
     if (savedSession && savedSession.openTabs.length > 0) return;
     fetch('/api/config')
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((data) => {
         if (data.initialFile) {
           openTab(data.initialFile);
@@ -510,8 +361,12 @@ export default function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
-    }).catch(() => {});
-  }, []);
+    }).then((r) => {
+      if (!r.ok) showToast('Could not reveal file');
+    }).catch(() => {
+      showToast('Could not reveal file');
+    });
+  }, [showToast]);
 
   const handleExplorerOpenFile = useCallback(
     (path: string) => {
@@ -521,213 +376,6 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
-  const updateAndSave = useCallback(
-    (newRaw: string) => {
-      setRawMarkdown(newRaw);
-      saveFile(newRaw);
-    },
-    [setRawMarkdown, saveFile],
-  );
-
-  // Feature 7: handleAddComment now accepts context for fuzzy re-matching
-  const handleAddComment = useCallback(
-    (
-      anchor: string,
-      text: string,
-      contextBefore?: string,
-      contextAfter?: string,
-      hintOffset?: number,
-    ) => {
-      const newRaw = insertComment(
-        rawMarkdownRef.current,
-        anchor,
-        text,
-        author,
-        contextBefore,
-        contextAfter,
-        hintOffset,
-      );
-      updateAndSave(newRaw);
-      clearSelection();
-      setAutoExpandForm(false);
-    },
-    [updateAndSave, clearSelection, author],
-  );
-
-  const handleResolve = useCallback(
-    (id: string) => {
-      updateAndSave(resolveComment(rawMarkdownRef.current, id));
-    },
-    [updateAndSave],
-  );
-
-  const handleUnresolve = useCallback(
-    (id: string) => {
-      updateAndSave(unresolveComment(rawMarkdownRef.current, id));
-    },
-    [updateAndSave],
-  );
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      updateAndSave(removeComment(rawMarkdownRef.current, id));
-      setActiveCommentId((prev) => (prev === id ? null : prev));
-    },
-    [updateAndSave],
-  );
-
-  const handleEdit = useCallback(
-    (id: string, newText: string) => {
-      updateAndSave(editComment(rawMarkdownRef.current, id, newText));
-    },
-    [updateAndSave],
-  );
-
-  const handleReply = useCallback(
-    (id: string, text: string) => {
-      updateAndSave(addReply(rawMarkdownRef.current, id, text, author));
-    },
-    [updateAndSave, author],
-  );
-
-  const handleBulkDelete = useCallback(() => {
-    updateAndSave(removeAllComments(rawMarkdownRef.current));
-  }, [updateAndSave]);
-
-  const handleBulkResolve = useCallback(() => {
-    updateAndSave(resolveAllComments(rawMarkdownRef.current));
-  }, [updateAndSave]);
-
-  const handleBulkDeleteResolved = useCallback(() => {
-    updateAndSave(removeResolvedComments(rawMarkdownRef.current));
-  }, [updateAndSave]);
-
-  const handleCopyAgentPrompt = useCallback(
-    (filePaths: string[]) => {
-      if (filePaths.length === 0) return;
-
-      const afterAction = settings.enableResolve
-        ? 'After addressing a comment, **resolve it** by setting `"status":"resolved"` and `"resolved":true` in the marker JSON'
-        : 'After addressing a comment, **remove the entire `<!-- @comment{...} -->` marker** from the file';
-
-      const isSingle = filePaths.length === 1;
-      const fileRef = isSingle ? filePaths[0] : 'the files listed below';
-      const fileList = isSingle
-        ? ''
-        : '\n\n## Files to review\n' +
-          filePaths
-            .map((p, i) => {
-              const count = commentCounts.get(p) ?? 0;
-              return `${i + 1}. ${p} (${count} comment${count !== 1 ? 's' : ''})`;
-            })
-            .join('\n');
-
-      const prompt = `I've left review comments in ${fileRef} using inline comment markers. Please read ${isSingle ? 'the file' : 'each file'} and address them.${fileList}
-
-## Comment format
-
-Comments are embedded as HTML comment markers: \`<!-- @comment{JSON} -->\`
-Each marker is placed **immediately before** the text it refers to (the "anchor").
-The JSON contains these fields:
-- \`anchor\`: the exact text the comment refers to
-- \`text\`: my feedback — this is what I need you to address
-- \`replies\`: threaded discussion — read for additional context
-
-## What to do
-
-1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
-2. For each comment, read the \`text\` field and address the feedback by editing the document
-${settings.enableResolve ? `3. If a comment is a question or doesn't require a document edit, **add a reply** to the \`replies\` array in the marker JSON instead: \`"replies":[{"id":"<unique-id>","text":"your answer","author":"Agent","timestamp":"<ISO-8601>"}]\` (append to any existing replies)
-4. ${afterAction}
-5. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it` : `3. ${afterAction}
-4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`}
-
-## How to respond
-
-After you're done, give me a brief summary:
-- How many comments you addressed${isSingle ? '' : ' (grouped by file)'}
-- For each one, a one-line description of what you ${settings.enableResolve ? 'changed or replied' : 'changed'}
-- Any comments you left in place and why`;
-
-      const fileCount = filePaths.length;
-      navigator.clipboard.writeText(prompt).then(
-        () =>
-          showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}`),
-        () => showToast("Couldn't copy to clipboard. Try from localhost."),
-      );
-    },
-    [commentCounts, showToast, settings.enableResolve],
-  );
-
-  const handleHighlightClick = useCallback((commentId: string) => {
-    setActiveCommentId(commentId);
-  }, []);
-
-  const handleSidebarActivate = useCallback((commentId: string) => {
-    setActiveCommentId(commentId);
-    viewerRef.current?.scrollToComment(commentId);
-    rawViewRef.current?.scrollToComment(commentId);
-  }, []);
-
-  const handleAnchorChange = useCallback(
-    (commentIds: string[], newAnchor: string) => {
-      let newRaw = rawMarkdownRef.current;
-      for (const id of commentIds) {
-        newRaw = updateCommentAnchor(newRaw, id, newAnchor);
-      }
-      updateAndSave(newRaw);
-    },
-    [updateAndSave],
-  );
-
-  // Take diff snapshot
-  const handleSnapshot = useCallback(() => {
-    if (!activeFilePath) return;
-    const isUpdate = snapshots.has(activeFilePath);
-    setSnapshots((prev) => new Map(prev).set(activeFilePath, rawMarkdownRef.current));
-    showToast(isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes');
-  }, [activeFilePath, snapshots, showToast]);
-
-  // Clear diff snapshot for current file
-  const handleClearSnapshot = useCallback(() => {
-    if (!activeFilePath) return;
-    setSnapshots((prev) => {
-      const next = new Map(prev);
-      next.delete(activeFilePath);
-      return next;
-    });
-    if (viewMode === 'diff') setViewMode('rendered');
-    showToast('Snapshot cleared');
-  }, [activeFilePath, viewMode, setViewMode, showToast]);
-
-  // Jump to next comment (skip resolved when resolve is enabled)
-  const handleJumpToNext = useCallback(() => {
-    const navigable = settings.enableResolve
-      ? comments.filter((c) => getEffectiveStatus(c) === 'open')
-      : comments;
-    if (navigable.length === 0) return;
-
-    const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
-    const nextIdx = (currentIdx + 1) % navigable.length;
-    const next = navigable[nextIdx];
-    setActiveCommentId(next.id);
-    viewerRef.current?.scrollToComment(next.id);
-  }, [comments, activeCommentId, settings.enableResolve]);
-
-  // Jump to previous comment
-  const handleJumpToPrev = useCallback(() => {
-    const navigable = settings.enableResolve
-      ? comments.filter((c) => getEffectiveStatus(c) === 'open')
-      : comments;
-    if (navigable.length === 0) return;
-
-    const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
-    const prevIdx = currentIdx <= 0 ? navigable.length - 1 : currentIdx - 1;
-    const prev = navigable[prevIdx];
-    setActiveCommentId(prev.id);
-    viewerRef.current?.scrollToComment(prev.id);
-  }, [comments, activeCommentId, settings.enableResolve]);
-
   const { handlePositions, onHandleMouseDown } = useDragHandles({
     viewerRef,
     scrollContainerRef: containerRef,
@@ -736,377 +384,28 @@ After you're done, give me a brief summary:
     onAnchorChange: handleAnchorChange,
   });
 
-  const commentCount = settings.enableResolve
-    ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-    : comments.length;
+
 
   // Stable ref for selection to use in keyboard handler without re-creating it
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
-  // --- Context menu handlers ---
-  const handleViewerContextMenu = useCallback(
-    (info: ViewerContextMenuInfo) => {
-      // Close other context menus if open
-      explorerCtxMenu.close();
-      tabCtxMenu.close();
-      sidebarCtxMenu.close();
-
-      if (info.type === 'highlight' && info.commentIds?.length) {
-        // Right-clicked on a comment highlight
-        const commentId = info.commentIds[0];
-        const comment = comments.find((c) => c.id === commentId);
-        if (!comment) return;
-
-        const resolveItems: ContextMenuEntry[] = settings.enableResolve
-          ? [
-              { type: 'divider' as const },
-              getEffectiveStatus(comment) === 'resolved'
-                ? { label: 'Reopen', onClick: () => handleUnresolve(commentId) }
-                : { label: 'Resolve', onClick: () => handleResolve(commentId) },
-            ]
-          : [];
-
-        const items: ContextMenuEntry[] = [
-          {
-            label: 'Edit',
-            onClick: () => {
-              setActiveCommentId(commentId);
-              setSidebarVisible(true);
-              triggerEdit(commentId);
-            },
-          },
-          {
-            label: 'Reply',
-            onClick: () => {
-              setActiveCommentId(commentId);
-              setSidebarVisible(true);
-              triggerReply(commentId);
-            },
-          },
-          ...resolveItems,
-          { type: 'divider' as const },
-          {
-            label: 'Delete',
-            danger: true,
-            onClick: () => handleDelete(commentId),
-          },
-          { type: 'divider' as const },
-          {
-            label: 'Copy Anchor Text',
-            onClick: () => navigator.clipboard.writeText(comment.anchor),
-          },
-          {
-            label: 'Copy Comment Text',
-            onClick: () => navigator.clipboard.writeText(comment.text),
-          },
-          {
-            label: 'Jump to Sidebar',
-            onClick: () => {
-              setActiveCommentId(commentId);
-              setSidebarVisible(true);
-            },
-          },
-        ];
-
-        setCtxMenuItems(items);
-        viewerCtxMenu.open(info.x, info.y);
-      } else if (info.type === 'selection') {
-        // Right-clicked on selected text
-        const sel = selectionRef.current;
-        if (!sel) return;
-
-        const templateItems: ContextMenuItem[] = settings.templates.map((t) => ({
-          label: t.label,
-          onClick: () => {
-            handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter);
-          },
-        }));
-
-        const items: ContextMenuEntry[] = [
-          {
-            label: 'Comment',
-            onClick: () => {
-              lockSelection();
-              setAutoExpandForm(true);
-            },
-          },
-          {
-            label: 'Templates',
-            items: templateItems,
-          },
-          { type: 'divider' as const },
-          {
-            label: 'Copy',
-            onClick: () => {
-              navigator.clipboard.writeText(sel.text);
-            },
-          },
-        ];
-
-        setCtxMenuItems(items);
-        viewerCtxMenu.open(info.x, info.y);
-      }
-    },
-    [
-      comments,
-      settings.enableResolve,
-      settings.templates,
-      handleResolve,
-      handleUnresolve,
-      handleDelete,
-      handleAddComment,
-      lockSelection,
-      setSidebarVisible,
-      triggerEdit,
-      triggerReply,
-      viewerCtxMenu,
-      explorerCtxMenu,
-      tabCtxMenu,
-      sidebarCtxMenu,
-    ],
-  );
-
-  const handleExplorerContextMenu = useCallback(
-    (info: ExplorerContextMenuInfo) => {
-      viewerCtxMenu.close();
-      tabCtxMenu.close();
-      sidebarCtxMenu.close();
-
-      if (info.type === 'file') {
-        const items: ContextMenuEntry[] = [
-          {
-            label: 'Open',
-            onClick: () => handleExplorerOpenFile(info.path),
-          },
-          {
-            label: 'Open in Background Tab',
-            onClick: () => {
-              openTabInBackground(info.path);
-              addRecentFile(info.path);
-            },
-          },
-          { type: 'divider' as const },
-          {
-            label: revealLabel,
-            onClick: () => revealInFinder(info.path),
-          },
-          {
-            label: 'Copy Path',
-            onClick: () => navigator.clipboard.writeText(info.path),
-          },
-          {
-            label: 'Copy File Name',
-            onClick: () => navigator.clipboard.writeText(info.name),
-          },
-        ];
-        setExplorerCtxMenuItems(items);
-        explorerCtxMenu.open(info.x, info.y);
-      } else if (info.type === 'directory') {
-        const items: ContextMenuEntry[] = [
-          {
-            label: 'Open in Explorer',
-            onClick: () => {
-              setExplorerDir(info.path);
-              setExplorerVisible(true);
-            },
-          },
-          { type: 'divider' as const },
-          {
-            label: revealLabel,
-            onClick: () => revealInFinder(info.path),
-          },
-          {
-            label: 'Copy Path',
-            onClick: () => navigator.clipboard.writeText(info.path),
-          },
-        ];
-        setExplorerCtxMenuItems(items);
-        explorerCtxMenu.open(info.x, info.y);
-      } else {
-        // Blank space — context is the current directory
-        const items: ContextMenuEntry[] = [
-          {
-            label: revealLabel,
-            onClick: () => revealInFinder(info.path),
-          },
-          {
-            label: 'Copy Path',
-            onClick: () => navigator.clipboard.writeText(info.path),
-          },
-        ];
-        setExplorerCtxMenuItems(items);
-        explorerCtxMenu.open(info.x, info.y);
-      }
-    },
-    [
-      handleExplorerOpenFile,
-      openTabInBackground,
-      addRecentFile,
-      revealInFinder,
-      revealLabel,
-      setExplorerVisible,
-      viewerCtxMenu,
-      explorerCtxMenu,
-      tabCtxMenu,
-      sidebarCtxMenu,
-    ],
-  );
-
-  const handleTabContextMenu = useCallback(
-    (info: TabContextMenuInfo) => {
-      viewerCtxMenu.close();
-      explorerCtxMenu.close();
-      sidebarCtxMenu.close();
-
-      const tabIndex = tabs.findIndex((t) => t.filePath === info.filePath);
-      const hasTabsToRight = tabIndex >= 0 && tabIndex < tabs.length - 1;
-      const hasOtherTabs = tabs.length > 1;
-      const fileName = getPathBasename(info.filePath) || info.filePath;
-
-      const items: ContextMenuEntry[] = [
-        {
-          label: 'Close',
-          onClick: () => closeTab(info.filePath),
-        },
-        {
-          label: 'Close Others',
-          onClick: () => closeOtherTabs(info.filePath),
-          disabled: !hasOtherTabs,
-        },
-        {
-          label: 'Close Tabs to the Right',
-          onClick: () => closeTabsToRight(info.filePath),
-          disabled: !hasTabsToRight,
-        },
-        {
-          label: 'Close All',
-          onClick: () => closeAllTabs(),
-        },
-        { type: 'divider' as const },
-        {
-          label: revealLabel,
-          onClick: () => revealInFinder(info.filePath),
-        },
-        {
-          label: 'Copy Path',
-          onClick: () => navigator.clipboard.writeText(info.filePath),
-        },
-        {
-          label: 'Copy File Name',
-          onClick: () => navigator.clipboard.writeText(fileName),
-        },
-      ];
-      setTabCtxMenuItems(items);
-      tabCtxMenu.open(info.x, info.y);
-    },
-    [
-      tabs,
-      closeTab,
-      closeOtherTabs,
-      closeAllTabs,
-      closeTabsToRight,
-      revealInFinder,
-      revealLabel,
-      viewerCtxMenu,
-      explorerCtxMenu,
-      tabCtxMenu,
-      sidebarCtxMenu,
-    ],
-  );
-
-  const handleSidebarContextMenu = useCallback(
-    (info: SidebarContextMenuInfo) => {
-      viewerCtxMenu.close();
-      explorerCtxMenu.close();
-      tabCtxMenu.close();
-
-      const comment = comments.find((c) => c.id === info.commentId);
-      if (!comment) return;
-
-      const resolveItems: ContextMenuEntry[] = settings.enableResolve
-        ? [
-            getEffectiveStatus(comment) === 'resolved'
-              ? { label: 'Reopen', onClick: () => handleUnresolve(info.commentId) }
-              : { label: 'Resolve', onClick: () => handleResolve(info.commentId) },
-          ]
-        : [];
-
-      const items: ContextMenuEntry[] = [
-        ...resolveItems,
-        {
-          label: 'Delete',
-          danger: true,
-          onClick: () => handleDelete(info.commentId),
-        },
-        { type: 'divider' as const },
-        {
-          label: 'Copy Anchor Text',
-          onClick: () => navigator.clipboard.writeText(comment.anchor),
-        },
-        {
-          label: 'Copy Comment Text',
-          onClick: () => navigator.clipboard.writeText(comment.text),
-        },
-        { type: 'divider' as const },
-        {
-          label: 'Scroll to Highlight',
-          onClick: () => {
-            setActiveCommentId(info.commentId);
-            viewerRef.current?.scrollToComment(info.commentId);
-          },
-        },
-      ];
-      setSidebarCtxMenuItems(items);
-      sidebarCtxMenu.open(info.x, info.y);
-    },
-    [
-      comments,
-      settings.enableResolve,
-      handleResolve,
-      handleUnresolve,
-      handleDelete,
-      viewerCtxMenu,
-      explorerCtxMenu,
-      tabCtxMenu,
-      sidebarCtxMenu,
-    ],
-  );
-
-  // --- Text search callbacks ---
-  const handleSearchCount = useCallback((count: number) => {
-    setSearchMatchCount(count);
-  }, []);
-
-  const handleSearchNext = useCallback(() => {
-    setActiveSearchIndex((prev) => (prev < searchMatchCount - 1 ? prev + 1 : 0));
-  }, [searchMatchCount]);
-
-  const handleSearchPrev = useCallback(() => {
-    setActiveSearchIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, searchMatchCount - 1)));
-  }, [searchMatchCount]);
-
-  const handleSearchClose = useCallback(() => {
-    setActiveModal(null);
-    setSearchQuery('');
-    setActiveSearchIndex(0);
-    setSearchMatchCount(0);
-  }, []);
-
-  const handleSearchQueryChange = useCallback((query: string) => {
-    setSearchQuery(query);
-    setActiveSearchIndex(0);
-  }, []);
-
-  // Raw view search count callback
-  const handleRawSearchCount = useCallback((count: number) => {
-    setSearchMatchCount(count);
-  }, []);
-
-  // Reset match count in diff view (no search support)
-  useEffect(() => {
-    if (viewMode === 'diff') setSearchMatchCount(0);
-  }, [viewMode]);
+  // Context menu handlers
+  const {
+    ctxMenuItems, explorerCtxMenuItems, tabCtxMenuItems, sidebarCtxMenuItems,
+    handleViewerContextMenu, handleExplorerContextMenu,
+    handleTabContextMenu, handleSidebarContextMenu,
+  } = useContextMenuItems({
+    comments, enableResolve: settings.enableResolve, templates: settings.templates,
+    handleResolve, handleUnresolve, handleDelete, handleAddComment,
+    setActiveCommentId, setSidebarVisible,
+    selectionRef, lockSelection, setAutoExpandForm,
+    triggerEdit, triggerReply, viewerRef,
+    handleExplorerOpenFile, openTabInBackground, addRecentFile,
+    revealInFinder, revealLabel, setExplorerDir, setExplorerVisible,
+    tabs, closeTab, closeOtherTabs, closeAllTabs, closeTabsToRight,
+    viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+  });
 
   // --- Keyboard shortcuts ---
   useEffect(() => {
@@ -1313,6 +612,8 @@ After you're done, give me a brief summary:
     setSidebarVisible,
     switchTabByOffset,
     showSearch,
+    setActiveModal,
+    setSearchFocusTrigger,
   ]);
 
 
@@ -1324,7 +625,7 @@ After you're done, give me a brief summary:
     { id: 'prev-tab', label: 'Previous tab', shortcut: prevTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(-1) },
     { id: 'next-tab', label: 'Next tab', shortcut: nextTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(1) },
     { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setActiveModal('search'); setSearchFocusTrigger((t) => t + 1); } },
-  ], [handleJumpToNext, handleJumpToPrev, switchTabByOffset]);
+  ], [handleJumpToNext, handleJumpToPrev, switchTabByOffset, setActiveModal, setSearchFocusTrigger]);
 
   const viewCommands = useMemo((): Command[] => {
     const cmds: Command[] = [
@@ -1374,7 +675,7 @@ After you're done, give me a brief summary:
       section: 'Theme',
       onExecute: () => setTheme(t.key),
     })),
-  ], [setTheme]);
+  ], [setTheme, setActiveModal]);
 
   const commentCommands = useMemo((): Command[] => {
     const cmds: Command[] = [];

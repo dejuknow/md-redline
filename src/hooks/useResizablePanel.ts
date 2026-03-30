@@ -22,7 +22,7 @@ const MAX_WIDTHS: PanelWidths = {
   sidebar: 560,
 };
 
-function loadWidths(): PanelWidths {
+export function loadWidths(): PanelWidths {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
@@ -36,7 +36,7 @@ function loadWidths(): PanelWidths {
   }
 }
 
-function clamp(value: number, min: number, max: number) {
+export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 

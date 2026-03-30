@@ -11,7 +11,7 @@ export interface RecentFile {
   openedAt: string; // ISO-8601
 }
 
-function loadFromStorage(): RecentFile[] {
+export function loadFromStorage(): RecentFile[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
@@ -20,7 +20,7 @@ function loadFromStorage(): RecentFile[] {
   }
 }
 
-function saveToStorage(files: RecentFile[]) {
+export function saveToStorage(files: RecentFile[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
   } catch { /* Storage unavailable */ }
@@ -35,7 +35,7 @@ export function useRecentFiles() {
     fetchPreferences().then((prefs) => {
       if (prefs.recentFiles && Array.isArray(prefs.recentFiles) && prefs.recentFiles.length > 0) {
         setRecentFiles(prefs.recentFiles as RecentFile[]);
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs.recentFiles)); } catch {}
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs.recentFiles)); } catch { /* storage unavailable */ }
       }
     });
   }, []);
@@ -55,7 +55,7 @@ export function useRecentFiles() {
 
   const clearRecentFiles = useCallback(() => {
     setRecentFiles([]);
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage unavailable */ }
     savePreferencesToDisk({ recentFiles: [] });
   }, []);
 

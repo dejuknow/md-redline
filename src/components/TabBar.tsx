@@ -212,7 +212,6 @@ export function TabBar({
   viewMode,
   hasSnapshot,
   commentCount,
-  enableResolve: _enableResolve,
   onViewModeChange,
   onSnapshot,
   onClearSnapshot,

@@ -81,6 +81,7 @@ export function FileOpener({
   const handleSystemPicker = useCallback(async () => {
     try {
       const res = await fetch('/api/pick-file');
+      if (!res.ok) return;
       const data = await res.json();
       if (data.path) {
         handleOpen(data.path);

@@ -15,7 +15,7 @@ const AUTHOR_COLORS = [
   { bg: '#fce4ec', text: '#e11d48', border: '#f48fb1' }, // rose
 ];
 
-function hashString(str: string): number {
+export function hashString(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = (hash << 5) - hash + str.charCodeAt(i);
@@ -44,7 +44,7 @@ export function useAuthor() {
     fetchPreferences().then((prefs) => {
       if (prefs.author && prefs.author !== author) {
         setAuthorState(prefs.author);
-        try { localStorage.setItem(STORAGE_KEY, prefs.author); } catch {}
+        try { localStorage.setItem(STORAGE_KEY, prefs.author); } catch { /* storage unavailable */ }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

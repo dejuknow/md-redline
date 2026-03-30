@@ -23,11 +23,12 @@ export async function fetchPreferences(): Promise<DiskPreferences> {
 
 export async function savePreferencesToDisk(patch: Partial<DiskPreferences>): Promise<void> {
   try {
-    await fetch('/api/preferences', {
+    const res = await fetch('/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
+    if (!res.ok) throw new Error('Save failed');
   } catch {
     // Server unavailable — silently fail, localStorage is the fallback
   }

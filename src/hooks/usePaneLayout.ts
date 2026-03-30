@@ -19,7 +19,7 @@ const DEFAULTS: PaneLayout = {
   viewMode: 'rendered',
 };
 
-function load(): PaneLayout {
+export function load(): PaneLayout {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
@@ -35,7 +35,7 @@ function load(): PaneLayout {
   }
 }
 
-function save(layout: PaneLayout) {
+export function save(layout: PaneLayout) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
   } catch { /* ignore */ }
