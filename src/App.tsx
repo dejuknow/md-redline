@@ -786,7 +786,7 @@ export default function App() {
               style={{ minWidth: explorerVisible ? explorerWidth : 0 }}
             >
               {/* Tab bar */}
-              <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
+              <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
                 <div className="flex items-center gap-0.5">
                   <button
                     onClick={() => setLeftPanelView('explorer')}
@@ -839,8 +839,9 @@ export default function App() {
                 </div>
                 <button
                   onClick={() => setExplorerVisible(false)}
-                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
+                  className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   title="Close panel"
+                  aria-label="Close panel"
                 >
                   <svg
                     className="w-3.5 h-3.5"
@@ -956,7 +957,7 @@ export default function App() {
             style={sidebarVisible ? { width: sidebarWidth } : undefined}
           >
             <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
-              <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
+              <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
                 <div className="flex items-center gap-0.5">
                   <h2 className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
                     <svg
@@ -977,8 +978,9 @@ export default function App() {
                 </div>
                 <button
                   onClick={() => setSidebarVisible(false)}
-                  className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
+                  className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   title="Close comments panel"
+                  aria-label="Close comments panel"
                 >
                   <svg
                     className="w-3.5 h-3.5"
