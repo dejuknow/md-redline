@@ -46,7 +46,7 @@ export function CommandPalette({ commands, open, onClose }: Props) {
     if (open) {
       setQuery('');
       setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 

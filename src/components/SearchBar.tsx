@@ -57,6 +57,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
           disabled={matchCount === 0}
           className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint disabled:opacity-30 transition-colors"
           title="Previous match (Shift+Enter)"
+          aria-label="Previous match"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
@@ -67,6 +68,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
           disabled={matchCount === 0}
           className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint disabled:opacity-30 transition-colors"
           title="Next match (Enter)"
+          aria-label="Next match"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -76,6 +78,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
           onClick={onClose}
           className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
           title="Close (Escape)"
+          aria-label="Close search"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

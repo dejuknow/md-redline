@@ -282,7 +282,7 @@ export function CommentSidebar({
                 <ActionButton
                   intent="danger"
                   size="sm"
-                  onClick={(e) => { e.stopPropagation(); onBulkDelete(); }}
+                  onClick={(e) => { e.stopPropagation(); if (confirm('Delete all comments? This cannot be undone.')) onBulkDelete(); }}
                   title="Delete all comments"
                 >
                   Delete All

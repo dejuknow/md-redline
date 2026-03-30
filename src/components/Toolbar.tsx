@@ -33,6 +33,11 @@ export function Toolbar({
   const authorInputRef = useRef<HTMLInputElement>(null);
   const modLabel = getPrimaryModifierLabel();
 
+  // Sync draft when author changes externally (e.g. from Settings panel)
+  useEffect(() => {
+    if (!editingAuthor) setAuthorDraft(author);
+  }, [author, editingAuthor]);
+
   useEffect(() => {
     if (editingAuthor && authorInputRef.current) {
       authorInputRef.current.focus();

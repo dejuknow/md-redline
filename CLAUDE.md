@@ -237,7 +237,7 @@ Each case is a directory under `eval/fixtures/` with three files:
 - `prompt.txt` — instruction for the agent
 - `expected.json` — scoring criteria (totalComments, actionableComments, per-comment expectedAction, contentAssertions)
 
-10 fixtures: single-rewrite, mixed-statuses, overlapping-anchors, vague-comment, code-block, deletion-request, threaded-comments, large-file, no-comments, frontmatter.
+13 fixtures: single-rewrite, mixed-statuses, overlapping-anchors, vague-comment, code-block, deletion-request, threaded-comments, large-file, no-comments, frontmatter, resolved-comments, clustered-paragraph, table-comments.
 
 ### Scoring dimensions
 

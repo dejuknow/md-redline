@@ -135,7 +135,7 @@ export function ContextMenu({ items, position, onClose }: Props) {
           if (isDivider(entry)) {
             return (
               <div
-                key={`divider-${idx}`}
+                key={`divider-${idx}`} /* dividers have no identity — index key is acceptable */
                 className="my-1 mx-2 h-px bg-border"
               />
             );
@@ -144,7 +144,7 @@ export function ContextMenu({ items, position, onClose }: Props) {
           if (isSubmenu(entry)) {
             return (
               <div
-                key={`submenu-${idx}`}
+                key={`submenu-${entry.label}`}
                 className="relative"
                 onMouseEnter={(e) => handleSubmenuHover(idx, e)}
                 onMouseLeave={() => setOpenSubmenuIdx(null)}
@@ -174,9 +174,9 @@ export function ContextMenu({ items, position, onClose }: Props) {
                     onMouseEnter={() => setOpenSubmenuIdx(idx)}
                     onMouseLeave={() => setOpenSubmenuIdx(null)}
                   >
-                    {entry.items.map((subItem, subIdx) => (
+                    {entry.items.map((subItem) => (
                       <button
-                        key={`sub-${subIdx}`}
+                        key={subItem.label}
                         onClick={() => handleItemClick(subItem)}
                         disabled={subItem.disabled}
                         className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
@@ -199,7 +199,7 @@ export function ContextMenu({ items, position, onClose }: Props) {
           // Regular menu item
           return (
             <button
-              key={`item-${idx}`}
+              key={entry.label}
               onClick={() => handleItemClick(entry)}
               disabled={entry.disabled}
               className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${

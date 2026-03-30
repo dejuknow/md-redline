@@ -292,7 +292,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                 <div className="space-y-1">
                   {draftTemplates.map((t, i) => (
                     <div
-                      key={i}
+                      key={`${t.label}-${t.text}`}
                       draggable={editingIndex !== i}
                       onDragStart={() => handleDragStart(i)}
                       onDragOver={(e) => handleDragOver(e, i)}
