@@ -1,26 +1,19 @@
 import { useState, useCallback } from 'react';
+import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 
 export function useCommentCardTriggers() {
-  const [requestEditId, setRequestEditId] = useState<string | null>(null);
-  const [requestEditToken, setRequestEditToken] = useState(0);
-  const [requestReplyId, setRequestReplyId] = useState<string | null>(null);
-  const [requestReplyToken, setRequestReplyToken] = useState(0);
+  const [requestedEditor, setRequestedEditor] = useState<SidebarCommentEditorState>(null);
 
   const triggerEdit = useCallback((commentId: string) => {
-    setRequestEditId(commentId);
-    setRequestEditToken(Date.now());
+    setRequestedEditor({ mode: 'comment-edit', commentId, token: Date.now() });
   }, []);
 
   const triggerReply = useCallback((commentId: string) => {
-    setRequestReplyId(commentId);
-    setRequestReplyToken(Date.now());
+    setRequestedEditor({ mode: 'reply-compose', commentId, token: Date.now() });
   }, []);
 
   return {
-    requestEditId,
-    requestEditToken,
-    requestReplyId,
-    requestReplyToken,
+    requestedEditor,
     triggerEdit,
     triggerReply,
   };

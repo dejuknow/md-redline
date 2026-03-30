@@ -15,10 +15,7 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import { parseComments } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
-import {
-  MarkdownViewer,
-  type MarkdownViewerHandle,
-} from './components/MarkdownViewer';
+import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentSidebar } from './components/CommentSidebar';
 import { CommentForm } from './components/CommentForm';
@@ -52,7 +49,6 @@ import { useDiffSnapshot } from './hooks/useDiffSnapshot';
 import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
-
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -98,7 +94,9 @@ export default function App() {
   } = usePaneLayout();
 
   // One-time migration of localStorage preferences to disk
-  useEffect(() => { migrateLocalStorageToDisk(); }, []);
+  useEffect(() => {
+    migrateLocalStorageToDisk();
+  }, []);
 
   // Session persistence (tabs only — pane layout is persisted by usePaneLayout)
   const { persist } = useSessionPersistence();
@@ -119,9 +117,10 @@ export default function App() {
     if (savedSession && savedSession.openTabs.length > 0) {
       // Open inactive tabs in background first, then the active tab last
       // (openTab sets it active, avoiding the setTimeout race)
-      const activeTarget = savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)
-        ? savedSession.activeFilePath
-        : savedSession.openTabs[0];
+      const activeTarget =
+        savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)
+          ? savedSession.activeFilePath
+          : savedSession.openTabs[0];
       for (const path of savedSession.openTabs) {
         if (path === activeTarget) continue;
         openTabInBackground(path);
@@ -159,10 +158,17 @@ export default function App() {
   // Text search state
   const showSearch = activeModal === 'search';
   const {
-    searchQuery, activeSearchIndex, searchMatchCount,
-    searchFocusTrigger, setSearchFocusTrigger,
-    handleSearchCount, handleSearchNext, handleSearchPrev,
-    handleSearchClose, handleSearchQueryChange, handleRawSearchCount,
+    searchQuery,
+    activeSearchIndex,
+    searchMatchCount,
+    searchFocusTrigger,
+    setSearchFocusTrigger,
+    handleSearchCount,
+    handleSearchNext,
+    handleSearchPrev,
+    handleSearchClose,
+    handleSearchQueryChange,
+    handleRawSearchCount,
   } = useSearch(() => setActiveModal(null), viewMode);
 
   // Platform info for context menu labels
@@ -170,7 +176,10 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/platform', { signal: controller.signal })
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      })
       .then(({ platform }) => {
         if (platform === 'darwin') setRevealLabel('Reveal in Finder');
         else if (platform === 'win32') setRevealLabel('Show in Explorer');
@@ -186,17 +195,12 @@ export default function App() {
   const tabCtxMenu = useContextMenu();
   const sidebarCtxMenu = useContextMenu();
 
-
   // Triggers for remotely entering edit/reply mode on a CommentCard
-  const {
-    requestEditId, requestEditToken, requestReplyId, requestReplyToken,
-    triggerEdit, triggerReply,
-  } = useCommentCardTriggers();
+  const { requestedEditor, triggerEdit, triggerReply } = useCommentCardTriggers();
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const rawViewRef = useRef<RawViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
   const rawMarkdownRef = useRef(rawMarkdown);
@@ -206,7 +210,11 @@ export default function App() {
 
   // Diff snapshot state
   const { currentSnapshot, handleSnapshot, handleClearSnapshot } = useDiffSnapshot(
-    activeFilePath, rawMarkdownRef, showToast, viewMode, setViewMode,
+    activeFilePath,
+    rawMarkdownRef,
+    showToast,
+    viewMode,
+    setViewMode,
   );
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
@@ -221,44 +229,76 @@ export default function App() {
 
   // Comment state and operations
   const {
-    activeCommentId, setActiveCommentId,
-    comments, cleanMarkdown, html, missingAnchors,
-    commentCounts, commentCount,
-    handleAddComment, handleResolve, handleUnresolve,
-    handleDelete, handleEdit, handleReply,
-    handleBulkDelete, handleBulkResolve, handleBulkDeleteResolved,
-    handleCopyAgentPrompt, handleHighlightClick, handleSidebarActivate,
-    handleAnchorChange, handleJumpToNext, handleJumpToPrev,
+    activeCommentId,
+    setActiveCommentId,
+    comments,
+    cleanMarkdown,
+    html,
+    missingAnchors,
+    commentCounts,
+    commentCount,
+    handleAddComment,
+    handleResolve,
+    handleUnresolve,
+    handleDelete,
+    handleEdit,
+    handleReply,
+    handleEditReply,
+    handleDeleteReply,
+    handleBulkDelete,
+    handleBulkResolve,
+    handleBulkDeleteResolved,
+    handleCopyAgentPrompt,
+    handleHighlightClick,
+    handleSidebarActivate,
+    handleAnchorChange,
+    handleJumpToNext,
+    handleJumpToPrev,
   } = useComments({
-    rawMarkdown, rawMarkdownRef, setRawMarkdown, saveFile,
-    author, enableResolve: settings.enableResolve,
-    tabs, activeFilePath, viewerRef, rawViewRef,
-    showToast, clearSelection, setAutoExpandForm,
+    rawMarkdown,
+    rawMarkdownRef,
+    setRawMarkdown,
+    saveFile,
+    author,
+    enableResolve: settings.enableResolve,
+    tabs,
+    activeFilePath,
+    viewerRef,
+    rawViewRef,
+    showToast,
+    clearSelection,
+    setAutoExpandForm,
   });
 
   // Combined handoff: snapshot + copy agent prompt
-  const handleHandoff = useCallback((filePaths: string[]) => {
-    handleSnapshot();
-    handleCopyAgentPrompt(filePaths);
-  }, [handleSnapshot, handleCopyAgentPrompt]);
+  const handleHandoff = useCallback(
+    (filePaths: string[]) => {
+      handleSnapshot();
+      handleCopyAgentPrompt(filePaths);
+    },
+    [handleSnapshot, handleCopyAgentPrompt],
+  );
 
   // Heading tracking / table of contents
   const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
     useHeadingTracking(containerRef, viewerRef, html);
 
-  const handleHeadingNavigate = useCallback((id: string) => {
-    cancelAnimationFrame(scrollSpyRafRef.current);
-    spyDisabledRef.current = true;
-    setActiveHeadingId(id);
+  const handleHeadingNavigate = useCallback(
+    (id: string) => {
+      cancelAnimationFrame(scrollSpyRafRef.current);
+      spyDisabledRef.current = true;
+      setActiveHeadingId(id);
 
-    if (viewMode === 'raw') {
-      rawViewRef.current?.scrollToHeading(id);
-      return;
-    }
+      if (viewMode === 'raw') {
+        rawViewRef.current?.scrollToHeading(id);
+        return;
+      }
 
-    const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [setActiveHeadingId, viewMode]);
+      const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    [setActiveHeadingId, viewMode, scrollSpyRafRef, spyDisabledRef],
+  );
 
   // Clear transient state on tab switch
   const prevFilePathRef = useRef(activeFilePath);
@@ -353,7 +393,10 @@ export default function App() {
     }
     if (savedSession && savedSession.openTabs.length > 0) return;
     fetch('/api/config')
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      })
       .then((data) => {
         if (data.initialFile) {
           openTab(data.initialFile);
@@ -376,17 +419,22 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
-  const revealInFinder = useCallback((path: string) => {
-    fetch('/api/reveal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
-    }).then((r) => {
-      if (!r.ok) showToast('Could not reveal file');
-    }).catch(() => {
-      showToast('Could not reveal file');
-    });
-  }, [showToast]);
+  const revealInFinder = useCallback(
+    (path: string) => {
+      fetch('/api/reveal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+        .then((r) => {
+          if (!r.ok) showToast('Could not reveal file');
+        })
+        .catch(() => {
+          showToast('Could not reveal file');
+        });
+    },
+    [showToast],
+  );
 
   const handleExplorerOpenFile = useCallback(
     (path: string) => {
@@ -404,27 +452,52 @@ export default function App() {
     onAnchorChange: handleAnchorChange,
   });
 
-
-
   // Stable ref for selection to use in keyboard handler without re-creating it
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
   // Context menu handlers
   const {
-    ctxMenuItems, explorerCtxMenuItems, tabCtxMenuItems, sidebarCtxMenuItems,
-    handleViewerContextMenu, handleExplorerContextMenu,
-    handleTabContextMenu, handleSidebarContextMenu,
+    ctxMenuItems,
+    explorerCtxMenuItems,
+    tabCtxMenuItems,
+    sidebarCtxMenuItems,
+    handleViewerContextMenu,
+    handleExplorerContextMenu,
+    handleTabContextMenu,
+    handleSidebarContextMenu,
   } = useContextMenuItems({
-    comments, enableResolve: settings.enableResolve, templates: settings.templates,
-    handleResolve, handleUnresolve, handleDelete, handleAddComment,
-    setActiveCommentId, setSidebarVisible,
-    selectionRef, lockSelection, setAutoExpandForm,
-    triggerEdit, triggerReply, viewerRef,
-    handleExplorerOpenFile, openTabInBackground, addRecentFile,
-    revealInFinder, revealLabel, setExplorerDir, setExplorerVisible,
-    tabs, closeTab, closeOtherTabs, closeAllTabs, closeTabsToRight,
-    viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+    comments,
+    enableResolve: settings.enableResolve,
+    templates: settings.templates,
+    handleResolve,
+    handleUnresolve,
+    handleDelete,
+    handleAddComment,
+    setActiveCommentId,
+    setSidebarVisible,
+    selectionRef,
+    lockSelection,
+    setAutoExpandForm,
+    triggerEdit,
+    triggerReply,
+    viewerRef,
+    handleExplorerOpenFile,
+    openTabInBackground,
+    addRecentFile,
+    revealInFinder,
+    revealLabel,
+    setExplorerDir,
+    setExplorerVisible,
+    tabs,
+    closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
+    viewerCtxMenu,
+    explorerCtxMenu,
+    tabCtxMenu,
+    sidebarCtxMenu,
   });
 
   // --- Keyboard shortcuts ---
@@ -628,74 +701,197 @@ export default function App() {
     setSearchFocusTrigger,
   ]);
 
-
-
   // Command palette commands — split into categories for manageable dependency arrays
-  const navigationCommands = useMemo((): Command[] => [
-    { id: 'next-comment', label: 'Jump to next comment', shortcut: 'N / J', section: 'Navigation', onExecute: handleJumpToNext },
-    { id: 'prev-comment', label: 'Jump to previous comment', shortcut: 'P / K', section: 'Navigation', onExecute: handleJumpToPrev },
-    { id: 'prev-tab', label: 'Previous tab', shortcut: prevTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(-1) },
-    { id: 'next-tab', label: 'Next tab', shortcut: nextTabShortcut, section: 'Tabs', onExecute: () => switchTabByOffset(1) },
-    { id: 'find', label: 'Find in document', shortcut: `${modKey}+F`, section: 'Navigation', onExecute: () => { setActiveModal('search'); setSearchFocusTrigger((t) => t + 1); } },
-  ], [handleJumpToNext, handleJumpToPrev, switchTabByOffset, setActiveModal, setSearchFocusTrigger]);
+  const navigationCommands = useMemo(
+    (): Command[] => [
+      {
+        id: 'next-comment',
+        label: 'Jump to next comment',
+        shortcut: 'N / J',
+        section: 'Navigation',
+        onExecute: handleJumpToNext,
+      },
+      {
+        id: 'prev-comment',
+        label: 'Jump to previous comment',
+        shortcut: 'P / K',
+        section: 'Navigation',
+        onExecute: handleJumpToPrev,
+      },
+      {
+        id: 'prev-tab',
+        label: 'Previous tab',
+        shortcut: prevTabShortcut,
+        section: 'Tabs',
+        onExecute: () => switchTabByOffset(-1),
+      },
+      {
+        id: 'next-tab',
+        label: 'Next tab',
+        shortcut: nextTabShortcut,
+        section: 'Tabs',
+        onExecute: () => switchTabByOffset(1),
+      },
+      {
+        id: 'find',
+        label: 'Find in document',
+        shortcut: `${modKey}+F`,
+        section: 'Navigation',
+        onExecute: () => {
+          setActiveModal('search');
+          setSearchFocusTrigger((t) => t + 1);
+        },
+      },
+    ],
+    [handleJumpToNext, handleJumpToPrev, switchTabByOffset, setActiveModal, setSearchFocusTrigger],
+  );
 
   const viewCommands = useMemo((): Command[] => {
     const cmds: Command[] = [
-      { id: 'toggle-sidebar', label: 'Toggle sidebar', shortcut: `${modKey}+\\`, section: 'View', onExecute: () => setSidebarVisible((p) => !p) },
-      { id: 'view-rendered', label: 'Switch to rendered view', section: 'View', onExecute: () => setViewMode('rendered') },
-      { id: 'view-raw', label: 'Switch to raw markdown', section: 'View', onExecute: () => setViewMode('raw') },
       {
-        id: 'toggle-explorer', label: 'Toggle file explorer', shortcut: `${modKey}+B`, section: 'View',
+        id: 'toggle-sidebar',
+        label: 'Toggle sidebar',
+        shortcut: `${modKey}+\\`,
+        section: 'View',
+        onExecute: () => setSidebarVisible((p) => !p),
+      },
+      {
+        id: 'view-rendered',
+        label: 'Switch to rendered view',
+        section: 'View',
+        onExecute: () => setViewMode('rendered'),
+      },
+      {
+        id: 'view-raw',
+        label: 'Switch to raw markdown',
+        section: 'View',
+        onExecute: () => setViewMode('raw'),
+      },
+      {
+        id: 'toggle-explorer',
+        label: 'Toggle file explorer',
+        shortcut: `${modKey}+B`,
+        section: 'View',
         onExecute: () => {
-          if (explorerVisible && leftPanelView === 'explorer') { setExplorerVisible(false); }
-          else { setExplorerVisible(true); setLeftPanelView('explorer'); }
+          if (explorerVisible && leftPanelView === 'explorer') {
+            setExplorerVisible(false);
+          } else {
+            setExplorerVisible(true);
+            setLeftPanelView('explorer');
+          }
         },
       },
       {
-        id: 'toggle-outline', label: 'Toggle document outline', shortcut: `${modKey}+Shift+O`, section: 'View',
+        id: 'toggle-outline',
+        label: 'Toggle document outline',
+        shortcut: `${modKey}+Shift+O`,
+        section: 'View',
         onExecute: () => {
-          if (explorerVisible && leftPanelView === 'outline') { setExplorerVisible(false); }
-          else { setExplorerVisible(true); setLeftPanelView('outline'); }
+          if (explorerVisible && leftPanelView === 'outline') {
+            setExplorerVisible(false);
+          } else {
+            setExplorerVisible(true);
+            setLeftPanelView('outline');
+          }
         },
       },
     ];
     if (currentSnapshot) {
-      cmds.push({ id: 'view-diff', label: 'Toggle diff view', section: 'View', onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')) });
+      cmds.push({
+        id: 'view-diff',
+        label: 'Toggle diff view',
+        section: 'View',
+        onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')),
+      });
     }
     return cmds;
-  }, [setSidebarVisible, setViewMode, setExplorerVisible, setLeftPanelView, explorerVisible, leftPanelView, currentSnapshot]);
+  }, [
+    setSidebarVisible,
+    setViewMode,
+    setExplorerVisible,
+    setLeftPanelView,
+    explorerVisible,
+    leftPanelView,
+    currentSnapshot,
+  ]);
 
   const fileCommands = useMemo((): Command[] => {
     const cmds: Command[] = [
       { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
-      { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: openFilePicker },
+      {
+        id: 'open-file',
+        label: 'Open file',
+        shortcut: `${modKey}+O`,
+        section: 'File',
+        onExecute: openFilePicker,
+      },
     ];
     if (currentSnapshot) {
-      cmds.push({ id: 'clear-snapshot', label: 'Clear diff snapshot', section: 'File', onExecute: handleClearSnapshot });
+      cmds.push({
+        id: 'clear-snapshot',
+        label: 'Clear diff snapshot',
+        section: 'File',
+        onExecute: handleClearSnapshot,
+      });
     }
     return cmds;
   }, [reloadFile, openFilePicker, handleClearSnapshot, currentSnapshot]);
 
-  const generalCommands = useMemo((): Command[] => [
-    { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setActiveModal('settings') },
-    { id: 'keyboard-shortcuts', label: 'Keyboard shortcuts', shortcut: '?', section: 'General', onExecute: () => setActiveModal('shortcuts') },
-    { id: 'theme-system', label: 'Theme: System', section: 'Theme', onExecute: () => setTheme('system') },
-    ...ALL_THEMES.map((t) => ({
-      id: `theme-${t.key}`,
-      label: `Theme: ${t.label}`,
-      section: 'Theme',
-      onExecute: () => setTheme(t.key),
-    })),
-  ], [setTheme, setActiveModal]);
+  const generalCommands = useMemo(
+    (): Command[] => [
+      {
+        id: 'open-settings',
+        label: 'Open settings',
+        shortcut: `${modKey}+,`,
+        section: 'General',
+        onExecute: () => setActiveModal('settings'),
+      },
+      {
+        id: 'keyboard-shortcuts',
+        label: 'Keyboard shortcuts',
+        shortcut: '?',
+        section: 'General',
+        onExecute: () => setActiveModal('shortcuts'),
+      },
+      {
+        id: 'theme-system',
+        label: 'Theme: System',
+        section: 'Theme',
+        onExecute: () => setTheme('system'),
+      },
+      ...ALL_THEMES.map((t) => ({
+        id: `theme-${t.key}`,
+        label: `Theme: ${t.label}`,
+        section: 'Theme',
+        onExecute: () => setTheme(t.key),
+      })),
+    ],
+    [setTheme, setActiveModal],
+  );
 
   const commentCommands = useMemo((): Command[] => {
     const cmds: Command[] = [];
     if (settings.enableResolve && commentCount > 0) {
-      cmds.push({ id: 'resolve-all', label: 'Resolve all open comments', section: 'Comments', onExecute: handleBulkResolve });
+      cmds.push({
+        id: 'resolve-all',
+        label: 'Resolve all open comments',
+        section: 'Comments',
+        onExecute: handleBulkResolve,
+      });
     }
     if (commentCount > 0) {
-      cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
-      cmds.push({ id: 'copy-agent-prompt', label: 'Hand off to agent (copy instructions)', section: 'Comments', onExecute: () => activeFilePath && handleHandoff([activeFilePath]) });
+      cmds.push({
+        id: 'delete-all',
+        label: 'Delete all comments',
+        section: 'Comments',
+        onExecute: handleBulkDelete,
+      });
+      cmds.push({
+        id: 'copy-agent-prompt',
+        label: 'Hand off to agent (copy instructions)',
+        section: 'Comments',
+        onExecute: () => activeFilePath && handleHandoff([activeFilePath]),
+      });
     }
     if (activeCommentId) {
       if (settings.enableResolve) {
@@ -703,30 +899,76 @@ export default function App() {
         if (activeComment) {
           const status = getEffectiveStatus(activeComment);
           if (status === 'open') {
-            cmds.push({ id: 'resolve-active', label: 'Resolve active comment', shortcut: 'A', section: 'Comments', onExecute: () => handleResolve(activeCommentId) });
+            cmds.push({
+              id: 'resolve-active',
+              label: 'Resolve active comment',
+              shortcut: 'A',
+              section: 'Comments',
+              onExecute: () => handleResolve(activeCommentId),
+            });
           }
           if (status === 'resolved') {
-            cmds.push({ id: 'unresolve-active', label: 'Reopen active comment', shortcut: 'U', section: 'Comments', onExecute: () => handleUnresolve(activeCommentId) });
+            cmds.push({
+              id: 'unresolve-active',
+              label: 'Reopen active comment',
+              shortcut: 'U',
+              section: 'Comments',
+              onExecute: () => handleUnresolve(activeCommentId),
+            });
           }
         }
       }
-      cmds.push({ id: 'delete-active', label: 'Delete active comment', shortcut: 'D', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
+      cmds.push({
+        id: 'delete-active',
+        label: 'Delete active comment',
+        shortcut: 'D',
+        section: 'Comments',
+        onExecute: () => handleDelete(activeCommentId),
+      });
     }
     return cmds;
-  }, [commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleHandoff, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
+  }, [
+    commentCount,
+    settings.enableResolve,
+    handleBulkDelete,
+    handleBulkResolve,
+    handleHandoff,
+    activeFilePath,
+    activeCommentId,
+    comments,
+    handleResolve,
+    handleUnresolve,
+    handleDelete,
+  ]);
 
-  const headingCommands = useMemo((): Command[] =>
-    tocHeadings.map((h) => ({
-      id: `heading-${h.id}`,
-      label: `${'\u2003'.repeat(h.level - 1)}${h.text}`,
-      section: 'Headings' as const,
-      onExecute: () => handleHeadingNavigate(h.id),
-    })),
-  [tocHeadings, handleHeadingNavigate]);
+  const headingCommands = useMemo(
+    (): Command[] =>
+      tocHeadings.map((h) => ({
+        id: `heading-${h.id}`,
+        label: `${'\u2003'.repeat(h.level - 1)}${h.text}`,
+        section: 'Headings' as const,
+        onExecute: () => handleHeadingNavigate(h.id),
+      })),
+    [tocHeadings, handleHeadingNavigate],
+  );
 
   const paletteCommands = useMemo(
-    () => [...navigationCommands, ...viewCommands, ...fileCommands, ...generalCommands, ...commentCommands, ...headingCommands],
-    [navigationCommands, viewCommands, fileCommands, generalCommands, commentCommands, headingCommands],
+    () => [
+      ...navigationCommands,
+      ...viewCommands,
+      ...fileCommands,
+      ...generalCommands,
+      ...commentCommands,
+      ...headingCommands,
+    ],
+    [
+      navigationCommands,
+      viewCommands,
+      fileCommands,
+      generalCommands,
+      commentCommands,
+      headingCommands,
+    ],
   );
 
   return (
@@ -1004,14 +1246,13 @@ export default function App() {
                   onDelete={handleDelete}
                   onEdit={handleEdit}
                   onReply={handleReply}
+                  onEditReply={handleEditReply}
+                  onDeleteReply={handleDeleteReply}
                   onBulkDelete={handleBulkDelete}
                   onBulkResolve={handleBulkResolve}
                   onBulkDeleteResolved={handleBulkDeleteResolved}
                   onContextMenu={handleSidebarContextMenu}
-                  requestEditId={requestEditId}
-                  requestEditToken={requestEditToken}
-                  requestReplyId={requestReplyId}
-                  requestReplyToken={requestReplyToken}
+                  requestedEditor={requestedEditor}
                 />
               </div>
             </div>

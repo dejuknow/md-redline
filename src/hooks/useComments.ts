@@ -1,13 +1,22 @@
-import { useState, useMemo, useCallback, type RefObject, type Dispatch, type SetStateAction } from 'react';
+import {
+  useState,
+  useMemo,
+  useCallback,
+  type RefObject,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import {
   parseComments,
   insertComment,
   removeComment,
   editComment,
+  editReply,
   updateCommentAnchor,
   resolveComment,
   unresolveComment,
   addReply,
+  removeReply,
   removeAllComments,
   resolveAllComments,
   removeResolvedComments,
@@ -41,9 +50,19 @@ export interface UseCommentsParams {
 
 export function useComments(params: UseCommentsParams) {
   const {
-    rawMarkdown, rawMarkdownRef, setRawMarkdown, saveFile,
-    author, enableResolve, tabs, activeFilePath,
-    viewerRef, rawViewRef, showToast, clearSelection, setAutoExpandForm,
+    rawMarkdown,
+    rawMarkdownRef,
+    setRawMarkdown,
+    saveFile,
+    author,
+    enableResolve,
+    tabs,
+    activeFilePath,
+    viewerRef,
+    rawViewRef,
+    showToast,
+    clearSelection,
+    setAutoExpandForm,
   } = params;
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -160,6 +179,20 @@ export function useComments(params: UseCommentsParams) {
     [updateAndSave, author, rawMarkdownRef],
   );
 
+  const handleEditReply = useCallback(
+    (commentId: string, replyId: string, newText: string) => {
+      updateAndSave(editReply(rawMarkdownRef.current ?? '', commentId, replyId, newText));
+    },
+    [updateAndSave, rawMarkdownRef],
+  );
+
+  const handleDeleteReply = useCallback(
+    (commentId: string, replyId: string) => {
+      updateAndSave(removeReply(rawMarkdownRef.current ?? '', commentId, replyId));
+    },
+    [updateAndSave, rawMarkdownRef],
+  );
+
   const handleBulkDelete = useCallback(() => {
     updateAndSave(removeAllComments(rawMarkdownRef.current ?? ''));
   }, [updateAndSave, rawMarkdownRef]);
@@ -207,10 +240,14 @@ The JSON contains these fields:
 
 1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
 2. For each comment, read the \`text\` field and address the feedback by editing the document
-${enableResolve ? `3. If a comment is a question or doesn't require a document edit, **add a reply** to the \`replies\` array in the marker JSON instead: \`"replies":[{"id":"<unique-id>","text":"your answer","author":"Agent","timestamp":"<ISO-8601>"}]\` (append to any existing replies)
+${
+  enableResolve
+    ? `3. If a comment is a question or doesn't require a document edit, **add a reply** to the \`replies\` array in the marker JSON instead: \`"replies":[{"id":"<unique-id>","text":"your answer","author":"Agent","timestamp":"<ISO-8601>"}]\` (append to any existing replies)
 4. ${afterAction}
-5. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it` : `3. ${afterAction}
-4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`}
+5. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`
+    : `3. ${afterAction}
+4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`
+}
 
 ## How to respond
 
@@ -222,7 +259,9 @@ After you're done, give me a brief summary:
       const fileCount = filePaths.length;
       navigator.clipboard.writeText(prompt).then(
         () =>
-          showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''} (snapshot saved)`),
+          showToast(
+            `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''} (snapshot saved)`,
+          ),
         () => showToast("Couldn't copy to clipboard. Try from localhost."),
       );
     },
@@ -233,11 +272,14 @@ After you're done, give me a brief summary:
     setActiveCommentId(commentId);
   }, []);
 
-  const handleSidebarActivate = useCallback((commentId: string) => {
-    setActiveCommentId(commentId);
-    viewerRef.current?.scrollToComment(commentId);
-    rawViewRef.current?.scrollToComment(commentId);
-  }, [viewerRef, rawViewRef]);
+  const handleSidebarActivate = useCallback(
+    (commentId: string) => {
+      setActiveCommentId(commentId);
+      viewerRef.current?.scrollToComment(commentId);
+      rawViewRef.current?.scrollToComment(commentId);
+    },
+    [viewerRef, rawViewRef],
+  );
 
   const handleAnchorChange = useCallback(
     (commentIds: string[], newAnchor: string) => {
@@ -292,6 +334,8 @@ After you're done, give me a brief summary:
     handleDelete,
     handleEdit,
     handleReply,
+    handleEditReply,
+    handleDeleteReply,
     handleBulkDelete,
     handleBulkResolve,
     handleBulkDeleteResolved,

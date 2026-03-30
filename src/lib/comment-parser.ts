@@ -527,6 +527,33 @@ export function editComment(rawMarkdown: string, commentId: string, newText: str
   });
 }
 
+function updateReplies(
+  rawMarkdown: string,
+  commentId: string,
+  updater: (replies: CommentReply[]) => CommentReply[] | null,
+): string {
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id !== commentId) return { type: 'keep' };
+
+    const nextReplies = updater(comment.replies ?? []);
+    if (nextReplies === null) return { type: 'keep' };
+
+    if (nextReplies.length === 0) {
+      const nextComment = { ...comment };
+      delete nextComment.replies;
+      return {
+        type: 'replace',
+        comment: nextComment,
+      };
+    }
+
+    return {
+      type: 'replace',
+      comment: { ...comment, replies: nextReplies },
+    };
+  });
+}
+
 export function updateCommentAnchor(
   rawMarkdown: string,
   commentId: string,
@@ -559,17 +586,34 @@ export function addReply(
     timestamp: new Date().toISOString(),
   };
 
-  return transformCommentMarkers(rawMarkdown, (comment) => {
-    if (comment?.id === commentId) {
-      return {
-        type: 'replace',
-        comment: {
-          ...comment,
-          replies: [...(comment.replies ?? []), reply],
-        },
-      };
-    }
-    return { type: 'keep' };
+  return updateReplies(rawMarkdown, commentId, (replies) => [...replies, reply]);
+}
+
+export function editReply(
+  rawMarkdown: string,
+  commentId: string,
+  replyId: string,
+  newText: string,
+): string {
+  return updateReplies(rawMarkdown, commentId, (replies) => {
+    const replyIndex = replies.findIndex((reply) => reply.id === replyId);
+    if (replyIndex === -1) return null;
+
+    return replies.map((reply) =>
+      reply.id === replyId
+        ? {
+            ...reply,
+            text: newText,
+          }
+        : reply,
+    );
+  });
+}
+
+export function removeReply(rawMarkdown: string, commentId: string, replyId: string): string {
+  return updateReplies(rawMarkdown, commentId, (replies) => {
+    const nextReplies = replies.filter((reply) => reply.id !== replyId);
+    return nextReplies.length === replies.length ? null : nextReplies;
   });
 }
 

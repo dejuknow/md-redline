@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
+import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { CommentCard } from './CommentCard';
 import { useSettings } from '../contexts/SettingsContext';
 import { ActionButton } from './ActionButton';
@@ -21,16 +22,13 @@ interface Props {
   onDelete: (id: string) => void;
   onEdit: (id: string, newText: string) => void;
   onReply: (id: string, text: string) => void;
+  onEditReply: (commentId: string, replyId: string, newText: string) => void;
+  onDeleteReply: (commentId: string, replyId: string) => void;
   onBulkDelete: () => void;
   onBulkResolve?: () => void;
   onBulkDeleteResolved?: () => void;
   onContextMenu?: (info: SidebarContextMenuInfo) => void;
-  /** When set, the matching comment enters edit mode. Use Date.now() to re-trigger. */
-  requestEditId?: string | null;
-  requestEditToken?: number;
-  /** When set, the matching comment enters reply mode. Use Date.now() to re-trigger. */
-  requestReplyId?: string | null;
-  requestReplyToken?: number;
+  requestedEditor?: SidebarCommentEditorState;
 }
 
 type FilterMode = 'all' | 'open' | 'resolved';
@@ -45,18 +43,18 @@ export function CommentSidebar({
   onDelete,
   onEdit,
   onReply,
+  onEditReply,
+  onDeleteReply,
   onBulkDelete,
   onBulkResolve,
   onBulkDeleteResolved,
   onContextMenu: onCtxMenu,
-  requestEditId,
-  requestEditToken,
-  requestReplyId,
-  requestReplyToken,
+  requestedEditor,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterMode>('all');
+  const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
   const { settings } = useSettings();
   const resolveEnabled = settings.enableResolve;
 
@@ -66,6 +64,45 @@ export function CommentSidebar({
       activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [activeCommentId]);
+
+  useEffect(() => {
+    if (requestedEditor) {
+      setActiveEditor(requestedEditor);
+    }
+  }, [requestedEditor]);
+
+  useEffect(() => {
+    if (!activeEditor) return;
+
+    const comment = comments.find((candidate) => candidate.id === activeEditor.commentId);
+    if (!comment) {
+      setActiveEditor(null);
+      return;
+    }
+
+    if (
+      activeEditor.mode === 'reply-edit' &&
+      !comment.replies?.some((reply) => reply.id === activeEditor.replyId)
+    ) {
+      setActiveEditor(null);
+    }
+  }, [comments, activeEditor]);
+
+  const openCommentEdit = (commentId: string) => {
+    setActiveEditor({ mode: 'comment-edit', commentId, token: Date.now() });
+  };
+
+  const openReplyCompose = (commentId: string) => {
+    setActiveEditor({ mode: 'reply-compose', commentId, token: Date.now() });
+  };
+
+  const openReplyEdit = (commentId: string, replyId: string) => {
+    setActiveEditor({ mode: 'reply-edit', commentId, replyId, token: Date.now() });
+  };
+
+  const closeEditor = () => {
+    setActiveEditor(null);
+  };
 
   // Count by status (only meaningful when resolve is enabled)
   const openCount = resolveEnabled
@@ -143,11 +180,7 @@ export function CommentSidebar({
           <div className="flex gap-1">
             {FILTER_TABS.map(({ key, label }) => {
               const count =
-                key === 'all'
-                  ? comments.length
-                  : key === 'open'
-                    ? openCount
-                    : resolvedCount;
+                key === 'all' ? comments.length : key === 'open' ? openCount : resolvedCount;
               return (
                 <button
                   key={key}
@@ -160,7 +193,9 @@ export function CommentSidebar({
                 >
                   {label}
                   {count > 0 && (
-                    <span className={`ml-1 ${filter === key ? 'text-primary-text' : 'text-content-muted'}`}>
+                    <span
+                      className={`ml-1 ${filter === key ? 'text-primary-text' : 'text-content-muted'}`}
+                    >
                       {count}
                     </span>
                   )}
@@ -196,9 +231,16 @@ export function CommentSidebar({
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
-              onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
-              requestEdit={comment.id === requestEditId ? requestEditToken : undefined}
-              requestReply={comment.id === requestReplyId ? requestReplyToken : undefined}
+              onEditReply={onEditReply}
+              onDeleteReply={onDeleteReply}
+              editor={activeEditor?.commentId === comment.id ? activeEditor : null}
+              onRequestCommentEdit={openCommentEdit}
+              onRequestReplyCompose={openReplyCompose}
+              onRequestReplyEdit={openReplyEdit}
+              onCloseEditor={closeEditor}
+              onContextMenu={
+                onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
+              }
             />
           </div>
         ))}
@@ -224,9 +266,16 @@ export function CommentSidebar({
               onDelete={onDelete}
               onEdit={onEdit}
               onReply={onReply}
-              onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
-              requestEdit={comment.id === requestEditId ? requestEditToken : undefined}
-              requestReply={comment.id === requestReplyId ? requestReplyToken : undefined}
+              onEditReply={onEditReply}
+              onDeleteReply={onDeleteReply}
+              editor={activeEditor?.commentId === comment.id ? activeEditor : null}
+              onRequestCommentEdit={openCommentEdit}
+              onRequestReplyCompose={openReplyCompose}
+              onRequestReplyEdit={openReplyEdit}
+              onCloseEditor={closeEditor}
+              onContextMenu={
+                onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
+              }
             />
           </div>
         ))}
@@ -250,7 +299,9 @@ export function CommentSidebar({
                 {resolvedCount > 0 && ` \u00b7 ${resolvedCount} resolved`}
               </>
             ) : (
-              <>{comments.length} comment{comments.length !== 1 ? 's' : ''}</>
+              <>
+                {comments.length} comment{comments.length !== 1 ? 's' : ''}
+              </>
             )}
           </span>
           <div className="flex gap-1.5">
@@ -260,7 +311,10 @@ export function CommentSidebar({
                   <ActionButton
                     intent="success"
                     size="sm"
-                    onClick={(e) => { e.stopPropagation(); onBulkResolve(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onBulkResolve();
+                    }}
                     title="Resolve all open comments"
                   >
                     Resolve All
@@ -270,7 +324,10 @@ export function CommentSidebar({
                   <ActionButton
                     intent="danger"
                     size="sm"
-                    onClick={(e) => { e.stopPropagation(); onBulkDeleteResolved(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onBulkDeleteResolved();
+                    }}
                     title="Delete all resolved comments"
                   >
                     Clear Resolved
@@ -282,7 +339,10 @@ export function CommentSidebar({
                 <ActionButton
                   intent="danger"
                   size="sm"
-                  onClick={(e) => { e.stopPropagation(); if (confirm('Delete all comments? This cannot be undone.')) onBulkDelete(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('Delete all comments? This cannot be undone.')) onBulkDelete();
+                  }}
                   title="Delete all comments"
                 >
                   Delete All

@@ -33,7 +33,7 @@ That design keeps the feedback:
 ## Current feature set
 
 - Inline comments with overlapping anchors
-- Threaded replies
+- Threaded replies with inline edit/delete
 - Drag-resize comment anchors
 - Multi-tab editing with tab context menus (close, close others, close to right)
 - File explorer, recent files, and native OS file picker

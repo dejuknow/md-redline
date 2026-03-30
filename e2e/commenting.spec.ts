@@ -180,6 +180,62 @@ test.describe('Comment editing and replies', () => {
 
     await expect(page.getByText('Yes, still recommended per OWASP.')).toBeVisible();
   });
+
+  test('edit and delete a reply', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'double-submit cookie pattern', 'Reply lifecycle');
+
+    const card = getCard(page, 'Reply lifecycle');
+    await card.getByRole('button', { name: 'Reply' }).click();
+
+    const replyArea = card.getByPlaceholder('Write a reply...');
+    await expect(replyArea).toBeVisible();
+    await replyArea.fill('Initial reply text');
+    await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
+
+    const reply = card.locator('[data-reply-id]').first();
+    await expect(reply).toContainText('Initial reply text');
+
+    await reply.hover();
+    await reply.getByRole('button', { name: 'Edit' }).click();
+    const replyEditArea = reply.getByRole('textbox');
+    await expect(replyEditArea).toBeVisible();
+    await replyEditArea.fill('Updated reply text');
+    await reply.getByRole('button', { name: 'Save' }).click();
+
+    await expect(reply).toContainText('Updated reply text');
+    await expect(reply).not.toContainText('Initial reply text');
+
+    await reply.hover();
+    await reply.getByRole('button', { name: 'Delete' }).click();
+    await expect(card.locator('[data-reply-id]')).toHaveCount(0);
+  });
+
+  test('opening an editor on another comment closes the previous editor', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'First comment');
+    await addComment(page, 'double-submit cookie pattern', 'Second comment');
+
+    const secondCard = getCard(page, 'Second comment');
+    await secondCard.getByRole('button', { name: 'Reply' }).click();
+    await secondCard.getByPlaceholder('Write a reply...').fill('Second reply');
+    await secondCard.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
+
+    const firstCard = getCard(page, 'First comment');
+    await clickCardAction(page, 'First comment', 'Edit');
+    await expect(firstCard.locator('textarea')).toHaveCount(1);
+
+    const secondReply = secondCard.locator('[data-reply-id]').first();
+    await secondReply.hover();
+    await secondReply.getByRole('button', { name: 'Edit' }).click();
+
+    await expect(firstCard.locator('textarea')).toHaveCount(0);
+    await expect(secondReply.getByRole('textbox')).toBeVisible();
+
+    await clickCardAction(page, 'First comment', 'Edit');
+    await expect(firstCard.locator('textarea')).toHaveCount(1);
+    await expect(secondReply.getByRole('textbox')).toHaveCount(0);
+  });
 });
 
 test.describe('Sidebar filtering', () => {

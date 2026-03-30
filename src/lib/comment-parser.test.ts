@@ -4,8 +4,10 @@ import {
   insertComment,
   removeComment,
   editComment,
+  editReply,
   updateCommentAnchor,
   addReply,
+  removeReply,
   serializeComment,
   detectMissingAnchors,
   stripInlineFormatting,
@@ -277,6 +279,61 @@ describe('addReply', () => {
     const raw = `${marker({ id: 'rp1' })}hello`;
     const result = addReply(raw, 'nonexistent', 'reply text', 'Bob');
     expect(result).toBe(raw);
+  });
+});
+
+describe('editReply', () => {
+  it('updates an existing reply', () => {
+    const raw = `${marker({
+      id: 'rp1',
+      replies: [
+        { id: 'r1', text: 'old reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+      ],
+    })}hello`;
+    const result = editReply(raw, 'rp1', 'r1', 'new reply');
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies).toHaveLength(1);
+    expect(parsed.comments[0].replies![0].text).toBe('new reply');
+    expect(parsed.comments[0].replies![0].author).toBe('A');
+  });
+
+  it('returns unchanged text when reply ID does not exist', () => {
+    const raw = `${marker({
+      id: 'rp1',
+      replies: [
+        { id: 'r1', text: 'old reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+      ],
+    })}hello`;
+    const result = editReply(raw, 'rp1', 'missing', 'new reply');
+    expect(result).toBe(raw);
+  });
+});
+
+describe('removeReply', () => {
+  it('removes a reply from an existing comment', () => {
+    const raw = `${marker({
+      id: 'rp1',
+      replies: [
+        { id: 'r1', text: 'first', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+        { id: 'r2', text: 'second', author: 'B', timestamp: '2024-01-02T00:00:00.000Z' },
+      ],
+    })}hello`;
+    const result = removeReply(raw, 'rp1', 'r1');
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies).toHaveLength(1);
+    expect(parsed.comments[0].replies![0].id).toBe('r2');
+  });
+
+  it('removes the replies field when deleting the last reply', () => {
+    const raw = `${marker({
+      id: 'rp1',
+      replies: [
+        { id: 'r1', text: 'only reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+      ],
+    })}hello`;
+    const result = removeReply(raw, 'rp1', 'r1');
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies).toBeUndefined();
   });
 });
 
