@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { addComment } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -23,31 +24,35 @@ async function openFixture(page: Page) {
   await page.locator('.prose').waitFor({ timeout: 10_000 });
 }
 
+/** Trigger a snapshot by adding a comment and handing off to agent. */
+async function takeSnapshotViaHandoff(page: Page, context: { grantPermissions: (p: string[]) => Promise<void> }) {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await addComment(page, 'Section One', 'placeholder');
+  await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('handoff-button').click();
+  await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
+}
+
 // ---------------------------------------------------------------------------
 // Diff view tests
 // ---------------------------------------------------------------------------
 
 test.describe('Diff view', () => {
-  test('take snapshot button appears and switches title after taking snapshot', async ({
-    page,
-  }) => {
+  test('diff toggle appears after handoff creates a snapshot', async ({ page, context }) => {
     await openFixture(page);
 
-    // Initially shows "Take diff snapshot"
-    const snapshotBtn = page.locator('button[title="Take diff snapshot"]');
-    await expect(snapshotBtn).toBeVisible();
+    // No diff toggle before handoff
+    await expect(page.locator('button[title="View diff since snapshot"]')).not.toBeVisible();
 
-    await snapshotBtn.click();
+    await takeSnapshotViaHandoff(page, context);
 
-    // After taking snapshot, button title changes to "Update diff snapshot"
-    await expect(page.locator('button[title="Update diff snapshot"]')).toBeVisible();
+    // Diff toggle should now be visible
+    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
   });
 
-  test('diff view shows "No changes" when content matches snapshot', async ({ page }) => {
+  test('diff view shows "No changes" when content matches snapshot', async ({ page, context }) => {
     await openFixture(page);
-
-    // Take a snapshot
-    await page.locator('button[title="Take diff snapshot"]').click();
+    await takeSnapshotViaHandoff(page, context);
 
     // Switch to diff view
     await page.locator('button[title="View diff since snapshot"]').click();
@@ -56,12 +61,9 @@ test.describe('Diff view', () => {
     await expect(page.getByText('No changes yet')).toBeVisible();
   });
 
-  test('diff view shows changes after external file edit', async ({ page }) => {
+  test('diff view shows changes after external file edit', async ({ page, context }) => {
     await openFixture(page);
-
-    // Take a snapshot of the original content
-    await page.locator('button[title="Take diff snapshot"]').click();
-    await expect(page.locator('button[title="Update diff snapshot"]')).toBeVisible();
+    await takeSnapshotViaHandoff(page, context);
 
     // Wait for SSE connection to establish
     await page.waitForTimeout(1500);
@@ -72,7 +74,6 @@ test.describe('Diff view', () => {
 
     // The app auto-switches to diff view when an external change is detected
     // and a snapshot exists. Verify the diff content shows both old and new.
-    // The removed line "-" and added line "+" should both be visible.
     await expect(page.getByText('## Updated Section')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('## Section One')).toBeVisible();
 
@@ -80,11 +81,11 @@ test.describe('Diff view', () => {
     await expect(page.locator('button[title="Switch to rendered view"]')).toBeVisible();
   });
 
-  test('diff view toggle switches back to rendered view', async ({ page }) => {
+  test('diff view toggle switches back to rendered view', async ({ page, context }) => {
     await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
 
-    // Take snapshot and switch to diff
-    await page.locator('button[title="Take diff snapshot"]').click();
+    // Switch to diff
     await page.locator('button[title="View diff since snapshot"]').click();
     await expect(page.getByText('No changes yet')).toBeVisible();
 

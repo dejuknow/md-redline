@@ -222,7 +222,7 @@ After you're done, give me a brief summary:
       const fileCount = filePaths.length;
       navigator.clipboard.writeText(prompt).then(
         () =>
-          showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}`),
+          showToast(`Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''} (snapshot saved)`),
         () => showToast("Couldn't copy to clipboard. Try from localhost."),
       );
     },

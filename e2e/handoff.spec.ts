@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { addComment } from './helpers/comments';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
 import { resetTestAppState } from './helpers/test-state';
@@ -26,48 +27,6 @@ test.afterAll(() => {
 async function openFixture(page: Page, fixture: string = FIXTURE_1) {
   await page.goto(`/?file=${fixture}`);
   await page.locator('.prose').waitFor({ timeout: 10_000 });
-}
-
-async function selectText(page: Page, text: string) {
-  await page.evaluate((targetText) => {
-    const walker = document.createTreeWalker(
-      document.querySelector('.prose') || document.body,
-      NodeFilter.SHOW_TEXT,
-    );
-    let node: Text | null;
-    while ((node = walker.nextNode() as Text | null)) {
-      const idx = node.textContent?.indexOf(targetText) ?? -1;
-      if (idx >= 0) {
-        const range = document.createRange();
-        range.setStart(node, idx);
-        range.setEnd(node, idx + targetText.length);
-        const sel = window.getSelection()!;
-        sel.removeAllRanges();
-        sel.addRange(range);
-        const rect = range.getBoundingClientRect();
-        node.parentElement?.dispatchEvent(
-          new MouseEvent('mouseup', {
-            bubbles: true,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-          }),
-        );
-        return;
-      }
-    }
-    throw new Error(`Text "${targetText}" not found in rendered markdown`);
-  }, text);
-}
-
-async function addComment(page: Page, anchorText: string, commentText: string) {
-  await selectText(page, anchorText);
-  const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
-  await expect(commentBtn).toBeVisible({ timeout: 5000 });
-  await commentBtn.click();
-  await page.getByPlaceholder('Add your comment...').fill(commentText);
-  await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment' }).click();
-  // Wait for the comment form to close (confirms save completed)
-  await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible({ timeout: 5000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +73,7 @@ test.describe('Single-file hand-off', () => {
     await page.getByTestId('handoff-button').click();
 
     // Check toast
-    await expect(page.getByText('Copied agent instructions for 1 file')).toBeVisible();
+    await expect(page.getByText('Copied agent instructions for 1 file (snapshot saved)')).toBeVisible();
 
     // Verify clipboard content
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
@@ -284,7 +243,7 @@ test.describe('Multi-file hand-off', () => {
     const dropdown = page.locator('.absolute.right-0.top-full');
     await dropdown.getByText('Copy handoff for 2 files').click();
 
-    await expect(page.getByText('Copied agent instructions for 2 files')).toBeVisible();
+    await expect(page.getByText('Copied agent instructions for 2 files (snapshot saved)')).toBeVisible();
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboard).toContain('Files to review');
@@ -325,5 +284,45 @@ test.describe('Command palette hand-off', () => {
     await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('hand off');
     await expect(page.getByText('Hand off to agent')).not.toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Handoff creates diff snapshot
+// ---------------------------------------------------------------------------
+
+test.describe('Handoff + snapshot', () => {
+  test('handoff button creates a diff snapshot', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+
+    // No diff toggle before handoff
+    await expect(page.locator('button[title="View diff since snapshot"]')).not.toBeVisible();
+
+    await addComment(page, 'authentication system', 'Needs more detail');
+    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('handoff-button').click();
+
+    // Diff toggle should now be visible (snapshot was created)
+    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+  });
+
+  test('clear snapshot via diff toggle dropdown after handoff', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    await addComment(page, 'authentication system', 'Needs more detail');
+    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('handoff-button').click();
+
+    // Diff toggle visible
+    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+
+    // Clear via the diff toggle's dropdown chevron
+    const diffChevron = page.locator('button[title="View diff since snapshot"]').locator('..').locator('button[title="Diff options"]');
+    await diffChevron.click();
+    await page.getByText('Clear snapshot').click();
+
+    // Diff toggle gone
+    await expect(page.locator('button[title="View diff since snapshot"]')).not.toBeVisible();
   });
 });

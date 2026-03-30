@@ -236,6 +236,12 @@ export default function App() {
     showToast, clearSelection, setAutoExpandForm,
   });
 
+  // Combined handoff: snapshot + copy agent prompt
+  const handleHandoff = useCallback((filePaths: string[]) => {
+    handleSnapshot();
+    handleCopyAgentPrompt(filePaths);
+  }, [handleSnapshot, handleCopyAgentPrompt]);
+
   // Heading tracking / table of contents
   const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
     useHeadingTracking(containerRef, viewerRef, html);
@@ -492,13 +498,6 @@ export default function App() {
         return;
       }
 
-      // Cmd+Shift+S : Take/update diff snapshot
-      if (mod && e.shiftKey && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        handleSnapshot();
-        return;
-      }
-
       // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari)
       if (mod && e.shiftKey && !isInput && activeModal !== 'commandPalette') {
         if (e.code === 'BracketLeft') {
@@ -596,7 +595,6 @@ export default function App() {
     handleDelete,
     handleResolve,
     handleUnresolve,
-    handleSnapshot,
     viewMode,
     activeCommentId,
     comments,
@@ -656,14 +654,13 @@ export default function App() {
   const fileCommands = useMemo((): Command[] => {
     const cmds: Command[] = [
       { id: 'reload-file', label: 'Reload file', section: 'File', onExecute: reloadFile },
-      { id: 'take-snapshot', label: currentSnapshot ? 'Update diff snapshot' : 'Take diff snapshot', shortcut: `${modKey}+Shift+S`, section: 'File', onExecute: handleSnapshot },
       { id: 'open-file', label: 'Open file', shortcut: `${modKey}+O`, section: 'File', onExecute: openFilePicker },
     ];
     if (currentSnapshot) {
       cmds.push({ id: 'clear-snapshot', label: 'Clear diff snapshot', section: 'File', onExecute: handleClearSnapshot });
     }
     return cmds;
-  }, [reloadFile, handleSnapshot, openFilePicker, handleClearSnapshot, currentSnapshot]);
+  }, [reloadFile, openFilePicker, handleClearSnapshot, currentSnapshot]);
 
   const generalCommands = useMemo((): Command[] => [
     { id: 'open-settings', label: 'Open settings', shortcut: `${modKey}+,`, section: 'General', onExecute: () => setActiveModal('settings') },
@@ -684,7 +681,7 @@ export default function App() {
     }
     if (commentCount > 0) {
       cmds.push({ id: 'delete-all', label: 'Delete all comments', section: 'Comments', onExecute: handleBulkDelete });
-      cmds.push({ id: 'copy-agent-prompt', label: 'Hand off to agent (copy instructions)', section: 'Comments', onExecute: () => activeFilePath && handleCopyAgentPrompt([activeFilePath]) });
+      cmds.push({ id: 'copy-agent-prompt', label: 'Hand off to agent (copy instructions)', section: 'Comments', onExecute: () => activeFilePath && handleHandoff([activeFilePath]) });
     }
     if (activeCommentId) {
       if (settings.enableResolve) {
@@ -702,7 +699,7 @@ export default function App() {
       cmds.push({ id: 'delete-active', label: 'Delete active comment', shortcut: 'D', section: 'Comments', onExecute: () => handleDelete(activeCommentId) });
     }
     return cmds;
-  }, [commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleCopyAgentPrompt, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
+  }, [commentCount, settings.enableResolve, handleBulkDelete, handleBulkResolve, handleHandoff, activeFilePath, activeCommentId, comments, handleResolve, handleUnresolve, handleDelete]);
 
   const headingCommands = useMemo((): Command[] =>
     tocHeadings.map((h) => ({
@@ -750,7 +747,6 @@ export default function App() {
           setViewMode(mode);
           if (mode === 'raw') clearSelection();
         }}
-        onSnapshot={handleSnapshot}
         onClearSnapshot={handleClearSnapshot}
         onSearch={() => {
           if (showSearch) {
@@ -761,7 +757,7 @@ export default function App() {
           }
         }}
         searchActive={showSearch}
-        onCopyAgentPrompt={handleCopyAgentPrompt}
+        onCopyAgentPrompt={handleHandoff}
       />
 
       <>

@@ -56,7 +56,6 @@ const sections: Section[] = [
     title: 'File',
     shortcuts: [
       { keys: `${mod}O`, label: 'Open file' },
-      { keys: `${mod}${shift}S`, label: 'Take/update diff snapshot' },
       { keys: `${mod},`, label: 'Open settings' },
       { keys: '?', label: 'This help panel' },
     ],

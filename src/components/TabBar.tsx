@@ -31,7 +31,6 @@ interface Props {
   commentCount: number;
   enableResolve?: boolean;
   onViewModeChange: (mode: ViewMode) => void;
-  onSnapshot: () => void;
   onClearSnapshot: () => void;
   onSearch: () => void;
   searchActive: boolean;
@@ -83,9 +82,7 @@ function HandOffButton({
 
   if (!hasMultipleFiles) {
     return (
-      <>
-        <Separator />
-        <div className="relative flex items-center" data-testid="handoff-group">
+      <div className="relative flex items-center" data-testid="handoff-group">
           <IconButton
             variant="neutral"
             onClick={() => onCopyAgentPrompt([activeFilePath])}
@@ -113,14 +110,11 @@ function HandOffButton({
             </svg>
           </button>
         </div>
-      </>
     );
   }
 
   return (
-    <>
-      <Separator />
-      <div className="relative flex items-center" data-testid="handoff-group">
+    <div className="relative flex items-center" data-testid="handoff-group">
         <SplitIconButton
           icon={handOffIcon}
           onClick={() => onCopyAgentPrompt([activeFilePath])}
@@ -197,7 +191,6 @@ function HandOffButton({
           }}
         />
       </div>
-    </>
   );
 }
 
@@ -213,7 +206,6 @@ export function TabBar({
   hasSnapshot,
   commentCount,
   onViewModeChange,
-  onSnapshot,
   onClearSnapshot,
   onSearch,
   searchActive,
@@ -311,13 +303,6 @@ export function TabBar({
     if (!isOverflowing) setTabListOpen(false);
   }, [isOverflowing]);
 
-  /* Aperture icon — "take a snapshot" */
-  const snapshotIcon = (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="m14.31 8 5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16 3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94" />
-    </svg>
-  );
 
   return (
     <div className="h-9 bg-surface-secondary border-b border-border flex items-stretch shrink-0">
@@ -571,45 +556,28 @@ export function TabBar({
           </svg>
         </IconButton>
         {hasSnapshot && (
-          <IconButton
-            variant="active"
-            active={viewMode === 'diff'}
+          <SplitIconButton
+            icon={
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
+                />
+              </svg>
+            }
             onClick={() => onViewModeChange(viewMode === 'diff' ? 'rendered' : 'diff')}
             title={viewMode === 'diff' ? 'Switch to rendered view' : 'View diff since snapshot'}
-          >
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
-              />
-            </svg>
-          </IconButton>
-        )}
-        {hasSnapshot ? (
-          <SplitIconButton
-            icon={snapshotIcon}
-            onClick={onSnapshot}
-            title="Update diff snapshot"
-            variant="success"
-            active
-            chevronTitle="Snapshot options"
+            variant="active"
+            active={viewMode === 'diff'}
+            chevronTitle="Diff options"
             menu={[
-              { label: 'Update snapshot', onClick: onSnapshot },
               { label: 'Clear snapshot', onClick: onClearSnapshot },
             ]}
           />
-        ) : (
-          <IconButton
-            variant="success"
-            onClick={onSnapshot}
-            title="Take diff snapshot"
-          >
-            {snapshotIcon}
-          </IconButton>
         )}
 
-        {/* Separator + Hand off (primary action with multi-file dropdown) */}
+        {/* Hand off (primary action with multi-file dropdown) */}
         {commentCount > 0 && onCopyAgentPrompt && activeFilePath && (
           <HandOffButton
             activeFilePath={activeFilePath}
