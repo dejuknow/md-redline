@@ -147,6 +147,60 @@ describe('/api/config', () => {
   });
 });
 
+describe('/api/preferences', () => {
+  it('returns {} when no dotfile exists', async () => {
+    const { response, body } = await requestJson(app, '/api/preferences');
+    expect(response.status).toBe(200);
+    expect(body).toEqual({});
+  });
+
+  it('returns dotfile content when it exists', async () => {
+    const { writeFile: wf } = await import('fs/promises');
+    await wf(join(fakeHome, '.md-redline.json'), JSON.stringify({ author: 'Test', theme: 'nord' }));
+    const { response, body } = await requestJson(app, '/api/preferences');
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ author: 'Test', theme: 'nord' });
+    // Clean up
+    const { rm: rmf } = await import('fs/promises');
+    await rmf(join(fakeHome, '.md-redline.json'));
+  });
+
+  it('PUT creates dotfile and returns merged content', async () => {
+    const { response, body } = await requestJson(app, '/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author: 'Alice' }),
+    });
+    expect(response.status).toBe(200);
+    expect(body.author).toBe('Alice');
+    // Clean up
+    const { rm: rmf } = await import('fs/promises');
+    await rmf(join(fakeHome, '.md-redline.json'));
+  });
+
+  it('PUT merges partial updates', async () => {
+    const { writeFile: wf, rm: rmf } = await import('fs/promises');
+    await wf(join(fakeHome, '.md-redline.json'), JSON.stringify({ author: 'Alice', theme: 'light' }));
+    const { response, body } = await requestJson(app, '/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: 'dark' }),
+    });
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ author: 'Alice', theme: 'dark' });
+    await rmf(join(fakeHome, '.md-redline.json'));
+  });
+
+  it('PUT rejects invalid JSON body', async () => {
+    const response = await app.request('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not json',
+    });
+    expect(response.status).toBe(400);
+  });
+});
+
 describe('isPathInsideRoot', () => {
   it('accepts nested POSIX paths', () => {
     expect(isPathInsideRoot('/repo/docs/spec.md', '/repo')).toBe(true);

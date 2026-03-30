@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import {
   type AppSettings,
   type CommentTemplate,
@@ -7,6 +7,7 @@ import {
   loadSettings,
   saveSettings,
 } from '../lib/settings';
+import { fetchPreferences } from '../lib/preferences-client';
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -23,6 +24,20 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+
+  // Hydrate from disk on mount — disk overrides localStorage
+  useEffect(() => {
+    fetchPreferences().then((prefs) => {
+      if (prefs.settings && typeof prefs.settings === 'object') {
+        const diskSettings = prefs.settings as Partial<AppSettings>;
+        setSettings((prev) => {
+          const merged = { ...prev, ...diskSettings };
+          saveSettings(merged);
+          return merged;
+        });
+      }
+    });
+  }, []);
 
   const update = useCallback((patch: Partial<AppSettings>) => {
     setSettings((prev) => {

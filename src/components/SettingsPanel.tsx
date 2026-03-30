@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useTheme } from 'next-themes';
+import { useThemePersistence } from '../hooks/useThemePersistence';
 import { useSettings } from '../contexts/SettingsContext';
 import type { CommentTemplate } from '../lib/settings';
 import { DEFAULT_TEMPLATES } from '../lib/settings';
@@ -16,7 +16,7 @@ interface Props {
 
 export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) {
   const { settings, updateTemplates, updateCommentMaxLength, updateShowTemplatesByDefault, updateEnableResolve, updateQuickComment, resetTemplates } = useSettings();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme } = useThemePersistence();
   const [activeSection, setActiveSection] = useState<Section>('general');
   const panelRef = useRef<HTMLDivElement>(null);
 

@@ -33,7 +33,6 @@ interface Props {
   onViewModeChange: (mode: ViewMode) => void;
   onSnapshot: () => void;
   onClearSnapshot: () => void;
-  onJumpToNext: () => void;
   onSearch: () => void;
   searchActive: boolean;
   onCopyAgentPrompt?: (filePaths: string[]) => void;
@@ -213,11 +212,10 @@ export function TabBar({
   viewMode,
   hasSnapshot,
   commentCount,
-  enableResolve,
+  enableResolve: _enableResolve,
   onViewModeChange,
   onSnapshot,
   onClearSnapshot,
-  onJumpToNext,
   onSearch,
   searchActive,
   onCopyAgentPrompt,
@@ -557,25 +555,6 @@ export function TabBar({
         </IconButton>
 
         <Separator />
-
-        {/* Comment navigation group */}
-        {commentCount > 0 && (
-          <>
-            <IconButton
-              onClick={onJumpToNext}
-              title={enableResolve ? 'Jump to next open comment (N)' : 'Jump to next comment (N)'}
-            >
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12"
-                />
-              </svg>
-            </IconButton>
-            <Separator />
-          </>
-        )}
 
         {/* View controls group */}
         <IconButton

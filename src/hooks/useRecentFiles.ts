@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { getPathBasename } from '../lib/path-utils';
+import { fetchPreferences, savePreferencesToDisk } from '../lib/preferences-client';
 
 const STORAGE_KEY = 'md-redline-recent-files';
 const MAX_RECENT = 10;
@@ -20,11 +21,24 @@ function loadFromStorage(): RecentFile[] {
 }
 
 function saveToStorage(files: RecentFile[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
+  } catch { /* Storage unavailable */ }
+  savePreferencesToDisk({ recentFiles: files });
 }
 
 export function useRecentFiles() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>(loadFromStorage);
+
+  // Hydrate from disk on mount
+  useEffect(() => {
+    fetchPreferences().then((prefs) => {
+      if (prefs.recentFiles && Array.isArray(prefs.recentFiles) && prefs.recentFiles.length > 0) {
+        setRecentFiles(prefs.recentFiles as RecentFile[]);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs.recentFiles)); } catch {}
+      }
+    });
+  }, []);
 
   const addRecentFile = useCallback((path: string) => {
     setRecentFiles((prev) => {
@@ -41,7 +55,8 @@ export function useRecentFiles() {
 
   const clearRecentFiles = useCallback(() => {
     setRecentFiles([]);
-    localStorage.removeItem(STORAGE_KEY);
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    savePreferencesToDisk({ recentFiles: [] });
   }, []);
 
   return { recentFiles, addRecentFile, clearRecentFiles };

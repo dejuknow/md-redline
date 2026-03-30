@@ -69,4 +69,8 @@ export function saveSettings(settings: AppSettings): void {
   } catch {
     // Storage unavailable
   }
+  // Dual-write to disk (fire-and-forget)
+  import('./preferences-client').then(({ savePreferencesToDisk }) => {
+    savePreferencesToDisk({ settings: settings as unknown as Record<string, unknown> });
+  }).catch(() => {});
 }

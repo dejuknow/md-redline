@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { fetchPreferences, savePreferencesToDisk } from '../lib/preferences-client';
 
 const STORAGE_KEY = 'md-redline-author';
 
@@ -38,6 +39,17 @@ function loadAuthor(): string {
 export function useAuthor() {
   const [author, setAuthorState] = useState(loadAuthor);
 
+  // Hydrate from disk on mount
+  useEffect(() => {
+    fetchPreferences().then((prefs) => {
+      if (prefs.author && prefs.author !== author) {
+        setAuthorState(prefs.author);
+        try { localStorage.setItem(STORAGE_KEY, prefs.author); } catch {}
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const setAuthor = useCallback((name: string) => {
     const trimmed = name.trim() || 'User';
     setAuthorState(trimmed);
@@ -46,6 +58,7 @@ export function useAuthor() {
     } catch {
       // Storage unavailable
     }
+    savePreferencesToDisk({ author: trimmed });
   }, []);
 
   return { author, setAuthor };

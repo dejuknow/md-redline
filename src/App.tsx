@@ -56,7 +56,8 @@ import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
-import { useTheme } from 'next-themes';
+import { useThemePersistence } from './hooks/useThemePersistence';
+import { migrateLocalStorageToDisk } from './lib/preferences-client';
 import { ALL_THEMES } from './lib/themes';
 import { usePaneLayout } from './hooks/usePaneLayout';
 import { getPathBasename } from './lib/path-utils';
@@ -94,7 +95,7 @@ export default function App() {
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme } = useThemePersistence();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
   const {
     explorerVisible,
@@ -106,6 +107,9 @@ export default function App() {
     viewMode,
     setViewMode,
   } = usePaneLayout();
+
+  // One-time migration of localStorage preferences to disk
+  useEffect(() => { migrateLocalStorageToDisk(); }, []);
 
   // Session persistence (tabs only — pane layout is persisted by usePaneLayout)
   const { persist } = useSessionPersistence();
@@ -1447,7 +1451,6 @@ After you're done, give me a brief summary:
         }}
         onSnapshot={handleSnapshot}
         onClearSnapshot={handleClearSnapshot}
-        onJumpToNext={handleJumpToNext}
         onSearch={() => {
           if (showSearch) {
             handleSearchClose();

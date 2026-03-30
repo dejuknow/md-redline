@@ -8,6 +8,7 @@ import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { pathToFileURL } from 'url';
+import { readPreferences, writePreferences } from './preferences';
 
 export interface CreateAppOptions {
   cwd?: string;
@@ -142,6 +143,29 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.get('/api/config', (c) => {
     return c.json({ initialFile, initialDir });
+  });
+
+  app.get('/api/preferences', async (c) => {
+    return c.json(await readPreferences(homeDir));
+  });
+
+  app.put('/api/preferences', async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return c.json({ error: 'Body must be a JSON object' }, 400);
+    }
+    try {
+      const merged = await writePreferences(homeDir, body);
+      return c.json(merged);
+    } catch (err) {
+      console.error('PUT /api/preferences failed:', err);
+      return c.json({ error: 'Failed to save preferences' }, 500);
+    }
   });
 
   app.get('/api/file', async (c) => {

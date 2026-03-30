@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useTheme } from 'next-themes';
+import { useThemePersistence } from '../hooks/useThemePersistence';
 import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
 
 function ThemeButton({ t, theme, onClick }: { t: { key: string; label: string; colors: string[] }; theme: string | undefined; onClick: () => void }) {
@@ -32,7 +32,7 @@ function ThemeButton({ t, theme, onClick }: { t: { key: string; label: string; c
 }
 
 export function ThemeSelector() {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme } = useThemePersistence();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
