@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createApp, type CreateAppOptions } from './index';
+import { createApp, isPathInsideRoot, type CreateAppOptions } from './index';
 
 type AppInstance = ReturnType<typeof createApp>;
 
@@ -144,6 +144,21 @@ describe('/api/config', () => {
       initialFile: '',
       initialDir,
     });
+  });
+});
+
+describe('isPathInsideRoot', () => {
+  it('accepts nested POSIX paths', () => {
+    expect(isPathInsideRoot('/repo/docs/spec.md', '/repo')).toBe(true);
+  });
+
+  it('rejects sibling POSIX paths', () => {
+    expect(isPathInsideRoot('/repo-other/spec.md', '/repo')).toBe(false);
+  });
+
+  it('handles Windows separators and case-insensitive matching', () => {
+    expect(isPathInsideRoot('C:\\Work\\Docs\\Spec.md', 'c:\\work', true)).toBe(true);
+    expect(isPathInsideRoot('D:\\Work\\Docs\\Spec.md', 'c:\\work', true)).toBe(false);
   });
 });
 

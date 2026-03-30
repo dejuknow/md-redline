@@ -24,6 +24,8 @@ interface BaseProps {
   onOpen?: () => void;
   /** data-testid for the primary button */
   testId?: string;
+  /** data-testid for the chevron button */
+  chevronTestId?: string;
 }
 
 type Props = BaseProps &
@@ -64,6 +66,7 @@ export function SplitIconButton({
   chevronTitle,
   onOpen,
   testId,
+  chevronTestId,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [chevronHover, setChevronHover] = useState(false);
@@ -108,7 +111,7 @@ export function SplitIconButton({
         onMouseEnter={() => setChevronHover(true)}
         onMouseLeave={() => setChevronHover(false)}
         title={chevronTitle}
-        data-testid={testId ? `${testId}-chevron` : undefined}
+        data-testid={chevronTestId ?? (testId ? `${testId}-chevron` : undefined)}
         className={`pl-0 pr-0.5 self-stretch flex items-center rounded-r ${baseClasses} ${
           open ? v.coordinated : 'text-content-muted hover:text-content-secondary hover:bg-tint'
         }`}

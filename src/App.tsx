@@ -59,6 +59,7 @@ import { useSettings } from './contexts/SettingsContext';
 import { useTheme } from 'next-themes';
 import { ALL_THEMES } from './lib/themes';
 import { usePaneLayout } from './hooks/usePaneLayout';
+import { getPathBasename } from './lib/path-utils';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -134,7 +135,7 @@ export default function App() {
       }
       openTab(activeTarget);
     }
-  }, [openTab, openTabInBackground]);
+  }, [openTab, openTabInBackground, savedSession]);
 
   // Diff snapshot state: per-file snapshots persisted to localStorage
   const [snapshots, setSnapshots] = useState<Map<string, string>>(() => {
@@ -488,7 +489,7 @@ export default function App() {
         }
       })
       .catch(() => {});
-  }, [openTab, addRecentFile, setExplorerVisible]);
+  }, [openTab, addRecentFile, setExplorerVisible, savedSession]);
 
   const handleOpenFile = useCallback(
     (path: string) => {
@@ -957,7 +958,7 @@ After you're done, give me a brief summary:
       const tabIndex = tabs.findIndex((t) => t.filePath === info.filePath);
       const hasTabsToRight = tabIndex >= 0 && tabIndex < tabs.length - 1;
       const hasOtherTabs = tabs.length > 1;
-      const fileName = info.filePath.split('/').pop() || info.filePath;
+      const fileName = getPathBasename(info.filePath) || info.filePath;
 
       const items: ContextMenuEntry[] = [
         {
@@ -1307,6 +1308,7 @@ After you're done, give me a brief summary:
     setLeftPanelView,
     setSidebarVisible,
     switchTabByOffset,
+    showSearch,
   ]);
 
 
@@ -1467,7 +1469,11 @@ After you're done, give me a brief summary:
             } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
             style={explorerVisible ? { width: explorerWidth } : undefined}
           >
-            <div className="h-full flex flex-col" style={{ minWidth: explorerWidth }}>
+            <div
+              className={`h-full flex flex-col ${explorerVisible ? '' : 'invisible pointer-events-none'}`}
+              aria-hidden={!explorerVisible}
+              style={{ minWidth: explorerVisible ? explorerWidth : 0 }}
+            >
               {/* Tab bar */}
               <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
                 <div className="flex items-center gap-0.5">
@@ -1651,7 +1657,7 @@ After you're done, give me a brief summary:
             <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
               <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
                 <div className="flex items-center gap-0.5">
-                  <span className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
+                  <h2 className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
                     <svg
                       className="w-3.5 h-3.5"
                       fill="none"
@@ -1666,12 +1672,12 @@ After you're done, give me a brief summary:
                       />
                     </svg>
                     Comments
-                  </span>
+                  </h2>
                 </div>
                 <button
                   onClick={() => setSidebarVisible(false)}
                   className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
-                  title="Close panel"
+                  title="Close comments panel"
                 >
                   <svg
                     className="w-3.5 h-3.5"

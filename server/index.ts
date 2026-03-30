@@ -25,6 +25,18 @@ function canonicalize(p: string): string {
   }
 }
 
+function normalizePathForComparison(path: string, caseInsensitive: boolean): string {
+  const normalized = path.replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+  const comparable = normalized || '/';
+  return caseInsensitive ? comparable.toLowerCase() : comparable;
+}
+
+export function isPathInsideRoot(path: string, root: string, caseInsensitive = false): boolean {
+  const normalizedPath = normalizePathForComparison(path, caseInsensitive);
+  const normalizedRoot = normalizePathForComparison(root, caseInsensitive);
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
+}
+
 function isMdFile(resolved: string): boolean {
   return extname(resolved).toLowerCase() === '.md';
 }
@@ -52,6 +64,7 @@ export function createApp(options: CreateAppOptions = {}) {
   const initialArg = initialArgRaw ? resolve(cwd, initialArgRaw) : '';
   const platformName = options.platformName ?? platform();
   const execFileImpl = options.execFileImpl ?? execFile;
+  const caseInsensitivePaths = platformName === 'win32';
 
   const app = new Hono();
   // Allow CORS from any localhost port (Vite may start on 5174+ if 5173 is busy)
@@ -85,13 +98,13 @@ export function createApp(options: CreateAppOptions = {}) {
   // the user can navigate to sibling files via the explorer.
   if (initialFile) {
     const fileDir = canonicalize(dirname(initialFile));
-    if (!allowedRoots.some((root) => fileDir.startsWith(root + '/') || fileDir === root)) {
+    if (!allowedRoots.some((root) => isPathInsideRoot(fileDir, root, caseInsensitivePaths))) {
       allowedRoots.push(fileDir);
     }
   }
   if (initialDir) {
     const dir = canonicalize(initialDir);
-    if (!allowedRoots.some((root) => dir.startsWith(root + '/') || dir === root)) {
+    if (!allowedRoots.some((root) => isPathInsideRoot(dir, root, caseInsensitivePaths))) {
       allowedRoots.push(dir);
     }
   }
@@ -113,7 +126,7 @@ export function createApp(options: CreateAppOptions = {}) {
         throw new Error('Access denied: cannot resolve path');
       }
     }
-    const allowed = allowedRoots.some((root) => real.startsWith(root + '/') || real === root);
+    const allowed = allowedRoots.some((root) => isPathInsideRoot(real, root, caseInsensitivePaths));
     if (!allowed) {
       throw new Error('Access denied: path outside allowed directories');
     }
@@ -312,12 +325,12 @@ export function createApp(options: CreateAppOptions = {}) {
       const pickedDir = dirname(resolve(path));
       try {
         const realDir = canonicalize(pickedDir);
-        if (!allowedRoots.some((root) => realDir.startsWith(root + '/') || realDir === root)) {
+        if (!allowedRoots.some((root) => isPathInsideRoot(realDir, root, caseInsensitivePaths))) {
           allowedRoots.push(realDir);
         }
       } catch {
         // Can't canonicalize — add the raw resolved dir
-        if (!allowedRoots.some((root) => pickedDir.startsWith(root + '/') || pickedDir === root)) {
+        if (!allowedRoots.some((root) => isPathInsideRoot(pickedDir, root, caseInsensitivePaths))) {
           allowedRoots.push(pickedDir);
         }
       }

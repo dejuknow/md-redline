@@ -9,13 +9,14 @@
  *    an inline element
  */
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { HIGHLIGHT_SEAM_DOC_BASELINE } from './helpers/fixture-baselines';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/highlight-seam-doc.md');
-const FIXTURE_ORIGINAL = readFileSync(FIXTURE, 'utf-8');
+const FIXTURE_ORIGINAL = HIGHLIGHT_SEAM_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);

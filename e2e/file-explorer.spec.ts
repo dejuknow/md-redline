@@ -1,12 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { MOD_LABEL } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
-const FIXTURE_ORIGINAL = readFileSync(FIXTURE, 'utf-8');
+const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);

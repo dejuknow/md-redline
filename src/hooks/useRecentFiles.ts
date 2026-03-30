@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { getPathBasename } from '../lib/path-utils';
 
 const STORAGE_KEY = 'md-redline-recent-files';
 const MAX_RECENT = 10;
@@ -27,7 +28,7 @@ export function useRecentFiles() {
 
   const addRecentFile = useCallback((path: string) => {
     setRecentFiles((prev) => {
-      const name = path.split('/').pop() || path;
+      const name = getPathBasename(path) || path;
       const filtered = prev.filter((f) => f.path !== path);
       const next = [{ path, name, openedAt: new Date().toISOString() }, ...filtered].slice(
         0,

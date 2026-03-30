@@ -1,14 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { withMod } from './helpers/shortcuts';
+import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
 const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
-const FIXTURE_1_ORIGINAL = readFileSync(FIXTURE_1, 'utf-8');
-const FIXTURE_2_ORIGINAL = readFileSync(FIXTURE_2, 'utf-8');
+const FIXTURE_1_ORIGINAL = TEST_DOC_BASELINE;
+const FIXTURE_2_ORIGINAL = TEST_DOC_2_BASELINE;
 const OVERFLOW_FIXTURES = Array.from({ length: 6 }, (_, index) =>
   resolve(__dirname, `fixtures/overflow-tab-${index + 1}.md`),
 );
@@ -19,12 +20,6 @@ function resetOverflowFixtures() {
       fixture,
       FIXTURE_1_ORIGINAL.replace('# Test Document', `# Overflow Tab ${index + 1}`),
     );
-  });
-}
-
-function cleanupOverflowFixtures() {
-  OVERFLOW_FIXTURES.forEach((fixture) => {
-    if (existsSync(fixture)) unlinkSync(fixture);
   });
 }
 
@@ -39,7 +34,7 @@ test.beforeEach(async ({ page }) => {
 test.afterAll(() => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
-  cleanupOverflowFixtures();
+  resetOverflowFixtures();
 });
 
 async function openFixture(page: Page, fixture: string = FIXTURE_1) {

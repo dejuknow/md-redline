@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getPathBasename } from '../lib/path-utils';
 
 interface BrowseResult {
   dir: string;
@@ -56,7 +57,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
     browse(initialDir);
   }, [browse, initialDir]);
 
-  const dirName = data?.dir.split('/').pop() || data?.dir || 'Files';
+  const dirName = getPathBasename(data?.dir || '') || data?.dir || 'Files';
 
   return (
     <div className="flex flex-col h-full">
@@ -122,7 +123,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
             // If the target is inside a button (file/dir item), let that handler take over
             if ((e.target as HTMLElement).closest('button')) return;
             e.preventDefault();
-            onCtxMenu({ type: 'blank', path: data.dir, name: data.dir.split('/').pop() || data.dir, x: e.clientX, y: e.clientY });
+            onCtxMenu({ type: 'blank', path: data.dir, name: getPathBasename(data.dir) || data.dir, x: e.clientX, y: e.clientY });
           }}
         >
           {/* Directories */}
