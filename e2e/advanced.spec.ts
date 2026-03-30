@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -215,16 +216,16 @@ test.describe('Multi-tab support', () => {
     await expect(badge).toHaveText('2');
   });
 
-  test('browser-safe shortcuts cycle tabs', async ({ page }) => {
+  test('Cmd+Shift+[ / ] cycle tabs', async ({ page }) => {
     await openFixture(page, FIXTURE_1);
     await openSecondFile(page);
 
     await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
 
-    await page.keyboard.press('Alt+Shift+Comma');
+    await page.keyboard.press(withMod('Shift+BracketLeft'));
     await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
 
-    await page.keyboard.press('Alt+Shift+Period');
+    await page.keyboard.press(withMod('Shift+BracketRight'));
     await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
   });
 

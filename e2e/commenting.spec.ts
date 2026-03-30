@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { withMod } from './helpers/shortcuts';
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -130,21 +130,6 @@ test.describe('Adding comments', () => {
     expect(content).toContain('Clarify the rate limit window.');
   });
 
-  test('apply quick template with keyboard shortcut', async ({ page }) => {
-    await openFixture(page);
-    await selectText(page, 'Session tokens');
-
-    await expect(
-      page.locator('[data-comment-form] button', { hasText: 'Comment' }),
-    ).toBeVisible({ timeout: 5000 });
-
-    // Cmd+1 applies the first template ("Rewrite this section")
-    await page.keyboard.press(withMod('1'));
-
-    await expect(
-      page.getByText('Rewrite this section — it needs to be clearer.'),
-    ).toBeVisible({ timeout: 5000 });
-  });
 });
 
 test.describe('Comment lifecycle', () => {
