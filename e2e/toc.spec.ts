@@ -29,6 +29,11 @@ async function switchToOutline(page: Page) {
   await page.locator('button[title="Document outline"]').click();
 }
 
+async function switchToRaw(page: Page) {
+  await page.locator('button[title="View raw markdown"]').click();
+  await expect(page.locator('.raw-view-table')).toBeVisible();
+}
+
 /** Ensure the left panel is visible */
 async function ensureLeftPanelOpen(page: Page) {
   const panel = page.locator('button[title="Document outline"]');
@@ -77,6 +82,29 @@ test.describe('Table of Contents', () => {
       return scrollEl ? scrollEl.scrollTop : 0;
     });
     expect(scrollAfter).toBeGreaterThan(scrollBefore);
+  });
+
+  test('clicking a heading scrolls raw view to that section', async ({ page }) => {
+    await openFixture(page);
+    await ensureLeftPanelOpen(page);
+    await switchToOutline(page);
+    await switchToRaw(page);
+
+    const scrollBefore = await page.evaluate(() => {
+      const scrollEl = document.querySelector('.raw-view')?.closest('.overflow-y-auto');
+      return scrollEl ? scrollEl.scrollTop : 0;
+    });
+
+    await page.locator('button[title="Conclusion"]').click();
+    await page.waitForTimeout(600);
+
+    const scrollAfter = await page.evaluate(() => {
+      const scrollEl = document.querySelector('.raw-view')?.closest('.overflow-y-auto');
+      return scrollEl ? scrollEl.scrollTop : 0;
+    });
+    expect(scrollAfter).toBeGreaterThan(scrollBefore);
+
+    await expect(page.locator('.raw-line', { hasText: '## Conclusion' })).toBeInViewport();
   });
 
   test('switching between Explorer and Outline tabs', async ({ page }) => {

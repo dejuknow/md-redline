@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHighlightedHtml, escapeHtml } from './RawView';
+import { buildHighlightedHtml, escapeHtml, extractRawHeadings } from './RawView';
 
 describe('escapeHtml', () => {
   it('escapes &, <, >, "', () => {
@@ -206,5 +206,26 @@ describe('buildHighlightedHtml', () => {
       const html = buildHighlightedHtml('## Title <script>');
       expect(html).toContain('&lt;script&gt;');
     });
+  });
+});
+
+describe('extractRawHeadings', () => {
+  it('extracts headings with stable slug ids and line indexes', () => {
+    const headings = extractRawHeadings('# Title\n\n## Section One\n\n## Section One\n');
+    expect(headings).toEqual([
+      { id: 'title', text: 'Title', level: 1, lineIndex: 0 },
+      { id: 'section-one', text: 'Section One', level: 2, lineIndex: 2 },
+      { id: 'section-one-1', text: 'Section One', level: 2, lineIndex: 4 },
+    ]);
+  });
+
+  it('ignores inline comment markers when matching heading lines', () => {
+    const headings = extractRawHeadings(
+      '# Intro\n\n## <!-- @comment{"id":"c1","anchor":"Heading","text":"Fix","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->Heading\n',
+    );
+    expect(headings).toEqual([
+      { id: 'intro', text: 'Intro', level: 1, lineIndex: 0 },
+      { id: 'heading', text: 'Heading', level: 2, lineIndex: 2 },
+    ]);
   });
 });

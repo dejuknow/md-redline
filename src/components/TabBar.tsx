@@ -3,7 +3,6 @@ import type { ViewMode } from './Toolbar';
 import { getPrimaryModifierLabel } from '../lib/platform';
 import { IconButton } from './IconButton';
 import { SplitIconButton } from './SplitIconButton';
-import { Separator } from './Separator';
 import { getPathBasename } from '../lib/path-utils';
 
 interface Tab {
@@ -538,9 +537,6 @@ export function TabBar({
           </svg>
         </IconButton>
 
-        <Separator />
-
-        {/* View controls group */}
         <IconButton
           variant="active"
           active={viewMode === 'raw'}

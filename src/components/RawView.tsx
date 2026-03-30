@@ -1,6 +1,11 @@
 import { useRef, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, useCallback, useMemo, useState } from 'react';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkFrontmatter from 'remark-frontmatter';
+import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
 import { COMMENT_MARKER_RE } from '../lib/comment-parser';
+import { uniqueSlugs } from '../lib/heading-slugs';
 
 // Markdown syntax highlighting patterns (order matters — first match wins per region)
 interface SyntaxRule {
@@ -39,6 +44,7 @@ const SYNTAX_RULES: SyntaxRule[] = [
 
 export interface RawViewHandle {
   scrollToComment: (commentId: string) => void;
+  scrollToHeading: (headingId: string) => void;
 }
 
 interface Props {
@@ -50,6 +56,72 @@ interface Props {
 }
 
 type Region = { start: number; end: number; className: string; id?: string };
+type MarkdownAstNode = {
+  type: string;
+  depth?: number;
+  value?: string;
+  alt?: string;
+  children?: MarkdownAstNode[];
+  position?: {
+    start?: {
+      line?: number;
+    };
+  };
+};
+
+export interface RawHeading {
+  id: string;
+  text: string;
+  level: number;
+  lineIndex: number;
+}
+
+const rawHeadingProcessor = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ['yaml', 'toml'])
+  .use(remarkGfm);
+
+function extractNodeText(node: MarkdownAstNode): string {
+  if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'html') {
+    return node.value ?? '';
+  }
+  if (node.type === 'image') {
+    return node.alt ?? '';
+  }
+  if (node.type === 'break') {
+    return ' ';
+  }
+  return node.children?.map(extractNodeText).join('') ?? '';
+}
+
+export function extractRawHeadings(rawMarkdown: string): RawHeading[] {
+  COMMENT_MARKER_RE.lastIndex = 0;
+  const cleanRaw = rawMarkdown.replace(COMMENT_MARKER_RE, '');
+  const tree = rawHeadingProcessor.parse(cleanRaw) as MarkdownAstNode;
+  const headings: Array<{ text: string; level: number; lineIndex: number }> = [];
+
+  const visit = (node: MarkdownAstNode) => {
+    if (node.type === 'heading') {
+      const line = node.position?.start?.line;
+      if (line != null) {
+        headings.push({
+          text: extractNodeText(node).trim(),
+          level: node.depth ?? 1,
+          lineIndex: Math.max(0, line - 1),
+        });
+      }
+    }
+    node.children?.forEach(visit);
+  };
+
+  visit(tree);
+
+  const ids = uniqueSlugs(headings.map((heading) => heading.text));
+  return headings.map((heading, index) => ({
+    ...heading,
+    id: ids[index],
+  }));
+}
 
 /**
  * Build highlighted HTML from raw markdown text.
@@ -154,6 +226,11 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
   }, []);
 
   const highlightedHtml = useMemo(() => buildHighlightedHtml(rawMarkdown), [rawMarkdown]);
+  const rawHeadings = useMemo(() => extractRawHeadings(rawMarkdown), [rawMarkdown]);
+  const headingIdsByLine = useMemo(
+    () => new Map(rawHeadings.map((heading) => [heading.lineIndex, heading.id])),
+    [rawHeadings],
+  );
 
   // Split the highlighted HTML into per-line segments.
   // We split the *source* into lines, build highlighted HTML for each,
@@ -296,7 +373,26 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     flashTimerRef.current = setTimeout(() => marker.classList.remove('raw-comment-marker-flash'), 1500);
   }, []);
 
-  useImperativeHandle(ref, () => ({ scrollToComment }), [scrollToComment]);
+  const scrollToHeading = useCallback((headingId: string) => {
+    if (!tableRef.current || !containerRef.current) return;
+    const headingLine = tableRef.current.querySelector(`.raw-line[data-heading-id="${CSS.escape(headingId)}"]`);
+    if (!headingLine) return;
+
+    const scrollParent = containerRef.current.closest('.overflow-y-auto');
+    if (scrollParent) {
+      const lineRect = headingLine.getBoundingClientRect();
+      const parentRect = scrollParent.getBoundingClientRect();
+      scrollParent.scrollTo({
+        top: scrollParent.scrollTop + lineRect.top - parentRect.top,
+        behavior: 'smooth',
+      });
+      return;
+    }
+
+    headingLine.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  useImperativeHandle(ref, () => ({ scrollToComment, scrollToHeading }), [scrollToComment, scrollToHeading]);
 
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   useEffect(() => {
@@ -343,7 +439,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
 
       <div ref={tableRef} className="raw-view-table">
         {lineHtmls.map((_, i) => (
-          <div key={i} className="raw-line">
+          <div key={i} className="raw-line" data-heading-id={headingIdsByLine.get(i)}>
             <span className="raw-line-number">{i + 1}</span>
             <span className="raw-line-content" />
           </div>

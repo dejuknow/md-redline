@@ -246,6 +246,20 @@ export default function App() {
   const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
     useHeadingTracking(containerRef, viewerRef, html);
 
+  const handleHeadingNavigate = useCallback((id: string) => {
+    cancelAnimationFrame(scrollSpyRafRef.current);
+    spyDisabledRef.current = true;
+    setActiveHeadingId(id);
+
+    if (viewMode === 'raw') {
+      rawViewRef.current?.scrollToHeading(id);
+      return;
+    }
+
+    const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [setActiveHeadingId, viewMode]);
+
   // Clear transient state on tab switch
   const prevFilePathRef = useRef(activeFilePath);
   useEffect(() => {
@@ -706,12 +720,9 @@ export default function App() {
       id: `heading-${h.id}`,
       label: `${'\u2003'.repeat(h.level - 1)}${h.text}`,
       section: 'Headings' as const,
-      onExecute: () => {
-        const el = containerRef.current?.querySelector(`#${CSS.escape(h.id)}`);
-        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      },
+      onExecute: () => handleHeadingNavigate(h.id),
     })),
-  [tocHeadings]);
+  [tocHeadings, handleHeadingNavigate]);
 
   const paletteCommands = useMemo(
     () => [...navigationCommands, ...viewCommands, ...fileCommands, ...generalCommands, ...commentCommands, ...headingCommands],
@@ -856,17 +867,7 @@ export default function App() {
                 <TableOfContents
                   headings={tocHeadings}
                   activeHeadingId={activeHeadingId}
-                  onHeadingClick={(id) => {
-                    // Cancel any pending spy rAF so it can't override the heading
-                    // we're setting. Spy stays disabled until the user manually
-                    // scrolls (wheel/touch), so the clicked heading is never
-                    // overridden regardless of scroll distance or animation duration.
-                    cancelAnimationFrame(scrollSpyRafRef.current);
-                    spyDisabledRef.current = true;
-                    setActiveHeadingId(id);
-                    const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
-                    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}
+                  onHeadingClick={handleHeadingNavigate}
                 />
               )}
             </div>
