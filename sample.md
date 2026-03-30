@@ -13,6 +13,7 @@ As a new user, I want to register with my email and password so that I can acces
 **Acceptance Criteria:**
 
 - User provides email, password, and display name
+<!-- @comment{"id":"demo-comment-2","text":"Should we also enforce a max length? Some password managers generate very long passwords and I've seen backends silently truncate them.","author":"Bob","timestamp":"2026-03-29T14:30:00.000Z","anchor":"Password must be at least 8 characters with one uppercase, one number, and one special character","contextBefore":"**Acceptance Criteria:**\n\n- User provides email, password, and display name\n- ","contextAfter":"\n- System sends verification email within 30 seconds"} -->
 - Password must be at least 8 characters with one uppercase, one number, and one special character
 - System sends verification email within 30 seconds
 - User cannot access protected routes until email is verified
