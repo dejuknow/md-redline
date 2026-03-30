@@ -137,4 +137,28 @@ describe('computeDiff', () => {
     expect(diff.filter((l) => l.type === 'removed').length).toBe(1500);
     expect(diff.filter((l) => l.type === 'added').length).toBe(1500);
   });
+
+  it('handles large files with shared prefix/suffix but large different middle', () => {
+    // Common prefix + 1200 different lines + common suffix
+    // Middle is 1200x1200 = 1.44M cells, exceeds threshold -> inner fallback
+    const prefix = Array.from({ length: 50 }, (_, i) => `shared-prefix-${i}`);
+    const suffix = Array.from({ length: 50 }, (_, i) => `shared-suffix-${i}`);
+    const oldMiddle = Array.from({ length: 1200 }, (_, i) => `old-middle-${i}`);
+    const newMiddle = Array.from({ length: 1200 }, (_, i) => `new-middle-${i}`);
+
+    const oldText = [...prefix, ...oldMiddle, ...suffix].join('\n');
+    const newText = [...prefix, ...newMiddle, ...suffix].join('\n');
+
+    const start = Date.now();
+    const diff = computeDiff(oldText, newText);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(5000);
+    // Prefix and suffix should be 'same'
+    const same = diff.filter((l) => l.type === 'same');
+    expect(same.length).toBe(100); // 50 prefix + 50 suffix
+    // Middle should be all removed + all added
+    expect(diff.filter((l) => l.type === 'removed').length).toBe(1200);
+    expect(diff.filter((l) => l.type === 'added').length).toBe(1200);
+  });
 });

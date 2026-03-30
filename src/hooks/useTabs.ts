@@ -20,6 +20,7 @@ export function useTabs() {
   tabOrderRef.current = tabOrder;
   const loadRequestIdsRef = useRef(new Map<string, number>());
   const nextLoadRequestIdRef = useRef(1);
+  const abortControllersRef = useRef(new Map<string, AbortController>());
 
   const startLoadRequest = useCallback((path: string) => {
     const requestId = nextLoadRequestIdRef.current++;
@@ -42,6 +43,8 @@ export function useTabs() {
 
   const cancelLoadRequest = useCallback((path: string) => {
     loadRequestIdsRef.current.delete(path);
+    abortControllersRef.current.get(path)?.abort();
+    abortControllersRef.current.delete(path);
   }, []);
 
   const updateTab = useCallback((path: string, updates: Partial<TabState>) => {
@@ -74,10 +77,13 @@ export function useTabs() {
     setTabOrder((prev) => [...prev, path]);
     setActiveFilePath(path);
     const requestId = startLoadRequest(path);
+    abortControllersRef.current.get(path)?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.set(path, controller);
 
     // Fetch file content
     try {
-      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal: controller.signal });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       if (!isCurrentLoadRequest(path, requestId)) return;
@@ -94,6 +100,7 @@ export function useTabs() {
       });
       finishLoadRequest(path, requestId);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       if (!isCurrentLoadRequest(path, requestId)) return;
       setTabData((prev) => {
         const next = new Map(prev);
@@ -108,6 +115,8 @@ export function useTabs() {
         return next;
       });
       finishLoadRequest(path, requestId);
+    } finally {
+      abortControllersRef.current.delete(path);
     }
   }, [finishLoadRequest, isCurrentLoadRequest, startLoadRequest]);
 
@@ -125,9 +134,12 @@ export function useTabs() {
     setTabData((prev) => new Map(prev).set(path, newTab));
     setTabOrder((prev) => [...prev, path]);
     const requestId = startLoadRequest(path);
+    abortControllersRef.current.get(path)?.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.set(path, controller);
 
     try {
-      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal: controller.signal });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       if (!isCurrentLoadRequest(path, requestId)) return;
@@ -144,6 +156,7 @@ export function useTabs() {
       });
       finishLoadRequest(path, requestId);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       if (!isCurrentLoadRequest(path, requestId)) return;
       setTabData((prev) => {
         const next = new Map(prev);
@@ -158,6 +171,8 @@ export function useTabs() {
         return next;
       });
       finishLoadRequest(path, requestId);
+    } finally {
+      abortControllersRef.current.delete(path);
     }
   }, [finishLoadRequest, isCurrentLoadRequest, startLoadRequest]);
 

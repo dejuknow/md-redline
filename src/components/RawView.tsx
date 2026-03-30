@@ -298,13 +298,19 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
 
   useImperativeHandle(ref, () => ({ scrollToComment }), [scrollToComment]);
 
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+  useEffect(() => {
+    return () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); };
+  }, []);
+
   const handleCopyClean = useCallback(() => {
     COMMENT_MARKER_RE.lastIndex = 0;
     const clean = rawMarkdown.replace(COMMENT_MARKER_RE, '');
     navigator.clipboard.writeText(clean).then(
       () => {
         setCopyFeedback(true);
-        setTimeout(() => setCopyFeedback(false), 2000);
+        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
       },
       () => { /* clipboard write failed */ },
     );

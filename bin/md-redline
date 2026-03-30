@@ -122,7 +122,9 @@ function killPort(port) {
       const output = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8' });
       const pids = new Set(output.trim().split('\n').map(line => line.trim().split(/\s+/).pop()));
       for (const pid of pids) {
-        if (pid && pid !== '0') execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+        if (pid && pid !== '0') {
+          try { execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }); } catch { /* process may have already exited */ }
+        }
       }
     } else {
       execSync(`lsof -ti:${port} | xargs kill 2>/dev/null`, { stdio: 'ignore' });

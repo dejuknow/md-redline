@@ -32,6 +32,9 @@ export function score(
     details.push('parsing: no comments expected, score=1.0');
   } else {
     const actionable = expected.comments.filter((c) => c.expectedAction === 'address');
+    if (expected.actionableComments !== undefined && actionable.length !== expected.actionableComments) {
+      details.push(`warning: actionableComments (${expected.actionableComments}) does not match computed count (${actionable.length})`);
+    }
     let correct = 0;
     for (const exp of actionable) {
       // Marker should be removed after addressing

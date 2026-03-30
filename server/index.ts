@@ -54,7 +54,17 @@ export function createApp(options: CreateAppOptions = {}) {
   const execFileImpl = options.execFileImpl ?? execFile;
 
   const app = new Hono();
-  app.use('*', cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }));
+  // Allow CORS from any localhost port (Vite may start on 5174+ if 5173 is busy)
+  app.use('*', cors({
+    origin: (origin) => {
+      if (!origin) return 'http://localhost:5173';
+      try {
+        const url = new URL(origin);
+        if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
+      } catch { /* invalid origin */ }
+      return null;
+    },
+  }));
   app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 }));
 
   let initialFile = '';
@@ -186,7 +196,7 @@ export function createApp(options: CreateAppOptions = {}) {
       const resolved = await resolveAndValidate(dir);
       const entries = await readdir(resolved, { withFileTypes: true });
       const files = entries
-        .filter((entry) => entry.isFile() && extname(entry.name) === '.md')
+        .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.md')
         .map((entry) => join(resolved, entry.name));
       files.sort((a, b) => a.localeCompare(b));
       return c.json({ files, dir: resolved });
@@ -217,7 +227,7 @@ export function createApp(options: CreateAppOptions = {}) {
         .sort((a, b) => a.name.localeCompare(b.name));
 
       const files = entries
-        .filter((entry) => entry.isFile() && extname(entry.name) === '.md')
+        .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.md')
         .map((entry) => ({ name: entry.name, path: join(resolved, entry.name) }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -455,8 +465,7 @@ function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
   return new Promise((res, rej) => {
     const server = serve({ fetch: appFetch, port }, () => res(port));
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') rej(err);
-      else rej(err);
+      rej(err);
     });
   });
 }

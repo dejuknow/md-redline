@@ -266,6 +266,12 @@ describe('addReply', () => {
     expect(parsed.comments[0].replies).toHaveLength(2);
     expect(parsed.comments[0].replies![1].text).toBe('second');
   });
+
+  it('returns unchanged text when comment ID does not exist', () => {
+    const raw = `${marker({ id: 'rp1' })}hello`;
+    const result = addReply(raw, 'nonexistent', 'reply text', 'Bob');
+    expect(result).toBe(raw);
+  });
 });
 
 describe('serializeComment', () => {

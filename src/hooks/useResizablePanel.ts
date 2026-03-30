@@ -98,6 +98,11 @@ export function useResizablePanel() {
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      // Clean up body styles if component unmounts mid-drag
+      if (dragging.current) {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
     };
   }, [persist]);
 

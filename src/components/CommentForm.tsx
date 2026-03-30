@@ -59,15 +59,17 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     return () => document.removeEventListener('mousedown', handler);
   }, [isExpanded, text, onCancel]);
 
-  // Reset expanded state when selection changes — derive from selection identity
+  // Reset expanded state when selection changes
   const selectionKey = `${selection.text}:${selection.rect.top}:${selection.rect.left}`;
-  const [prevSelectionKey, setPrevSelectionKey] = useState(selectionKey);
-  if (prevSelectionKey !== selectionKey) {
-    setPrevSelectionKey(selectionKey);
-    if (!settings.quickComment && isExpanded) setIsExpanded(false);
-    if (text) setText('');
-    if (showTemplates !== settings.showTemplatesByDefault) setShowTemplates(settings.showTemplatesByDefault);
-  }
+  const prevSelectionKeyRef = useRef(selectionKey);
+  useEffect(() => {
+    if (prevSelectionKeyRef.current !== selectionKey) {
+      prevSelectionKeyRef.current = selectionKey;
+      if (!settings.quickComment) setIsExpanded(false);
+      setText('');
+      setShowTemplates(settings.showTemplatesByDefault);
+    }
+  }, [selectionKey, settings.quickComment, settings.showTemplatesByDefault]);
 
   // Position the form near the selection
   const viewportHeight = window.innerHeight;

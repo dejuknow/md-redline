@@ -303,21 +303,19 @@ describe('PUT /api/file', () => {
 });
 
 describe('/api/files', () => {
-  it('lists only lowercase .md files in the requested directory', async () => {
+  it('lists .md files case-insensitively in the requested directory', async () => {
     const { response, body } = await requestJson(
       app,
       `/api/files?dir=${encodeURIComponent(docsDir)}`,
     );
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({
-      dir: docsDir,
-      files: [
-        join(docsDir, 'alpha.md'),
-        writtenFile,
-        join(docsDir, 'zeta.md'),
-      ],
-    });
+    expect(body.dir).toBe(docsDir);
+    expect(body.files).toContain(join(docsDir, 'README.MD'));
+    expect(body.files).toContain(join(docsDir, 'alpha.md'));
+    expect(body.files).toContain(writtenFile);
+    expect(body.files).toContain(join(docsDir, 'zeta.md'));
+    expect(body.files).toHaveLength(4);
   });
 
   it('rejects directories outside allowed roots', async () => {
@@ -381,6 +379,7 @@ describe('/api/browse', () => {
       directories: [{ name: 'nested', path: join(docsDir, 'nested') }],
       files: [
         { name: 'alpha.md', path: join(docsDir, 'alpha.md') },
+        { name: 'README.MD', path: join(docsDir, 'README.MD') },
         { name: 'written.md', path: writtenFile },
         { name: 'zeta.md', path: join(docsDir, 'zeta.md') },
       ],

@@ -99,15 +99,25 @@ export function ContextMenu({ items, position, onClose }: Props) {
     const rect = target.getBoundingClientRect();
     const menuRect = menuRef.current?.getBoundingClientRect();
     const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
     // Default: open to the right
     let x = rect.right;
-    const y = rect.top;
+    let y = rect.top;
 
     // If not enough space on the right, open to the left
     if (menuRect && x + 180 > vw - 8) {
       x = menuRect.left - 180;
     }
+
+    // Clamp vertically so submenu doesn't overflow below viewport
+    // Estimate submenu height as ~32px per item (max 10 items visible)
+    const entry = items[idx];
+    const estimatedHeight = isSubmenu(entry) ? Math.min(entry.items.length, 10) * 32 : 200;
+    if (y + estimatedHeight > vh - 8) {
+      y = vh - estimatedHeight - 8;
+    }
+    if (y < 8) y = 8;
 
     setSubmenuPos({ x, y });
     setOpenSubmenuIdx(idx);
