@@ -35,15 +35,24 @@ That design keeps the feedback:
 - Inline comments with overlapping anchors
 - Threaded replies
 - Drag-resize comment anchors
-- Multi-tab editing
-- File explorer and recent files
-- Command palette and keyboard shortcuts
+- Multi-tab editing with tab context menus (close, close others, close to right)
+- File explorer, recent files, and native OS file picker
+- Command palette (`Cmd+K`) and comprehensive keyboard shortcuts
 - Rendered, raw, and diff views
-- Table of contents with active heading tracking
+- Find in document (`Cmd+F`) with match counting and navigation
+- Table of contents with active heading tracking and scroll spy
+- Comment sidebar search across text, anchors, authors, and replies
 - Real-time reload via SSE when files change outside the app
 - Optional resolve workflow for human review
 - Agent hand-off prompt copying for one or multiple files
 - Mermaid rendering with commentable diagram text
+- 8 themes: Light, Dark, Sepia, Nord, Solarized, GitHub, Rosé Pine, Catppuccin
+- Customizable comment templates (add, remove, reorder via drag-and-drop)
+- Quick comment mode (skip the "Comment" button, open form immediately on selection)
+- Resizable panels with draggable dividers between explorer, viewer, and sidebar
+- Right-click context menus on tabs, files, comments, and selections
+- Settings panel (`Cmd+,`) with General, Templates, and Theme tabs
+- Session persistence: open tabs, panel layout, view mode, and diff snapshots saved to localStorage; author, theme, and recent files saved to `~/.md-redline.json`
 
 ## Supported platforms
 
@@ -64,7 +73,10 @@ Then open [http://localhost:5173](http://localhost:5173).
 
 ```bash
 npm link
-mdr /path/to/spec.md
+mdr /path/to/spec.md        # Open a file
+mdr /path/to/dir             # Open a directory
+mdr --stop                   # Stop the running server
+mdr -h                       # Show help
 ```
 
 `md-redline` also works as an alias for `mdr`.
@@ -104,14 +116,22 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 |---|---|
 | `Cmd+K` / `Ctrl+K` | Toggle command palette |
 | `Cmd+B` / `Ctrl+B` | Toggle file explorer |
+| `Cmd+F` / `Ctrl+F` | Find in document |
+| `Cmd+O` / `Ctrl+O` | Open file |
+| `Cmd+,` / `Ctrl+,` | Open settings |
 | `Cmd+Enter` / `Ctrl+Enter` | Submit comment / expand comment form |
 | `Cmd+1-8` / `Ctrl+1-8` | Apply quick template |
 | `Cmd+Shift+M` / `Ctrl+Shift+M` | Start commenting on selection |
+| `Cmd+Shift+S` / `Ctrl+Shift+S` | Take/update diff snapshot |
+| `Cmd+Shift+O` / `Ctrl+Shift+O` | Toggle document outline |
+| `Cmd+Shift+[` / `]` | Previous / next tab |
 | `Cmd+\` / `Ctrl+\` | Toggle comments sidebar |
 | `N` / `J` | Next comment |
 | `P` / `K` | Previous comment |
+| `D` | Delete active comment |
 | `A` / `X` | Resolve active comment when resolve workflow is enabled |
 | `U` | Reopen active comment when resolve workflow is enabled |
+| `?` | Show keyboard shortcuts help |
 | `Escape` | Cancel form, unlock selection, or cancel drag |
 
 ## Architecture
@@ -165,10 +185,6 @@ Useful scripts:
 This is intentional so the tool can work with real docs on your machine, but it also means you should only run it in environments you trust.
 
 If you find a vulnerability, please use the process in [SECURITY.md](./SECURITY.md).
-
-## Known issue
-
-- Saving `.md` files inside the project can still trigger Vite reload behavior in some setups.
 
 ## Contributing
 
