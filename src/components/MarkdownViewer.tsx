@@ -162,44 +162,48 @@ export const MarkdownViewer = memo(
         highlightGroups.set(key, group);
       }
 
-      // IMPORTANT: Mermaid highlight quirks (do NOT refactor to class-based styles):
-      // 1. Chrome ignores class-based background-color on inline elements inside
-      //    SVG foreignObject — only inline style="..." works.
-      // 2. CSS text-decoration on <mark> prevents text wrapping inside foreignObject.
-      // 3. CSS background shorthand (e.g. linear-gradient) also prevents wrapping.
-      // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
-      // Solution: detect mermaid context in the configure callback and apply only
-      // inline styles — never set .comment-highlight class on mermaid marks.
-      const rootStyles = getComputedStyle(document.documentElement);
-      const mermaidBg = rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim();
-      const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
-      const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
-
       for (const { anchor, ids, plainOffset, contextBefore, contextAfter } of highlightGroups.values()) {
         wrapText(
           container,
           anchor,
           (mark) => {
+            mark.className = 'comment-highlight';
             mark.dataset.commentIds = ids.join(',');
-            const isActive = ids.includes(activeCommentId || '');
-            if (mark.closest('.mermaid-block')) {
-              // Mermaid: inline styles only — class-based styles break wrapping
-              mark.className = 'mermaid-comment-highlight';
-              if (isActive) mark.classList.add('mermaid-comment-highlight-active');
-              mark.style.backgroundColor = mermaidBg;
-              mark.style.color = mermaidColor;
-              mark.style.textDecoration = 'none';
-              mark.style.borderBottom = `2px solid ${mermaidUnderline}`;
-              mark.style.transition = 'none';
-            } else {
-              mark.className = 'comment-highlight';
-              if (isActive) mark.classList.add('comment-highlight-active');
+            if (ids.includes(activeCommentId || '')) {
+              mark.classList.add('comment-highlight-active');
             }
           },
           plainOffset,
           contextBefore,
           contextAfter,
         );
+      }
+
+      // IMPORTANT: Do NOT insert ANY new elements inside mermaid foreignObject.
+      // Chrome breaks text wrapping when ANY element (even unstyled <mark>) is added.
+      // Headless Chromium does NOT reproduce this — cannot verify headlessly.
+      // Background-color (class or inline) also doesn't render on inline spans in FO.
+      // Solution: unwrap <mark> elements, style the existing .nodeLabel span instead.
+      // See memory: feedback_mermaid_highlights.md for full list of failed approaches.
+      const rootStyles = getComputedStyle(document.documentElement);
+      const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
+      const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
+      for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight')) {
+        const nodeLabel = mark.closest('.nodeLabel') as HTMLElement | null;
+        if (nodeLabel) {
+          nodeLabel.classList.add('mermaid-comment-highlight');
+          nodeLabel.dataset.commentIds = (mark as HTMLElement).dataset.commentIds || '';
+          if (mark.classList.contains('comment-highlight-active')) {
+            nodeLabel.classList.add('mermaid-comment-highlight-active');
+          }
+          nodeLabel.style.color = mermaidColor;
+          nodeLabel.style.textDecoration = `underline 2px ${mermaidUnderline}`;
+          nodeLabel.style.textUnderlineOffset = '3px';
+        }
+        // Unwrap: remove the <mark>, keep its text content
+        const parent = mark.parentNode!;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
       }
 
       // --- Selection highlight ---
