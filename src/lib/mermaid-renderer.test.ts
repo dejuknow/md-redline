@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getMermaidTheme, hasMermaidBlocks } from './mermaid-renderer';
+import { ALL_THEMES } from './themes';
 
 describe('getMermaidTheme', () => {
   it('maps "light" to "default"', () => {
@@ -37,6 +38,17 @@ describe('getMermaidTheme', () => {
   it('falls back to "default" for unknown themes', () => {
     expect(getMermaidTheme('unknown-theme')).toBe('default');
     expect(getMermaidTheme('')).toBe('default');
+  });
+
+  it('returns a valid mermaid theme for every app theme in themes.ts', () => {
+    const validMermaidThemes = ['default', 'dark', 'forest', 'neutral', 'base'];
+    for (const theme of ALL_THEMES) {
+      const result = getMermaidTheme(theme.key);
+      expect(
+        validMermaidThemes.includes(result),
+        `getMermaidTheme("${theme.key}") returned "${result}" — add it to THEME_MAP in mermaid-renderer.ts`,
+      ).toBe(true);
+    }
   });
 });
 

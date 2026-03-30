@@ -162,43 +162,44 @@ export const MarkdownViewer = memo(
         highlightGroups.set(key, group);
       }
 
-      for (const { anchor, ids, plainOffset, contextBefore, contextAfter } of highlightGroups.values()) {
-        wrapText(
-          container,
-          anchor,
-          (mark) => {
-            mark.className = 'comment-highlight';
-            mark.dataset.commentIds = ids.join(',');
-            if (ids.includes(activeCommentId || '')) {
-              mark.classList.add('comment-highlight-active');
-            }
-          },
-          plainOffset,
-          contextBefore,
-          contextAfter,
-        );
-      }
-
       // IMPORTANT: Mermaid highlight quirks (do NOT refactor to class-based styles):
       // 1. Chrome ignores class-based background-color on inline elements inside
       //    SVG foreignObject — only inline style="..." works.
       // 2. CSS text-decoration on <mark> prevents text wrapping inside foreignObject.
       // 3. CSS background shorthand (e.g. linear-gradient) also prevents wrapping.
       // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
-      // Solution: keep the <mark> but swap class styles for inline styles.
+      // Solution: detect mermaid context in the configure callback and apply only
+      // inline styles — never set .comment-highlight class on mermaid marks.
       const rootStyles = getComputedStyle(document.documentElement);
       const mermaidBg = rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim();
       const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
       const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
-      for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight')) {
-        mark.classList.remove('comment-highlight');
-        mark.classList.add('mermaid-comment-highlight');
-        const el = mark as HTMLElement;
-        el.style.backgroundColor = mermaidBg;
-        el.style.color = mermaidColor;
-        el.style.textDecoration = 'none';
-        el.style.borderBottom = `2px solid ${mermaidUnderline}`;
-        el.style.transition = 'none';
+
+      for (const { anchor, ids, plainOffset, contextBefore, contextAfter } of highlightGroups.values()) {
+        wrapText(
+          container,
+          anchor,
+          (mark) => {
+            mark.dataset.commentIds = ids.join(',');
+            const isActive = ids.includes(activeCommentId || '');
+            if (mark.closest('.mermaid-block')) {
+              // Mermaid: inline styles only — class-based styles break wrapping
+              mark.className = 'mermaid-comment-highlight';
+              if (isActive) mark.classList.add('mermaid-comment-highlight-active');
+              mark.style.backgroundColor = mermaidBg;
+              mark.style.color = mermaidColor;
+              mark.style.textDecoration = 'none';
+              mark.style.borderBottom = `2px solid ${mermaidUnderline}`;
+              mark.style.transition = 'none';
+            } else {
+              mark.className = 'comment-highlight';
+              if (isActive) mark.classList.add('comment-highlight-active');
+            }
+          },
+          plainOffset,
+          contextBefore,
+          contextAfter,
+        );
       }
 
       // --- Selection highlight ---
