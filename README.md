@@ -102,9 +102,10 @@ On Windows, absolute paths like `C:\docs\spec.md` work as well.
 By default, comments are instructions to an agent:
 
 1. the reviewer adds comments
-2. the agent reads the file and updates the content
-3. the agent deletes the addressed markers
-4. the reviewer checks the result in diff view
+2. the reviewer clicks "Hand off to agent" — this copies instructions to the clipboard and takes a diff snapshot
+3. the agent reads the file and updates the content
+4. the agent deletes the addressed markers
+5. the reviewer checks the result in diff view
 
 ### Optional resolve workflow
 
