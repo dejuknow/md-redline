@@ -78,25 +78,23 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
         </div>
       )}
 
-      {/* Breadcrumb */}
+      {/* Breadcrumb navigation */}
       {data && (
-        <div className="px-3 py-1.5 border-b border-border-subtle">
-          <div className="flex items-center gap-1 text-[10px] text-content-muted overflow-x-auto">
-            {data.parent && (
-              <button
-                onClick={() => browse(data.parent!)}
-                className="hover:text-primary-text shrink-0 p-0.5"
-                title="Go up"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-            )}
-            <span className="font-medium text-content-secondary truncate" title={data.dir}>
-              {dirName}
-            </span>
-          </div>
+        <div className="px-1.5 py-1 border-b border-border-subtle flex items-center gap-0.5">
+          {data.parent && (
+            <button
+              onClick={() => browse(data.parent!)}
+              className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors shrink-0"
+              title="Go up"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+          <span className="text-xs text-content-secondary truncate px-1" title={data.dir}>
+            {dirName}
+          </span>
         </div>
       )}
 
