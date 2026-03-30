@@ -30,6 +30,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 beforeEach(() => {
   localStorageMock.clear();
+  mockFetch.mockReset();
   vi.clearAllMocks();
 });
 
@@ -96,7 +97,7 @@ describe('migrateLocalStorageToDisk', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1); // Only the GET
   });
 
-  it('migrates author, settings, theme, recentFiles from localStorage', async () => {
+  it('migrates settings, theme, and recentFiles from localStorage', async () => {
     // Mock disk as empty
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -105,7 +106,6 @@ describe('migrateLocalStorageToDisk', () => {
     // Mock save
     mockFetch.mockResolvedValueOnce({ ok: true });
 
-    store['md-redline-author'] = 'Alice';
     store['md-redline-settings'] = JSON.stringify({ enableResolve: true });
     store['theme'] = 'dark';
     store['md-redline-recent-files'] = JSON.stringify([
@@ -119,10 +119,24 @@ describe('migrateLocalStorageToDisk', () => {
     const putCall = mockFetch.mock.calls[1];
     expect(putCall[0]).toBe('/api/preferences');
     const body = JSON.parse(putCall[1].body);
-    expect(body.author).toBe('Alice');
     expect(body.settings).toEqual({ enableResolve: true });
     expect(body.theme).toBe('dark');
     expect(body.recentFiles).toHaveLength(1);
+  });
+
+  it('does not migrate legacy author from localStorage', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
+    mockFetch.mockResolvedValueOnce({ ok: true });
+
+    store['md-redline-author'] = 'PersistentUser';
+
+    await migrateLocalStorageToDisk();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(store['md-redline-migrated-to-disk']).toBe('1');
   });
 
   it('removes migrated keys from localStorage except theme', async () => {
@@ -164,7 +178,6 @@ describe('migrateLocalStorageToDisk', () => {
 
     await migrateLocalStorageToDisk();
 
-    expect(store['md-redline-author']).toBe('Alice');
     expect(store['md-redline-settings']).toBe(JSON.stringify({ enableResolve: true }));
     expect(store['theme']).toBe('dark');
     expect(store['md-redline-migrated-to-disk']).toBeUndefined();

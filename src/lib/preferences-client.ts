@@ -52,9 +52,6 @@ export async function migrateLocalStorageToDisk(): Promise<void> {
     // Collect from localStorage
     const patch: DiskPreferences = {};
 
-    const author = localStorage.getItem('md-redline-author');
-    if (author) patch.author = author;
-
     const settingsRaw = localStorage.getItem('md-redline-settings');
     if (settingsRaw) {
       try {
