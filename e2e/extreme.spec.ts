@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/extreme-mermaid-stress.md');
@@ -105,8 +106,7 @@ test.beforeAll(() => {
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_CONTENT);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {

@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { MOD_LABEL, withMod } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -11,8 +12,7 @@ const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {

@@ -13,6 +13,7 @@ import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { FORMATTED_DOC_BASELINE } from './helpers/fixture-baselines';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/formatted-doc.md');
@@ -20,8 +21,7 @@ const FIXTURE_ORIGINAL = FORMATTED_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -100,7 +100,9 @@ async function dragStartHandleLeft(page: Page, pxLeft: number) {
 // ---------------------------------------------------------------------------
 
 test.describe('Drag start handle backwards - regression', () => {
-  test('dragging start handle left past bold formatting keeps highlight visible', async ({ page }) => {
+  test('dragging start handle left past bold formatting keeps highlight visible', async ({
+    page,
+  }) => {
     await openFixture(page);
 
     // Comment on text AFTER all the formatting
@@ -174,7 +176,9 @@ test.describe('Drag start handle backwards - regression', () => {
     await expect(highlights.first()).toBeVisible({ timeout: 5000 });
   });
 
-  test('dragging start handle left past italic formatting keeps highlight visible', async ({ page }) => {
+  test('dragging start handle left past italic formatting keeps highlight visible', async ({
+    page,
+  }) => {
     await openFixture(page);
 
     await addComment(page, 'and then normal text', 'Italic boundary test');

@@ -1,14 +1,26 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fetchPreferences, savePreferencesToDisk, migrateLocalStorageToDisk } from './preferences-client';
+import {
+  fetchPreferences,
+  savePreferencesToDisk,
+  migrateLocalStorageToDisk,
+} from './preferences-client';
 
 // Mock localStorage
 const store: Record<string, string> = {};
 const localStorageMock = {
   getItem: vi.fn((key: string) => store[key] ?? null),
-  setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
-  removeItem: vi.fn((key: string) => { delete store[key]; }),
-  clear: vi.fn(() => { for (const key in store) delete store[key]; }),
-  get length() { return Object.keys(store).length; },
+  setItem: vi.fn((key: string, value: string) => {
+    store[key] = value;
+  }),
+  removeItem: vi.fn((key: string) => {
+    delete store[key];
+  }),
+  clear: vi.fn(() => {
+    for (const key in store) delete store[key];
+  }),
+  get length() {
+    return Object.keys(store).length;
+  },
   key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
 };
 Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
@@ -47,7 +59,7 @@ describe('fetchPreferences', () => {
 describe('savePreferencesToDisk', () => {
   it('sends PUT request with correct body', async () => {
     mockFetch.mockResolvedValue({ ok: true });
-    await savePreferencesToDisk({ author: 'Bob' });
+    await expect(savePreferencesToDisk({ author: 'Bob' })).resolves.toBe(true);
     expect(mockFetch).toHaveBeenCalledWith('/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -55,14 +67,14 @@ describe('savePreferencesToDisk', () => {
     });
   });
 
-  it('does not throw on network error', async () => {
+  it('returns false on network error', async () => {
     mockFetch.mockRejectedValue(new Error('Network error'));
-    await expect(savePreferencesToDisk({ author: 'Bob' })).resolves.toBeUndefined();
+    await expect(savePreferencesToDisk({ author: 'Bob' })).resolves.toBe(false);
   });
 
-  it('does not throw on non-ok response', async () => {
+  it('returns false on non-ok response', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
-    await expect(savePreferencesToDisk({ author: 'Bob' })).resolves.toBeUndefined();
+    await expect(savePreferencesToDisk({ author: 'Bob' })).resolves.toBe(false);
   });
 });
 
@@ -96,7 +108,9 @@ describe('migrateLocalStorageToDisk', () => {
     store['md-redline-author'] = 'Alice';
     store['md-redline-settings'] = JSON.stringify({ enableResolve: true });
     store['theme'] = 'dark';
-    store['md-redline-recent-files'] = JSON.stringify([{ path: '/test.md', name: 'test.md', openedAt: '2026-01-01' }]);
+    store['md-redline-recent-files'] = JSON.stringify([
+      { path: '/test.md', name: 'test.md', openedAt: '2026-01-01' },
+    ]);
 
     await migrateLocalStorageToDisk();
 
@@ -135,5 +149,24 @@ describe('migrateLocalStorageToDisk', () => {
     });
     await migrateLocalStorageToDisk();
     expect(store['md-redline-migrated-to-disk']).toBe('1');
+  });
+
+  it('keeps local data and retries later when saving to disk fails', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+    store['md-redline-author'] = 'Alice';
+    store['md-redline-settings'] = JSON.stringify({ enableResolve: true });
+    store['theme'] = 'dark';
+
+    await migrateLocalStorageToDisk();
+
+    expect(store['md-redline-author']).toBe('Alice');
+    expect(store['md-redline-settings']).toBe(JSON.stringify({ enableResolve: true }));
+    expect(store['theme']).toBe('dark');
+    expect(store['md-redline-migrated-to-disk']).toBeUndefined();
   });
 });

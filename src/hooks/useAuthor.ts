@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { fetchPreferences, savePreferencesToDisk } from '../lib/preferences-client';
 
 const STORAGE_KEY = 'md-redline-author';
@@ -38,20 +38,31 @@ function loadAuthor(): string {
 
 export function useAuthor() {
   const [author, setAuthorState] = useState(loadAuthor);
+  const hasLocalMutationRef = useRef(false);
 
   // Hydrate from disk on mount
   useEffect(() => {
+    let cancelled = false;
     fetchPreferences().then((prefs) => {
+      if (cancelled || hasLocalMutationRef.current) return;
       if (prefs.author && prefs.author !== author) {
         setAuthorState(prefs.author);
-        try { localStorage.setItem(STORAGE_KEY, prefs.author); } catch { /* storage unavailable */ }
+        try {
+          localStorage.setItem(STORAGE_KEY, prefs.author);
+        } catch {
+          /* storage unavailable */
+        }
       }
     });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setAuthor = useCallback((name: string) => {
     const trimmed = name.trim() || 'User';
+    hasLocalMutationRef.current = true;
     setAuthorState(trimmed);
     try {
       localStorage.setItem(STORAGE_KEY, trimmed);

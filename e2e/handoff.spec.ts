@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -14,8 +15,7 @@ const FIXTURE_2_ORIGINAL = TEST_DOC_2_BASELINE;
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -162,7 +162,10 @@ async function toggleSetting(page: Page, settingName: string) {
 }
 
 test.describe('Resolve-mode hand-off', () => {
-  test('prompt includes reply instruction when resolve workflow is enabled', async ({ page, context }) => {
+  test('prompt includes reply instruction when resolve workflow is enabled', async ({
+    page,
+    context,
+  }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openFixture(page);
     await addComment(page, 'authentication system', 'How important is this?');
@@ -208,7 +211,9 @@ test.describe('Multi-file hand-off', () => {
     await expect(input).toBeVisible({ timeout: 5_000 });
     await input.fill(FIXTURE_2);
     await input.press('Enter');
-    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
     await addComment(page, 'second test document', 'Fix introduction');
     await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
   }

@@ -13,6 +13,7 @@ import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { HIGHLIGHT_SEAM_DOC_BASELINE } from './helpers/fixture-baselines';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/highlight-seam-doc.md');
@@ -20,8 +21,7 @@ const FIXTURE_ORIGINAL = HIGHLIGHT_SEAM_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -49,8 +49,10 @@ async function selectText(page: Page, text: string) {
 
     // Find which text nodes the match spans
     let pos = 0;
-    let startNode: Text | null = null, startOffset = 0;
-    let endNode: Text | null = null, endOffset = 0;
+    let startNode: Text | null = null,
+      startOffset = 0;
+    let endNode: Text | null = null,
+      endOffset = 0;
     for (const tn of textNodes) {
       const len = tn.textContent?.length || 0;
       if (!startNode && pos + len > matchStart) {
@@ -106,15 +108,16 @@ test.describe('highlight seam regression', () => {
 
     // Find the block element containing the highlight and check mark structure
     const markStructure = await page.evaluate(() => {
-      const container = Array.from(document.querySelectorAll('p'))
-        .find(el => el.textContent?.includes('bold text'));
+      const container = Array.from(document.querySelectorAll('p')).find((el) =>
+        el.textContent?.includes('bold text'),
+      );
       if (!container) return null;
 
       const marks = container.querySelectorAll('mark.comment-highlight');
       return {
         markCount: marks.length,
-        marksWithStrong: Array.from(marks).filter(m => m.querySelector('strong')).length,
-        markTexts: Array.from(marks).map(m => m.textContent),
+        marksWithStrong: Array.from(marks).filter((m) => m.querySelector('strong')).length,
+        markTexts: Array.from(marks).map((m) => m.textContent),
       };
     });
 
@@ -126,7 +129,9 @@ test.describe('highlight seam regression', () => {
     expect(markStructure!.markTexts[0]).toContain('followed');
   });
 
-  test('comment spanning multiple li elements produces one mark per li without seams', async ({ page }) => {
+  test('comment spanning multiple li elements produces one mark per li without seams', async ({
+    page,
+  }) => {
     await openFixture(page);
 
     // Select text spanning the first two Metric bullets
@@ -141,17 +146,19 @@ test.describe('highlight seam regression', () => {
 
     // Check mark structure in the li that has "30% increase"
     const markStructure = await page.evaluate(() => {
-      const targetLi = Array.from(document.querySelectorAll('li'))
-        .find(el => el.textContent?.includes('30% increase'));
+      const targetLi = Array.from(document.querySelectorAll('li')).find((el) =>
+        el.textContent?.includes('30% increase'),
+      );
       if (!targetLi) return { error: 'target li not found' };
 
       const marks = targetLi.querySelectorAll('mark.comment-highlight');
       return {
         markCount: marks.length,
-        marksWithStrong: Array.from(marks).filter(m => m.querySelector('strong')).length,
-        markTexts: Array.from(marks).map(m => m.textContent),
+        marksWithStrong: Array.from(marks).filter((m) => m.querySelector('strong')).length,
+        markTexts: Array.from(marks).map((m) => m.textContent),
         // Verify no <strong> is a parent of any mark (the per-node seam pattern)
-        marksInsideStrong: Array.from(marks).filter(m => m.parentElement?.tagName === 'STRONG').length,
+        marksInsideStrong: Array.from(marks).filter((m) => m.parentElement?.tagName === 'STRONG')
+          .length,
       };
     });
 
@@ -172,8 +179,9 @@ test.describe('highlight seam regression', () => {
     await page.waitForTimeout(300);
 
     const result = await page.evaluate(() => {
-      const container = Array.from(document.querySelectorAll('p'))
-        .find(el => el.textContent?.includes('bold text'));
+      const container = Array.from(document.querySelectorAll('p')).find((el) =>
+        el.textContent?.includes('bold text'),
+      );
       if (!container) return null;
 
       const mark = container.querySelector('mark.comment-highlight');
@@ -203,8 +211,9 @@ test.describe('highlight seam regression', () => {
 
     // Check that the rendered paragraph text is in correct order
     const result = await page.evaluate(() => {
-      const container = Array.from(document.querySelectorAll('p'))
-        .find(el => el.textContent?.includes('Value Proposition'));
+      const container = Array.from(document.querySelectorAll('p')).find((el) =>
+        el.textContent?.includes('Value Proposition'),
+      );
       if (!container) return null;
 
       return {

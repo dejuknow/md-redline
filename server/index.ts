@@ -60,7 +60,7 @@ const sseEncoder = new TextEncoder();
 
 export function createApp(options: CreateAppOptions = {}) {
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
-  const homeDir = options.homeDir ?? homedir();
+  const homeDir = options.homeDir ?? process.env.MD_REDLINE_HOME ?? homedir();
   const initialArgRaw = options.initialArg ?? process.argv[2] ?? '';
   const initialArg = initialArgRaw ? resolve(cwd, initialArgRaw) : '';
   const platformName = options.platformName ?? platform();
@@ -69,16 +69,21 @@ export function createApp(options: CreateAppOptions = {}) {
 
   const app = new Hono();
   // Allow CORS from any localhost port (Vite may start on 5174+ if 5173 is busy)
-  app.use('*', cors({
-    origin: (origin) => {
-      if (!origin) return 'http://localhost:5173';
-      try {
-        const url = new URL(origin);
-        if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
-      } catch { /* invalid origin */ }
-      return null;
-    },
-  }));
+  app.use(
+    '*',
+    cors({
+      origin: (origin) => {
+        if (!origin) return 'http://localhost:5173';
+        try {
+          const url = new URL(origin);
+          if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
+        } catch {
+          /* invalid origin */
+        }
+        return null;
+      },
+    }),
+  );
   app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 }));
 
   let initialFile = '';
@@ -206,14 +211,16 @@ export function createApp(options: CreateAppOptions = {}) {
       }
       // Serialize writes to the same path to prevent concurrent write races
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
-      const currentWrite = prevLock.then(async () => {
-        await writeFile(resolved, body.content, 'utf-8');
-        lastWrittenContent.set(resolved, body.content);
-      }).finally(() => {
-        if (writeLocks.get(resolved) === currentWrite) {
-          writeLocks.delete(resolved);
-        }
-      });
+      const currentWrite = prevLock
+        .then(async () => {
+          await writeFile(resolved, body.content, 'utf-8');
+          lastWrittenContent.set(resolved, body.content);
+        })
+        .finally(() => {
+          if (writeLocks.get(resolved) === currentWrite) {
+            writeLocks.delete(resolved);
+          }
+        });
       writeLocks.set(resolved, currentWrite);
       await currentWrite;
       return c.json({ success: true, path: resolved });
@@ -386,7 +393,10 @@ export function createApp(options: CreateAppOptions = {}) {
       const clients = new Set<WritableStreamDefaultWriter>();
       let debounce: ReturnType<typeof setTimeout> | null = null;
       const cleanUpWatcher = () => {
-        if (debounce) { clearTimeout(debounce); debounce = null; }
+        if (debounce) {
+          clearTimeout(debounce);
+          debounce = null;
+        }
         for (const client of clients) {
           client.close().catch(() => {});
         }
@@ -494,7 +504,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
 export const app = createApp();
 
-const DEFAULT_PORT = 3001;
+const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '3001', 10);
 const MAX_PORT_ATTEMPTS = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 
@@ -515,7 +525,9 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
       if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
     }
   }
-  throw new Error(`No available port found (tried ${DEFAULT_PORT}-${DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1})`);
+  throw new Error(
+    `No available port found (tried ${DEFAULT_PORT}-${DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1})`,
+  );
 }
 
 const isMainModule =
@@ -523,20 +535,34 @@ const isMainModule =
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
 if (isMainModule) {
-  findAvailablePort(app.fetch).then((port) => {
-    writeFileSync(PORT_FILE, String(port));
-    console.log(`md-redline server running on http://localhost:${port}`);
-    const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
-    if (initialArg) {
-      console.log(`Initial path: ${initialArg}`);
-    }
+  findAvailablePort(app.fetch)
+    .then((port) => {
+      writeFileSync(PORT_FILE, String(port));
+      console.log(`md-redline server running on http://localhost:${port}`);
+      const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
+      if (initialArg) {
+        console.log(`Initial path: ${initialArg}`);
+      }
 
-    const cleanup = () => { try { unlinkSync(PORT_FILE); } catch { /* ignore */ } };
-    process.on('exit', cleanup);
-    process.on('SIGINT', () => { cleanup(); process.exit(0); });
-    process.on('SIGTERM', () => { cleanup(); process.exit(0); });
-  }).catch((err) => {
-    console.error(err.message);
-    process.exit(1);
-  });
+      const cleanup = () => {
+        try {
+          unlinkSync(PORT_FILE);
+        } catch {
+          /* ignore */
+        }
+      };
+      process.on('exit', cleanup);
+      process.on('SIGINT', () => {
+        cleanup();
+        process.exit(0);
+      });
+      process.on('SIGTERM', () => {
+        cleanup();
+        process.exit(0);
+      });
+    })
+    .catch((err) => {
+      console.error(err.message);
+      process.exit(1);
+    });
 }

@@ -3,6 +3,7 @@ import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -10,8 +11,7 @@ const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -28,7 +28,9 @@ async function openFixture(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Diff view', () => {
-  test('take snapshot button appears and switches title after taking snapshot', async ({ page }) => {
+  test('take snapshot button appears and switches title after taking snapshot', async ({
+    page,
+  }) => {
     await openFixture(page);
 
     // Initially shows "Take diff snapshot"
@@ -65,10 +67,7 @@ test.describe('Diff view', () => {
     await page.waitForTimeout(1500);
 
     // Modify the file externally — this triggers SSE reload
-    const modified = FIXTURE_ORIGINAL.replace(
-      '## Section One',
-      '## Updated Section',
-    );
+    const modified = FIXTURE_ORIGINAL.replace('## Section One', '## Updated Section');
     writeFileSync(FIXTURE, modified);
 
     // The app auto-switches to diff view when an external change is detected

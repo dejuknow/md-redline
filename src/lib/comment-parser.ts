@@ -7,60 +7,137 @@ const COMMENT_PATTERN = /<!-- @comment(\{.*?\}) -->/gs;
 /** Shared regex for matching comment markers (without capture group). Reset lastIndex before use. */
 export const COMMENT_MARKER_RE = /<!-- @comment\{.*?\} -->/gs;
 
-export function parseComments(rawMarkdown: string): ParseResult {
-  const comments: MdComment[] = [];
-  const strippedRegions: { rawStart: number; rawEnd: number; parsed: boolean }[] = [];
+interface CodeBlockRange {
+  start: number;
+  end: number;
+}
 
-  // Build list of fenced code block ranges to skip markers inside them
-  const codeBlockRanges: { start: number; end: number }[] = [];
+interface CommentMarkerRegion {
+  rawStart: number;
+  markerEnd: number;
+  stripEnd: number;
+  parsedComment: MdComment | null;
+}
+
+type CommentTransform =
+  | { type: 'keep' }
+  | { type: 'remove' }
+  | { type: 'replace'; comment: MdComment };
+
+function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
+  const codeBlockRanges: CodeBlockRange[] = [];
   const fenceRegex = /^(`{3,}|~{3,}).*$/gm;
   let fenceMatch: RegExpExecArray | null;
   let openFence: { marker: string; start: number } | null = null;
+
   while ((fenceMatch = fenceRegex.exec(rawMarkdown)) !== null) {
     const marker = fenceMatch[1];
     if (!openFence) {
       openFence = { marker: marker[0].repeat(marker.length), start: fenceMatch.index };
     } else if (marker[0] === openFence.marker[0] && marker.length >= openFence.marker.length) {
-      codeBlockRanges.push({ start: openFence.start, end: fenceMatch.index + fenceMatch[0].length });
+      codeBlockRanges.push({
+        start: openFence.start,
+        end: fenceMatch.index + fenceMatch[0].length,
+      });
       openFence = null;
     }
   }
 
-  function isInsideCodeBlock(offset: number): boolean {
-    for (const range of codeBlockRanges) {
-      if (offset >= range.start && offset < range.end) return true;
-    }
-    return false;
-  }
+  return codeBlockRanges;
+}
 
-  let match: RegExpExecArray | null;
+function isInsideCodeBlock(offset: number, codeBlockRanges: CodeBlockRange[]): boolean {
+  for (const range of codeBlockRanges) {
+    if (offset >= range.start && offset < range.end) return true;
+  }
+  return false;
+}
+
+function getStandaloneStripEnd(
+  rawMarkdown: string,
+  markerStart: number,
+  markerEnd: number,
+): number {
+  const isStartOfLine = markerStart === 0 || rawMarkdown[markerStart - 1] === '\n';
+  return isStartOfLine && rawMarkdown[markerEnd] === '\n' ? markerEnd + 1 : markerEnd;
+}
+
+function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
+  const codeBlockRanges = getCodeBlockRanges(rawMarkdown);
+  const regions: CommentMarkerRegion[] = [];
   const regex = new RegExp(COMMENT_PATTERN);
+  let match: RegExpExecArray | null;
 
   while ((match = regex.exec(rawMarkdown)) !== null) {
-    // Skip markers inside fenced code blocks (e.g. documentation examples)
-    if (isInsideCodeBlock(match.index)) continue;
+    if (isInsideCodeBlock(match.index, codeBlockRanges)) continue;
 
-    let parsed = false;
+    let parsedComment: MdComment | null = null;
     try {
       const data = JSON.parse(match[1]) as MdComment;
       if (data.id && data.anchor) {
-        comments.push(data);
-        parsed = true;
+        parsedComment = data;
       }
     } catch {
-      // Malformed JSON — still strip the marker
+      // Malformed markers are still considered removable outside code blocks.
     }
-    let rawEnd = match.index + match[0].length;
-    // If the marker sits alone on its own line (e.g. before a code fence),
-    // also consume the trailing newline so stripping restores the original content.
-    const isStartOfLine = match.index === 0 || rawMarkdown[match.index - 1] === '\n';
-    if (isStartOfLine && rawMarkdown[rawEnd] === '\n') {
-      rawEnd += 1;
+
+    const markerEnd = match.index + match[0].length;
+    regions.push({
+      rawStart: match.index,
+      markerEnd,
+      stripEnd: getStandaloneStripEnd(rawMarkdown, match.index, markerEnd),
+      parsedComment,
+    });
+  }
+
+  return regions;
+}
+
+function transformCommentMarkers(
+  rawMarkdown: string,
+  transform: (comment: MdComment | null) => CommentTransform,
+): string {
+  const regions = collectCommentRegions(rawMarkdown);
+  if (regions.length === 0) return rawMarkdown;
+
+  let nextRaw = '';
+  let lastEnd = 0;
+
+  for (const region of regions) {
+    nextRaw += rawMarkdown.slice(lastEnd, region.rawStart);
+    const action = transform(region.parsedComment);
+
+    if (action.type === 'keep') {
+      nextRaw += rawMarkdown.slice(region.rawStart, region.markerEnd);
+      lastEnd = region.markerEnd;
+      continue;
+    }
+
+    if (action.type === 'replace') {
+      nextRaw += serializeComment(action.comment);
+      lastEnd = region.markerEnd;
+      continue;
+    }
+
+    lastEnd = region.stripEnd;
+  }
+
+  nextRaw += rawMarkdown.slice(lastEnd);
+  return nextRaw;
+}
+
+export function parseComments(rawMarkdown: string): ParseResult {
+  const comments: MdComment[] = [];
+  const strippedRegions: { rawStart: number; rawEnd: number; parsed: boolean }[] = [];
+
+  for (const region of collectCommentRegions(rawMarkdown)) {
+    if (region.parsedComment) {
+      comments.push(region.parsedComment);
     }
     strippedRegions.push({
-      rawStart: match.index,
-      rawEnd,
-      parsed,
+      rawStart: region.rawStart,
+      rawEnd: region.stripEnd,
+      parsed: region.parsedComment !== null,
     });
   }
 
@@ -157,7 +234,11 @@ function fuzzyReMatch(cleanMarkdown: string, comment: MdComment): number | null 
   // Fallback: try contextAfter only (only if it appears exactly once)
   if (contextAfter && contextAfter.length >= 10) {
     const firstIdx = cleanMarkdown.indexOf(contextAfter);
-    if (firstIdx !== -1 && firstIdx > 0 && cleanMarkdown.indexOf(contextAfter, firstIdx + 1) === -1) {
+    if (
+      firstIdx !== -1 &&
+      firstIdx > 0 &&
+      cleanMarkdown.indexOf(contextAfter, firstIdx + 1) === -1
+    ) {
       return Math.max(0, firstIdx);
     }
   }
@@ -313,9 +394,10 @@ export function insertComment(
     }
 
     if (plainOccs.length > 0) {
-      const best = plainOccs.length === 1
-        ? plainOccs[0]
-        : pickBestOccurrence(plain, plainOccs, anchor, hintOffset, contextBefore, contextAfter);
+      const best =
+        plainOccs.length === 1
+          ? plainOccs[0]
+          : pickBestOccurrence(plain, plainOccs, anchor, hintOffset, contextBefore, contextAfter);
       insertionCleanOffset = toCleanOffset(best);
     }
   }
@@ -365,7 +447,10 @@ export function insertComment(
       if (!openF) {
         openF = { marker: marker[0].repeat(marker.length), start: fm.index };
       } else if (marker[0] === openF.marker[0] && marker.length >= openF.marker.length) {
-        if (insertionCleanOffset >= openF.start && insertionCleanOffset <= fm.index + fm[0].length) {
+        if (
+          insertionCleanOffset >= openF.start &&
+          insertionCleanOffset <= fm.index + fm[0].length
+        ) {
           insertionCleanOffset = openF.start;
           movedBeforeFence = true;
         }
@@ -381,71 +466,64 @@ export function insertComment(
 
   const marker = serializeComment(comment);
   if (movedBeforeFence) {
-    return rawMarkdown.slice(0, rawInsertionPoint) + marker + '\n' + rawMarkdown.slice(rawInsertionPoint);
+    return (
+      rawMarkdown.slice(0, rawInsertionPoint) + marker + '\n' + rawMarkdown.slice(rawInsertionPoint)
+    );
   }
   return rawMarkdown.slice(0, rawInsertionPoint) + marker + rawMarkdown.slice(rawInsertionPoint);
 }
 
 export function removeComment(rawMarkdown: string, commentId: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) return '';
-    } catch {
-      // Keep malformed comments
-    }
-    return match;
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id === commentId) return { type: 'remove' };
+    return { type: 'keep' };
   });
 }
 
 export function resolveComment(rawMarkdown: string, commentId: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) {
-        data.resolved = true;
-        data.status = 'resolved';
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id === commentId) {
+      return {
+        type: 'replace',
+        comment: {
+          ...comment,
+          resolved: true,
+          status: 'resolved',
+        },
+      };
     }
-    return match;
+    return { type: 'keep' };
   });
 }
 
 export function unresolveComment(rawMarkdown: string, commentId: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) {
-        data.resolved = false;
-        data.status = 'open';
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id === commentId) {
+      return {
+        type: 'replace',
+        comment: {
+          ...comment,
+          resolved: false,
+          status: 'open',
+        },
+      };
     }
-    return match;
+    return { type: 'keep' };
   });
 }
 
 export function editComment(rawMarkdown: string, commentId: string, newText: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) {
-        data.text = newText;
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id === commentId) {
+      return {
+        type: 'replace',
+        comment: {
+          ...comment,
+          text: newText,
+        },
+      };
     }
-    return match;
+    return { type: 'keep' };
   });
 }
 
@@ -454,21 +532,19 @@ export function updateCommentAnchor(
   commentId: string,
   newAnchor: string,
 ): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) {
-        data.anchor = newAnchor;
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id === commentId) {
+      return {
+        type: 'replace',
+        comment: {
+          ...comment,
+          anchor: newAnchor,
+        },
+      };
     }
-    return match;
+    return { type: 'keep' };
   });
 }
-
 
 export function addReply(
   rawMarkdown: string,
@@ -482,54 +558,47 @@ export function addReply(
     author,
     timestamp: new Date().toISOString(),
   };
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.id === commentId) {
-        if (!data.replies) data.replies = [];
-        data.replies.push(reply);
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
+
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id === commentId) {
+      return {
+        type: 'replace',
+        comment: {
+          ...comment,
+          replies: [...(comment.replies ?? []), reply],
+        },
+      };
     }
-    return match;
+    return { type: 'keep' };
   });
 }
 
 export function removeAllComments(rawMarkdown: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, () => '');
+  return transformCommentMarkers(rawMarkdown, () => ({ type: 'remove' }));
 }
 
 export function resolveAllComments(rawMarkdown: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (!data.resolved) {
-        data.resolved = true;
-        data.status = 'resolved';
-        return serializeComment(data);
-      }
-    } catch {
-      // Keep malformed comments
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (!comment || getEffectiveStatus(comment) === 'resolved') {
+      return { type: 'keep' };
     }
-    return match;
+    return {
+      type: 'replace',
+      comment: {
+        ...comment,
+        resolved: true,
+        status: 'resolved',
+      },
+    };
   });
 }
 
 export function removeResolvedComments(rawMarkdown: string): string {
-  const regex = new RegExp(COMMENT_PATTERN);
-  return rawMarkdown.replace(regex, (match, json) => {
-    try {
-      const data = JSON.parse(json) as MdComment;
-      if (data.resolved) return '';
-    } catch {
-      // Keep malformed comments
+  return transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment && getEffectiveStatus(comment) === 'resolved') {
+      return { type: 'remove' };
     }
-    return match;
+    return { type: 'keep' };
   });
 }
 
@@ -540,7 +609,11 @@ export function removeResolvedComments(rawMarkdown: string): string {
  * in the haystack (e.g. space matches newline). Returns {start, end} in haystack coords
  * or null if not found.
  */
-function flexibleIndexOf(haystack: string, needle: string, startFrom = 0): { start: number; end: number } | null {
+function flexibleIndexOf(
+  haystack: string,
+  needle: string,
+  startFrom = 0,
+): { start: number; end: number } | null {
   // Fast path: exact match
   const exact = haystack.indexOf(needle, startFrom);
   if (exact !== -1) return { start: exact, end: exact + needle.length };
@@ -581,7 +654,11 @@ function flexibleIndexOf(haystack: string, needle: string, startFrom = 0): { sta
   return null;
 }
 
-function findSegments(text: string, segments: string[], startFrom = 0): { start: number; end: number } | null {
+function findSegments(
+  text: string,
+  segments: string[],
+  startFrom = 0,
+): { start: number; end: number } | null {
   let searchFrom = startFrom;
   let firstStart = -1;
   let lastEnd = -1;
@@ -838,10 +915,7 @@ function extractMermaidText(cleanMarkdown: string): string {
  * Returns a set of comment IDs with missing anchors.
  * Parts must appear contiguously (with only whitespace between them) to count as found.
  */
-export function detectMissingAnchors(
-  cleanMarkdown: string,
-  comments: MdComment[],
-): Set<string> {
+export function detectMissingAnchors(cleanMarkdown: string, comments: MdComment[]): Set<string> {
   const missing = new Set<string>();
   if (!cleanMarkdown) return missing;
   // Compare against plain text (formatting stripped) since anchors come from
@@ -859,7 +933,10 @@ export function detectMissingAnchors(
       if (parts.length === 0) continue;
       if (!partsAppearContiguously(plain, parts)) {
         // Check mermaid rendered text as fallback
-        if (mermaidText && (mermaidText.includes(c.anchor) || partsAppearContiguously(mermaidText, parts))) {
+        if (
+          mermaidText &&
+          (mermaidText.includes(c.anchor) || partsAppearContiguously(mermaidText, parts))
+        ) {
           continue;
         }
         missing.add(c.id);

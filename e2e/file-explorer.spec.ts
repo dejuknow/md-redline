@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { MOD_LABEL } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -11,8 +12,7 @@ const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -38,7 +38,7 @@ async function toggleExplorer(page: Page) {
 
 /** The toolbar button gets bg-primary-bg when explorer is open. Check that class. */
 async function isExplorerOpen(page: Page) {
-  const cls = await explorerToggle(page).getAttribute('class') ?? '';
+  const cls = (await explorerToggle(page).getAttribute('class')) ?? '';
   return cls.includes('bg-primary-bg');
 }
 
@@ -92,11 +92,15 @@ test.describe('File explorer', () => {
     await page.locator('button', { hasText: 'fixtures' }).click();
 
     // Click on the test-doc.md file
-    await expect(page.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
+      timeout: 5000,
+    });
     await page.locator('button', { hasText: 'test-doc.md' }).first().click();
 
     // The file should open and render
-    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test('clicking a directory navigates into it', async ({ page }) => {
@@ -129,7 +133,9 @@ test.describe('File explorer', () => {
 
     // Navigate into fixtures/
     await page.locator('button', { hasText: 'fixtures' }).click();
-    await expect(page.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
+      timeout: 5000,
+    });
 
     // Click Go up — should navigate back to e2e/
     await page.locator('button[title="Go up"]').click();

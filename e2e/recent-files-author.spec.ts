@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { MOD_LABEL } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -14,8 +15,7 @@ const FIXTURE_2_ORIGINAL = TEST_DOC_2_BASELINE;
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -106,15 +106,22 @@ test.describe('Recent files', () => {
 
   test('multiple files appear in recent list', async ({ page }) => {
     await openFixture(page, FIXTURE_1);
-    await page.waitForTimeout(300);
 
-    await page.goto(`/?file=${FIXTURE_2}`);
+    // Make the first recent-file write observable before navigating away.
+    await page.locator('button[title="Open file"]').click();
+    let opener = fileOpener(page);
+    await expect(opener.getByText('test-doc.md').first()).toBeVisible({ timeout: 5000 });
+    await page.keyboard.press('Escape');
+    await expect(opener).not.toBeVisible();
+
+    await page.locator('button[title="Open file"]').click();
+    await page.getByPlaceholder('File path or name...').fill(FIXTURE_2);
+    await page.getByPlaceholder('File path or name...').press('Enter');
     await page.locator('.prose').waitFor({ timeout: 10_000 });
-    await page.waitForTimeout(300);
 
     await page.locator('button[title="Open file"]').click();
 
-    const opener = fileOpener(page);
+    opener = fileOpener(page);
     await expect(opener.getByText('test-doc.md').first()).toBeVisible({ timeout: 5000 });
     await expect(opener.getByText('test-doc-2.md').first()).toBeVisible({ timeout: 5000 });
   });

@@ -221,6 +221,12 @@ describe('removeComment', () => {
     const result = removeComment(raw, 'nonexistent');
     expect(result).toBe(raw);
   });
+
+  it('preserves fenced code blocks when removing a standalone marker before them', () => {
+    const original = '```mermaid\nflowchart LR\nA-->B\n```';
+    const raw = `${marker({ id: 'code-1', anchor: 'A-->B' })}\n${original}`;
+    expect(removeComment(raw, 'code-1')).toBe(original);
+  });
 });
 
 describe('editComment', () => {
@@ -463,15 +469,20 @@ describe('detectMissingAnchors', () => {
   });
 
   it('does not flag anchor spanning across list items', () => {
-    const clean = '- System sends verification email within 30 seconds\n- User cannot access protected routes';
-    const comments = [{ id: 'a', anchor: 'System sends verification email within 30 seconds\nUser cannot acce' }] as MdComment[];
+    const clean =
+      '- System sends verification email within 30 seconds\n- User cannot access protected routes';
+    const comments = [
+      { id: 'a', anchor: 'System sends verification email within 30 seconds\nUser cannot acce' },
+    ] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag anchor spanning across blockquote lines', () => {
     const clean = '> First line of quote\n> Second line continues';
-    const comments = [{ id: 'a', anchor: 'First line of quote\nSecond line continues' }] as MdComment[];
+    const comments = [
+      { id: 'a', anchor: 'First line of quote\nSecond line continues' },
+    ] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -506,7 +517,9 @@ describe('detectMissingAnchors', () => {
 
   it('does not flag anchor spanning mixed formatting', () => {
     const clean = '> *Note: This is **important** and _critical_ for the `release` process.*';
-    const comments = [{ id: 'a', anchor: 'Note: This is important and critical for the release process.' }] as MdComment[];
+    const comments = [
+      { id: 'a', anchor: 'Note: This is important and critical for the release process.' },
+    ] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -519,7 +532,8 @@ describe('detectMissingAnchors', () => {
   });
 
   it('does not flag punctuation-heavy anchors spanning links and inline code', () => {
-    const clean = 'Review [the beta spec](https://example.com/spec) at `C:\\docs\\review?.md` before release.';
+    const clean =
+      'Review [the beta spec](https://example.com/spec) at `C:\\docs\\review?.md` before release.';
     const comments = [
       { id: 'a', anchor: 'Review the beta spec at C:\\docs\\review?.md before release.' },
     ] as MdComment[];
@@ -528,8 +542,9 @@ describe('detectMissingAnchors', () => {
   });
 
   it('does not flag anchor from rendered mermaid diagram text', () => {
-    const clean = '# Flow\n\n```mermaid\ngraph TD\n    A[Admin clicks Add] --> B[Admin enters name]\n```\n';
-    const comments = [{ id: 'a', anchor: "clicks Add Admin enters" }] as MdComment[];
+    const clean =
+      '# Flow\n\n```mermaid\ngraph TD\n    A[Admin clicks Add] --> B[Admin enters name]\n```\n';
+    const comments = [{ id: 'a', anchor: 'clicks Add Admin enters' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -549,14 +564,16 @@ describe('detectMissingAnchors', () => {
   });
 
   it('does not flag anchor in mermaid when file also has regular markdown', () => {
-    const clean = '# Title\n\nSome **bold** paragraph.\n\n```mermaid\ngraph TD\n    A[User clicks button]\n```\n\nMore text here.\n';
+    const clean =
+      '# Title\n\nSome **bold** paragraph.\n\n```mermaid\ngraph TD\n    A[User clicks button]\n```\n\nMore text here.\n';
     const comments = [{ id: 'a', anchor: 'User clicks button' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('matches across multiple mermaid blocks', () => {
-    const clean = '```mermaid\ngraph TD\n    A[First]\n```\n\nText\n\n```mermaid\ngraph TD\n    B[Second]\n```\n';
+    const clean =
+      '```mermaid\ngraph TD\n    A[First]\n```\n\nText\n\n```mermaid\ngraph TD\n    B[Second]\n```\n';
     const comments = [
       { id: 'a', anchor: 'First' },
       { id: 'b', anchor: 'Second' },
@@ -651,7 +668,14 @@ describe('insertComment with formatted markdown (stripInlineFormatting)', () => 
 describe('insertComment with context', () => {
   it('stores contextBefore and contextAfter in the comment marker', () => {
     const raw = 'Some text before the anchor text and after text.';
-    const result = insertComment(raw, 'anchor text', 'my note', 'User', 'before the ', ' and after');
+    const result = insertComment(
+      raw,
+      'anchor text',
+      'my note',
+      'User',
+      'before the ',
+      ' and after',
+    );
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.comments[0].contextBefore).toBe('before the ');
@@ -837,10 +861,19 @@ describe('insertComment cross-element segments', () => {
     // In markdown, bold header and body text are on separate lines (joined by \n).
     // The browser renders this as a space, so sel.toString() gives a space where
     // the source has a newline. The anchor must still be found.
-    const raw = '**Primary: Builder**\nThe admin builds apps.\n\n**Secondary: User**\nThe user interacts.';
+    const raw =
+      '**Primary: Builder**\nThe admin builds apps.\n\n**Secondary: User**\nThe user interacts.';
     // sel.toString() would give space (not \n) between "Secondary: User" and "The user"
     // because the browser collapses the line break. hintOffset is always provided by CommentForm.
-    const result = insertComment(raw, 'Secondary: User The user interacts', 'test', 'User', undefined, undefined, 40);
+    const result = insertComment(
+      raw,
+      'Secondary: User The user interacts',
+      'test',
+      'User',
+      undefined,
+      undefined,
+      40,
+    );
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.comments[0].anchor).toBe('Secondary: User The user interacts');
@@ -864,7 +897,12 @@ describe('comments with nested JSON', () => {
       author: 'User',
       timestamp: '2024-01-01T00:00:00.000Z',
       replies: [
-        { id: 'r1', text: 'try {value: true}', author: 'Bob', timestamp: '2024-01-01T00:00:00.000Z' },
+        {
+          id: 'r1',
+          text: 'try {value: true}',
+          author: 'Bob',
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
       ],
     };
     const raw = `${serializeComment(comment)}test content`;
@@ -897,9 +935,7 @@ describe('comments with nested JSON', () => {
 
 describe('updateCommentAnchor and cleanOffset after backward drag', () => {
   it('marker stays in place after anchor expansion — cleanOffset unchanged', () => {
-    const raw =
-      'Some text before ' +
-      `${marker({ id: 'drag-1', anchor: 'target' })}target end.`;
+    const raw = 'Some text before ' + `${marker({ id: 'drag-1', anchor: 'target' })}target end.`;
 
     const expanded = updateCommentAnchor(raw, 'drag-1', 'text before target');
     const parsed = parseComments(expanded);
@@ -1179,10 +1215,10 @@ describe('insertComment inside fenced code blocks', () => {
     const result = insertComment(raw, 'graph TD', 'fix diagram');
     // The fence must remain at line start — the marker must NOT be on the same line as ```
     const lines = result.split('\n');
-    const fenceLine = lines.find(l => l.startsWith('```mermaid'));
+    const fenceLine = lines.find((l) => l.startsWith('```mermaid'));
     expect(fenceLine).toBe('```mermaid');
     // Marker should be on a separate line
-    const markerLine = lines.find(l => l.includes('@comment'));
+    const markerLine = lines.find((l) => l.includes('@comment'));
     expect(markerLine).toBeTruthy();
     expect(markerLine).not.toContain('```');
   });
@@ -1191,7 +1227,7 @@ describe('insertComment inside fenced code blocks', () => {
     const raw = 'Before\n\n~~~\nsome code\n~~~\n\nAfter';
     const result = insertComment(raw, 'some code', 'review');
     const lines = result.split('\n');
-    const fenceLine = lines.find(l => l.startsWith('~~~'));
+    const fenceLine = lines.find((l) => l.startsWith('~~~'));
     expect(fenceLine).toBe('~~~');
   });
 
@@ -1219,7 +1255,15 @@ describe('insertComment inside fenced code blocks', () => {
     // Second comment targeting code block "user account"
     const { plain } = stripInlineFormatting(parseComments(result).cleanMarkdown);
     const secondOcc = plain.indexOf('user account', plain.indexOf('user account') + 1);
-    result = insertComment(result, 'user account', 'second comment', 'User', undefined, undefined, secondOcc);
+    result = insertComment(
+      result,
+      'user account',
+      'second comment',
+      'User',
+      undefined,
+      undefined,
+      secondOcc,
+    );
 
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(2);
@@ -1237,7 +1281,15 @@ describe('insertComment inside fenced code blocks', () => {
     // hintOffset pointing to the code block occurrence (past the first "hello world")
     const { plain } = stripInlineFormatting(parseComments(raw).cleanMarkdown);
     const secondOccurrence = plain.indexOf('hello world', plain.indexOf('hello world') + 1);
-    const result = insertComment(raw, 'hello world', 'inside code', 'User', undefined, undefined, secondOccurrence);
+    const result = insertComment(
+      raw,
+      'hello world',
+      'inside code',
+      'User',
+      undefined,
+      undefined,
+      secondOccurrence,
+    );
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
     // Marker should be placed before the code block, not inside it
@@ -1331,20 +1383,14 @@ describe('pickBestOccurrence', () => {
     const plain = 'alpha foo beta gamma foo delta';
     // "foo" at 6 and 21. Suppose hintOffset is wrong (say 5, closer to 1st "foo")
     // but context uniquely identifies the 2nd "foo"
-    const result = pickBestOccurrence(
-      plain, [6, 21], 'foo', 5,
-      'gamma ', ' delta',
-    );
+    const result = pickBestOccurrence(plain, [6, 21], 'foo', 5, 'gamma ', ' delta');
     expect(result).toBe(21);
   });
 
   it('uses context to pick correct occurrence with many duplicates', () => {
     const plain = 'x foo y foo z foo w';
     // "foo" at 2, 8, 14. Context identifies 2nd one.
-    const result = pickBestOccurrence(
-      plain, [2, 8, 14], 'foo', 0,
-      'y ', ' z',
-    );
+    const result = pickBestOccurrence(plain, [2, 8, 14], 'foo', 0, 'y ', ' z');
     expect(result).toBe(8);
   });
 
@@ -1355,9 +1401,12 @@ describe('pickBestOccurrence', () => {
     // "foo" at positions 6 and 29
     // In DOM text, 2nd "foo" would be preceded by "delta " (same after normalization)
     const result = pickBestOccurrence(
-      plain, [6, 29], 'foo', 5, // hintOffset=5 is closer to 1st foo
-      'delta ',    // contextBefore from DOM (uniquely identifies 2nd occurrence)
-      ' epsilon',  // contextAfter
+      plain,
+      [6, 29],
+      'foo',
+      5, // hintOffset=5 is closer to 1st foo
+      'delta ', // contextBefore from DOM (uniquely identifies 2nd occurrence)
+      ' epsilon', // contextAfter
     );
     // Should pick 2nd "foo" despite wrong hintOffset, thanks to context matching
     expect(result).toBe(29);
@@ -1366,10 +1415,7 @@ describe('pickBestOccurrence', () => {
   it('uses hintOffset as tiebreaker when context scores are equal', () => {
     // Identical surrounding context — context can't disambiguate
     const plain = 'x foo y x foo y';
-    const result = pickBestOccurrence(
-      plain, [2, 10], 'foo', 9,
-      'x ', ' y',
-    );
+    const result = pickBestOccurrence(plain, [2, 10], 'foo', 9, 'x ', ' y');
     // Both have identical context ("x " before, " y" after), so hintOffset breaks tie
     expect(result).toBe(10);
   });
@@ -1393,10 +1439,13 @@ describe('context-based disambiguation in insertComment', () => {
     // Without link stripping, 2nd "foo" would be at ~65 (much further from hintOffset=35)
     // Context uniquely identifies the 2nd "foo" regardless
     const result = insertComment(
-      raw, 'foo', 'check this', 'User',
+      raw,
+      'foo',
+      'check this',
+      'User',
       'Another ', // contextBefore (from DOM, last few chars before 2nd "foo")
-      ' here.',   // contextAfter
-      35,         // hintOffset in DOM space (may not match plain space exactly)
+      ' here.', // contextAfter
+      35, // hintOffset in DOM space (may not match plain space exactly)
     );
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
@@ -1408,13 +1457,17 @@ describe('context-based disambiguation in insertComment', () => {
   });
 
   it('uses context to pick correct duplicate across multiple paragraphs', () => {
-    const raw = 'First paragraph with target word.\n\nSecond paragraph.\n\nThird paragraph with target word.';
+    const raw =
+      'First paragraph with target word.\n\nSecond paragraph.\n\nThird paragraph with target word.';
     // User selected "target" in the third paragraph
     const result = insertComment(
-      raw, 'target', 'fix', 'User',
-      'with ',     // contextBefore
-      ' word.',    // contextAfter
-      70,          // hintOffset (approximate, may have drift)
+      raw,
+      'target',
+      'fix',
+      'User',
+      'with ', // contextBefore
+      ' word.', // contextAfter
+      70, // hintOffset (approximate, may have drift)
     );
     const parsed = parseComments(result);
     expect(parsed.comments).toHaveLength(1);
@@ -1431,9 +1484,12 @@ describe('context-based disambiguation in insertComment', () => {
     // Let's use a proper duplicate:
     const raw2 = 'the cat sat on the mat.\nthe dog saw the cat run.';
     const result = insertComment(
-      raw2, 'the cat', 'which one', 'User',
-      'saw ',       // contextBefore: chars before 2nd "the cat"
-      ' run.',      // contextAfter
+      raw2,
+      'the cat',
+      'which one',
+      'User',
+      'saw ', // contextBefore: chars before 2nd "the cat"
+      ' run.', // contextAfter
       39,
     );
     const parsed = parseComments(result);
@@ -1446,7 +1502,10 @@ describe('context-based disambiguation in insertComment', () => {
   it('still works when only contextBefore is available', () => {
     const raw = 'start foo end\nstart foo end';
     const result = insertComment(
-      raw, 'foo', 'note', 'User',
+      raw,
+      'foo',
+      'note',
+      'User',
       '\nstart ', // contextBefore identifies 2nd occurrence (has newline prefix)
       undefined,
       15,
@@ -1461,7 +1520,10 @@ describe('context-based disambiguation in insertComment', () => {
   it('still works when only contextAfter is available', () => {
     const raw = 'foo alpha\nfoo beta';
     const result = insertComment(
-      raw, 'foo', 'note', 'User',
+      raw,
+      'foo',
+      'note',
+      'User',
       undefined,
       ' beta', // contextAfter identifies 2nd occurrence
       10,
@@ -1574,7 +1636,10 @@ describe('insertComment with links causing offset drift', () => {
     // In DOM text: "intro has foo. Then outro has foo too."
     // User selects 2nd "foo" — hintOffset in DOM is ~33
     const result = insertComment(
-      raw, 'foo', 'second', 'User',
+      raw,
+      'foo',
+      'second',
+      'User',
       'has ', // contextBefore
       ' too.', // contextAfter
       33,
@@ -1600,7 +1665,10 @@ describe('insertComment with links causing offset drift', () => {
     // "key" appears twice. User selects 2nd one.
     // Context: "has a " before, " component" after
     const result = insertComment(
-      raw, 'key', 'review', 'User',
+      raw,
+      'key',
+      'review',
+      'User',
       'has a ',
       ' component.',
       80, // approximate DOM offset
@@ -1685,6 +1753,16 @@ describe('removeAllComments', () => {
     const result = removeAllComments(raw);
     expect(result).toBe('test content');
   });
+
+  it('keeps comment-looking examples inside fenced code blocks', () => {
+    const codeExample =
+      '<!-- @comment{"id":"example","anchor":"demo","text":"example","author":"Doc","timestamp":"2024-01-01T00:00:00.000Z"} -->demo';
+    const raw = `\`\`\`md\n${codeExample}\n\`\`\`\n${marker({ id: 'c1', anchor: 'live' })}live comment`;
+    const result = removeAllComments(raw);
+    expect(result).toContain(codeExample);
+    expect(result).toContain('```md');
+    expect(result).not.toContain('"id":"c1"');
+  });
 });
 
 describe('resolveAllComments', () => {
@@ -1714,6 +1792,16 @@ describe('resolveAllComments', () => {
     const parsed = parseComments(result);
     expect(parsed.cleanMarkdown).toBe('hello world');
   });
+
+  it('ignores comment-looking examples inside fenced code blocks', () => {
+    const codeExample =
+      '<!-- @comment{"id":"example","anchor":"demo","text":"example","author":"Doc","timestamp":"2024-01-01T00:00:00.000Z"} -->demo';
+    const raw = `\`\`\`md\n${codeExample}\n\`\`\`\n${marker({ id: 'c1', anchor: 'hello' })}hello`;
+    const result = resolveAllComments(raw);
+    expect(result).toContain(codeExample);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].status).toBe('resolved');
+  });
 });
 
 describe('removeResolvedComments', () => {
@@ -1742,6 +1830,17 @@ describe('removeResolvedComments', () => {
     const result = removeResolvedComments(raw);
     expect(result).toBe('a b');
     expect(result).not.toContain('<!-- @comment');
+  });
+
+  it('treats status-only resolved comments as resolved', () => {
+    const raw =
+      `${marker({ id: 'c1', anchor: 'hello', status: 'resolved' })}hello ` +
+      `${marker({ id: 'c2', anchor: 'world' })}world`;
+    const result = removeResolvedComments(raw);
+    const parsed = parseComments(result);
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].id).toBe('c2');
+    expect(parsed.cleanMarkdown).toBe('hello world');
   });
 });
 

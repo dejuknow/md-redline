@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
-
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -12,9 +12,7 @@ const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 // Restore the fixture file before each test so tests are independent
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  // Clear localStorage to avoid session state leaking between tests
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(async () => {
@@ -24,7 +22,9 @@ test.afterAll(async () => {
 /** Open the test fixture file and wait for it to render */
 async function openFixture(page: Page) {
   await page.goto(`/?file=${FIXTURE}`);
-  await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+    timeout: 10_000,
+  });
 }
 
 /**
@@ -110,7 +110,9 @@ test.describe('File opening', () => {
     await page.locator('button[title="Open file"]').click();
     await page.getByPlaceholder('File path or name...').fill(FIXTURE);
     await page.getByPlaceholder('File path or name...').press('Enter');
-    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });
 
@@ -130,7 +132,6 @@ test.describe('Adding comments', () => {
     expect(content).toContain('@comment');
     expect(content).toContain('Clarify the rate limit window.');
   });
-
 });
 
 test.describe('Comment lifecycle', () => {
@@ -297,17 +298,17 @@ test.describe('Sidebar toggle', () => {
     const toggleBtn = page.locator('button[title*="Toggle comments sidebar"]');
 
     // Sidebar is open: toggle button has active state
-    let cls = await toggleBtn.getAttribute('class') ?? '';
+    let cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).toContain('bg-primary-bg');
 
     // Toggle off
     await toggleBtn.click();
-    cls = await toggleBtn.getAttribute('class') ?? '';
+    cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
 
     // Toggle on
     await toggleBtn.click();
-    cls = await toggleBtn.getAttribute('class') ?? '';
+    cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).toContain('bg-primary-bg');
   });
 });

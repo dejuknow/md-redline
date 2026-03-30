@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { MOD_LABEL } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -14,8 +15,7 @@ const FIXTURE_2_ORIGINAL = TEST_DOC_2_BASELINE;
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -77,7 +77,9 @@ async function openSecondFile(page: Page) {
   await page.locator('button[title="Open file"]').click();
   await page.getByPlaceholder('File path or name...').fill(FIXTURE_2);
   await page.getByPlaceholder('File path or name...').press('Enter');
-  await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+    timeout: 10_000,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +123,7 @@ test.describe('Context menu on tab', () => {
 
     // Close the explorer so tab area is fully unobscured
     const explorerBtn = page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
-    const cls = await explorerBtn.getAttribute('class') ?? '';
+    const cls = (await explorerBtn.getAttribute('class')) ?? '';
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
 
@@ -141,7 +143,7 @@ test.describe('Context menu on tab', () => {
     await openSecondFile(page);
 
     const explorerBtn = page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
-    const cls = await explorerBtn.getAttribute('class') ?? '';
+    const cls = (await explorerBtn.getAttribute('class')) ?? '';
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
 

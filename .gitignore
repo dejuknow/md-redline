@@ -36,6 +36,7 @@ Thumbs.db
 test-results/
 playwright-report/
 coverage/
+.playwright-home/
 
 # Eval results
 eval/results/

@@ -21,16 +21,17 @@ export async function fetchPreferences(): Promise<DiskPreferences> {
   }
 }
 
-export async function savePreferencesToDisk(patch: Partial<DiskPreferences>): Promise<void> {
+export async function savePreferencesToDisk(patch: Partial<DiskPreferences>): Promise<boolean> {
   try {
     const res = await fetch('/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
-    if (!res.ok) throw new Error('Save failed');
+    return res.ok;
   } catch {
     // Server unavailable — silently fail, localStorage is the fallback
+    return false;
   }
 }
 
@@ -56,7 +57,11 @@ export async function migrateLocalStorageToDisk(): Promise<void> {
 
     const settingsRaw = localStorage.getItem('md-redline-settings');
     if (settingsRaw) {
-      try { patch.settings = JSON.parse(settingsRaw); } catch { /* ignore */ }
+      try {
+        patch.settings = JSON.parse(settingsRaw);
+      } catch {
+        /* ignore */
+      }
     }
 
     const theme = localStorage.getItem('theme');
@@ -64,11 +69,16 @@ export async function migrateLocalStorageToDisk(): Promise<void> {
 
     const recentRaw = localStorage.getItem('md-redline-recent-files');
     if (recentRaw) {
-      try { patch.recentFiles = JSON.parse(recentRaw); } catch { /* ignore */ }
+      try {
+        patch.recentFiles = JSON.parse(recentRaw);
+      } catch {
+        /* ignore */
+      }
     }
 
     if (Object.keys(patch).length > 0) {
-      await savePreferencesToDisk(patch);
+      const saved = await savePreferencesToDisk(patch);
+      if (!saved) return;
     }
 
     // Remove migrated keys from localStorage (keep theme for next-themes flash-free init)

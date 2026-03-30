@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -12,8 +13,7 @@ const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -22,7 +22,9 @@ test.afterAll(() => {
 
 async function openFixture(page: Page) {
   await page.goto(`/?file=${FIXTURE}`);
-  await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+    timeout: 10_000,
+  });
 }
 
 async function selectText(page: Page, text: string) {
@@ -242,7 +244,9 @@ test.describe('Middle-click tab close', () => {
     await page.locator('button[title="Open file"]').click();
     await page.getByPlaceholder('File path or name...').fill(FIXTURE_2);
     await page.getByPlaceholder('File path or name...').press('Enter');
-    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Both tabs visible
     const tabBar = page.locator('.h-9');

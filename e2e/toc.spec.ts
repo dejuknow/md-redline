@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TOC_DOC_BASELINE } from './helpers/fixture-baselines';
 import { MOD_LABEL, withMod } from './helpers/shortcuts';
+import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/toc-doc.md');
@@ -11,8 +12,7 @@ const FIXTURE_ORIGINAL = TOC_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await resetTestAppState(page);
 });
 
 test.afterAll(() => {
@@ -177,7 +177,9 @@ test.describe('Table of Contents', () => {
     await expect(activeTocItem).toBeVisible();
   });
 
-  test('clicking a heading highlights it immediately and keeps it highlighted after scroll completes', async ({ page }) => {
+  test('clicking a heading highlights it immediately and keeps it highlighted after scroll completes', async ({
+    page,
+  }) => {
     await openFixture(page);
     await ensureLeftPanelOpen(page);
     await switchToOutline(page);
@@ -192,7 +194,9 @@ test.describe('Table of Contents', () => {
     // doesn't override the clicked heading after the animation finishes
     await page.waitForTimeout(800);
     await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
-    await expect(page.locator('button[title="Project Specification"]')).not.toHaveClass(/bg-primary-bg/);
+    await expect(page.locator('button[title="Project Specification"]')).not.toHaveClass(
+      /bg-primary-bg/,
+    );
   });
 
   test('clicking a heading updates the active heading from a previous one', async ({ page }) => {
@@ -238,7 +242,9 @@ test.describe('Table of Contents', () => {
     await page.waitForTimeout(200);
 
     // The first heading should now be active (spy is tracking scroll position again)
-    await expect(page.locator('button[title="Project Specification"]')).toHaveClass(/bg-primary-bg/);
+    await expect(page.locator('button[title="Project Specification"]')).toHaveClass(
+      /bg-primary-bg/,
+    );
     await expect(page.locator('button[title="Conclusion"]')).not.toHaveClass(/bg-primary-bg/);
   });
 
@@ -266,9 +272,9 @@ test.describe('Table of Contents', () => {
     const h2Btn = page.locator('button[title="Introduction"]');
     const h3Btn = page.locator('button[title="Technical Constraints"]');
 
-    const h1Classes = await h1Btn.getAttribute('class') ?? '';
-    const h2Classes = await h2Btn.getAttribute('class') ?? '';
-    const h3Classes = await h3Btn.getAttribute('class') ?? '';
+    const h1Classes = (await h1Btn.getAttribute('class')) ?? '';
+    const h2Classes = (await h2Btn.getAttribute('class')) ?? '';
+    const h3Classes = (await h3Btn.getAttribute('class')) ?? '';
 
     // h1 gets pl-3, h2 gets pl-6, h3 gets pl-9
     expect(h1Classes).toContain('pl-3');
