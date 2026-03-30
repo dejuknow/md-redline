@@ -62,14 +62,14 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
     <div className="flex flex-col h-full">
       {/* Header */}
       {!hideHeader && (
-        <div className="h-10 border-b border-border flex items-center justify-between px-3 shrink-0">
-          <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider truncate">
+        <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
+          <span className="px-2.5 py-1.5 rounded text-xs font-medium text-content truncate">
             Explorer
-          </h2>
+          </span>
           <button
             onClick={onClose}
             className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
-            title="Close explorer"
+            title="Close panel"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

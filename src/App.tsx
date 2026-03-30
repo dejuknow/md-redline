@@ -1649,14 +1649,29 @@ After you're done, give me a brief summary:
             style={sidebarVisible ? { width: sidebarWidth } : undefined}
           >
             <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
-              <div className="h-10 border-b border-border flex items-center justify-between px-4 shrink-0">
-                <h2 className="text-xs font-semibold text-content-secondary uppercase tracking-wider">
-                  Comments
-                </h2>
+              <div className="h-10 border-b border-border flex items-center justify-between px-1 shrink-0">
+                <div className="flex items-center gap-0.5">
+                  <span className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                      />
+                    </svg>
+                    Comments
+                  </span>
+                </div>
                 <button
                   onClick={() => setSidebarVisible(false)}
                   className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
-                  title="Close comments sidebar"
+                  title="Close panel"
                 >
                   <svg
                     className="w-3.5 h-3.5"
