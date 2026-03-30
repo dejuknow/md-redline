@@ -179,28 +179,26 @@ export const MarkdownViewer = memo(
         );
       }
 
-      // IMPORTANT: Do NOT insert ANY new elements inside mermaid foreignObject.
-      // Chrome breaks text wrapping when ANY element (even unstyled <mark>) is added.
-      // Also do NOT set text-decoration on spans inside foreignObject — also breaks wrapping.
-      // background-color (class or inline) doesn't render on inline spans in FO either.
-      // Headless Chromium does NOT reproduce any of this — cannot verify headlessly.
-      // Solution: unwrap <mark>, apply ONLY color change to existing .nodeLabel span.
+      // IMPORTANT: Mermaid highlight quirks (do NOT refactor to class-based styles):
+      // 1. Chrome ignores class-based background-color on inline elements inside
+      //    SVG foreignObject — only inline style="..." works.
+      // 2. CSS text-decoration on <mark> prevents text wrapping inside foreignObject.
+      // 3. CSS background shorthand (e.g. linear-gradient) also prevents wrapping.
+      // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
+      // Solution: keep the <mark> but swap class styles for inline styles.
       const rootStyles = getComputedStyle(document.documentElement);
+      const mermaidBg = rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim();
       const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
+      const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
       for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight')) {
-        const nodeLabel = mark.closest('.nodeLabel') as HTMLElement | null;
-        if (nodeLabel) {
-          nodeLabel.classList.add('mermaid-comment-highlight');
-          nodeLabel.dataset.commentIds = (mark as HTMLElement).dataset.commentIds || '';
-          if (mark.classList.contains('comment-highlight-active')) {
-            nodeLabel.classList.add('mermaid-comment-highlight-active');
-          }
-          nodeLabel.style.color = mermaidColor;
-        }
-        // Unwrap: remove the <mark>, keep its text content
-        const parent = mark.parentNode!;
-        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-        parent.removeChild(mark);
+        mark.classList.remove('comment-highlight');
+        mark.classList.add('mermaid-comment-highlight');
+        const el = mark as HTMLElement;
+        el.style.backgroundColor = mermaidBg;
+        el.style.color = mermaidColor;
+        el.style.textDecoration = 'none';
+        el.style.borderBottom = `2px solid ${mermaidUnderline}`;
+        el.style.transition = 'none';
       }
 
       // --- Selection highlight ---
