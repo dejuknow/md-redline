@@ -181,13 +181,12 @@ export const MarkdownViewer = memo(
 
       // IMPORTANT: Do NOT insert ANY new elements inside mermaid foreignObject.
       // Chrome breaks text wrapping when ANY element (even unstyled <mark>) is added.
-      // Headless Chromium does NOT reproduce this — cannot verify headlessly.
-      // Background-color (class or inline) also doesn't render on inline spans in FO.
-      // Solution: unwrap <mark> elements, style the existing .nodeLabel span instead.
-      // See memory: feedback_mermaid_highlights.md for full list of failed approaches.
+      // Also do NOT set text-decoration on spans inside foreignObject — also breaks wrapping.
+      // background-color (class or inline) doesn't render on inline spans in FO either.
+      // Headless Chromium does NOT reproduce any of this — cannot verify headlessly.
+      // Solution: unwrap <mark>, apply ONLY color change to existing .nodeLabel span.
       const rootStyles = getComputedStyle(document.documentElement);
       const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
-      const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
       for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight')) {
         const nodeLabel = mark.closest('.nodeLabel') as HTMLElement | null;
         if (nodeLabel) {
@@ -197,8 +196,6 @@ export const MarkdownViewer = memo(
             nodeLabel.classList.add('mermaid-comment-highlight-active');
           }
           nodeLabel.style.color = mermaidColor;
-          nodeLabel.style.textDecoration = `underline 2px ${mermaidUnderline}`;
-          nodeLabel.style.textUnderlineOffset = '3px';
         }
         // Unwrap: remove the <mark>, keep its text content
         const parent = mark.parentNode!;
