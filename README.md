@@ -1,20 +1,20 @@
 # md-redline
 
-`mdr` is a local review app for markdown files.
+*Reviewing markdown with AI agents shouldn't require leaving the file.*
 
-It lets you highlight text in rendered markdown, attach inline review comments, and hand the file back to an AI agent or teammate. Comments are stored directly in the `.md` file as HTML comment markers, so the file itself remains the source of truth.
+`mdr` is a local app for inline review of markdown files — built for the loop between humans and AI agents.
+
+Highlight text, leave inline comments, and hand the file to an agent or teammate. Comments are stored as HTML comment markers directly in the `.md` file — no sidecar files, no database, no external service. The file is the source of truth.
 
 ## Why it exists
 
-Most markdown review workflows break down once AI tools are involved. The document is local, the reviewer wants precise inline feedback, and the agent only knows how to read files. `mdr` keeps that loop simple:
+AI agents can read and write files, but they can't use review UIs. `mdr` bridges that gap: you review in a rendered view, and the agent addresses your feedback by reading the same file.
 
 1. open a markdown file
 2. highlight text
 3. leave inline comments
 4. let an agent address them in-place
 5. review the result in raw or diff view
-
-No sidecar files, no database, and no external service are required.
 
 ## How comments work
 
