@@ -21,8 +21,17 @@ No sidecar files, no database, and no external service are required.
 Comments are stored immediately before the text they refer to:
 
 ```markdown
-Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"Rewrite this section to be clearer.","author":"User","timestamp":"2026-03-26T12:00:00.000Z","replies":[]} -->highlighted text continues here.
+Some text <!-- @comment{
+  "id":"uuid",
+  "anchor":"highlighted text",
+  "text":"Rewrite this section to be clearer.",
+  "author":"User",
+  "timestamp":"2026-03-26T12:00:00.000Z",
+  "replies":[]
+} -->highlighted text continues here.
 ```
+
+The app writes the same marker inline on one line; it is expanded here only for readability.
 
 That design keeps the feedback:
 
@@ -53,7 +62,7 @@ That design keeps the feedback:
 - Resizable panels with draggable dividers between explorer, viewer, and sidebar
 - Right-click context menus on tabs, files, comments, and selections
 - Settings panel (`Cmd+,`) with General, Templates, and Theme tabs
-- Session persistence: open tabs, panel layout, view mode, and diff snapshots saved to localStorage; author, theme, and recent files saved to `~/.md-redline.json`
+- Session persistence: open tabs, panel layout, panel widths, view mode, and diff snapshots saved to localStorage; author, theme, recent files, and settings are also mirrored to `~/.md-redline.json`
 
 ## Supported platforms
 
@@ -63,12 +72,14 @@ That design keeps the feedback:
 
 ## Quick start
 
+Prerequisite: Node 20 or newer.
+
 ```bash
 npm install
 npm run dev
 ```
 
-Then open [http://localhost:5173](http://localhost:5173).
+Then open the local URL printed by Vite in your terminal. By default this is usually `http://localhost:5173`, but it may move to the next available port.
 
 ## Open a file quickly
 
@@ -91,10 +102,10 @@ mdr .\spec.md
 
 You can also open a file or directory directly by URL:
 
-- `http://localhost:5173?file=/absolute/path/to/file.md`
-- `http://localhost:5173?dir=/absolute/path/to/folder`
+- `http://localhost:<vite-port>?file=/absolute/path/to/file.md`
+- `http://localhost:<vite-port>?dir=/absolute/path/to/folder`
 
-On Windows, absolute paths like `C:\docs\spec.md` work as well.
+Use the actual client port Vite is running on. On Windows, absolute paths like `C:\docs\spec.md` work as well.
 
 ## Review workflows
 
@@ -125,7 +136,7 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 | `Cmd+1-8` / `Ctrl+1-8` | Apply quick template |
 | `Cmd+Shift+M` / `Ctrl+Shift+M` | Start commenting on selection |
 | `Cmd+Shift+O` / `Ctrl+Shift+O` | Toggle document outline |
-| `Cmd+Shift+[` / `]` | Previous / next tab |
+| `Cmd+Shift+[ / ]` / `Ctrl+Shift+[ / ]` | Previous / next tab |
 | `Cmd+\` / `Ctrl+\` | Toggle comments sidebar |
 | `N` / `J` | Next comment |
 | `P` / `K` | Previous comment |
@@ -184,12 +195,6 @@ Useful scripts:
 - any initial file or directory passed at startup
 
 This is intentional so the tool can work with real docs on your machine, but it also means you should only run it in environments you trust.
-
-If you find a vulnerability, please use the process in [SECURITY.md](./SECURITY.md).
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
