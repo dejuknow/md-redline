@@ -2,6 +2,12 @@ let mermaidModule: typeof import('mermaid') | null = null;
 let initTheme: string | null = null;
 let themeChangePromise: Promise<void> | null = null;
 
+const FLOWCHART_CONFIG = {
+  useMaxWidth: true,
+  wrappingWidth: 200,
+  rankSpacing: 70,
+} as const;
+
 async function getMermaid() {
   if (!mermaidModule) {
     mermaidModule = await import('mermaid');
@@ -10,10 +16,7 @@ async function getMermaid() {
       securityLevel: 'loose',
       theme: 'default',
       htmlLabels: true,
-      flowchart: {
-        useMaxWidth: true,
-        wrappingWidth: 200,
-      },
+      flowchart: FLOWCHART_CONFIG,
     });
     initTheme = 'default';
   }
@@ -56,10 +59,7 @@ export async function renderMermaidBlock(
             securityLevel: 'loose',
             theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
             htmlLabels: true,
-            flowchart: {
-              useMaxWidth: true,
-              wrappingWidth: 200,
-            },
+            flowchart: FLOWCHART_CONFIG,
           });
           initTheme = mermaidTheme;
           themeChangePromise = null;

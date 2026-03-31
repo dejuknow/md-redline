@@ -29,6 +29,7 @@ That design keeps the feedback:
 - visible to AI agents with a plain file read
 - portable with the markdown file
 - invisible in normal markdown renderers like GitHub and VS Code preview
+- resilient in rendered Mermaid diagrams: diagram anchors are matched against visible label text, not hidden SVG metadata or injected CSS text
 
 ## Current feature set
 

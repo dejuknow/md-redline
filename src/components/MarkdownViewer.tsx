@@ -4,6 +4,12 @@ import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 import { assignHeadingIds } from '../lib/heading-slugs';
 import { useMermaidRenderer } from '../hooks/useMermaidRenderer';
+import { collectVisibleTextNodes } from '../lib/visible-text';
+import {
+  applyMermaidHighlightStyles,
+  getMermaidHighlightTheme,
+  scheduleMermaidLayoutStabilization,
+} from '../lib/mermaid-highlights';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
@@ -186,20 +192,18 @@ export const MarkdownViewer = memo(
       // 3. CSS background shorthand (e.g. linear-gradient) also prevents wrapping.
       // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
       // Solution: keep the <mark> but swap class styles for inline styles.
-      const rootStyles = getComputedStyle(document.documentElement);
-      const mermaidBg = rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim();
-      const mermaidColor = rootStyles.getPropertyValue('--theme-text').trim();
-      const mermaidUnderline = rootStyles.getPropertyValue('--theme-comment-underline').trim();
-      for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight')) {
-        mark.classList.remove('comment-highlight');
-        mark.classList.add('mermaid-comment-highlight');
+      const mermaidTheme = getMermaidHighlightTheme(getComputedStyle(document.documentElement));
+      for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-active')) {
         const el = mark as HTMLElement;
-        el.style.backgroundColor = mermaidBg;
-        el.style.color = mermaidColor;
-        el.style.textDecoration = 'none';
-        el.style.borderBottom = `2px solid ${mermaidUnderline}`;
-        el.style.transition = 'none';
+        const isActive = el.classList.contains('comment-highlight-active');
+        el.classList.remove('comment-highlight', 'comment-highlight-active');
+        el.classList.add('mermaid-comment-highlight');
+        if (isActive) {
+          el.classList.add('mermaid-comment-highlight-active');
+        }
+        applyMermaidHighlightStyles(el, mermaidTheme, isActive);
       }
+      const cleanupMermaidLayout = scheduleMermaidLayoutStabilization(container);
 
       // --- Selection highlight ---
       if (selectionText) {
@@ -225,6 +229,8 @@ export const MarkdownViewer = memo(
       activeMarkRef.current = container.querySelector(
         '.comment-highlight-active, .mermaid-comment-highlight-active',
       ) as HTMLElement | null;
+
+      return cleanupMermaidLayout;
     }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, enableResolve, searchQuery, searchActiveIndex, mermaidSvgMap]);
 
     const handleClick = (e: React.MouseEvent) => {
@@ -292,12 +298,7 @@ function wrapText(
   contextAfter?: string,
 ) {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const allTextNodes: Text[] = [];
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) {
-    allTextNodes.push(node);
-  }
+  const allTextNodes = collectVisibleTextNodes(container);
   if (allTextNodes.length === 0) return;
 
   // Build concatenated text with position tracking (all nodes, for offset-based matching)
@@ -537,10 +538,7 @@ function flexibleSearch(
  *  in <mark class="search-highlight"> elements. The match at `activeIndex` gets an additional
  *  `search-highlight-active` class and is scrolled into view. */
 export function highlightSearchMatches(container: HTMLElement, query: string, activeIndex: number): number {
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const textNodes: Text[] = [];
-  let tn: Text | null;
-  while ((tn = walker.nextNode() as Text | null)) textNodes.push(tn);
+  const textNodes = collectVisibleTextNodes(container);
   if (textNodes.length === 0) return 0;
 
   const nodeInfo: { node: Text; globalStart: number; length: number }[] = [];

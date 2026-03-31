@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { MdComment } from '../types';
+import {
+  applyMermaidHighlightStyles,
+  getMermaidHighlightTheme,
+} from '../lib/mermaid-highlights';
+import { collectVisibleTextNodes, getVisibleTextContent } from '../lib/visible-text';
 
 interface Position {
   top: number;
@@ -85,7 +90,7 @@ function getContainerTextOffset(container: HTMLElement, targetNode: Node, offset
   } catch {
     return 0;
   }
-  return range.toString().length;
+  return getVisibleTextContent(range.cloneContents()).length;
 }
 
 export function useDragHandles({
@@ -103,12 +108,14 @@ export function useDragHandles({
     handle: 'start' | 'end';
     commentIds: string[];
     originalAnchor: string;
+    initialHtml: string;
     // Container-relative text offsets for the fixed boundary
     fixedStartOffset: number;
     fixedEndOffset: number;
     // Current text offsets (updated during drag)
     currentStartOffset: number;
     currentEndOffset: number;
+    isMermaid: boolean;
     markEls: HTMLElement[];
   } | null>(null);
 
@@ -181,16 +188,18 @@ export function useDragHandles({
         lastTextNode,
         lastTextNode.textContent?.length || 0,
       );
-      const originalAnchor = (container.textContent || '').slice(startOffset, endOffset);
+      const originalAnchor = getVisibleTextContent(container).slice(startOffset, endOffset);
 
       dragRef.current = {
         handle,
         commentIds,
         originalAnchor,
+        initialHtml: container.innerHTML,
         fixedStartOffset: startOffset,
         fixedEndOffset: endOffset,
         currentStartOffset: startOffset,
         currentEndOffset: endOffset,
+        isMermaid: markEls.some((mark) => mark.classList.contains('mermaid-comment-highlight')),
         markEls,
       };
 
@@ -231,7 +240,7 @@ export function useDragHandles({
         if (newStartOffset >= newEndOffset) return;
 
         // Pre-validate text length before modifying DOM
-        const fullText = container.textContent || '';
+        const fullText = getVisibleTextContent(container);
         const newText = fullText.slice(newStartOffset, newEndOffset);
         if (newText.length < 2) return;
 
@@ -239,7 +248,9 @@ export function useDragHandles({
         const snapshot = container.innerHTML;
 
         // Unwrap all active marks, preserving their children
-        const oldMarks = container.querySelectorAll('mark.comment-highlight-active');
+        const oldMarks = container.querySelectorAll(
+          'mark.comment-highlight-active, mark.mermaid-comment-highlight-active',
+        );
         oldMarks.forEach((oldMark) => {
           const parent = oldMark.parentNode;
           if (parent) {
@@ -250,11 +261,9 @@ export function useDragHandles({
         if (oldMarks.length > 0) container.normalize();
 
         // Collect text node positions after normalize
-        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
         const nodeInfos: { node: Text; globalStart: number; length: number }[] = [];
         let pos = 0;
-        let textNode: Text | null;
-        while ((textNode = walker.nextNode() as Text | null)) {
+        for (const textNode of collectVisibleTextNodes(container)) {
           const len = textNode.textContent?.length || 0;
           nodeInfos.push({ node: textNode, globalStart: pos, length: len });
           pos += len;
@@ -279,7 +288,7 @@ export function useDragHandles({
           // Nothing to wrap — roll back so the old highlight stays visible
           container.innerHTML = snapshot;
           drag.markEls = Array.from(
-            container.querySelectorAll('mark.comment-highlight-active'),
+            container.querySelectorAll('mark.comment-highlight-active, mark.mermaid-comment-highlight-active'),
           ) as HTMLElement[];
           return;
         }
@@ -292,7 +301,17 @@ export function useDragHandles({
           range.setStart(node, start);
           range.setEnd(node, end);
           const mark = document.createElement('mark');
-          mark.className = 'comment-highlight comment-highlight-active';
+          if (drag.isMermaid) {
+            mark.className = 'mermaid-comment-highlight mermaid-comment-highlight-active';
+            // Mermaid labels need inline styles; class-only marks break wrapping in foreignObject.
+            applyMermaidHighlightStyles(
+              mark,
+              getMermaidHighlightTheme(getComputedStyle(document.documentElement)),
+              true,
+            );
+          } else {
+            mark.className = 'comment-highlight comment-highlight-active';
+          }
           mark.dataset.commentIds = drag.commentIds.join(',');
           try {
             range.surroundContents(mark);
@@ -310,7 +329,7 @@ export function useDragHandles({
           // All wrapping failed — roll back
           container.innerHTML = snapshot;
           drag.markEls = Array.from(
-            container.querySelectorAll('mark.comment-highlight-active'),
+            container.querySelectorAll('mark.comment-highlight-active, mark.mermaid-comment-highlight-active'),
           ) as HTMLElement[];
         }
 
@@ -327,7 +346,7 @@ export function useDragHandles({
         if (drag) {
           // Use container text offsets to get the full anchor including whitespace
           // between styled elements that weren't wrapped in marks
-          const newAnchor = (container.textContent || '').slice(
+          const newAnchor = getVisibleTextContent(container).slice(
             drag.currentStartOffset,
             drag.currentEndOffset,
           );
@@ -347,6 +366,15 @@ export function useDragHandles({
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
+          const drag = dragRef.current;
+          if (drag) {
+            container.innerHTML = drag.initialHtml;
+            drag.markEls = Array.from(
+              container.querySelectorAll(
+                'mark.comment-highlight-active, mark.mermaid-comment-highlight-active',
+              ),
+            ) as HTMLElement[];
+          }
           dragRef.current = null;
           setIsDragging(false);
           document.body.classList.remove('anchor-dragging');

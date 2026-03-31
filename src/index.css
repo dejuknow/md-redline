@@ -819,16 +819,18 @@ body {
 }
 
 .mermaid-block .mermaid-svg {
-  display: flex;
-  justify-content: center;
+  display: block;
   padding: 1.5rem 1rem;
   background-color: var(--theme-bg-inset);
   border-radius: 8px;
-  overflow-x: auto;
+  overflow: auto;
 }
 
 .mermaid-block .mermaid-svg svg {
+  display: block;
+  margin: 0 auto;
   height: auto;
+  overflow: visible;
 }
 
 /* Mermaid sets foreignObject to a tight calculated height that can clip text
