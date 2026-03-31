@@ -166,7 +166,6 @@ e2e/                       Playwright end-to-end coverage
 npm run dev
 npm run lint
 npm test
-npm run eval:dry
 npm run test:e2e
 ```
 
@@ -185,6 +184,14 @@ Useful scripts:
 - `npm run build`
 - `npm run test:watch`
 - `npm run test:e2e:ui`
+
+### Eval
+
+- `npm run eval:dry` validates eval fixtures only
+- `npm run eval` runs the full eval harness and writes scored results to `eval/results/`
+- The eval is a file-based regression harness for agent handling of inline markdown comments, not a UI benchmark
+- The current eval adapter id is `claude-cli`; it shells out to the local `claude` CLI, and the effective model is whatever that CLI is configured to use by default
+- See [eval/README.md](./eval/README.md) for fixture structure, scoring, and flags
 
 ## Security model
 
