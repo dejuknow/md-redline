@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getApiErrorMessage, readJsonResponse, type ApiErrorPayload } from '../lib/http';
 import { getPathBasename } from '../lib/path-utils';
 
 interface BrowseResult {
@@ -7,6 +8,8 @@ interface BrowseResult {
   directories: { name: string; path: string }[];
   files: { name: string; path: string }[];
 }
+
+type BrowseResponse = BrowseResult & ApiErrorPayload;
 
 export interface ExplorerContextMenuInfo {
   type: 'file' | 'directory' | 'blank';
@@ -42,8 +45,10 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
     try {
       const params = dir ? `?dir=${encodeURIComponent(dir)}` : '';
       const res = await fetch(`/api/browse${params}`, { signal: controller.signal });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
+      const result = await readJsonResponse<BrowseResponse>(res);
+      if (!res.ok || !result) {
+        throw new Error(getApiErrorMessage(res, result, 'Failed to browse'));
+      }
       setData(result);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;

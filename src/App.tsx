@@ -39,6 +39,7 @@ import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
 import { useThemePersistence } from './hooks/useThemePersistence';
 import { migrateLocalStorageToDisk } from './lib/preferences-client';
+import { readJsonResponse } from './lib/http';
 import { ALL_THEMES } from './lib/themes';
 import { usePaneLayout } from './hooks/usePaneLayout';
 import { useToast } from './hooks/useToast';
@@ -178,9 +179,10 @@ export default function App() {
     fetch('/api/platform', { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error();
-        return r.json();
+        return readJsonResponse<{ platform?: string }>(r);
       })
-      .then(({ platform }) => {
+      .then((data) => {
+        const platform = data?.platform;
         if (platform === 'darwin') setRevealLabel('Reveal in Finder');
         else if (platform === 'win32') setRevealLabel('Show in Explorer');
         else setRevealLabel('Show in File Manager');
@@ -395,9 +397,10 @@ export default function App() {
     fetch('/api/config')
       .then((r) => {
         if (!r.ok) throw new Error();
-        return r.json();
+        return readJsonResponse<{ initialFile?: string; initialDir?: string }>(r);
       })
       .then((data) => {
+        if (!data) return;
         if (data.initialFile) {
           openTab(data.initialFile);
         }

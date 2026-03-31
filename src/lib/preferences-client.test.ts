@@ -34,18 +34,28 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function jsonResponse(body: unknown, init?: ResponseInit) {
+  return new Response(JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  });
+}
+
 describe('fetchPreferences', () => {
   it('returns parsed JSON on successful response', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ author: 'Alice', theme: 'dark' }),
-    });
+    mockFetch.mockResolvedValue(jsonResponse({ author: 'Alice', theme: 'dark' }));
     const result = await fetchPreferences();
     expect(result).toEqual({ author: 'Alice', theme: 'dark' });
   });
 
   it('returns empty object when response is not ok', async () => {
-    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'boom' }, { status: 500 }));
+    const result = await fetchPreferences();
+    expect(result).toEqual({});
+  });
+
+  it('returns empty object on invalid JSON response', async () => {
+    mockFetch.mockResolvedValue(new Response('', { status: 502 }));
     const result = await fetchPreferences();
     expect(result).toEqual({});
   });
@@ -87,10 +97,7 @@ describe('migrateLocalStorageToDisk', () => {
   });
 
   it('skips migration when disk has existing data', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ author: 'Existing' }),
-    });
+    mockFetch.mockResolvedValue(jsonResponse({ author: 'Existing' }));
     await migrateLocalStorageToDisk();
     expect(store['md-redline-migrated-to-disk']).toBe('1');
     // Should not have called PUT
@@ -99,10 +106,7 @@ describe('migrateLocalStorageToDisk', () => {
 
   it('migrates settings, theme, and recentFiles from localStorage', async () => {
     // Mock disk as empty
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
     // Mock save
     mockFetch.mockResolvedValueOnce({ ok: true });
 
@@ -125,10 +129,7 @@ describe('migrateLocalStorageToDisk', () => {
   });
 
   it('does not migrate legacy author from localStorage', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
     mockFetch.mockResolvedValueOnce({ ok: true });
 
     store['md-redline-author'] = 'PersistentUser';
@@ -140,10 +141,7 @@ describe('migrateLocalStorageToDisk', () => {
   });
 
   it('removes migrated keys from localStorage except theme', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
     mockFetch.mockResolvedValueOnce({ ok: true });
 
     store['md-redline-author'] = 'Alice';
@@ -157,19 +155,13 @@ describe('migrateLocalStorageToDisk', () => {
   });
 
   it('sets migrated flag after successful migration', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
     await migrateLocalStorageToDisk();
     expect(store['md-redline-migrated-to-disk']).toBe('1');
   });
 
   it('keeps local data and retries later when saving to disk fails', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));
     mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
 
     store['md-redline-author'] = 'Alice';

@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
+import { getApiErrorMessage, readJsonResponse, type ApiErrorPayload } from '../lib/http';
 
 export interface TabState {
   filePath: string;
@@ -27,6 +28,16 @@ interface LoadedTabUpdate {
   tabOrder: string[];
   activeFilePath: string | null;
 }
+
+type FileResponse = {
+  path: string;
+  content: string;
+} & ApiErrorPayload;
+
+type SaveFileResponse = {
+  success: boolean;
+  path: string;
+} & ApiErrorPayload;
 
 export function applyPendingTabState(
   prevData: Map<string, TabState>,
@@ -229,8 +240,10 @@ export function useTabs() {
     // Fetch file content
     try {
       const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal: controller.signal });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await readJsonResponse<FileResponse>(res);
+      if (!res.ok || !data) {
+        throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+      }
       if (!isCurrentLoadRequest(path, requestId)) return;
       applyLoadedResponse(path, data.path, data.content);
       finishLoadRequest(path, requestId);
@@ -275,8 +288,10 @@ export function useTabs() {
 
     try {
       const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal: controller.signal });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await readJsonResponse<FileResponse>(res);
+      if (!res.ok || !data) {
+        throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+      }
       if (!isCurrentLoadRequest(path, requestId)) return;
       applyLoadedResponse(path, data.path, data.content);
       finishLoadRequest(path, requestId);
@@ -406,8 +421,10 @@ export function useTabs() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: activeFilePath, content }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        const data = await readJsonResponse<SaveFileResponse>(res);
+        if (!res.ok || !data) {
+          throw new Error(getApiErrorMessage(res, data, 'Failed to save file'));
+        }
         updateTab(activeFilePath, { lastSaved: new Date(), error: null });
       } catch (err) {
         updateTab(activeFilePath, {
@@ -423,8 +440,10 @@ export function useTabs() {
     updateTab(activeFilePath, { isLoading: true, error: null });
     try {
       const res = await fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await readJsonResponse<FileResponse>(res);
+      if (!res.ok || !data) {
+        throw new Error(getApiErrorMessage(res, data, 'Failed to reload file'));
+      }
       updateTab(activeFilePath, {
         rawMarkdown: data.content,
         isLoading: false,

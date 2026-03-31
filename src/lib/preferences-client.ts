@@ -1,3 +1,5 @@
+import { readJsonResponse } from './http';
+
 export interface RecentFileEntry {
   path: string;
   name: string;
@@ -14,8 +16,9 @@ export interface DiskPreferences {
 export async function fetchPreferences(): Promise<DiskPreferences> {
   try {
     const res = await fetch('/api/preferences');
-    if (!res.ok) return {};
-    return await res.json();
+    const data = await readJsonResponse<DiskPreferences>(res);
+    if (!res.ok || !data) return {};
+    return data;
   } catch {
     return {};
   }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { RecentFile } from '../hooks/useRecentFiles';
+import { getApiErrorMessage, readJsonResponse, type ApiErrorPayload } from '../lib/http';
 
 interface Props {
   open: boolean;
@@ -9,6 +10,10 @@ interface Props {
   activeFilePath: string | null;
   onClearRecent: () => void;
 }
+
+type PickFileResponse = {
+  path?: string;
+} & ApiErrorPayload;
 
 function looksLikeDirectPath(value: string): boolean {
   return (
@@ -81,8 +86,10 @@ export function FileOpener({
   const handleSystemPicker = useCallback(async () => {
     try {
       const res = await fetch('/api/pick-file');
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await readJsonResponse<PickFileResponse>(res);
+      if (!res.ok || !data) {
+        throw new Error(getApiErrorMessage(res, data, 'Failed to open system file picker'));
+      }
       if (data.path) {
         handleOpen(data.path);
       }
