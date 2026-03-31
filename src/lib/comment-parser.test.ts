@@ -382,6 +382,22 @@ describe('edge cases', () => {
     expect(parsed.cleanMarkdown).toBe('Hello world');
   });
 
+  it('uses a provided comment ID when inserting a comment', () => {
+    const result = insertComment(
+      'Hello world',
+      'world',
+      'track me',
+      'User',
+      undefined,
+      undefined,
+      undefined,
+      'comment-123',
+    );
+    const parsed = parseComments(result);
+
+    expect(parsed.comments[0]?.id).toBe('comment-123');
+  });
+
   it('handles very long anchor text', () => {
     const longText = 'a'.repeat(10000);
     const raw = `Start ${longText} end`;

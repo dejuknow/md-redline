@@ -43,6 +43,7 @@ That design keeps the feedback:
 ## Current feature set
 
 - Inline comments with overlapping anchors
+- Newly added comments become active and focused in the sidebar
 - Threaded replies with inline edit/delete
 - Drag-resize comment anchors
 - Multi-tab editing with tab context menus (close, close others, close to right)

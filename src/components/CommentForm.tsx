@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
@@ -21,6 +21,8 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const [text, setText] = useState('');
   const [showTemplates, setShowTemplates] = useState(settings.showTemplatesByDefault);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
+  const [formSize, setFormSize] = useState<{ height: number; width: number } | null>(null);
   useAutoResize(inputRef, text);
 
   useEffect(() => {
@@ -47,7 +49,6 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   }, []);
 
   // Click outside: dismiss if expanded with empty text.
-  const formRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isExpanded) return;
     const handler = (e: MouseEvent) => {
@@ -68,20 +69,51 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       if (!settings.quickComment) setIsExpanded(false);
       setText('');
       setShowTemplates(settings.showTemplatesByDefault);
+      setFormSize(null);
     }
   }, [selectionKey, settings.quickComment, settings.showTemplatesByDefault]);
 
+  useLayoutEffect(() => {
+    const node = formRef.current;
+    if (!node) return;
+
+    const nextSize = {
+      height: Math.ceil(node.getBoundingClientRect().height),
+      width: Math.ceil(node.getBoundingClientRect().width),
+    };
+
+    setFormSize((current) =>
+      current?.height === nextSize.height && current?.width === nextSize.width ? current : nextSize,
+    );
+  }, [isExpanded, showTemplates, text, selectionKey]);
+
   // Position the form near the selection
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+  const viewportPadding = 12;
   const viewportHeight = window.innerHeight;
-  const spaceBelow = viewportHeight - selection.rect.bottom;
-  const showAbove = spaceBelow < 200;
+  const viewportWidth = window.innerWidth;
+  const formHeight = formSize?.height ?? (isExpanded ? (showTemplates ? 280 : 220) : 44);
+  const formWidth = formSize?.width ?? (isExpanded ? 320 : 120);
+  const belowTop = selection.rect.bottom + 8;
+  const aboveTop = selection.rect.top - formHeight - 8;
+  const showAbove =
+    belowTop + formHeight > viewportHeight - viewportPadding && aboveTop >= viewportPadding;
+  const top = clamp(
+    showAbove ? aboveTop : belowTop,
+    viewportPadding,
+    Math.max(viewportPadding, viewportHeight - formHeight - viewportPadding),
+  );
+  const left = clamp(
+    selection.rect.left,
+    viewportPadding,
+    Math.max(viewportPadding, viewportWidth - formWidth - viewportPadding),
+  );
 
   const style: React.CSSProperties = {
     position: 'fixed',
-    left: `${Math.min(selection.rect.left, window.innerWidth - 320)}px`,
-    ...(showAbove
-      ? { bottom: `${viewportHeight - selection.rect.top + 8}px` }
-      : { top: `${selection.rect.bottom + 8}px` }),
+    left: `${left}px`,
+    top: `${top}px`,
+    maxHeight: `${Math.max(0, viewportHeight - viewportPadding * 2)}px`,
     zIndex: 50,
   };
 
@@ -143,7 +175,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       ref={formRef}
       style={style}
       data-comment-form
-      className="w-80 bg-surface-raised rounded-xl shadow-xl border border-border overflow-hidden"
+      className="w-80 bg-surface-raised rounded-xl shadow-xl border border-border overflow-x-hidden overflow-y-auto"
     >
       {/* Anchor preview */}
       <div className="px-3 pt-3 pb-2 border-b border-border-subtle bg-surface-secondary">

@@ -46,6 +46,7 @@ export interface UseCommentsParams {
   showToast: (msg: string) => void;
   clearSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
+  requestCommentFocus: (commentId: string) => void;
 }
 
 export function useComments(params: UseCommentsParams) {
@@ -63,6 +64,7 @@ export function useComments(params: UseCommentsParams) {
     showToast,
     clearSelection,
     setAutoExpandForm,
+    requestCommentFocus,
   } = params;
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -127,6 +129,7 @@ export function useComments(params: UseCommentsParams) {
       contextAfter?: string,
       hintOffset?: number,
     ) => {
+      const newCommentId = crypto.randomUUID();
       const newRaw = insertComment(
         rawMarkdownRef.current ?? '',
         anchor,
@@ -135,12 +138,22 @@ export function useComments(params: UseCommentsParams) {
         contextBefore,
         contextAfter,
         hintOffset,
+        newCommentId,
       );
       updateAndSave(newRaw);
+      setActiveCommentId(newCommentId);
+      requestCommentFocus(newCommentId);
       clearSelection();
       setAutoExpandForm(false);
     },
-    [updateAndSave, clearSelection, author, rawMarkdownRef, setAutoExpandForm],
+    [
+      updateAndSave,
+      clearSelection,
+      author,
+      rawMarkdownRef,
+      requestCommentFocus,
+      setAutoExpandForm,
+    ],
   );
 
   const handleResolve = useCallback(

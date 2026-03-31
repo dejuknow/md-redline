@@ -50,6 +50,7 @@ import { useDiffSnapshot } from './hooks/useDiffSnapshot';
 import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
+import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -135,6 +136,8 @@ export default function App() {
 
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
+  const [requestedCommentFocus, setRequestedCommentFocus] =
+    useState<SidebarCommentFocusRequest | null>(null);
 
   // Modal state — only one modal can be open at a time
   const { activeModal, setActiveModal, toggleModal, openFilePicker } = useModalState();
@@ -228,6 +231,10 @@ export default function App() {
   const { selection, clearSelection, lockSelection } = useSelection(
     containerRef as RefObject<HTMLElement | null>,
   );
+  const requestCommentFocus = useCallback(
+    (commentId: string) => setRequestedCommentFocus({ commentId, token: Date.now() }),
+    [],
+  );
 
   // Comment state and operations
   const {
@@ -270,6 +277,7 @@ export default function App() {
     showToast,
     clearSelection,
     setAutoExpandForm,
+    requestCommentFocus,
   });
 
   // Combined handoff: snapshot + copy agent prompt
@@ -1256,6 +1264,8 @@ export default function App() {
                   onBulkDeleteResolved={handleBulkDeleteResolved}
                   onContextMenu={handleSidebarContextMenu}
                   requestedEditor={requestedEditor}
+                  requestedFocus={requestedCommentFocus}
+                  onFocusHandled={() => setRequestedCommentFocus(null)}
                 />
               </div>
             </div>

@@ -345,9 +345,10 @@ export function insertComment(
   contextBefore?: string,
   contextAfter?: string,
   hintOffset?: number,
+  commentId: string = crypto.randomUUID(),
 ): string {
   const comment: MdComment = {
-    id: crypto.randomUUID(),
+    id: commentId,
     anchor,
     text: commentText,
     author,

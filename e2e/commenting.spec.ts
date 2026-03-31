@@ -72,6 +72,34 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
   await expect(page.getByText(commentText, { exact: true })).toBeVisible();
 }
 
+async function clickVisibleProsePointOutsideCommentForm(page: Page) {
+  const point = await page.evaluate(() => {
+    const proseRect = document.querySelector('.prose')?.getBoundingClientRect();
+    const formRect = document.querySelector('[data-comment-form]')?.getBoundingClientRect();
+    if (!proseRect || !formRect) return null;
+
+    const candidates = [
+      { x: proseRect.left + 24, y: proseRect.top + 24 },
+      { x: proseRect.right - 24, y: proseRect.top + 24 },
+      { x: proseRect.left + 24, y: proseRect.bottom - 24 },
+      { x: proseRect.right - 24, y: proseRect.bottom - 24 },
+    ];
+
+    return (
+      candidates.find(
+        ({ x, y }) =>
+          x < formRect.left || x > formRect.right || y < formRect.top || y > formRect.bottom,
+      ) ?? null
+    );
+  });
+
+  if (!point) {
+    throw new Error('Could not find a prose click target outside the comment form');
+  }
+
+  await page.mouse.click(point.x, point.y);
+}
+
 /**
  * Get the comment card container that holds a comment with the given text.
  * Uses the data structure: card > div.px-3.py-2 > p (comment text)
@@ -120,6 +148,15 @@ test.describe('Adding comments', () => {
   test('select text and add a comment via the floating form', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'This needs more detail about what valid means.');
+  });
+
+  test('newly added comment becomes focused in the sidebar', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Focus this new comment');
+
+    await expect(
+      page.locator('[data-comment-card-id]', { hasText: 'Focus this new comment' }),
+    ).toBeFocused();
   });
 
   test('comment is persisted to the markdown file', async ({ page }) => {
@@ -320,8 +357,8 @@ test.describe('Comment form click-outside dismiss', () => {
     const textarea = page.getByPlaceholder('Add your comment...');
     await expect(textarea).toBeVisible();
 
-    // Click in the prose/markdown viewer area (outside the form)
-    await page.locator('.prose h2').first().click({ force: true });
+    // Click in the prose/markdown viewer area at a point that is actually outside the form.
+    await clickVisibleProsePointOutsideCommentForm(page);
 
     // Form should be dismissed — this is the key regression test
     await expect(textarea).not.toBeVisible({ timeout: 3000 });

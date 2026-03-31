@@ -12,6 +12,11 @@ export interface SidebarContextMenuInfo {
   y: number;
 }
 
+export interface SidebarCommentFocusRequest {
+  commentId: string;
+  token: number;
+}
+
 interface Props {
   comments: MdComment[];
   activeCommentId: string | null;
@@ -29,6 +34,8 @@ interface Props {
   onBulkDeleteResolved?: () => void;
   onContextMenu?: (info: SidebarContextMenuInfo) => void;
   requestedEditor?: SidebarCommentEditorState;
+  requestedFocus?: SidebarCommentFocusRequest | null;
+  onFocusHandled?: () => void;
 }
 
 type FilterMode = 'all' | 'open' | 'resolved';
@@ -50,8 +57,11 @@ export function CommentSidebar({
   onBulkDeleteResolved,
   onContextMenu: onCtxMenu,
   requestedEditor,
+  requestedFocus,
+  onFocusHandled,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
+  const commentRefs = useRef(new Map<string, HTMLDivElement>());
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterMode>('all');
   const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
@@ -64,6 +74,29 @@ export function CommentSidebar({
       activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [activeCommentId]);
+
+  useEffect(() => {
+    if (!requestedFocus) return;
+
+    if (search) {
+      setSearch('');
+      return;
+    }
+
+    if (resolveEnabled && filter === 'resolved') {
+      setFilter('open');
+      return;
+    }
+
+    const node = commentRefs.current.get(requestedFocus.commentId);
+    if (!node) return;
+
+    node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    requestAnimationFrame(() => {
+      node.focus({ preventScroll: true });
+      onFocusHandled?.();
+    });
+  }, [requestedFocus, resolveEnabled, filter, search, onFocusHandled]);
 
   useEffect(() => {
     if (requestedEditor) {
@@ -220,7 +253,21 @@ export function CommentSidebar({
       {/* Comment list */}
       <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
         {activeComments.map((comment) => (
-          <div key={comment.id} ref={comment.id === activeCommentId ? activeRef : undefined}>
+          <div
+            key={comment.id}
+            ref={(node) => {
+              if (node) {
+                commentRefs.current.set(comment.id, node);
+              } else {
+                commentRefs.current.delete(comment.id);
+              }
+              if (comment.id === activeCommentId) {
+                activeRef.current = node;
+              }
+            }}
+            tabIndex={-1}
+            data-comment-card-id={comment.id}
+          >
             <CommentCard
               comment={comment}
               isActive={comment.id === activeCommentId}
@@ -255,7 +302,21 @@ export function CommentSidebar({
           </div>
         )}
         {resolvedComments.map((comment) => (
-          <div key={comment.id} ref={comment.id === activeCommentId ? activeRef : undefined}>
+          <div
+            key={comment.id}
+            ref={(node) => {
+              if (node) {
+                commentRefs.current.set(comment.id, node);
+              } else {
+                commentRefs.current.delete(comment.id);
+              }
+              if (comment.id === activeCommentId) {
+                activeRef.current = node;
+              }
+            }}
+            tabIndex={-1}
+            data-comment-card-id={comment.id}
+          >
             <CommentCard
               comment={comment}
               isActive={comment.id === activeCommentId}
