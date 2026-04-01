@@ -80,7 +80,7 @@ npm install
 npm run dev
 ```
 
-Then open the local URL printed by Vite in your terminal. By default this is usually `http://localhost:5173`, but it may move to the next available port.
+Then open the local URL printed by Vite in your terminal. By default this is usually `http://localhost:5188`, but it may move to the next available port.
 
 ## Open a file quickly
 

@@ -68,12 +68,12 @@ export function createApp(options: CreateAppOptions = {}) {
   const caseInsensitivePaths = platformName === 'win32';
 
   const app = new Hono();
-  // Allow CORS from any localhost port (Vite may start on 5174+ if 5173 is busy)
+  // Allow CORS from any localhost port (Vite may start on 5189+ if 5188 is busy)
   app.use(
     '*',
     cors({
       origin: (origin) => {
-        if (!origin) return 'http://localhost:5173';
+        if (!origin) return 'http://localhost:5188';
         try {
           const url = new URL(origin);
           if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
