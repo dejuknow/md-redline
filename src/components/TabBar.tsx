@@ -27,6 +27,7 @@ interface Props {
   // Document actions (moved from Toolbar)
   viewMode: ViewMode;
   hasSnapshot: boolean;
+  diffPending?: boolean;
   commentCount: number;
   enableResolve?: boolean;
   onViewModeChange: (mode: ViewMode) => void;
@@ -203,6 +204,7 @@ export function TabBar({
   onTabContextMenu,
   viewMode,
   hasSnapshot,
+  diffPending,
   commentCount,
   onViewModeChange,
   onClearSnapshot,
@@ -373,8 +375,8 @@ export function TabBar({
                     </span>
                   )}
                   {tab.error && <span className="w-1.5 h-1.5 rounded-full bg-danger shrink-0" />}
-                  <button
-                    type="button"
+                  <span
+                    role="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onCloseTab(tab.filePath);
@@ -394,7 +396,7 @@ export function TabBar({
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                  </button>
+                  </span>
                 </button>
               );
             })}
@@ -554,13 +556,18 @@ export function TabBar({
         {hasSnapshot && (
           <SplitIconButton
             icon={
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
-                />
-              </svg>
+              <span className="relative">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
+                  />
+                </svg>
+                {diffPending && viewMode !== 'diff' && (
+                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary animate-pulse" />
+                )}
+              </span>
             }
             onClick={() => onViewModeChange(viewMode === 'diff' ? 'rendered' : 'diff')}
             title={viewMode === 'diff' ? 'Switch to rendered view' : 'View diff since snapshot'}

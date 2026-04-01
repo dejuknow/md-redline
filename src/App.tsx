@@ -246,6 +246,9 @@ export default function App() {
     currentSnapshotRef.current = currentSnapshot;
   }, [currentSnapshot]);
 
+  // Track whether the diff has unseen external changes (badge indicator on diff button)
+  const [diffPending, setDiffPending] = useState(false);
+
   const { selection, clearSelection, lockSelection } = useSelection(
     containerRef as RefObject<HTMLElement | null>,
   );
@@ -343,6 +346,7 @@ export default function App() {
       prevFilePathRef.current = activeFilePath;
       setActiveCommentId(null);
       if (viewMode === 'diff') setViewMode('rendered');
+      setDiffPending(false);
       clearSelection();
     }
   }, [activeFilePath, viewMode, setViewMode, clearSelection, setActiveCommentId]);
@@ -398,7 +402,11 @@ export default function App() {
             if (r > 0) parts.push(`${r} resolved`);
             if (d > 0) parts.push(`${d} addressed`);
             if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
-            showToast(`${parts.join(', ')} externally`);
+            const diffAction =
+              cleanContentChanged && currentSnapshotRef.current
+                ? { label: 'View diff', onClick: () => setViewMode('diff') }
+                : undefined;
+            showToast(`${parts.join(', ')} externally`, diffAction);
           }
         } catch {
           // Ignore parse errors — still update the content
@@ -406,9 +414,9 @@ export default function App() {
 
         setRawMarkdown(content);
 
-        // Auto-switch to diff view when a snapshot exists and content actually changed
+        // Flag the diff button when content changed and a snapshot exists
         if (cleanContentChanged && currentSnapshotRef.current) {
-          setViewMode('diff');
+          setDiffPending(true);
         }
       },
       [setRawMarkdown, setViewMode, settings.enableResolve, showToast],
@@ -1065,10 +1073,12 @@ export default function App() {
         onTabContextMenu={handleTabContextMenu}
         viewMode={viewMode}
         hasSnapshot={currentSnapshot !== null}
+        diffPending={diffPending}
         commentCount={commentCount}
         enableResolve={settings.enableResolve}
         onViewModeChange={(mode) => {
           setViewMode(mode);
+          if (mode === 'diff') setDiffPending(false);
           if (mode === 'raw') clearSelection();
         }}
         onClearSnapshot={handleClearSnapshot}
@@ -1351,7 +1361,7 @@ export default function App() {
       </>
 
       {/* Toast notification (Feature 8) */}
-      <Toast message={toast.message} visible={toast.visible} onDismiss={dismissToast} />
+      <Toast message={toast.message} visible={toast.visible} onDismiss={dismissToast} action={toast.action} />
 
       {/* Command palette */}
       <CommandPalette

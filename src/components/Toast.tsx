@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ToastAction } from '../hooks/useToast';
 
 interface Props {
   message: string;
   visible: boolean;
   onDismiss: () => void;
+  action?: ToastAction;
 }
 
-export function Toast({ message, visible, onDismiss }: Props) {
+export function Toast({ message, visible, onDismiss, action }: Props) {
   const [show, setShow] = useState(false);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -50,6 +52,19 @@ export function Toast({ message, visible, onDismiss }: Props) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         {message}
+        {action && (
+          <button
+            onClick={() => {
+              action.onClick();
+              setShow(false);
+              if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+              fadeTimerRef.current = setTimeout(onDismiss, 200);
+            }}
+            className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-on-primary/20 hover:bg-on-primary/30 transition-colors"
+          >
+            {action.label}
+          </button>
+        )}
         <button
           onClick={() => {
             setShow(false);
