@@ -60,6 +60,8 @@ const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
   const [savedSession] = useState(() => loadSession());
+  const showToastRef = useRef<((msg: string) => void) | null>(null);
+  const onSaveError = useCallback((msg: string) => showToastRef.current?.(`Save failed: ${msg}`), []);
   const {
     tabs,
     activeFilePath,
@@ -77,7 +79,7 @@ export default function App() {
     switchTab,
     saveFile,
     reloadFile,
-  } = useTabs();
+  } = useTabs({ onSaveError });
 
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
@@ -134,6 +136,7 @@ export default function App() {
 
   // Toast notification state
   const { toast, showToast, dismissToast } = useToast();
+  showToastRef.current = showToast;
 
   // Accumulate external-change counts so rapid SSE events coalesce into one
   // updating toast ("3 comments addressed") instead of flickering "1 comment" each time.

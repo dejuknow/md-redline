@@ -106,7 +106,8 @@ export function applyLoadedTabState(
   };
 }
 
-export function useTabs() {
+export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
+  const onSaveError = options?.onSaveError;
   const [tabOrder, setTabOrder] = useState<string[]>([]);
   const [tabData, setTabData] = useState<Map<string, TabState>>(new Map());
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -427,12 +428,12 @@ export function useTabs() {
         }
         updateTab(activeFilePath, { lastSaved: new Date(), error: null });
       } catch (err) {
-        updateTab(activeFilePath, {
-          error: err instanceof Error ? err.message : 'Failed to save file',
-        });
+        const msg = err instanceof Error ? err.message : 'Failed to save file';
+        updateTab(activeFilePath, { error: msg });
+        onSaveError?.(msg);
       }
     },
-    [activeFilePath, updateTab],
+    [activeFilePath, updateTab, onSaveError],
   );
 
   const reloadFile = useCallback(async () => {
