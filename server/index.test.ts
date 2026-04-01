@@ -540,6 +540,30 @@ describe('/api/pick-file', () => {
 });
 
 describe('/api/reveal', () => {
+  it('uses osascript on macOS to reveal and activate Finder', async () => {
+    const { calls, execFileImpl } = createExecFileStub('');
+    const macApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const { response, body } = await requestJson(macApp, '/api/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: docsFile }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('osascript');
+    expect(calls[0].args).toContain('-e');
+    expect(calls[0].args.join(' ')).toContain('tell application "Finder" to reveal');
+    expect(calls[0].args.join(' ')).toContain('tell application "Finder" to activate');
+  });
+
   it('uses Explorer on Windows to reveal a file', async () => {
     const { calls, execFileImpl } = createExecFileStub('');
     const windowsApp = createApp({

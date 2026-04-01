@@ -506,7 +506,11 @@ export function createApp(options: CreateAppOptions = {}) {
       const resolved = await resolveAndValidate(body.path);
       await new Promise<void>((promiseResolve, reject) => {
         if (platformName === 'darwin') {
-          execFileImpl('open', ['-R', resolved], (err) => {
+          const escaped = resolved.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          execFileImpl('osascript', [
+            '-e', `tell application "Finder" to reveal POSIX file "${escaped}"`,
+            '-e', 'tell application "Finder" to activate',
+          ], (err) => {
             if (err) return reject(err);
             promiseResolve();
           });
