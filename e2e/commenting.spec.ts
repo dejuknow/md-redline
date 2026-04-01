@@ -180,6 +180,52 @@ test.describe('Comment lifecycle', () => {
 
     await expect(page.getByText('Mention cost factor')).not.toBeVisible();
   });
+
+  test('delete all shows confirm dialog and cancelling keeps comments', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'First comment');
+    await addComment(page, 'brute force attacks', 'Second comment');
+
+    // Click Delete All in sidebar
+    await page.getByRole('button', { name: 'Delete All' }).click();
+
+    // Confirm dialog should appear
+    const dialog = page.locator('.fixed.inset-0');
+    await expect(dialog.getByRole('heading', { name: 'Delete all comments' })).toBeVisible();
+    await expect(dialog.getByText('This will permanently delete all comments.')).toBeVisible();
+
+    // Cancel — comments should remain
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByText('First comment')).toBeVisible();
+    await expect(page.getByText('Second comment')).toBeVisible();
+  });
+
+  test('delete all confirm dialog removes all comments', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Comment A');
+    await addComment(page, 'brute force attacks', 'Comment B');
+
+    await page.getByRole('button', { name: 'Delete All' }).click();
+
+    // Confirm deletion
+    const dialog = page.locator('.fixed.inset-0');
+    await dialog.getByRole('button', { name: 'Delete All' }).click();
+
+    await expect(page.getByText('Comment A')).not.toBeVisible();
+    await expect(page.getByText('Comment B')).not.toBeVisible();
+  });
+
+  test('delete all confirm dialog closes on Escape', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Escape test comment');
+
+    await page.getByRole('button', { name: 'Delete All' }).click();
+    await expect(page.getByText('This will permanently delete all comments.')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByText('This will permanently delete all comments.')).not.toBeVisible();
+    await expect(page.getByText('Escape test comment')).toBeVisible();
+  });
 });
 
 test.describe('Comment editing and replies', () => {

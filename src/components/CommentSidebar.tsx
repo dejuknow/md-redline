@@ -5,6 +5,7 @@ import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { CommentCard } from './CommentCard';
 import { useSettings } from '../contexts/SettingsContext';
 import { ActionButton } from './ActionButton';
+import { ConfirmDialog } from './ConfirmDialog';
 
 export interface SidebarContextMenuInfo {
   commentId: string;
@@ -65,6 +66,7 @@ export function CommentSidebar({
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterMode>('all');
   const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const { settings } = useSettings();
   const resolveEnabled = settings.enableResolve;
 
@@ -402,7 +404,7 @@ export function CommentSidebar({
                   size="sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm('Delete all comments? This cannot be undone.')) onBulkDelete();
+                    setConfirmDeleteAll(true);
                   }}
                   title="Delete all comments"
                 >
@@ -413,6 +415,18 @@ export function CommentSidebar({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteAll}
+        title="Delete all comments"
+        message="This will permanently delete all comments. This cannot be undone."
+        confirmLabel="Delete All"
+        onConfirm={() => {
+          setConfirmDeleteAll(false);
+          onBulkDelete();
+        }}
+        onCancel={() => setConfirmDeleteAll(false)}
+      />
     </div>
   );
 }

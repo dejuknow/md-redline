@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import type { ReactNode, ButtonHTMLAttributes } from 'react';
 
 type Intent = 'neutral' | 'primary' | 'success' | 'danger' | 'submit';
@@ -24,18 +25,16 @@ const sizeClasses: Record<Size, string> = {
   sm: 'text-xs px-2 py-1',
 };
 
-export function ActionButton({
-  intent = 'neutral',
-  size = 'xs',
-  children,
-  ...rest
-}: Props) {
-  return (
-    <button
-      className={`rounded transition-colors ${sizeClasses[size]} ${intentClasses[intent]}`}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
-}
+export const ActionButton = forwardRef<HTMLButtonElement, Props>(
+  function ActionButton({ intent = 'neutral', size = 'xs', children, ...rest }, ref) {
+    return (
+      <button
+        ref={ref}
+        className={`rounded transition-colors ${sizeClasses[size]} ${intentClasses[intent]}`}
+        {...rest}
+      >
+        {children}
+      </button>
+    );
+  },
+);
