@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { readFileSync, writeFileSync, renameSync } from 'fs';
+import { resolve, dirname, join } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { withMod } from './helpers/shortcuts';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
@@ -480,6 +481,38 @@ test.describe('SSE file watching', () => {
     writeFileSync(FIXTURE_1, withReply);
 
     await expect(page.getByText(/1 new reply added/)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('multiple sequential atomic writes are all detected', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();
+
+    await page.waitForTimeout(1500);
+
+    // Atomic write: write to temp file then rename over the original.
+    // This changes the file's inode each time — the same mechanism that
+    // Claude Code's Edit tool, sed -i, and vim use.  Before the fix,
+    // fs.watch() (kqueue) lost track after the first rename event.
+    function atomicWrite(path: string, content: string) {
+      const tmp = join(tmpdir(), `mdr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      writeFileSync(tmp, content);
+      renameSync(tmp, path);
+    }
+
+    const edits = [
+      { from: '## Section One', to: '## Edit One', heading: 'Edit One' },
+      { from: '## Section Two', to: '## Edit Two', heading: 'Edit Two' },
+      { from: '## Section Three', to: '## Edit Three', heading: 'Edit Three' },
+    ];
+
+    let content = readFileSync(FIXTURE_1, 'utf-8');
+    for (const { from, to, heading } of edits) {
+      content = content.replace(from, to);
+      atomicWrite(FIXTURE_1, content);
+      await expect(page.getByRole('heading', { name: heading })).toBeVisible({
+        timeout: 15_000,
+      });
+    }
   });
 });
 

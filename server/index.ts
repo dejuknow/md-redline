@@ -143,7 +143,11 @@ export function createApp(options: CreateAppOptions = {}) {
   const writeLocks = new Map<string, Promise<void>>();
   const fileWatchers = new Map<
     string,
-    { watcher: FSWatcher; clients: Set<WritableStreamDefaultWriter> }
+    {
+      watcher: FSWatcher;
+      clients: Set<WritableStreamDefaultWriter>;
+      cleanup: () => void;
+    }
   >();
 
   app.get('/api/config', (c) => {
@@ -392,6 +396,60 @@ export function createApp(options: CreateAppOptions = {}) {
     if (!fileWatchers.has(resolved)) {
       const clients = new Set<WritableStreamDefaultWriter>();
       let debounce: ReturnType<typeof setTimeout> | null = null;
+      let lastBroadcast: string | null = null;
+
+      const broadcastChange = async () => {
+        try {
+          const content = await readFile(resolved, 'utf-8');
+          if (lastWrittenContent.get(resolved) === content) return;
+          if (content === lastBroadcast) return;
+          lastWrittenContent.delete(resolved);
+          lastBroadcast = content;
+          const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
+          for (const client of clients) {
+            client.write(frame).catch(() => {});
+          }
+        } catch {
+          const frame = sseFrame(
+            'error',
+            JSON.stringify({ path: resolved, reason: 'file_gone' }),
+          );
+          for (const client of clients) {
+            client.write(frame).catch(() => {});
+          }
+          cleanUpWatcher();
+        }
+      };
+
+      const onFsEvent = (eventType: string) => {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(async () => {
+          await broadcastChange();
+          // On macOS, fs.watch uses kqueue which tracks by file descriptor.
+          // Atomic writes (rename-over) create a new inode, leaving the old
+          // watcher stale.  Re-attach after every rename so we keep watching
+          // the current file.
+          if (eventType === 'rename') {
+            reattachWatcher();
+          }
+        }, 150);
+      };
+
+      let activeWatcher = watch(resolved, onFsEvent);
+
+      const reattachWatcher = () => {
+        activeWatcher.close();
+        try {
+          activeWatcher = watch(resolved, onFsEvent);
+          activeWatcher.on('error', cleanUpWatcher);
+          const entry = fileWatchers.get(resolved);
+          if (entry) entry.watcher = activeWatcher;
+        } catch {
+          // File deleted — clean up entirely
+          cleanUpWatcher();
+        }
+      };
+
       const cleanUpWatcher = () => {
         if (debounce) {
           clearTimeout(debounce);
@@ -401,34 +459,12 @@ export function createApp(options: CreateAppOptions = {}) {
           client.close().catch(() => {});
         }
         clients.clear();
-        watcher.close();
+        activeWatcher.close();
         fileWatchers.delete(resolved);
       };
-      const watcher = watch(resolved, () => {
-        if (debounce) clearTimeout(debounce);
-        debounce = setTimeout(async () => {
-          try {
-            const content = await readFile(resolved, 'utf-8');
-            if (lastWrittenContent.get(resolved) === content) return;
-            lastWrittenContent.delete(resolved);
-            const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
-            for (const client of clients) {
-              client.write(frame).catch(() => {});
-            }
-          } catch {
-            const frame = sseFrame(
-              'error',
-              JSON.stringify({ path: resolved, reason: 'file_gone' }),
-            );
-            for (const client of clients) {
-              client.write(frame).catch(() => {});
-            }
-            cleanUpWatcher();
-          }
-        }, 150);
-      });
-      watcher.on('error', cleanUpWatcher);
-      fileWatchers.set(resolved, { watcher, clients });
+
+      activeWatcher.on('error', cleanUpWatcher);
+      fileWatchers.set(resolved, { watcher: activeWatcher, clients, cleanup: cleanUpWatcher });
     }
 
     const entry = fileWatchers.get(resolved)!;
@@ -440,8 +476,7 @@ export function createApp(options: CreateAppOptions = {}) {
       entry.clients.delete(writer);
       writer.close().catch(() => {});
       if (entry.clients.size === 0) {
-        entry.watcher.close();
-        fileWatchers.delete(resolved);
+        entry.cleanup();
       }
     });
 
