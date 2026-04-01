@@ -480,7 +480,7 @@ test.describe('SSE file watching', () => {
     );
     writeFileSync(FIXTURE_1, withReply);
 
-    await expect(page.getByText(/1 new reply added/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/1 reply added externally/)).toBeVisible({ timeout: 15_000 });
   });
 
   test('background tab picks up external changes', async ({ page }) => {

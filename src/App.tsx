@@ -135,6 +135,20 @@ export default function App() {
   // Toast notification state
   const { toast, showToast, dismissToast } = useToast();
 
+  // Accumulate external-change counts so rapid SSE events coalesce into one
+  // updating toast ("3 comments addressed") instead of flickering "1 comment" each time.
+  const accResolvedRef = useRef(0);
+  const accDeletedRef = useRef(0);
+  const accRepliesRef = useRef(0);
+
+  useEffect(() => {
+    if (!toast.visible) {
+      accResolvedRef.current = 0;
+      accDeletedRef.current = 0;
+      accRepliesRef.current = 0;
+    }
+  }, [toast.visible]);
+
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
   const [requestedCommentFocus, setRequestedCommentFocus] =
@@ -368,14 +382,20 @@ export default function App() {
             }
           }
 
-          if (resolvedCount > 0) {
-            showToast(
-              `${resolvedCount} comment${resolvedCount > 1 ? 's' : ''} resolved externally`,
-            );
-          } else if (deletedCount > 0) {
-            showToast(`${deletedCount} comment${deletedCount > 1 ? 's' : ''} addressed externally`);
-          } else if (newReplyCount > 0) {
-            showToast(`${newReplyCount} new repl${newReplyCount > 1 ? 'ies' : 'y'} added`);
+          // Accumulate across rapid events so the toast coalesces
+          accResolvedRef.current += resolvedCount;
+          accDeletedRef.current += deletedCount;
+          accRepliesRef.current += newReplyCount;
+
+          const r = accResolvedRef.current;
+          const d = accDeletedRef.current;
+          const rp = accRepliesRef.current;
+          if (r > 0 || d > 0 || rp > 0) {
+            const parts: string[] = [];
+            if (r > 0) parts.push(`${r} resolved`);
+            if (d > 0) parts.push(`${d} addressed`);
+            if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
+            showToast(`${parts.join(', ')} externally`);
           }
         } catch {
           // Ignore parse errors — still update the content

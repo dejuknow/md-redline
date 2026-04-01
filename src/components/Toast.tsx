@@ -21,6 +21,8 @@ export function Toast({ message, visible, onDismiss }: Props) {
     if (visible) {
       // Trigger enter animation
       requestAnimationFrame(() => setShow(true));
+      // Reset the auto-dismiss timer on every message update so coalesced
+      // toasts stay visible while new events keep arriving.
       const timer = setTimeout(() => {
         setShow(false);
         if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
@@ -33,7 +35,7 @@ export function Toast({ message, visible, onDismiss }: Props) {
     } else {
       setShow(false);
     }
-  }, [visible, onDismiss]);
+  }, [visible, message, onDismiss]);
 
   if (!visible) return null;
 
