@@ -32,12 +32,24 @@ export function useDiffSnapshot(
 
   const currentSnapshot = activeFilePath ? (snapshots.get(activeFilePath) ?? null) : null;
 
-  const handleSnapshot = useCallback(() => {
-    if (!activeFilePath) return;
-    const isUpdate = snapshots.has(activeFilePath);
-    setSnapshots((prev) => new Map(prev).set(activeFilePath, rawMarkdownRef.current));
-    showToast(isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes');
-  }, [activeFilePath, snapshots, showToast, rawMarkdownRef]);
+  const handleSnapshot = useCallback(
+    (extraEntries?: Map<string, string>) => {
+      if (!activeFilePath) return;
+      setSnapshots((prev) => {
+        const next = new Map(prev);
+        next.set(activeFilePath, rawMarkdownRef.current);
+        if (extraEntries) {
+          for (const [path, content] of extraEntries) {
+            next.set(path, content);
+          }
+        }
+        return next;
+      });
+      const isUpdate = snapshots.has(activeFilePath);
+      showToast(isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes');
+    },
+    [activeFilePath, snapshots, showToast, rawMarkdownRef],
+  );
 
   const handleClearSnapshot = useCallback(() => {
     if (!activeFilePath) return;

@@ -284,10 +284,18 @@ export default function App() {
   // Combined handoff: snapshot + copy agent prompt
   const handleHandoff = useCallback(
     (filePaths: string[]) => {
-      handleSnapshot();
+      // Build snapshot entries for background files so every handed-off file
+      // gets a diff baseline, not just the active tab.
+      const extra = new Map<string, string>();
+      for (const p of filePaths) {
+        if (p === activeFilePath) continue;
+        const tab = tabs.find((t) => t.filePath === p);
+        if (tab) extra.set(p, tab.rawMarkdown);
+      }
+      handleSnapshot(extra.size > 0 ? extra : undefined);
       handleCopyAgentPrompt(filePaths);
     },
-    [handleSnapshot, handleCopyAgentPrompt],
+    [handleSnapshot, handleCopyAgentPrompt, activeFilePath, tabs],
   );
 
   // Heading tracking / table of contents

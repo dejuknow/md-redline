@@ -307,6 +307,41 @@ test.describe('Handoff + snapshot', () => {
     await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
   });
 
+  test('multi-file handoff creates snapshots for all selected files', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+    // Open file 1 and add a comment
+    await openFixture(page, FIXTURE_1);
+    await addComment(page, 'authentication system', 'Fix auth');
+
+    // Open file 2 and add a comment
+    await page.locator('button[title="Open file"]').click();
+    const input = page.getByPlaceholder('File path or name...');
+    await expect(input).toBeVisible({ timeout: 5_000 });
+    await input.fill(FIXTURE_2);
+    await input.press('Enter');
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await addComment(page, 'second test document', 'Fix intro');
+
+    // Multi-file handoff — select both files
+    await page.getByTestId('handoff-chevron').click();
+    const dropdown = page.locator('.absolute.right-0.top-full');
+    await dropdown.getByText('Copy handoff for 2 files').click();
+    await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
+
+    // File 2 (active tab) should have a snapshot → diff toggle visible
+    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+
+    // Switch to file 1 — it should also have a snapshot
+    await page.locator('button', { hasText: 'test-doc.md' }).first().click();
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+  });
+
   test('clear snapshot via diff toggle dropdown after handoff', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openFixture(page);
