@@ -483,6 +483,43 @@ test.describe('SSE file watching', () => {
     await expect(page.getByText(/1 new reply added/)).toBeVisible({ timeout: 15_000 });
   });
 
+  test('background tab picks up external changes', async ({ page }) => {
+    // Open file 1
+    await openFixture(page, FIXTURE_1);
+    await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();
+
+    // Open file 2 in a new tab — file 1 becomes a background tab
+    await page.locator('button[title="Open file"]').click();
+    const input = page.getByPlaceholder('File path or name...');
+    await expect(input).toBeVisible({ timeout: 5_000 });
+    await input.fill(FIXTURE_2);
+    await input.press('Enter');
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Wait for background SSE connection to establish
+    await page.waitForTimeout(1500);
+
+    // Modify file 1 externally while file 2 is the active tab
+    function atomicWrite(path: string, content: string) {
+      const tmp = join(tmpdir(), `mdr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      writeFileSync(tmp, content);
+      renameSync(tmp, path);
+    }
+    const modified = FIXTURE_1_ORIGINAL.replace('## Section One', '## Background Edit');
+    atomicWrite(FIXTURE_1, modified);
+
+    // Wait for the SSE event to be processed
+    await page.waitForTimeout(2000);
+
+    // Switch back to file 1 — should already show the updated heading
+    await page.locator('button', { hasText: 'test-doc.md' }).first().click();
+    await expect(page.getByRole('heading', { name: 'Background Edit' })).toBeVisible({
+      timeout: 5_000,
+    });
+  });
+
   test('multiple sequential atomic writes are all detected', async ({ page }) => {
     await openFixture(page);
     await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();

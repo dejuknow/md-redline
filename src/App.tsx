@@ -65,6 +65,7 @@ export default function App() {
     activeFilePath,
     rawMarkdown,
     setRawMarkdown,
+    updateTab,
     isLoading,
     error,
     openTab,
@@ -382,6 +383,34 @@ export default function App() {
       [setRawMarkdown, setViewMode, settings.enableResolve, showToast],
     ),
   });
+
+  // Watch background tabs for external changes so they stay fresh during handoff.
+  // The active tab is handled by useFileWatcher above; this covers the rest.
+  // Keyed by path list so connections only churn when tabs open/close/switch.
+  const backgroundPathsKey = tabs
+    .map((t) => t.filePath)
+    .filter((p) => p && p !== activeFilePath)
+    .join('\0');
+
+  useEffect(() => {
+    const paths = backgroundPathsKey ? backgroundPathsKey.split('\0') : [];
+    if (paths.length === 0) return;
+
+    const sources = paths.map((path) => {
+      const es = new EventSource(`/api/watch?path=${encodeURIComponent(path)}`);
+      es.addEventListener('change', (e) => {
+        try {
+          const { content } = JSON.parse(e.data);
+          updateTab(path, { rawMarkdown: content });
+        } catch {
+          // ignore malformed events
+        }
+      });
+      return es;
+    });
+
+    return () => sources.forEach((es) => es.close());
+  }, [backgroundPathsKey, updateTab]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {

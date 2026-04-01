@@ -465,6 +465,7 @@ export function useTabs() {
     filePath,
     rawMarkdown,
     setRawMarkdown,
+    updateTab,
     isLoading,
     error,
     openTab,
