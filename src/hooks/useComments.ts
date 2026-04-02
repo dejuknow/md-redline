@@ -85,14 +85,18 @@ export function useComments(params: UseCommentsParams) {
   );
 
   // Comment counts per tab (for badges)
-  const commentCounts = useMemo(() => {
+  const { commentCounts, resolvedCommentCounts } = useMemo(() => {
     const counts = new Map<string, number>();
+    const resolvedCounts = new Map<string, number>();
     for (const tab of tabs) {
       if (tab.filePath === activeFilePath) {
         const count = enableResolve
           ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
           : comments.length;
         counts.set(tab.filePath, count);
+        if (enableResolve) {
+          resolvedCounts.set(tab.filePath, comments.filter((c) => getEffectiveStatus(c) === 'resolved').length);
+        }
       } else {
         try {
           const { comments: tabComments } = parseComments(tab.rawMarkdown);
@@ -100,12 +104,15 @@ export function useComments(params: UseCommentsParams) {
             ? tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
             : tabComments.length;
           counts.set(tab.filePath, count);
+          if (enableResolve) {
+            resolvedCounts.set(tab.filePath, tabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length);
+          }
         } catch {
           counts.set(tab.filePath, 0);
         }
       }
     }
-    return counts;
+    return { commentCounts: counts, resolvedCommentCounts: resolvedCounts };
   }, [tabs, activeFilePath, comments, enableResolve]);
 
   const commentCount = enableResolve
@@ -115,6 +122,8 @@ export function useComments(params: UseCommentsParams) {
   // Core update helper
   const updateAndSave = useCallback(
     (newRaw: string) => {
+      const commentCount = (newRaw.match(/@comment\{/g) ?? []).length;
+      console.log(`[updateAndSave] ${commentCount} comment(s), ${newRaw.length} bytes`);
       setRawMarkdown(newRaw);
       saveFile(newRaw);
     },
@@ -339,6 +348,7 @@ After you're done, give me a brief summary:
     html,
     missingAnchors,
     commentCounts,
+    resolvedCommentCounts,
     commentCount,
     updateAndSave,
     handleAddComment,

@@ -20,6 +20,7 @@ interface Props {
   tabs: Tab[];
   activeFilePath: string | null;
   commentCounts: Map<string, number>;
+  resolvedCommentCounts?: Map<string, number>;
   onSwitchTab: (path: string) => void;
   onCloseTab: (path: string) => void;
   onOpenFile: () => void;
@@ -206,6 +207,7 @@ export function TabBar({
   tabs,
   activeFilePath,
   commentCounts,
+  resolvedCommentCounts,
   onSwitchTab,
   onCloseTab,
   onOpenFile,
@@ -343,6 +345,7 @@ export function TabBar({
               const isActive = tab.filePath === activeFilePath;
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
               const count = commentCounts.get(tab.filePath) ?? 0;
+              const resolvedCount = resolvedCommentCounts?.get(tab.filePath) ?? 0;
               return (
                 <button
                   key={tab.filePath}
@@ -371,7 +374,7 @@ export function TabBar({
                   title={tab.filePath}
                 >
                   <span className="truncate">{fileName}</span>
-                  {count > 0 && (
+                  {count > 0 ? (
                     <span
                       className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
                         isActive
@@ -381,7 +384,14 @@ export function TabBar({
                     >
                       {count}
                     </span>
-                  )}
+                  ) : resolvedCount > 0 ? (
+                    <span
+                      className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border text-content-muted"
+                      title={`${resolvedCount} resolved`}
+                    >
+                      {resolvedCount}
+                    </span>
+                  ) : null}
                   {tab.error && <span className="w-1.5 h-1.5 rounded-full bg-danger shrink-0" />}
                   <span
                     role="button"
@@ -487,6 +497,7 @@ export function TabBar({
                     const isActive = tab.filePath === activeFilePath;
                     const fileName = getPathBasename(tab.filePath) || tab.filePath;
                     const count = commentCounts.get(tab.filePath) ?? 0;
+                    const resolvedCount = resolvedCommentCounts?.get(tab.filePath) ?? 0;
                     return (
                       <button
                         key={tab.filePath}
@@ -508,7 +519,7 @@ export function TabBar({
                         >
                           {fileName}
                         </span>
-                        {count > 0 && (
+                        {count > 0 ? (
                           <span
                             className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
                               isActive
@@ -518,7 +529,14 @@ export function TabBar({
                           >
                             {count}
                           </span>
-                        )}
+                        ) : resolvedCount > 0 ? (
+                          <span
+                            className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border text-content-muted"
+                            title={`${resolvedCount} resolved`}
+                          >
+                            {resolvedCount}
+                          </span>
+                        ) : null}
                         {tab.error && (
                           <span className="w-1.5 h-1.5 rounded-full bg-danger shrink-0" />
                         )}

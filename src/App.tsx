@@ -266,6 +266,7 @@ export default function App() {
     html,
     missingAnchors,
     commentCounts,
+    resolvedCommentCounts,
     commentCount,
     handleAddComment,
     handleResolve,
@@ -1067,6 +1068,7 @@ export default function App() {
         tabs={tabs}
         activeFilePath={activeFilePath}
         commentCounts={commentCounts}
+        resolvedCommentCounts={resolvedCommentCounts}
         onSwitchTab={switchTab}
         onCloseTab={closeTab}
         onOpenFile={openFilePicker}
