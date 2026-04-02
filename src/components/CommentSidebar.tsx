@@ -408,17 +408,6 @@ export function CommentSidebar({
                 Clear Resolved
               </ActionButton>
             )}
-            <ActionButton
-              intent="danger"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmDeleteAll(true);
-              }}
-              title="Delete all comments"
-            >
-              Delete All
-            </ActionButton>
           </div>
         )}
       </div>
