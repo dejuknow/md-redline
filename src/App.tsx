@@ -11,6 +11,7 @@ import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
+import { usePageVisible } from './hooks/usePageVisible';
 import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import { parseComments } from './lib/comment-parser';
@@ -87,6 +88,7 @@ export default function App() {
   const { settings } = useSettings();
   const { theme, setTheme } = useThemePersistence();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
+  const pageVisible = usePageVisible();
   const {
     explorerVisible,
     setExplorerVisible,
@@ -433,11 +435,14 @@ export default function App() {
     .join('\0');
 
   useEffect(() => {
+    if (!pageVisible) return;
     const paths = backgroundPathsKey ? backgroundPathsKey.split('\0') : [];
     if (paths.length === 0) return;
 
     // Single multiplexed SSE connection for all background tabs to avoid
     // exhausting the browser's per-origin HTTP/1.1 connection limit (6).
+    // Also closed when the browser tab is hidden so multiple browser tabs
+    // to the same server don't exhaust the limit.
     const params = paths.map(p => `path=${encodeURIComponent(p)}`).join('&');
     const es = new EventSource(`/api/watch?${params}`);
     es.addEventListener('change', (e) => {
@@ -450,7 +455,21 @@ export default function App() {
     });
 
     return () => es.close();
-  }, [backgroundPathsKey, updateTab]);
+  }, [backgroundPathsKey, pageVisible, updateTab]);
+
+  // When the browser tab becomes visible again, reload the active file
+  // to catch any changes that were missed while SSE was disconnected.
+  const wasHiddenRef = useRef(false);
+  useEffect(() => {
+    if (!pageVisible) {
+      wasHiddenRef.current = true;
+      return;
+    }
+    if (wasHiddenRef.current) {
+      wasHiddenRef.current = false;
+      reloadFile();
+    }
+  }, [pageVisible, reloadFile]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
