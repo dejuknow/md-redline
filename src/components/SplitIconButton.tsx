@@ -95,7 +95,7 @@ export function SplitIconButton({
         onClick={onClick}
         title={title}
         data-testid={testId}
-        className={`p-1 rounded-l ${baseClasses} ${chevronHover ? v.coordinated : stateClass}`}
+        className={`p-1 rounded-l ${baseClasses} ${open || chevronHover ? v.coordinated : stateClass}`}
       >
         <span className="block w-3.5 h-3.5">{icon}</span>
       </button>
@@ -112,7 +112,7 @@ export function SplitIconButton({
         onMouseLeave={() => setChevronHover(false)}
         title={chevronTitle}
         data-testid={chevronTestId ?? (testId ? `${testId}-chevron` : undefined)}
-        className={`pl-0 pr-0.5 self-stretch flex items-center rounded-r ${baseClasses} ${
+        className={`px-0.5 self-stretch flex items-center rounded-r ${baseClasses} ${
           open ? v.coordinated : 'text-content-muted hover:text-content-secondary hover:bg-tint'
         }`}
       >
