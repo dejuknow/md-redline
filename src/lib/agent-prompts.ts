@@ -42,6 +42,10 @@ The JSON contains these fields:
 
 Whenever you add a reply to a comment's \`replies\` array, set the \`"author"\` field to your own tool or model name (for example \`"Claude"\`, \`"Codex"\`, or \`"Gemini CLI"\`). Do not use a generic name like \`"Agent"\`.
 
+## Important: edit the original files
+
+You MUST edit the files at the exact paths listed above. Do NOT copy them to a different location, do NOT create new files. If you cannot access a file at its given path (e.g. workspace restrictions), stop and tell me immediately instead of working around it.
+
 ## What to do
 
 1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
