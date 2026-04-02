@@ -72,12 +72,13 @@ test.describe('Diff overlay', () => {
     await expect(toggleBtn(page, 'diff')).toBeVisible();
   });
 
-  test('diff toggle shows "No changes" when content matches snapshot', async ({ page, context }) => {
+  test('diff auto-enables on raw mode entry and shows "No changes" when content matches snapshot', async ({ page, context }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    await toggleBtn(page, 'diff').click();
+    // Diff should auto-enable when entering raw mode with a snapshot
+    await expectActive(toggleBtn(page, 'diff'));
     await expect(page.getByText('No changes yet')).toBeVisible();
   });
 
@@ -145,10 +146,13 @@ test.describe('Diff overlay', () => {
 
     const diffBtn = toggleBtn(page, 'diff');
 
-    await diffBtn.click();
+    // Diff is auto-enabled on raw mode entry; "No changes" shows
+    await expectActive(diffBtn);
     await expect(page.getByText('No changes yet')).toBeVisible();
 
+    // Toggle off — should stay in raw view without diff
     await diffBtn.click();
+    await expectInactive(diffBtn);
     await expect(page.locator('.raw-view')).toBeVisible();
     await expect(page.getByText('No changes yet')).not.toBeVisible();
   });

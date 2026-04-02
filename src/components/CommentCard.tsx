@@ -190,7 +190,7 @@ export const CommentCard = memo(function CommentCard({
         isActive
           ? 'border-primary-border bg-primary-bg shadow-sm ring-1 ring-primary-ring'
           : isResolved
-            ? 'border-border-subtle bg-surface-secondary opacity-60'
+            ? 'border-border bg-surface-secondary opacity-60'
             : 'border-border-subtle bg-surface hover:border-content-faint hover:shadow-sm'
       }`}
       onClick={() => onActivate(comment.id)}

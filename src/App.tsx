@@ -436,7 +436,7 @@ export default function App() {
           setDiffPending(true);
         }
       },
-      [setRawMarkdown, setViewMode, settings.enableResolve, showToast],
+      [setDiffEnabled, setRawMarkdown, setViewMode, settings.enableResolve, showToast],
     ),
   });
 
@@ -1114,7 +1114,13 @@ export default function App() {
         enableResolve={settings.enableResolve}
         onViewModeChange={(mode) => {
           setViewMode(mode);
-          if (mode === 'raw') clearSelection();
+          if (mode === 'raw') {
+            clearSelection();
+            if (currentSnapshot) {
+              setDiffEnabled(true);
+              setDiffPending(false);
+            }
+          }
           if (mode === 'rendered') setDiffEnabled(false);
         }}
         onSearch={() => {
@@ -1143,7 +1149,7 @@ export default function App() {
               aria-hidden={!explorerVisible}
             >
               {/* Tab bar */}
-              <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
+              <div className="h-10 flex items-center justify-between pl-1 pr-2 shrink-0">
                 <div className="flex items-center gap-0.5">
                   <button
                     onClick={() => setLeftPanelView('explorer')}
@@ -1316,7 +1322,7 @@ export default function App() {
             style={sidebarVisible ? { width: sidebarWidth } : undefined}
           >
             <div className="h-full flex flex-col min-w-0">
-              <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
+              <div className="h-10 flex items-center justify-between pl-1 pr-2 shrink-0">
                 <div className="flex items-center gap-0.5">
                   <h2 className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
                     <svg
