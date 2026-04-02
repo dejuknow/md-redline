@@ -51,8 +51,8 @@ export function FileOpener({
       )
     : recentFiles;
 
-  // Items: recent files + "System file picker..."
-  const SYSTEM_INDEX = filtered.length;
+  // Items: "System file picker..." + recent files
+  const SYSTEM_INDEX = 0;
   const itemCount = filtered.length + 1;
 
   useEffect(() => {
@@ -100,10 +100,10 @@ export function FileOpener({
 
   const handleSelect = useCallback(
     (index: number) => {
-      if (index < filtered.length) {
-        handleOpen(filtered[index].path);
-      } else if (index === SYSTEM_INDEX) {
+      if (index === SYSTEM_INDEX) {
         handleSystemPicker();
+      } else if (index > SYSTEM_INDEX && index <= filtered.length) {
+        handleOpen(filtered[index - 1].path);
       }
     },
     [filtered, SYSTEM_INDEX, handleOpen, handleSystemPicker],
@@ -178,6 +178,38 @@ export function FileOpener({
 
         {/* List */}
         <div ref={listRef} className="max-h-80 overflow-y-auto py-1">
+          {/* Actions */}
+          <div className={filtered.length > 0 ? 'border-b border-border-subtle mb-1' : ''}>
+            <button
+              data-selected={selectedIndex === SYSTEM_INDEX}
+              onClick={handleSystemPicker}
+              onMouseMove={() => {
+                if (isKeyboardNav) setIsKeyboardNav(false);
+                else setSelectedIndex(SYSTEM_INDEX);
+              }}
+              className={`w-full text-left px-4 py-2.5 flex items-center gap-3 text-sm transition-colors ${
+                selectedIndex === SYSTEM_INDEX
+                  ? 'bg-primary-bg text-primary-text'
+                  : 'text-content hover:bg-tint'
+              }`}
+            >
+              <svg
+                className={`w-4 h-4 shrink-0 ${selectedIndex === SYSTEM_INDEX ? 'text-primary-text' : 'text-content-muted'}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
+                />
+              </svg>
+              System file picker...
+            </button>
+          </div>
+
           {/* Recent files */}
           {filtered.length > 0 && (
             <>
@@ -196,7 +228,8 @@ export function FileOpener({
                 </button>
               </div>
               {filtered.map((file, i) => {
-                const isSelected = i === selectedIndex;
+                const itemIndex = i + 1;
+                const isSelected = itemIndex === selectedIndex;
                 const isActive = file.path === activeFilePath;
                 return (
                   <button
@@ -205,7 +238,7 @@ export function FileOpener({
                     onClick={() => handleOpen(file.path)}
                     onMouseMove={() => {
                       if (isKeyboardNav) setIsKeyboardNav(false);
-                      else setSelectedIndex(i);
+                      else setSelectedIndex(itemIndex);
                     }}
                     className={`w-full text-left px-4 py-2 flex items-center gap-3 transition-colors ${
                       isSelected
@@ -258,38 +291,6 @@ export function FileOpener({
               Press <kbd className="px-1 py-0.5 rounded border border-border bg-surface text-[10px]">Enter</kbd> to open <span className="text-content font-medium">{query}</span>
             </div>
           )}
-
-          {/* Actions */}
-          <div className={filtered.length > 0 ? 'border-t border-border-subtle mt-1' : ''}>
-            <button
-              data-selected={selectedIndex === SYSTEM_INDEX}
-              onClick={handleSystemPicker}
-              onMouseMove={() => {
-                if (isKeyboardNav) setIsKeyboardNav(false);
-                else setSelectedIndex(SYSTEM_INDEX);
-              }}
-              className={`w-full text-left px-4 py-2.5 flex items-center gap-3 text-sm transition-colors ${
-                selectedIndex === SYSTEM_INDEX
-                  ? 'bg-primary-bg text-primary-text'
-                  : 'text-content hover:bg-tint'
-              }`}
-            >
-              <svg
-                className={`w-4 h-4 shrink-0 ${selectedIndex === SYSTEM_INDEX ? 'text-primary-text' : 'text-content-muted'}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
-                />
-              </svg>
-              System file picker...
-            </button>
-          </div>
         </div>
       </div>
     </div>
