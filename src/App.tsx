@@ -404,7 +404,7 @@ export default function App() {
             if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
             const diffAction =
               cleanContentChanged && currentSnapshotRef.current
-                ? { label: 'View diff', onClick: () => setViewMode('diff') }
+                ? { label: 'View diff', onClick: () => { setViewMode('diff'); setDiffPending(false); } }
                 : undefined;
             showToast(`${parts.join(', ')} externally`, diffAction);
           }

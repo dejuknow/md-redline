@@ -100,6 +100,10 @@ test.describe('Diff view', () => {
     // Click the action button to switch to diff view
     await viewDiffBtn.click();
     await expect(page.locator('button[title="Switch to rendered view"]')).toBeVisible();
+
+    // Badge should be cleared after using the toast action
+    const badge = page.locator('button[title="Switch to rendered view"] .animate-pulse');
+    await expect(badge).not.toBeVisible();
   });
 
   test('diff button shows pending indicator after external change', async ({ page, context }) => {
