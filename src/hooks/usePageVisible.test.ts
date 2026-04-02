@@ -7,11 +7,9 @@ import { usePageVisible } from './usePageVisible';
 
 let root: Root;
 let container: HTMLDivElement;
-let lastValue: boolean | undefined;
 
 function TestComponent() {
-  lastValue = usePageVisible();
-  return null;
+  return createElement('div', undefined, usePageVisible() ? 'visible' : 'hidden');
 }
 
 function setVisibility(state: DocumentVisibilityState) {
@@ -26,7 +24,6 @@ function setVisibility(state: DocumentVisibilityState) {
 }
 
 beforeEach(() => {
-  lastValue = undefined;
   Object.defineProperty(document, 'visibilityState', {
     value: 'visible',
     writable: true,
@@ -45,21 +42,21 @@ afterEach(() => {
 describe('usePageVisible', () => {
   it('returns true when the page is visible', () => {
     act(() => root.render(createElement(TestComponent)));
-    expect(lastValue).toBe(true);
+    expect(container.textContent).toBe('visible');
   });
 
   it('returns false after the page becomes hidden', () => {
     act(() => root.render(createElement(TestComponent)));
     setVisibility('hidden');
-    expect(lastValue).toBe(false);
+    expect(container.textContent).toBe('hidden');
   });
 
   it('returns true again when the page becomes visible', () => {
     act(() => root.render(createElement(TestComponent)));
     setVisibility('hidden');
-    expect(lastValue).toBe(false);
+    expect(container.textContent).toBe('hidden');
     setVisibility('visible');
-    expect(lastValue).toBe(true);
+    expect(container.textContent).toBe('visible');
   });
 
   it('cleans up the event listener on unmount', () => {
