@@ -435,20 +435,20 @@ export default function App() {
     const paths = backgroundPathsKey ? backgroundPathsKey.split('\0') : [];
     if (paths.length === 0) return;
 
-    const sources = paths.map((path) => {
-      const es = new EventSource(`/api/watch?path=${encodeURIComponent(path)}`);
-      es.addEventListener('change', (e) => {
-        try {
-          const { content } = JSON.parse(e.data);
-          updateTab(path, { rawMarkdown: content });
-        } catch {
-          // ignore malformed events
-        }
-      });
-      return es;
+    // Single multiplexed SSE connection for all background tabs to avoid
+    // exhausting the browser's per-origin HTTP/1.1 connection limit (6).
+    const params = paths.map(p => `path=${encodeURIComponent(p)}`).join('&');
+    const es = new EventSource(`/api/watch?${params}`);
+    es.addEventListener('change', (e) => {
+      try {
+        const { content, path } = JSON.parse(e.data);
+        updateTab(path, { rawMarkdown: content });
+      } catch {
+        // ignore malformed events
+      }
     });
 
-    return () => sources.forEach((es) => es.close());
+    return () => es.close();
   }, [backgroundPathsKey, updateTab]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session

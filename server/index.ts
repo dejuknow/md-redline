@@ -214,11 +214,20 @@ export function createApp(options: CreateAppOptions = {}) {
         return c.json({ error: 'Only .md files are supported' }, 400);
       }
       // Serialize writes to the same path to prevent concurrent write races
+      const commentCount = (body.content.match(/@comment\{/g) ?? []).length;
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
       const currentWrite = prevLock
         .then(async () => {
           await writeFile(resolved, body.content, 'utf-8');
           lastWrittenContent.set(resolved, body.content);
+          // Verify write persisted
+          const readBack = await readFile(resolved, 'utf-8');
+          const readBackComments = (readBack.match(/@comment\{/g) ?? []).length;
+          if (readBackComments !== commentCount) {
+            console.error(`[SAVE VERIFY FAIL] Wrote ${commentCount} comments but read back ${readBackComments} for ${resolved}`);
+          } else {
+            console.log(`[SAVE OK] ${resolved} — ${commentCount} comment(s), ${body.content.length} bytes`);
+          }
         })
         .finally(() => {
           if (writeLocks.get(resolved) === currentWrite) {
@@ -376,108 +385,132 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   app.get('/api/watch', async (c) => {
-    const path = c.req.query('path');
-    if (!path) return c.json({ error: 'path query parameter is required' }, 400);
+    // Accept one or many paths: ?path=a&path=b (single SSE for all)
+    const paths = c.req.queries('path') ?? [];
+    if (paths.length === 0) return c.json({ error: 'path query parameter is required' }, 400);
 
-    let resolved: string;
-    try {
-      resolved = await resolveAndValidate(path);
-      if (!isMdFile(resolved)) return c.json({ error: 'Only .md files are supported' }, 400);
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Access denied')) {
-        return c.json({ error: err.message }, 403);
+    const resolvedPaths: string[] = [];
+    for (const p of paths) {
+      try {
+        const resolved = await resolveAndValidate(p);
+        if (!isMdFile(resolved)) {
+          if (paths.length === 1) return c.json({ error: 'Only .md files are supported' }, 400);
+          continue;
+        }
+        resolvedPaths.push(resolved);
+      } catch (err) {
+        if (paths.length === 1) {
+          if (err instanceof Error && err.message.startsWith('Access denied')) {
+            return c.json({ error: err.message }, 403);
+          }
+          return c.json({ error: 'File not found' }, 404);
+        }
       }
-      return c.json({ error: 'File not found' }, 404);
+    }
+
+    if (resolvedPaths.length === 0) {
+      return c.json({ error: 'No valid .md files to watch' }, 400);
     }
 
     const stream = new TransformStream();
     const writer = stream.writable.getWriter();
 
-    if (!fileWatchers.has(resolved)) {
-      const clients = new Set<WritableStreamDefaultWriter>();
-      let debounce: ReturnType<typeof setTimeout> | null = null;
-      let lastBroadcast: string | null = null;
+    for (const resolved of resolvedPaths) {
+      if (!fileWatchers.has(resolved)) {
+        const clients = new Set<WritableStreamDefaultWriter>();
+        let debounce: ReturnType<typeof setTimeout> | null = null;
+        let lastBroadcast: string | null = null;
 
-      const broadcastChange = async () => {
-        try {
-          const content = await readFile(resolved, 'utf-8');
-          if (lastWrittenContent.get(resolved) === content) return;
-          if (content === lastBroadcast) return;
-          lastWrittenContent.delete(resolved);
-          lastBroadcast = content;
-          const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
+        const broadcastChange = async () => {
+          try {
+            const content = await readFile(resolved, 'utf-8');
+            if (lastWrittenContent.get(resolved) === content) return;
+            if (content === lastBroadcast) return;
+            const extComments = (content.match(/@comment\{/g) ?? []).length;
+            const prevComments = (lastBroadcast?.match(/@comment\{/g) ?? []).length;
+            console.warn(`[EXTERNAL CHANGE] ${resolved} — ${extComments} comment(s) (was ${prevComments})`);
+            lastWrittenContent.delete(resolved);
+            lastBroadcast = content;
+            const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
+            for (const client of clients) {
+              client.write(frame).catch(() => {});
+            }
+          } catch {
+            const frame = sseFrame(
+              'error',
+              JSON.stringify({ path: resolved, reason: 'file_gone' }),
+            );
+            for (const client of clients) {
+              client.write(frame).catch(() => {});
+            }
+            cleanUpWatcher();
+          }
+        };
+
+        const onFsEvent = (eventType: string) => {
+          if (debounce) clearTimeout(debounce);
+          debounce = setTimeout(async () => {
+            await broadcastChange();
+            // On macOS, fs.watch uses kqueue which tracks by file descriptor.
+            // Atomic writes (rename-over) create a new inode, leaving the old
+            // watcher stale.  Re-attach after every rename so we keep watching
+            // the current file.
+            if (eventType === 'rename') {
+              reattachWatcher();
+            }
+          }, 150);
+        };
+
+        let activeWatcher = watch(resolved, onFsEvent);
+
+        const reattachWatcher = () => {
+          activeWatcher.close();
+          try {
+            activeWatcher = watch(resolved, onFsEvent);
+            activeWatcher.on('error', cleanUpWatcher);
+            const entry = fileWatchers.get(resolved);
+            if (entry) entry.watcher = activeWatcher;
+          } catch {
+            // File deleted — clean up entirely
+            cleanUpWatcher();
+          }
+        };
+
+        const cleanUpWatcher = () => {
+          if (debounce) {
+            clearTimeout(debounce);
+            debounce = null;
+          }
           for (const client of clients) {
-            client.write(frame).catch(() => {});
+            client.close().catch(() => {});
           }
-        } catch {
-          const frame = sseFrame(
-            'error',
-            JSON.stringify({ path: resolved, reason: 'file_gone' }),
-          );
-          for (const client of clients) {
-            client.write(frame).catch(() => {});
-          }
-          cleanUpWatcher();
-        }
-      };
+          clients.clear();
+          activeWatcher.close();
+          fileWatchers.delete(resolved);
+        };
 
-      const onFsEvent = (eventType: string) => {
-        if (debounce) clearTimeout(debounce);
-        debounce = setTimeout(async () => {
-          await broadcastChange();
-          // On macOS, fs.watch uses kqueue which tracks by file descriptor.
-          // Atomic writes (rename-over) create a new inode, leaving the old
-          // watcher stale.  Re-attach after every rename so we keep watching
-          // the current file.
-          if (eventType === 'rename') {
-            reattachWatcher();
-          }
-        }, 150);
-      };
+        activeWatcher.on('error', cleanUpWatcher);
+        fileWatchers.set(resolved, { watcher: activeWatcher, clients, cleanup: cleanUpWatcher });
+      }
 
-      let activeWatcher = watch(resolved, onFsEvent);
-
-      const reattachWatcher = () => {
-        activeWatcher.close();
-        try {
-          activeWatcher = watch(resolved, onFsEvent);
-          activeWatcher.on('error', cleanUpWatcher);
-          const entry = fileWatchers.get(resolved);
-          if (entry) entry.watcher = activeWatcher;
-        } catch {
-          // File deleted — clean up entirely
-          cleanUpWatcher();
-        }
-      };
-
-      const cleanUpWatcher = () => {
-        if (debounce) {
-          clearTimeout(debounce);
-          debounce = null;
-        }
-        for (const client of clients) {
-          client.close().catch(() => {});
-        }
-        clients.clear();
-        activeWatcher.close();
-        fileWatchers.delete(resolved);
-      };
-
-      activeWatcher.on('error', cleanUpWatcher);
-      fileWatchers.set(resolved, { watcher: activeWatcher, clients, cleanup: cleanUpWatcher });
+      const entry = fileWatchers.get(resolved)!;
+      entry.clients.add(writer);
     }
 
-    const entry = fileWatchers.get(resolved)!;
-    entry.clients.add(writer);
-
-    writer.write(sseFrame('connected', JSON.stringify({ path: resolved }))).catch(() => {});
+    for (const resolved of resolvedPaths) {
+      writer.write(sseFrame('connected', JSON.stringify({ path: resolved }))).catch(() => {});
+    }
 
     c.req.raw.signal.addEventListener('abort', () => {
-      entry.clients.delete(writer);
-      writer.close().catch(() => {});
-      if (entry.clients.size === 0) {
-        entry.cleanup();
+      for (const resolved of resolvedPaths) {
+        const entry = fileWatchers.get(resolved);
+        if (!entry) continue;
+        entry.clients.delete(writer);
+        if (entry.clients.size === 0) {
+          entry.cleanup();
+        }
       }
+      writer.close().catch(() => {});
     });
 
     return new Response(stream.readable, {

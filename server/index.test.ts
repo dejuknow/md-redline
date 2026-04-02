@@ -509,6 +509,133 @@ describe('/api/browse', () => {
   });
 });
 
+describe('/api/watch', () => {
+  /** Read the initial SSE frames from a streaming response (the stream never closes). */
+  async function readSseFrames(response: Response): Promise<string> {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    // Read available chunks with a short deadline — "connected" frames are written synchronously.
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<{ done: true; value: undefined }>((r) =>
+          setTimeout(() => r({ done: true, value: undefined }), 100),
+        ),
+      ]);
+      if (result.value) text += decoder.decode(result.value, { stream: true });
+      if (result.done) break;
+    }
+    reader.cancel().catch(() => {});
+    return text;
+  }
+
+  function parseSseEvents(text: string) {
+    return text
+      .split('\n\n')
+      .filter(Boolean)
+      .map((block) => {
+        const eventMatch = block.match(/^event: (.+)$/m);
+        const dataLines = block
+          .split('\n')
+          .filter((l) => l.startsWith('data: '))
+          .map((l) => l.slice(6));
+        return {
+          event: eventMatch?.[1] ?? '',
+          data: dataLines.join('\n'),
+        };
+      });
+  }
+
+  it('returns 400 when no path is provided', async () => {
+    const { response, body } = await requestJson(app, '/api/watch');
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'path query parameter is required' });
+  });
+
+  it('returns 400 for a single non-markdown file', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/watch?path=${encodeURIComponent(textFile)}`,
+    );
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'Only .md files are supported' });
+  });
+
+  it('returns 403 for a single file outside allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/watch?path=${encodeURIComponent(externalFile)}`,
+    );
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
+  });
+
+  it('opens an SSE stream for a single valid file', async () => {
+    const response = await app.request(
+      `http://localhost/api/watch?path=${encodeURIComponent(docsFile)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('text/event-stream');
+
+    const text = await readSseFrames(response);
+    const events = parseSseEvents(text);
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events[0].event).toBe('connected');
+    expect(JSON.parse(events[0].data)).toEqual({ path: docsFile });
+  });
+
+  it('opens a multiplexed SSE stream for multiple valid files', async () => {
+    const response = await app.request(
+      `http://localhost/api/watch?path=${encodeURIComponent(docsFile)}&path=${encodeURIComponent(rootFile)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('text/event-stream');
+
+    const text = await readSseFrames(response);
+    const events = parseSseEvents(text);
+    const connectedPaths = events
+      .filter((e) => e.event === 'connected')
+      .map((e) => JSON.parse(e.data).path);
+    expect(connectedPaths).toContain(docsFile);
+    expect(connectedPaths).toContain(rootFile);
+  });
+
+  it('skips invalid paths silently in a multi-path request', async () => {
+    const badPath = join(externalDir, 'outside.md');
+    const response = await app.request(
+      `http://localhost/api/watch?path=${encodeURIComponent(docsFile)}&path=${encodeURIComponent(badPath)}`,
+    );
+
+    expect(response.status).toBe(200);
+
+    const text = await readSseFrames(response);
+    const events = parseSseEvents(text);
+    const connectedPaths = events
+      .filter((e) => e.event === 'connected')
+      .map((e) => JSON.parse(e.data).path);
+    expect(connectedPaths).toEqual([docsFile]);
+  });
+
+  it('returns 400 when all paths in a multi-path request are invalid', async () => {
+    const bad1 = join(externalDir, 'outside.md');
+    const bad2 = join(externalDir, 'also-outside.md');
+    const { response, body } = await requestJson(
+      app,
+      `/api/watch?path=${encodeURIComponent(bad1)}&path=${encodeURIComponent(bad2)}`,
+    );
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'No valid .md files to watch' });
+  });
+});
+
 describe('/api/platform', () => {
   it('returns the injected platform value', async () => {
     const { response, body } = await requestJson(app, '/api/platform');

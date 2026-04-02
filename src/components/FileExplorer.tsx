@@ -51,7 +51,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
       }
       setData(result);
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Failed to browse');
     } finally {
       if (!controller.signal.aborted) setLoading(false);
@@ -60,6 +60,7 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
 
   useEffect(() => {
     browse(initialDir);
+    return () => { abortRef.current?.abort(); };
   }, [browse, initialDir]);
 
   const dirName = getPathBasename(data?.dir || '') || data?.dir || 'Files';
