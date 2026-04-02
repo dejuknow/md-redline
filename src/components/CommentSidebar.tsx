@@ -353,13 +353,12 @@ export function CommentSidebar({
       </div>
 
       {/* Footer: summary + bulk actions */}
-      <div className="border-t border-border px-4 py-2 bg-surface-secondary">
+      <div className="border-t border-border px-4 py-2 bg-surface-secondary flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-content-secondary">
+          <span className="text-xs text-content-secondary whitespace-nowrap">
             {resolveEnabled ? (
               <>
-                {openCount} open
-                {resolvedCount > 0 && ` \u00b7 ${resolvedCount} resolved`}
+                {openCount} open {'\u00b7'} {resolvedCount} resolved
               </>
             ) : (
               <>
@@ -367,53 +366,61 @@ export function CommentSidebar({
               </>
             )}
           </span>
-          <div className="flex gap-1.5">
-            {resolveEnabled ? (
-              <>
-                {openCount > 0 && onBulkResolve && (
-                  <ActionButton
-                    intent="success"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onBulkResolve();
-                    }}
-                    title="Resolve all open comments"
-                  >
-                    Resolve All
-                  </ActionButton>
-                )}
-                {resolvedCount > 0 && onBulkDeleteResolved && (
-                  <ActionButton
-                    intent="danger"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onBulkDeleteResolved();
-                    }}
-                    title="Delete all resolved comments"
-                  >
-                    Clear Resolved
-                  </ActionButton>
-                )}
-              </>
-            ) : (
-              comments.length > 0 && (
-                <ActionButton
-                  intent="danger"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmDeleteAll(true);
-                  }}
-                  title="Delete all comments"
-                >
-                  Delete All
-                </ActionButton>
-              )
-            )}
-          </div>
+          {!resolveEnabled && comments.length > 0 && (
+            <ActionButton
+              intent="danger"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDeleteAll(true);
+              }}
+              title="Delete all comments"
+            >
+              Delete All
+            </ActionButton>
+          )}
         </div>
+        {resolveEnabled && comments.length > 0 && (
+          <div className="flex gap-1.5 justify-end">
+            {openCount > 0 && onBulkResolve && (
+              <ActionButton
+                intent="success"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBulkResolve();
+                }}
+                title="Resolve all open comments"
+              >
+                Resolve All
+              </ActionButton>
+            )}
+            {resolvedCount > 0 && onBulkDeleteResolved && (
+              <ActionButton
+                intent="danger"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBulkDeleteResolved();
+                }}
+                title="Delete all resolved comments"
+              >
+                Clear Resolved
+              </ActionButton>
+            )}
+            <ActionButton
+              intent="danger"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDeleteAll(true);
+              }}
+              title="Delete all comments"
+            >
+              Delete All
+            </ActionButton>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
