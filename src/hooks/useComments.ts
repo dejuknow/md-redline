@@ -26,6 +26,7 @@ import { getEffectiveStatus } from '../types';
 import { renderMarkdown } from '../markdown/pipeline';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
+import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 
 interface TabInfo {
   filePath: string;
@@ -230,53 +231,11 @@ export function useComments(params: UseCommentsParams) {
   const handleCopyAgentPrompt = useCallback(
     (filePaths: string[]) => {
       if (filePaths.length === 0) return;
-
-      const afterAction = enableResolve
-        ? 'After addressing a comment, **resolve it** by setting `"status":"resolved"` and `"resolved":true` in the marker JSON'
-        : 'After addressing a comment, **remove the entire `<!-- @comment{...} -->` marker** from the file';
-
-      const isSingle = filePaths.length === 1;
-      const fileRef = isSingle ? filePaths[0] : 'the files listed below';
-      const fileList = isSingle
-        ? ''
-        : '\n\n## Files to review\n' +
-          filePaths
-            .map((p, i) => {
-              const count = commentCounts.get(p) ?? 0;
-              return `${i + 1}. ${p} (${count} comment${count !== 1 ? 's' : ''})`;
-            })
-            .join('\n');
-
-      const prompt = `I've left review comments in ${fileRef} using inline comment markers. Please read ${isSingle ? 'the file' : 'each file'} and address them.${fileList}
-
-## Comment format
-
-Comments are embedded as HTML comment markers: \`<!-- @comment{JSON} -->\`
-Each marker is placed **immediately before** the text it refers to (the "anchor").
-The JSON contains these fields:
-- \`anchor\`: the exact text the comment refers to
-- \`text\`: my feedback — this is what I need you to address
-- \`replies\`: threaded discussion — read for additional context
-
-## What to do
-
-1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
-2. For each comment, read the \`text\` field and address the feedback by editing the document
-${
-  enableResolve
-    ? `3. If a comment is a question or doesn't require a document edit, **add a reply** to the \`replies\` array in the marker JSON instead: \`"replies":[{"id":"<unique-id>","text":"your answer","author":"Agent","timestamp":"<ISO-8601>"}]\` (append to any existing replies)
-4. ${afterAction}
-5. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`
-    : `3. ${afterAction}
-4. If a comment is unclear or you're unsure how to address it, leave the marker in place and ask me about it`
-}
-
-## How to respond
-
-After you're done, give me a brief summary:
-- How many comments you addressed${isSingle ? '' : ' (grouped by file)'}
-- For each one, a one-line description of what you ${enableResolve ? 'changed or replied' : 'changed'}
-- Any comments you left in place and why`;
+      const prompt = buildAddressCommentsPrompt({
+        filePaths,
+        commentCounts,
+        enableResolve,
+      });
 
       const fileCount = filePaths.length;
       navigator.clipboard.writeText(prompt).then(
