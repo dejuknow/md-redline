@@ -45,11 +45,19 @@ const tabActionButtonClass =
 
 const handOffIcon = (
   <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
-    />
+    {/* antenna */}
+    <line x1="12" y1="1.5" x2="12" y2="4.5" strokeLinecap="round" />
+    <circle cx="12" cy="1.5" r="1" fill="currentColor" stroke="none" />
+    {/* head */}
+    <rect x="3" y="4.5" width="18" height="17" rx="3" strokeLinejoin="round" />
+    {/* eyes */}
+    <circle cx="8" cy="11.5" r="2" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="11.5" r="2" fill="currentColor" stroke="none" />
+    {/* mouth */}
+    <line x1="8.5" y1="17.5" x2="15.5" y2="17.5" strokeLinecap="round" />
+    {/* ears */}
+    <line x1="0.5" y1="13" x2="3" y2="13" strokeLinecap="round" />
+    <line x1="21" y1="13" x2="23.5" y2="13" strokeLinecap="round" />
   </svg>
 );
 
