@@ -51,7 +51,7 @@ export function SearchBar({ query, onQueryChange, matchCount, activeIndex, onNex
           {matchCount > 0 ? `${activeIndex + 1} of ${matchCount}` : 'No results'}
         </span>
       )}
-      <div className="flex items-center gap-0.5 border-l border-border pl-1.5 ml-0.5">
+      <div className="flex items-center gap-0.5 border-l border-border-subtle pl-1.5 ml-0.5">
         <button
           onClick={onPrev}
           disabled={matchCount === 0}

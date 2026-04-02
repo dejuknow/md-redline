@@ -248,7 +248,7 @@ export function CommentSidebar({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search comments..."
-          className="w-full text-xs border border-border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
+          className="w-full text-xs border border-border-subtle rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
         />
       </div>
 
@@ -296,11 +296,11 @@ export function CommentSidebar({
 
         {resolveEnabled && resolvedComments.length > 0 && filter !== 'resolved' && (
           <div className="flex items-center gap-2 pt-3 pb-1">
-            <div className="h-px flex-1 bg-border" />
+            <div className="h-px flex-1 bg-border-subtle" />
             <span className="text-xs text-content-muted font-medium">
               Resolved ({resolvedComments.length})
             </span>
-            <div className="h-px flex-1 bg-border" />
+            <div className="h-px flex-1 bg-border-subtle" />
           </div>
         )}
         {resolvedComments.map((comment) => (

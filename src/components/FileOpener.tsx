@@ -171,7 +171,7 @@ export function FileOpener({
             placeholder="File path or name..."
             className="flex-1 px-3 py-3 text-sm bg-transparent text-content focus:outline-none placeholder:text-content-muted"
           />
-          <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-border text-content-muted bg-surface">
+          <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-border-subtle text-content-muted bg-surface">
             esc
           </kbd>
         </div>
@@ -288,7 +288,7 @@ export function FileOpener({
           {/* Path hint when typing a path */}
           {query && looksLikeDirectPath(query) && (
             <div className="px-4 py-3 text-xs text-content-muted border-b border-border-subtle">
-              Press <kbd className="px-1 py-0.5 rounded border border-border bg-surface text-[10px]">Enter</kbd> to open <span className="text-content font-medium">{query}</span>
+              Press <kbd className="px-1 py-0.5 rounded border border-border-subtle bg-surface text-[10px]">Enter</kbd> to open <span className="text-content font-medium">{query}</span>
             </div>
           )}
         </div>

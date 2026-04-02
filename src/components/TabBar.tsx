@@ -178,7 +178,7 @@ function HandOffButton({
                 })}
 
                 {/* Action button */}
-                <div className="border-t border-border mt-1.5 pt-1.5 px-3 pb-1">
+                <div className="border-t border-border-subtle mt-1.5 pt-1.5 px-3 pb-1">
                   <button
                     onClick={handleCopySelected}
                     disabled={selected.size === 0}
@@ -382,7 +382,7 @@ export function TabBar({
                     </span>
                   ) : resolvedCount > 0 ? (
                     <span
-                      className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border text-content-muted"
+                      className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border-subtle text-content-muted"
                       title={`${resolvedCount} resolved`}
                     >
                       {resolvedCount}
@@ -527,7 +527,7 @@ export function TabBar({
                           </span>
                         ) : resolvedCount > 0 ? (
                           <span
-                            className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border text-content-muted"
+                            className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border-subtle text-content-muted"
                             title={`${resolvedCount} resolved`}
                           >
                             {resolvedCount}

@@ -1139,9 +1139,8 @@ export default function App() {
             style={explorerVisible ? { width: explorerWidth } : undefined}
           >
             <div
-              className={`h-full flex flex-col ${explorerVisible ? '' : 'invisible pointer-events-none'}`}
+              className={`h-full flex flex-col min-w-0 ${explorerVisible ? '' : 'invisible pointer-events-none'}`}
               aria-hidden={!explorerVisible}
-              style={{ minWidth: explorerVisible ? explorerWidth : 0 }}
             >
               {/* Tab bar */}
               <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
@@ -1233,7 +1232,7 @@ export default function App() {
           </div>
           {explorerVisible && (
             <div
-              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
               onMouseDown={(e) => onResizeStart('explorer', e)}
             >
               <div className="absolute inset-y-0 -left-1 -right-1" />
@@ -1241,7 +1240,7 @@ export default function App() {
           )}
 
           {/* Markdown viewer */}
-          <div className="flex-1 min-h-0 min-w-0 relative">
+          <div className="flex-1 min-h-0 min-w-0 relative bg-surface panel-center">
             {showSearch && (
               <SearchBar
                 query={searchQuery}
@@ -1304,7 +1303,7 @@ export default function App() {
           {/* Comment sidebar */}
           {sidebarVisible && (
             <div
-              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
               onMouseDown={(e) => onResizeStart('sidebar', e)}
             >
               <div className="absolute inset-y-0 -left-1 -right-1" />
@@ -1316,7 +1315,7 @@ export default function App() {
             } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
             style={sidebarVisible ? { width: sidebarWidth } : undefined}
           >
-            <div className="h-full flex flex-col" style={{ minWidth: sidebarWidth }}>
+            <div className="h-full flex flex-col min-w-0">
               <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
                 <div className="flex items-center gap-0.5">
                   <h2 className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
@@ -1466,13 +1465,13 @@ export default function App() {
       {/* Keyboard shortcuts hint */}
       <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-muted shrink-0">
         <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
             {modKey}+K
           </kbd>{' '}
           Commands
         </span>
         <span className="ml-auto">
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border text-content-secondary font-mono">
+          <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
             ?
           </kbd>{' '}
           Shortcuts

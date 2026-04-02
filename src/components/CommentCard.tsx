@@ -190,8 +190,8 @@ export const CommentCard = memo(function CommentCard({
         isActive
           ? 'border-primary-border bg-primary-bg shadow-sm ring-1 ring-primary-ring'
           : isResolved
-            ? 'border-border bg-surface-secondary opacity-60'
-            : 'border-border bg-surface hover:border-content-faint hover:shadow-sm'
+            ? 'border-border-subtle bg-surface-secondary opacity-60'
+            : 'border-border-subtle bg-surface hover:border-content-faint hover:shadow-sm'
       }`}
       onClick={() => onActivate(comment.id)}
       onContextMenu={(e) => {
@@ -273,7 +273,7 @@ export const CommentCard = memo(function CommentCard({
                 }
               }}
               maxLength={COMMENT_MAX_LENGTH}
-              className="w-full text-sm border border-border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
+              className="w-full text-sm border border-border-subtle rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
               rows={1}
             />
           </div>
@@ -303,8 +303,8 @@ export const CommentCard = memo(function CommentCard({
       </div>
 
       {/* Footer: author, time, actions */}
-      <div className="px-3 pb-2 flex items-center justify-between">
-        <span className="text-xs text-content-muted flex items-center gap-1.5">
+      <div className="px-3 pb-2 flex items-center flex-wrap gap-y-1">
+        <span className="text-xs text-content-muted flex items-center gap-1.5 mr-auto">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
             style={{ backgroundColor: getAuthorColor(comment.author).text }}
@@ -372,7 +372,7 @@ export const CommentCard = memo(function CommentCard({
 
       {/* Replies thread */}
       {replies.length > 0 && (
-        <div className="mx-3 mb-2 border-l-2 border-border pl-3 space-y-2">
+        <div className="mx-3 mb-2 border-l-2 border-border-subtle pl-3 space-y-2">
           {replies.map((reply) => (
             <div key={reply.id} className="group/reply text-xs" data-reply-id={reply.id}>
               {editingReplyId === reply.id ? (
@@ -415,7 +415,7 @@ export const CommentCard = memo(function CommentCard({
                       }
                     }}
                     maxLength={COMMENT_MAX_LENGTH}
-                    className="w-full text-sm border border-border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
+                    className="w-full text-sm border border-border-subtle rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
                     rows={1}
                   />
                 </div>
@@ -476,7 +476,7 @@ export const CommentCard = memo(function CommentCard({
             }}
             placeholder="Write a reply..."
             maxLength={COMMENT_MAX_LENGTH}
-            className="w-full text-xs border border-border rounded-md px-2 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
+            className="w-full text-xs border border-border-subtle rounded-md px-2 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
             rows={1}
           />
           {replyText.length > COMMENT_MAX_LENGTH * 0.8 && (

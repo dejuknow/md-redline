@@ -272,14 +272,14 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                 </label>
 
                 {/* Divider */}
-                <div className="border-t border-border my-4" />
+                <div className="border-t border-border-subtle my-4" />
 
                 {/* Template list header */}
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-sm font-semibold text-content">Templates</h3>
                   <button
                     onClick={handleResetTemplates}
-                    className="text-xs px-2.5 py-1 rounded-md border border-border text-content-secondary hover:bg-tint transition-colors"
+                    className="text-xs px-2.5 py-1 rounded-md border border-border-subtle text-content-secondary hover:bg-tint transition-colors"
                   >
                     Reset to defaults
                   </button>
@@ -306,14 +306,14 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                             value={editLabel}
                             onChange={(e) => setEditLabel(e.target.value)}
                             placeholder="Label"
-                            className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                            className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border-subtle bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                           />
                           <textarea
                             value={editText}
                             onChange={(e) => setEditText(e.target.value)}
                             placeholder="Template text"
                             rows={2}
-                            className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                            className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border-subtle bg-surface text-content resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                           />
                           <div className="flex gap-2 justify-end">
                             <button
@@ -384,7 +384,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       value={newLabel}
                       onChange={(e) => setNewLabel(e.target.value)}
                       placeholder="Label (e.g. Clarify)"
-                      className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border-subtle bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { setAddingNew(false); setNewLabel(''); setNewText(''); }
                       }}
@@ -394,7 +394,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       onChange={(e) => setNewText(e.target.value)}
                       placeholder="Template text (e.g. Please clarify this section.)"
                       rows={2}
-                      className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border bg-surface text-content resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      className="w-full text-sm px-2.5 py-1.5 rounded-md border border-border-subtle bg-surface text-content resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { setAddingNew(false); setNewLabel(''); setNewText(''); }
                         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleAddTemplate(); }
@@ -419,7 +419,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                 ) : (
                   <button
                     onClick={() => { setAddingNew(true); setEditingIndex(null); }}
-                    className="mt-3 w-full text-left px-3 py-2 rounded-lg border border-dashed border-border text-sm text-content-muted hover:text-primary-text hover:border-primary-border hover:bg-tint-primary transition-colors flex items-center gap-2"
+                    className="mt-3 w-full text-left px-3 py-2 rounded-lg border border-dashed border-border-subtle text-sm text-content-muted hover:text-primary-text hover:border-primary-border hover:bg-tint-primary transition-colors flex items-center gap-2"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -450,7 +450,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         (e.target as HTMLInputElement).blur();
                       }
                     }}
-                    className="w-60 text-sm px-3 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    className="w-60 text-sm px-3 py-1.5 rounded-md border border-border-subtle bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     placeholder="Your name"
                   />
                 </div>
@@ -527,7 +527,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         (e.target as HTMLInputElement).blur();
                       }
                     }}
-                    className="w-32 text-sm px-3 py-1.5 rounded-md border border-border bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    className="w-32 text-sm px-3 py-1.5 rounded-md border border-border-subtle bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
                   <span className="text-xs text-content-muted ml-2">characters</span>
                 </div>
@@ -547,7 +547,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                   className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-colors mb-5 flex items-center gap-3 ${
                     theme === 'system'
                       ? 'border-primary bg-primary-bg'
-                      : 'border-border hover:border-primary-border hover:bg-tint'
+                      : 'border-border-subtle hover:border-primary-border hover:bg-tint'
                   }`}
                 >
                   <svg className={`w-5 h-5 ${theme === 'system' ? 'text-primary-text' : 'text-content-muted'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -576,7 +576,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                         theme === t.key
                           ? 'border-primary bg-primary-bg'
-                          : 'border-border hover:border-primary-border hover:bg-tint'
+                          : 'border-border-subtle hover:border-primary-border hover:bg-tint'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
@@ -584,7 +584,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                           {t.colors.map((c, i) => (
                             <div
                               key={i}
-                              className="w-4 h-4 rounded-full border border-border"
+                              className="w-4 h-4 rounded-full border border-border-subtle"
                               style={{ backgroundColor: c }}
                             />
                           ))}
@@ -620,7 +620,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                         theme === t.key
                           ? 'border-primary bg-primary-bg'
-                          : 'border-border hover:border-primary-border hover:bg-tint'
+                          : 'border-border-subtle hover:border-primary-border hover:bg-tint'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
@@ -628,7 +628,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                           {t.colors.map((c, i) => (
                             <div
                               key={i}
-                              className="w-4 h-4 rounded-full border border-border"
+                              className="w-4 h-4 rounded-full border border-border-subtle"
                               style={{ backgroundColor: c }}
                             />
                           ))}

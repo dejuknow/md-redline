@@ -120,7 +120,7 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
                       className="flex items-center justify-between py-1.5"
                     >
                       <span className="text-sm text-content">{shortcut.label}</span>
-                      <kbd className="text-[11px] px-2 py-0.5 rounded border border-border text-content-muted bg-surface font-mono min-w-[2rem] text-center">
+                      <kbd className="text-[11px] px-2 py-0.5 rounded border border-border-subtle text-content-muted bg-surface font-mono min-w-[2rem] text-center">
                         <StyledShortcut text={shortcut.keys} />
                       </kbd>
                     </div>

@@ -849,6 +849,23 @@ body {
   white-space: pre-wrap;
 }
 
+/* ========== Panel Edge Shadows ========== */
+/* Inset shadows on the center content area create depth against side panels */
+.panel-center {
+  box-shadow:
+    inset 6px 0 8px -6px rgba(0, 0, 0, 0.08),
+    inset -6px 0 8px -6px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .panel-center,
+[data-theme="nord"] .panel-center,
+[data-theme="rose-pine"] .panel-center,
+[data-theme="catppuccin"] .panel-center {
+  box-shadow:
+    inset 6px 0 8px -6px rgba(0, 0, 0, 0.3),
+    inset -6px 0 8px -6px rgba(0, 0, 0, 0.3);
+}
+
 /* ========== Raw View Styles ========== */
 .raw-view {
   position: relative;
@@ -915,10 +932,10 @@ body {
   align-items: center;
   justify-content: space-between;
   height: 2.5rem;
-  padding-left: 0.25rem;
+  padding-left: 0.5rem;
   padding-right: 0.5rem;
-  border-bottom: 1px solid var(--theme-border);
-  background-color: var(--theme-bg-secondary);
+  border-bottom: 1px solid var(--theme-border-subtle);
+  background-color: var(--theme-bg);
   flex-shrink: 0;
 }
 

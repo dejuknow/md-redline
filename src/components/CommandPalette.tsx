@@ -134,7 +134,7 @@ export function CommandPalette({ commands, open, onClose }: Props) {
             placeholder="Type a command..."
             className="flex-1 px-3 py-3 text-sm bg-transparent text-content focus:outline-none placeholder:text-content-muted"
           />
-          <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-border text-content-muted bg-surface">
+          <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-border-subtle text-content-muted bg-surface">
             esc
           </kbd>
         </div>
@@ -175,7 +175,7 @@ export function CommandPalette({ commands, open, onClose }: Props) {
                         className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
                           isSelected
                             ? 'border-primary-border text-primary-text'
-                            : 'border-border text-content-muted bg-surface'
+                            : 'border-border-subtle text-content-muted bg-surface'
                         }`}
                       >
                         <StyledShortcut text={cmd.shortcut} />

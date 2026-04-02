@@ -16,7 +16,7 @@ function ThemeButton({ t, theme, onClick }: { t: { key: string; label: string; c
         {t.colors.map((c, i) => (
           <div
             key={i}
-            className="w-3 h-3 rounded-full border border-border"
+            className="w-3 h-3 rounded-full border border-border-subtle"
             style={{ backgroundColor: c }}
           />
         ))}
@@ -82,13 +82,13 @@ export function ThemeSelector() {
             )}
           </button>
 
-          <div className="border-t border-border my-1" />
+          <div className="border-t border-border-subtle my-1" />
           <div className="px-3 py-1 text-[10px] font-medium text-content-muted uppercase tracking-wider">Light</div>
           {LIGHT_THEMES.map((t) => (
             <ThemeButton key={t.key} t={t} theme={theme} onClick={() => { setTheme(t.key); setOpen(false); }} />
           ))}
 
-          <div className="border-t border-border my-1" />
+          <div className="border-t border-border-subtle my-1" />
           <div className="px-3 py-1 text-[10px] font-medium text-content-muted uppercase tracking-wider">Dark</div>
           {DARK_THEMES.map((t) => (
             <ThemeButton key={t.key} t={t} theme={theme} onClick={() => { setTheme(t.key); setOpen(false); }} />

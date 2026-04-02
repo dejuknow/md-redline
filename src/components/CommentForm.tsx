@@ -194,7 +194,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               <button
                 key={t.label}
                 onClick={() => handleTemplateClick(t.text)}
-                className="text-[10px] px-2 py-1 rounded-md bg-surface border border-border text-content-secondary hover:bg-tint-primary hover:text-primary-text hover:border-primary-border transition-colors"
+                className="text-[10px] px-2 py-1 rounded-md bg-surface border border-border-subtle text-content-secondary hover:bg-tint-primary hover:text-primary-text hover:border-primary-border transition-colors"
               >
                 {t.label}
               </button>
@@ -213,7 +213,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           placeholder="Add your comment..."
           rows={1}
           maxLength={COMMENT_MAX_LENGTH}
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content overflow-hidden"
+          className="w-full text-sm border border-border-subtle rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content overflow-hidden"
         />
         {text.length > COMMENT_MAX_LENGTH * 0.8 && (
           <p className={`text-right text-xs mt-1 ${

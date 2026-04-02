@@ -39,19 +39,24 @@ async function switchToRaw(page: Page) {
   await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
 }
 
-/** Locate a button inside the raw toolbar by its text label. */
+/** Locate a toolbar toggle by its title attribute. */
+function toggleBtn(page: Page, titlePattern: string): Locator {
+  return page.locator(`.raw-toolbar button[title*="${titlePattern}"]`);
+}
+
+/** Locate a toolbar text button by its label. */
 function toolbarBtn(page: Page, label: string): Locator {
   return page.locator('.raw-toolbar button', { hasText: label });
 }
 
 /** Assert that a toolbar toggle button is in its active state. */
 async function expectActive(btn: Locator) {
-  await expect(btn).toHaveClass(/bg-primary-bg-strong/);
+  await expect(btn).toHaveClass(/bg-primary-bg/);
 }
 
 /** Assert that a toolbar toggle button is NOT in its active state. */
 async function expectInactive(btn: Locator) {
-  await expect(btn).not.toHaveClass(/bg-primary-bg-strong/);
+  await expect(btn).not.toHaveClass(/bg-primary-bg/);
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +69,7 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    await expect(toolbarBtn(page, 'Diff')).toBeVisible();
+    await expect(toggleBtn(page, 'diff')).toBeVisible();
   });
 
   test('diff toggle shows "No changes" when content matches snapshot', async ({ page, context }) => {
@@ -72,7 +77,7 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    await toolbarBtn(page, 'Diff').click();
+    await toggleBtn(page, 'diff').click();
     await expect(page.getByText('No changes yet')).toBeVisible();
   });
 
@@ -81,7 +86,7 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    const commentsBtn = toolbarBtn(page, 'Comments');
+    const commentsBtn = toggleBtn(page, 'comment marker');
     await expectActive(commentsBtn);
 
     // Hide comments
@@ -115,7 +120,7 @@ test.describe('Diff overlay', () => {
     // Click the action — should switch to raw view with diff enabled
     await viewDiffBtn.click();
     await expect(page.locator('.raw-view')).toBeVisible();
-    await expectActive(toolbarBtn(page, 'Diff'));
+    await expectActive(toggleBtn(page, 'diff'));
   });
 
   test('raw button shows pending badge after external change', async ({ page, context }) => {
@@ -138,7 +143,7 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    const diffBtn = toolbarBtn(page, 'Diff');
+    const diffBtn = toggleBtn(page, 'diff');
 
     await diffBtn.click();
     await expect(page.getByText('No changes yet')).toBeVisible();
@@ -153,7 +158,7 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    const diffBtn = toolbarBtn(page, 'Diff');
+    const diffBtn = toggleBtn(page, 'diff');
     await expect(diffBtn).toBeVisible();
 
     await toolbarBtn(page, 'Clear snapshot').click();
@@ -166,6 +171,6 @@ test.describe('Diff overlay', () => {
     await openFixture(page);
     await switchToRaw(page);
 
-    await expect(toolbarBtn(page, 'Diff')).not.toBeVisible();
+    await expect(toggleBtn(page, 'diff')).not.toBeVisible();
   });
 });
