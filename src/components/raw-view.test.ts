@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHighlightedHtml, escapeHtml, extractRawHeadings } from './RawView';
+import { buildHighlightedHtml, escapeHtml, extractRawHeadings, splitHighlightedHtml } from './RawView';
 
 describe('escapeHtml', () => {
   it('escapes &, <, >, "', () => {
@@ -227,5 +227,55 @@ describe('extractRawHeadings', () => {
       { id: 'intro', text: 'Intro', level: 1, lineIndex: 0 },
       { id: 'heading', text: 'Heading', level: 2, lineIndex: 2 },
     ]);
+  });
+});
+
+describe('splitHighlightedHtml', () => {
+  it('splits plain text into one segment per source line', () => {
+    const raw = 'line1\nline2\nline3';
+    const html = buildHighlightedHtml(raw);
+    const lines = splitHighlightedHtml(raw, html);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe('line1');
+    expect(lines[1]).toBe('line2');
+    expect(lines[2]).toBe('line3');
+  });
+
+  it('handles a single line with no newlines', () => {
+    const raw = 'hello world';
+    const html = buildHighlightedHtml(raw);
+    const lines = splitHighlightedHtml(raw, html);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe('hello world');
+  });
+
+  it('preserves empty lines', () => {
+    const raw = 'a\n\nb';
+    const html = buildHighlightedHtml(raw);
+    const lines = splitHighlightedHtml(raw, html);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe('a');
+    expect(lines[1]).toBe('');
+    expect(lines[2]).toBe('b');
+  });
+
+  it('closes and reopens spans that cross line boundaries', () => {
+    const raw = '```mermaid\ngraph TD\n```';
+    const html = buildHighlightedHtml(raw);
+    const lines = splitHighlightedHtml(raw, html);
+    expect(lines).toHaveLength(3);
+    // Each line should have balanced tags
+    for (const line of lines) {
+      const opens = (line.match(/<span/g) ?? []).length;
+      const closes = (line.match(/<\/span>/g) ?? []).length;
+      expect(opens).toBe(closes);
+    }
+  });
+
+  it('matches source line count even with syntax-highlighted content', () => {
+    const raw = '# Title\n\n**bold** and *italic*\n\n> quote';
+    const html = buildHighlightedHtml(raw);
+    const lines = splitHighlightedHtml(raw, html);
+    expect(lines).toHaveLength(raw.split('\n').length);
   });
 });

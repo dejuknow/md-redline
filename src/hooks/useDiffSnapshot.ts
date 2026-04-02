@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, type RefObject } from 'react';
-import type { ViewMode } from '../components/Toolbar';
 
 const STORAGE_KEY = 'md-redline-snapshots';
 
@@ -7,8 +6,7 @@ export function useDiffSnapshot(
   activeFilePath: string | null,
   rawMarkdownRef: RefObject<string>,
   showToast: (msg: string) => void,
-  viewMode: ViewMode,
-  setViewMode: (v: ViewMode | ((prev: ViewMode) => ViewMode)) => void,
+  setDiffEnabled: (v: boolean) => void,
 ) {
   const [snapshots, setSnapshots] = useState<Map<string, string>>(() => {
     try {
@@ -58,9 +56,9 @@ export function useDiffSnapshot(
       next.delete(activeFilePath);
       return next;
     });
-    if (viewMode === 'diff') setViewMode('rendered');
+    setDiffEnabled(false);
     showToast('Snapshot cleared');
-  }, [activeFilePath, viewMode, setViewMode, showToast]);
+  }, [activeFilePath, setDiffEnabled, showToast]);
 
   return { currentSnapshot, handleSnapshot, handleClearSnapshot };
 }

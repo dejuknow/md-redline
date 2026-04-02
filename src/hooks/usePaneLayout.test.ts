@@ -58,10 +58,14 @@ describe('load', () => {
   });
 
   it('only accepts valid viewMode values', () => {
-    for (const mode of ['rendered', 'raw', 'diff']) {
+    for (const mode of ['rendered', 'raw']) {
       store['md-redline-pane-layout'] = JSON.stringify({ viewMode: mode });
       expect(load().viewMode).toBe(mode);
     }
+
+    // Legacy 'diff' migrates to 'raw'
+    store['md-redline-pane-layout'] = JSON.stringify({ viewMode: 'diff' });
+    expect(load().viewMode).toBe('raw');
 
     store['md-redline-pane-layout'] = JSON.stringify({ viewMode: 'invalid' });
     expect(load().viewMode).toBe('rendered');
@@ -76,7 +80,7 @@ describe('save', () => {
   });
 
   it('round-trips through load', () => {
-    const layout = { explorerVisible: false, sidebarVisible: false, leftPanelView: 'outline' as const, viewMode: 'diff' as const };
+    const layout = { explorerVisible: false, sidebarVisible: false, leftPanelView: 'outline' as const, viewMode: 'raw' as const };
     save(layout);
     expect(load()).toEqual(layout);
   });

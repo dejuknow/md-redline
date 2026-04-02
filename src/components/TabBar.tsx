@@ -27,12 +27,10 @@ interface Props {
   onTabContextMenu?: (info: TabContextMenuInfo) => void;
   // Document actions (moved from Toolbar)
   viewMode: ViewMode;
-  hasSnapshot: boolean;
   diffPending?: boolean;
   commentCount: number;
   enableResolve?: boolean;
   onViewModeChange: (mode: ViewMode) => void;
-  onClearSnapshot: () => void;
   onSearch: () => void;
   searchActive: boolean;
   onCopyAgentPrompt?: (filePaths: string[]) => void;
@@ -213,11 +211,9 @@ export function TabBar({
   onOpenFile,
   onTabContextMenu,
   viewMode,
-  hasSnapshot,
   diffPending,
   commentCount,
   onViewModeChange,
-  onClearSnapshot,
   onSearch,
   searchActive,
   onCopyAgentPrompt,
@@ -571,40 +567,19 @@ export function TabBar({
           onClick={() => onViewModeChange(viewMode === 'raw' ? 'rendered' : 'raw')}
           title={viewMode === 'raw' ? 'Switch to rendered view' : 'View raw markdown'}
         >
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
-            />
-          </svg>
+          <span className="relative">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
+              />
+            </svg>
+            {diffPending && viewMode !== 'raw' && (
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary animate-pulse" />
+            )}
+          </span>
         </IconButton>
-        {hasSnapshot && (
-          <SplitIconButton
-            icon={
-              <span className="relative">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
-                  />
-                </svg>
-                {diffPending && viewMode !== 'diff' && (
-                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary animate-pulse" />
-                )}
-              </span>
-            }
-            onClick={() => onViewModeChange(viewMode === 'diff' ? 'rendered' : 'diff')}
-            title={viewMode === 'diff' ? 'Switch to rendered view' : 'View diff since snapshot'}
-            variant="active"
-            active={viewMode === 'diff'}
-            chevronTitle="Diff options"
-            menu={[
-              { label: 'Clear snapshot', onClick: onClearSnapshot },
-            ]}
-          />
-        )}
 
         {/* Hand off (primary action with multi-file dropdown) */}
         {commentCount > 0 && onCopyAgentPrompt && activeFilePath && (

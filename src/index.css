@@ -890,34 +890,48 @@ body {
   content: '\a0';
 }
 
-/* Copy clean button */
-.raw-copy-clean-btn {
-  position: absolute;
-  top: -0.25rem;
-  right: 0;
+/* Diff overlay in raw view */
+.raw-line-diff-added {
+  background-color: var(--color-diff-added-bg);
+}
+
+.raw-line-diff-added .raw-line-content {
+  color: var(--color-diff-added-text);
+}
+
+.raw-line-diff-removed {
+  background-color: var(--color-diff-removed-bg);
+  opacity: 0.7;
+}
+
+.raw-line-diff-removed .raw-line-content {
+  color: var(--color-diff-removed-text);
+  text-decoration: line-through;
+}
+
+/* Raw view toolbar — matches panel headers (h-10 = 2.5rem) */
+.raw-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
+  justify-content: space-between;
+  height: 2.5rem;
+  padding-left: 0.25rem;
+  padding-right: 0.5rem;
+  border-bottom: 1px solid var(--theme-border);
   background-color: var(--theme-bg-secondary);
-  border: 1px solid var(--theme-border);
-  border-radius: 0.25rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  z-index: 5;
+  flex-shrink: 0;
 }
 
-.raw-copy-clean-btn:hover {
-  color: var(--theme-text-secondary);
-  background-color: var(--theme-bg-inset);
-  border-color: var(--theme-border);
+.raw-toolbar-left,
+.raw-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
 }
 
-.raw-copy-clean-btn:focus-visible {
-  outline: 2px solid var(--theme-accent);
-  outline-offset: 1px;
+/* Comment markers hidden when toggle is off */
+.raw-view-comments-hidden .raw-comment-marker {
+  display: none;
 }
 
 /* --- Syntax highlighting --- */

@@ -3,7 +3,7 @@ import { getPrimaryModifierLabel } from '../lib/platform';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
 
-export type ViewMode = 'rendered' | 'raw' | 'diff';
+export type ViewMode = 'rendered' | 'raw';
 
 interface Props {
   error: string | null;

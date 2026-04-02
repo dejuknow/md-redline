@@ -28,7 +28,7 @@ export function load(): PaneLayout {
       explorerVisible: typeof parsed.explorerVisible === 'boolean' ? parsed.explorerVisible : DEFAULTS.explorerVisible,
       sidebarVisible: typeof parsed.sidebarVisible === 'boolean' ? parsed.sidebarVisible : DEFAULTS.sidebarVisible,
       leftPanelView: parsed.leftPanelView === 'outline' ? 'outline' : 'explorer',
-      viewMode: ['rendered', 'raw', 'diff'].includes(parsed.viewMode) ? parsed.viewMode : 'rendered',
+      viewMode: parsed.viewMode === 'raw' || parsed.viewMode === 'diff' ? 'raw' : 'rendered',
     };
   } catch {
     return DEFAULTS;
@@ -76,14 +76,19 @@ export function usePaneLayout() {
     });
   }, []);
 
+  // Diff overlay is transient — not persisted to localStorage
+  const [diffEnabled, setDiffEnabled] = useState(false);
+
   return {
     explorerVisible: layout.explorerVisible,
     sidebarVisible: layout.sidebarVisible,
     leftPanelView: layout.leftPanelView,
     viewMode: layout.viewMode,
+    diffEnabled,
     setExplorerVisible,
     setSidebarVisible,
     setLeftPanelView,
     setViewMode,
+    setDiffEnabled,
   };
 }

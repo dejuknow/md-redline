@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 
-export function useSearch(onClose: () => void, viewMode: string) {
+export function useSearch(onClose: () => void) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [searchMatchCount, setSearchMatchCount] = useState(0);
@@ -33,11 +33,6 @@ export function useSearch(onClose: () => void, viewMode: string) {
   const handleRawSearchCount = useCallback((count: number) => {
     setSearchMatchCount(count);
   }, []);
-
-  // Reset match count in diff view (no search support)
-  useEffect(() => {
-    if (viewMode === 'diff') setSearchMatchCount(0);
-  }, [viewMode]);
 
   return {
     searchQuery,

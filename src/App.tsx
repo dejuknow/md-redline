@@ -25,7 +25,6 @@ import { TabBar } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
-import { DiffViewer } from './components/DiffViewer';
 import { RawView, type RawViewHandle } from './components/RawView';
 import { Toast } from './components/Toast';
 
@@ -98,6 +97,8 @@ export default function App() {
     setLeftPanelView,
     viewMode,
     setViewMode,
+    diffEnabled,
+    setDiffEnabled,
   } = usePaneLayout();
 
   // One-time migration of localStorage preferences to disk
@@ -193,7 +194,7 @@ export default function App() {
     handleSearchClose,
     handleSearchQueryChange,
     handleRawSearchCount,
-  } = useSearch(() => setActiveModal(null), viewMode);
+  } = useSearch(() => setActiveModal(null));
 
   // Platform info for context menu labels
   const [revealLabel, setRevealLabel] = useState('Reveal in File Manager');
@@ -238,8 +239,7 @@ export default function App() {
     activeFilePath,
     rawMarkdownRef,
     showToast,
-    viewMode,
-    setViewMode,
+    setDiffEnabled,
   );
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
@@ -321,6 +321,16 @@ export default function App() {
     [handleSnapshot, handleCopyAgentPrompt, activeFilePath, tabs],
   );
 
+  const handleDiffToggle = useCallback(() => {
+    if (!diffEnabled) {
+      if (viewMode !== 'raw') setViewMode('raw');
+      setDiffEnabled(true);
+      setDiffPending(false);
+    } else {
+      setDiffEnabled(false);
+    }
+  }, [diffEnabled, viewMode, setViewMode, setDiffEnabled]);
+
   // Heading tracking / table of contents
   const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
     useHeadingTracking(containerRef, viewerRef, html);
@@ -348,11 +358,11 @@ export default function App() {
     if (prevFilePathRef.current !== activeFilePath) {
       prevFilePathRef.current = activeFilePath;
       setActiveCommentId(null);
-      if (viewMode === 'diff') setViewMode('rendered');
+      setDiffEnabled(false);
       setDiffPending(false);
       clearSelection();
     }
-  }, [activeFilePath, viewMode, setViewMode, clearSelection, setActiveCommentId]);
+  }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId]);
 
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
   useFileWatcher({
@@ -407,7 +417,11 @@ export default function App() {
             if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
             const diffAction =
               cleanContentChanged && currentSnapshotRef.current
-                ? { label: 'View diff', onClick: () => { setViewMode('diff'); setDiffPending(false); } }
+                ? { label: 'View diff', onClick: () => {
+                    setViewMode('raw');
+                    setDiffEnabled(true);
+                    setDiffPending(false);
+                  }}
                 : undefined;
             showToast(`${parts.join(', ')} externally`, diffAction);
           }
@@ -897,10 +911,10 @@ export default function App() {
     ];
     if (currentSnapshot) {
       cmds.push({
-        id: 'view-diff',
-        label: 'Toggle diff view',
+        id: 'toggle-diff-overlay',
+        label: diffEnabled ? 'Hide diff overlay' : 'Show diff overlay',
         section: 'View',
-        onExecute: () => setViewMode((m) => (m === 'diff' ? 'rendered' : 'diff')),
+        onExecute: handleDiffToggle,
       });
     }
     return cmds;
@@ -912,6 +926,8 @@ export default function App() {
     explorerVisible,
     leftPanelView,
     currentSnapshot,
+    diffEnabled,
+    handleDiffToggle,
   ]);
 
   const fileCommands = useMemo((): Command[] => {
@@ -1093,16 +1109,14 @@ export default function App() {
         onOpenFile={openFilePicker}
         onTabContextMenu={handleTabContextMenu}
         viewMode={viewMode}
-        hasSnapshot={currentSnapshot !== null}
         diffPending={diffPending}
         commentCount={commentCount}
         enableResolve={settings.enableResolve}
         onViewModeChange={(mode) => {
           setViewMode(mode);
-          if (mode === 'diff') setDiffPending(false);
           if (mode === 'raw') clearSelection();
+          if (mode === 'rendered') setDiffEnabled(false);
         }}
-        onClearSnapshot={handleClearSnapshot}
         onSearch={() => {
           if (showSearch) {
             handleSearchClose();
@@ -1219,7 +1233,7 @@ export default function App() {
           </div>
           {explorerVisible && (
             <div
-              className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
               onMouseDown={(e) => onResizeStart('explorer', e)}
             >
               <div className="absolute inset-y-0 -left-1 -right-1" />
@@ -1240,55 +1254,57 @@ export default function App() {
                 focusTrigger={searchFocusTrigger}
               />
             )}
-            <div
-              ref={containerRef}
-              className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
-            >
-              <div className="max-w-3xl mx-auto">
-                {viewMode === 'raw' ? (
-                  <RawView
-                    ref={rawViewRef}
-                    rawMarkdown={rawMarkdown}
+            {viewMode === 'raw' ? (
+              <div ref={containerRef} className="h-full relative flex flex-col">
+                <RawView
+                  ref={rawViewRef}
+                  rawMarkdown={rawMarkdown}
+                  searchQuery={showSearch ? searchQuery : undefined}
+                  searchActiveIndex={activeSearchIndex}
+                  onSearchCount={handleRawSearchCount}
+                  activeCommentId={activeCommentId}
+                  diffSnapshot={currentSnapshot}
+                  diffEnabled={diffEnabled}
+                  onDiffToggle={handleDiffToggle}
+                  onClearSnapshot={handleClearSnapshot}
+                />
+              </div>
+            ) : (
+              <div
+                ref={containerRef}
+                className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
+              >
+                <div className="max-w-3xl mx-auto">
+                  <MarkdownViewer
+                    ref={viewerRef}
+                    html={html}
+                    cleanMarkdown={cleanMarkdown}
+                    comments={comments}
+                    activeCommentId={activeCommentId}
+                    selectionText={selection?.text ?? null}
+                    selectionOffset={selection?.offset ?? null}
+                    onHighlightClick={handleHighlightClick}
+                    onContextMenu={handleViewerContextMenu}
+                    enableResolve={settings.enableResolve}
                     searchQuery={showSearch ? searchQuery : undefined}
                     searchActiveIndex={activeSearchIndex}
-                    onSearchCount={handleRawSearchCount}
-                    activeCommentId={activeCommentId}
+                    onSearchCount={handleSearchCount}
+                    theme={theme}
                   />
-                ) : viewMode === 'diff' && currentSnapshot ? (
-                  <DiffViewer oldRaw={currentSnapshot} newRaw={rawMarkdown} />
-                ) : (
-                  <>
-                    <MarkdownViewer
-                      ref={viewerRef}
-                      html={html}
-                      cleanMarkdown={cleanMarkdown}
-                      comments={comments}
-                      activeCommentId={activeCommentId}
-                      selectionText={selection?.text ?? null}
-                      selectionOffset={selection?.offset ?? null}
-                      onHighlightClick={handleHighlightClick}
-                      onContextMenu={handleViewerContextMenu}
-                      enableResolve={settings.enableResolve}
-                      searchQuery={showSearch ? searchQuery : undefined}
-                      searchActiveIndex={activeSearchIndex}
-                      onSearchCount={handleSearchCount}
-                      theme={theme}
-                    />
-                    <DragHandles
-                      startPos={handlePositions?.start ?? null}
-                      endPos={handlePositions?.end ?? null}
-                      onMouseDown={onHandleMouseDown}
-                    />
-                  </>
-                )}
+                  <DragHandles
+                    startPos={handlePositions?.start ?? null}
+                    endPos={handlePositions?.end ?? null}
+                    onMouseDown={onHandleMouseDown}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Comment sidebar */}
           {sidebarVisible && (
             <div
-              className="w-1 shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
               onMouseDown={(e) => onResizeStart('sidebar', e)}
             >
               <div className="absolute inset-y-0 -left-1 -right-1" />

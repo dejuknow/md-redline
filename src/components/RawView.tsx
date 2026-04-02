@@ -4,8 +4,10 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
-import { COMMENT_MARKER_RE } from '../lib/comment-parser';
+import { COMMENT_MARKER_RE, parseComments } from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
+import { computeDiff, type DiffLine } from '../lib/diff';
+import { SplitIconButton } from './SplitIconButton';
 
 // Markdown syntax highlighting patterns (order matters — first match wins per region)
 interface SyntaxRule {
@@ -53,6 +55,17 @@ interface Props {
   searchActiveIndex?: number;
   onSearchCount?: (count: number) => void;
   activeCommentId: string | null;
+  diffSnapshot?: string | null;
+  diffEnabled?: boolean;
+  onDiffToggle?: () => void;
+  onClearSnapshot?: () => void;
+}
+
+interface DisplayRow {
+  type: 'same' | 'added' | 'removed';
+  html: string;
+  lineNo: number | undefined;
+  sourceLineIndex?: number;
 }
 
 type Region = { start: number; end: number; className: string; id?: string };
@@ -197,6 +210,59 @@ export function buildHighlightedHtml(raw: string): string {
   return parts.join('');
 }
 
+/**
+ * Split highlighted HTML into per-line segments matching the source line count.
+ * Handles spans that cross line boundaries by closing/reopening tags.
+ */
+export function splitHighlightedHtml(raw: string, fullHtml: string): string[] {
+  const lines = raw.split('\n');
+  const result: string[] = [];
+  let current = '';
+  const openTags: string[] = [];
+  let i = 0;
+
+  while (i < fullHtml.length) {
+    if (fullHtml[i] === '\n') {
+      for (let t = openTags.length - 1; t >= 0; t--) {
+        current += '</span>';
+      }
+      result.push(current);
+      current = '';
+      for (const tag of openTags) {
+        current += tag;
+      }
+      i++;
+    } else if (fullHtml[i] === '<') {
+      const closeMatch = fullHtml.slice(i).match(/^<\/span>/);
+      if (closeMatch) {
+        current += closeMatch[0];
+        openTags.pop();
+        i += closeMatch[0].length;
+      } else {
+        const openMatch = fullHtml.slice(i).match(/^<span[^>]*>/);
+        if (openMatch) {
+          current += openMatch[0];
+          openTags.push(openMatch[0]);
+          i += openMatch[0].length;
+        } else {
+          current += fullHtml[i];
+          i++;
+        }
+      }
+    } else {
+      current += fullHtml[i];
+      i++;
+    }
+  }
+  for (let t = openTags.length - 1; t >= 0; t--) {
+    current += '</span>';
+  }
+  result.push(current);
+
+  while (result.length < lines.length) result.push('');
+  return result;
+}
+
 export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -210,13 +276,14 @@ function escapeAttr(s: string): string {
 }
 
 export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
-  { rawMarkdown, searchQuery, searchActiveIndex, onSearchCount, activeCommentId },
+  { rawMarkdown, searchQuery, searchActiveIndex, onSearchCount, activeCommentId, diffSnapshot, diffEnabled, onDiffToggle, onClearSnapshot },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [showComments, setShowComments] = useState(true);
 
   // Clean up flash timer on unmount
   useEffect(() => {
@@ -232,94 +299,84 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     [rawHeadings],
   );
 
-  // Split the highlighted HTML into per-line segments.
-  // We split the *source* into lines, build highlighted HTML for each,
-  // so line numbers always match 1:1 with actual newlines.
-  const lineHtmls = useMemo(() => {
-    const lines = rawMarkdown.split('\n');
-    const fullHtml = highlightedHtml;
+  const lineHtmls = useMemo(
+    () => splitHighlightedHtml(rawMarkdown, highlightedHtml),
+    [rawMarkdown, highlightedHtml],
+  );
 
-    // We need to split the HTML at newline boundaries. Since we escaped \n as literal
-    // text in the HTML, we can split on literal \n in the output.
-    // But spans can cross line boundaries (e.g. comment markers spanning multiple lines).
-    // Strategy: walk through the HTML, track open tags, and split at \n characters
-    // that appear in text content (not inside tags).
-    const result: string[] = [];
-    let current = '';
-    const openTags: string[] = []; // stack of open tag strings for re-opening
-    let i = 0;
+  // Diff computation — compare clean markdown (without comment markers) so that
+  // marker additions/removals don't appear as content changes
+  const diffLines = useMemo<DiffLine[] | null>(() => {
+    if (!diffEnabled || !diffSnapshot) return null;
+    const { cleanMarkdown: oldClean } = parseComments(diffSnapshot);
+    const { cleanMarkdown: newClean } = parseComments(rawMarkdown);
+    return computeDiff(oldClean, newClean);
+  }, [diffEnabled, diffSnapshot, rawMarkdown]);
 
-    while (i < fullHtml.length) {
-      if (fullHtml[i] === '\n') {
-        // Close any open tags for this line
-        for (let t = openTags.length - 1; t >= 0; t--) {
-          current += '</span>';
-        }
-        result.push(current);
-        current = '';
-        // Re-open tags for next line
-        for (const tag of openTags) {
-          current += tag;
-        }
-        i++;
-      } else if (fullHtml[i] === '<') {
-        // Parse the tag
-        const closeMatch = fullHtml.slice(i).match(/^<\/span>/);
-        if (closeMatch) {
-          current += closeMatch[0];
-          openTags.pop();
-          i += closeMatch[0].length;
-        } else {
-          const openMatch = fullHtml.slice(i).match(/^<span[^>]*>/);
-          if (openMatch) {
-            current += openMatch[0];
-            openTags.push(openMatch[0]);
-            i += openMatch[0].length;
-          } else {
-            current += fullHtml[i];
-            i++;
-          }
-        }
-      } else {
-        current += fullHtml[i];
-        i++;
+  const oldHighlightedHtml = useMemo(
+    () => (diffEnabled && diffSnapshot ? buildHighlightedHtml(diffSnapshot) : ''),
+    [diffEnabled, diffSnapshot],
+  );
+
+  const oldLineHtmls = useMemo(() => {
+    if (!diffEnabled || !diffSnapshot) return [];
+    return splitHighlightedHtml(diffSnapshot, oldHighlightedHtml);
+  }, [diffEnabled, diffSnapshot, oldHighlightedHtml]);
+
+  const displayRows = useMemo<DisplayRow[]>(() => {
+    if (!diffLines) {
+      return lineHtmls.map((html, i) => ({
+        type: 'same' as const,
+        html,
+        lineNo: i + 1,
+        sourceLineIndex: i,
+      }));
+    }
+    return diffLines.map((dl) => {
+      if (dl.type === 'removed') {
+        const oldIdx = (dl.oldLineNo ?? 1) - 1;
+        return {
+          type: 'removed' as const,
+          html: oldLineHtmls[oldIdx] ?? '',
+          lineNo: dl.oldLineNo,
+          sourceLineIndex: undefined,
+        };
       }
-    }
-    // Push the last line
-    for (let t = openTags.length - 1; t >= 0; t--) {
-      current += '</span>';
-    }
-    result.push(current);
-
-    // Should match source line count
-    while (result.length < lines.length) result.push('');
-
-    return result;
-  }, [rawMarkdown, highlightedHtml]);
+      const newIdx = (dl.newLineNo ?? 1) - 1;
+      return {
+        type: dl.type,
+        html: lineHtmls[newIdx] ?? '',
+        lineNo: dl.newLineNo,
+        sourceLineIndex: newIdx,
+      };
+    });
+  }, [diffLines, lineHtmls, oldLineHtmls]);
 
   // Set innerHTML for each line cell and apply search highlights
   useLayoutEffect(() => {
     if (!tableRef.current) return;
     const codeCells = tableRef.current.querySelectorAll<HTMLElement>('.raw-line-content');
     codeCells.forEach((cell, i) => {
-      cell.innerHTML = lineHtmls[i] || '';
+      cell.innerHTML = displayRows[i]?.html || '';
     });
 
-    // Apply search highlights across all content cells.
-    // First pass: count matches per cell. Second pass: highlight with correct active index.
+    // Apply search highlights across all content cells (skip removed lines).
     if (searchQuery) {
-      // Count matches per cell without highlighting
       const counts: number[] = [];
-      codeCells.forEach(cell => {
+      codeCells.forEach((cell, i) => {
+        if (displayRows[i]?.type === 'removed') {
+          counts.push(0);
+          return;
+        }
         const count = highlightSearchMatches(cell, searchQuery, -1);
         counts.push(count);
       });
       const totalCount = counts.reduce((a, b) => a + b, 0);
 
-      // Re-set innerHTML and highlight with correct active index
       let cumulative = 0;
       codeCells.forEach((cell, i) => {
-        cell.innerHTML = lineHtmls[i] || '';
+        if (displayRows[i]?.type === 'removed') return;
+        cell.innerHTML = displayRows[i]?.html || '';
         const activeGlobal = searchActiveIndex ?? 0;
         const localActive = (activeGlobal >= cumulative && activeGlobal < cumulative + counts[i])
           ? activeGlobal - cumulative
@@ -331,9 +388,9 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     } else {
       onSearchCount?.(0);
     }
-  }, [lineHtmls, searchQuery, searchActiveIndex, onSearchCount]);
+  }, [displayRows, searchQuery, searchActiveIndex, onSearchCount]);
 
-  // Highlight active comment marker
+  // Highlight active comment marker (only in current content, not removed lines)
   useLayoutEffect(() => {
     if (!tableRef.current) return;
 
@@ -342,43 +399,62 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     });
 
     if (activeCommentId) {
-      const marker = tableRef.current.querySelector(`[data-comment-id="${CSS.escape(activeCommentId)}"]`);
-      if (marker) {
-        marker.classList.add('raw-comment-marker-active');
+      const markers = tableRef.current.querySelectorAll(`[data-comment-id="${CSS.escape(activeCommentId)}"]`);
+      for (const marker of markers) {
+        if (!marker.closest('.raw-line-diff-removed')) {
+          marker.classList.add('raw-comment-marker-active');
+          break;
+        }
       }
     }
-  }, [activeCommentId, lineHtmls]);
+  }, [activeCommentId, displayRows]);
+
+  /** Find the scrollable container (descendant or ancestor). */
+  const getScrollParent = useCallback((): Element | null => {
+    if (!containerRef.current) return null;
+    // The scroll container is a descendant (flex-1 overflow-y-auto) in pinned toolbar layout
+    return containerRef.current.querySelector('.overflow-y-auto')
+      ?? containerRef.current.closest('.overflow-y-auto');
+  }, []);
 
   const scrollToComment = useCallback((commentId: string) => {
     if (!tableRef.current || !containerRef.current) return;
-    const marker = tableRef.current.querySelector(`[data-comment-id="${CSS.escape(commentId)}"]`);
-    if (!marker) return;
 
-    const scrollParent = containerRef.current.closest('.overflow-y-auto');
-    if (scrollParent) {
-      const markerRect = marker.getBoundingClientRect();
-      const parentRect = scrollParent.getBoundingClientRect();
-      const offset = markerRect.top - parentRect.top - parentRect.height / 3;
-      scrollParent.scrollTop += offset;
-    }
+    // Re-enable comment markers if hidden so the marker is visible
+    setShowComments(true);
 
-    // Clear previous flash animation
-    if (flashTimerRef.current) {
-      clearTimeout(flashTimerRef.current);
-      tableRef.current?.querySelectorAll('.raw-comment-marker-flash').forEach(el => {
-        el.classList.remove('raw-comment-marker-flash');
-      });
-    }
-    marker.classList.add('raw-comment-marker-flash');
-    flashTimerRef.current = setTimeout(() => marker.classList.remove('raw-comment-marker-flash'), 1500);
-  }, []);
+    // Defer scroll to next frame so display:none is removed first
+    requestAnimationFrame(() => {
+      if (!tableRef.current) return;
+      const marker = tableRef.current.querySelector(`[data-comment-id="${CSS.escape(commentId)}"]`);
+      if (!marker) return;
+
+      const scrollParent = getScrollParent();
+      if (scrollParent) {
+        const markerRect = marker.getBoundingClientRect();
+        const parentRect = scrollParent.getBoundingClientRect();
+        const offset = markerRect.top - parentRect.top - parentRect.height / 3;
+        scrollParent.scrollTop += offset;
+      }
+
+      // Clear previous flash animation
+      if (flashTimerRef.current) {
+        clearTimeout(flashTimerRef.current);
+        tableRef.current?.querySelectorAll('.raw-comment-marker-flash').forEach(el => {
+          el.classList.remove('raw-comment-marker-flash');
+        });
+      }
+      marker.classList.add('raw-comment-marker-flash');
+      flashTimerRef.current = setTimeout(() => marker.classList.remove('raw-comment-marker-flash'), 1500);
+    });
+  }, [getScrollParent]);
 
   const scrollToHeading = useCallback((headingId: string) => {
-    if (!tableRef.current || !containerRef.current) return;
+    if (!tableRef.current) return;
     const headingLine = tableRef.current.querySelector(`.raw-line[data-heading-id="${CSS.escape(headingId)}"]`);
     if (!headingLine) return;
 
-    const scrollParent = containerRef.current.closest('.overflow-y-auto');
+    const scrollParent = getScrollParent();
     if (scrollParent) {
       const lineRect = headingLine.getBoundingClientRect();
       const parentRect = scrollParent.getBoundingClientRect();
@@ -390,7 +466,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     }
 
     headingLine.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, []);
+  }, [getScrollParent]);
 
   useImperativeHandle(ref, () => ({ scrollToComment, scrollToHeading }), [scrollToComment, scrollToHeading]);
 
@@ -399,51 +475,144 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     return () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); };
   }, []);
 
-  const handleCopyClean = useCallback(() => {
+  const showCopyFeedback = useCallback(() => {
+    setCopyFeedback(true);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(rawMarkdown).then(showCopyFeedback, () => {});
+  }, [rawMarkdown, showCopyFeedback]);
+
+  const handleCopyWithoutComments = useCallback(() => {
     COMMENT_MARKER_RE.lastIndex = 0;
     const clean = rawMarkdown.replace(COMMENT_MARKER_RE, '');
-    navigator.clipboard.writeText(clean).then(
-      () => {
-        setCopyFeedback(true);
-        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-        copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
-      },
-      () => { /* clipboard write failed */ },
+    navigator.clipboard.writeText(clean).then(showCopyFeedback, () => {});
+  }, [rawMarkdown, showCopyFeedback]);
+
+  const hasChanges = diffLines ? diffLines.some((l) => l.type !== 'same') : true;
+  const hasDiffSnapshot = diffSnapshot != null;
+
+  const toggleClass = (active: boolean) =>
+    `text-[11px] px-2 py-0.5 rounded-md font-medium transition-colors ${
+      active
+        ? 'bg-primary-bg-strong text-primary-text'
+        : 'text-content-secondary hover:bg-tint'
+    }`;
+
+  const actionClass = 'text-[11px] rounded px-2 py-0.5 transition-colors text-content-secondary hover:text-content hover:bg-tint';
+
+  const toolbar = (
+    <div className="raw-toolbar">
+      <div className="raw-toolbar-left">
+        <button
+          className={toggleClass(showComments)}
+          onClick={() => setShowComments((v) => !v)}
+          title={showComments ? 'Hide comment markers' : 'Show comment markers'}
+        >
+          Comments
+        </button>
+        {hasDiffSnapshot && onDiffToggle && (
+          <button
+            className={toggleClass(!!diffEnabled)}
+            onClick={onDiffToggle}
+            title={diffEnabled ? 'Hide diff overlay' : 'Show diff since snapshot'}
+          >
+            Diff
+          </button>
+        )}
+      </div>
+      <div className="raw-toolbar-right">
+        {hasDiffSnapshot && onClearSnapshot && (
+          <button
+            className={actionClass}
+            onClick={onClearSnapshot}
+            title="Clear diff snapshot"
+          >
+            Clear snapshot
+          </button>
+        )}
+        <SplitIconButton
+          icon={
+            copyFeedback ? (
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+            ) : (
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+              </svg>
+            )
+          }
+          onClick={handleCopy}
+          title={copyFeedback ? 'Copied!' : 'Copy document'}
+          chevronTitle="Copy options"
+          menu={[
+            { label: 'Copy without comments', onClick: handleCopyWithoutComments },
+          ]}
+        />
+      </div>
+    </div>
+  );
+
+  const containerClass = `raw-view flex flex-col h-full${showComments ? '' : ' raw-view-comments-hidden'}`;
+
+  if (diffEnabled && diffLines && !hasChanges) {
+    return (
+      <div ref={containerRef} className={containerClass}>
+        {toolbar}
+        <div className="flex flex-col items-center justify-center flex-1 text-content-muted px-6">
+          <svg
+            className="w-12 h-12 mb-3 text-content-faint"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
+          <p className="text-xs text-center leading-relaxed max-w-xs">
+            This view updates automatically when the file is modified.
+            <br />
+            Hand off to an agent and changes will appear here.
+          </p>
+        </div>
+      </div>
     );
-  }, [rawMarkdown]);
+  }
 
   return (
-    <div ref={containerRef} className="raw-view relative">
-      {/* Copy clean button */}
-      <button
-        onClick={handleCopyClean}
-        className="raw-copy-clean-btn"
-        title="Copy markdown without comment markers"
-      >
-        {copyFeedback ? (
-          <>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-            Copied
-          </>
-        ) : (
-          <>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-            </svg>
-            Copy clean
-          </>
-        )}
-      </button>
+    <div ref={containerRef} className={containerClass}>
+      {toolbar}
 
-      <div ref={tableRef} className="raw-view-table">
-        {lineHtmls.map((_, i) => (
-          <div key={i} className="raw-line" data-heading-id={headingIdsByLine.get(i)}>
-            <span className="raw-line-number">{i + 1}</span>
-            <span className="raw-line-content" />
+      <div className="flex-1 overflow-y-auto px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16">
+        <div className="max-w-3xl mx-auto">
+          <div ref={tableRef} className="raw-view-table">
+            {displayRows.map((row, i) => {
+              const diffClass = row.type === 'added'
+                ? 'raw-line-diff-added'
+                : row.type === 'removed'
+                  ? 'raw-line-diff-removed'
+                  : '';
+              return (
+                <div
+                  key={i}
+                  className={`raw-line ${diffClass}`}
+                  data-heading-id={row.sourceLineIndex != null ? headingIdsByLine.get(row.sourceLineIndex) : undefined}
+                >
+                  <span className="raw-line-number">{row.lineNo}</span>
+                  <span className="raw-line-content" />
+                </div>
+              );
+            })}
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );
