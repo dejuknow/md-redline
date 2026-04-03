@@ -241,9 +241,7 @@ export function FileOpener({
                       else setSelectedIndex(itemIndex);
                     }}
                     className={`w-full text-left px-4 py-2 flex items-center gap-3 transition-colors ${
-                      isSelected
-                        ? 'bg-primary-bg text-primary-text'
-                        : 'text-content hover:bg-tint'
+                      isSelected ? 'bg-primary-bg text-primary-text' : 'text-content hover:bg-tint'
                     }`}
                   >
                     <svg
@@ -263,12 +261,16 @@ export function FileOpener({
                       <div className="text-sm font-medium truncate">
                         {file.name}
                         {isActive && (
-                          <span className={`ml-2 text-[10px] font-normal ${isSelected ? 'text-primary-text/70' : 'text-content-muted'}`}>
+                          <span
+                            className={`ml-2 text-[10px] font-normal ${isSelected ? 'text-primary-text/70' : 'text-content-muted'}`}
+                          >
                             active
                           </span>
                         )}
                       </div>
-                      <div className={`text-xs truncate ${isSelected ? 'text-primary-text/60' : 'text-content-muted'}`}>
+                      <div
+                        className={`text-xs truncate ${isSelected ? 'text-primary-text/60' : 'text-content-muted'}`}
+                      >
                         {file.path}
                       </div>
                     </div>
@@ -288,7 +290,11 @@ export function FileOpener({
           {/* Path hint when typing a path */}
           {query && looksLikeDirectPath(query) && (
             <div className="px-4 py-3 text-xs text-content-muted border-b border-border-subtle">
-              Press <kbd className="px-1 py-0.5 rounded border border-border-subtle bg-surface text-[10px]">Enter</kbd> to open <span className="text-content font-medium">{query}</span>
+              Press{' '}
+              <kbd className="px-1 py-0.5 rounded border border-border-subtle bg-surface text-[10px]">
+                Enter
+              </kbd>{' '}
+              to open <span className="text-content font-medium">{query}</span>
             </div>
           )}
         </div>

@@ -50,8 +50,10 @@ export async function renderMermaidBlock(
     const mermaid = await getMermaid();
     const mermaidTheme = getMermaidTheme(appTheme);
 
-    // Serialize theme changes to avoid concurrent re-initialization races
-    if (mermaidTheme !== initTheme) {
+    // Serialize theme changes to avoid concurrent re-initialization races.
+    // After awaiting a pending promise, re-check in case a newer theme was
+    // requested while we were waiting (rapid toggling).
+    while (mermaidTheme !== initTheme) {
       if (!themeChangePromise) {
         themeChangePromise = (async () => {
           mermaid.initialize({

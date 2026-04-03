@@ -869,8 +869,9 @@ describe('fuzzy re-matching', () => {
     const clean = parsed.cleanMarkdown;
     expect(clean).toBe('prefix text changed text and the rest follows here.');
     const afterIdx = clean.indexOf(' and the rest follows');
-    // cleanOffset is positioned at the start of contextAfter (best guess without anchor length)
-    expect(parsed.comments[0].cleanOffset).toBe(Math.max(0, afterIdx));
+    // cleanOffset is positioned anchor.length chars before contextAfter
+    // so the marker re-attaches to the right region
+    expect(parsed.comments[0].cleanOffset).toBe(Math.max(0, afterIdx - comment.anchor.length));
   });
 
   it('rejects fuzzy match when gap between contexts is too large (>500 chars)', () => {

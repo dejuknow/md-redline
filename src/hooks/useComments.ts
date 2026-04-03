@@ -96,7 +96,10 @@ export function useComments(params: UseCommentsParams) {
           : comments.length;
         counts.set(tab.filePath, count);
         if (enableResolve) {
-          resolvedCounts.set(tab.filePath, comments.filter((c) => getEffectiveStatus(c) === 'resolved').length);
+          resolvedCounts.set(
+            tab.filePath,
+            comments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+          );
         }
       } else {
         try {
@@ -106,7 +109,10 @@ export function useComments(params: UseCommentsParams) {
             : tabComments.length;
           counts.set(tab.filePath, count);
           if (enableResolve) {
-            resolvedCounts.set(tab.filePath, tabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length);
+            resolvedCounts.set(
+              tab.filePath,
+              tabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+            );
           }
         } catch {
           counts.set(tab.filePath, 0);
@@ -123,8 +129,6 @@ export function useComments(params: UseCommentsParams) {
   // Core update helper
   const updateAndSave = useCallback(
     (newRaw: string) => {
-      const commentCount = (newRaw.match(/@comment\{/g) ?? []).length;
-      console.log(`[updateAndSave] ${commentCount} comment(s), ${newRaw.length} bytes`);
       setRawMarkdown(newRaw);
       saveFile(newRaw);
     },
@@ -156,14 +160,7 @@ export function useComments(params: UseCommentsParams) {
       clearSelection();
       setAutoExpandForm(false);
     },
-    [
-      updateAndSave,
-      clearSelection,
-      author,
-      rawMarkdownRef,
-      requestCommentFocus,
-      setAutoExpandForm,
-    ],
+    [updateAndSave, clearSelection, author, rawMarkdownRef, requestCommentFocus, setAutoExpandForm],
   );
 
   const handleResolve = useCallback(
@@ -284,7 +281,8 @@ export function useComments(params: UseCommentsParams) {
     const next = navigable[nextIdx];
     setActiveCommentId(next.id);
     viewerRef.current?.scrollToComment(next.id);
-  }, [comments, activeCommentId, enableResolve, viewerRef]);
+    rawViewRef.current?.scrollToComment(next.id);
+  }, [comments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
 
   const handleJumpToPrev = useCallback(() => {
     const navigable = enableResolve
@@ -297,7 +295,8 @@ export function useComments(params: UseCommentsParams) {
     const prev = navigable[prevIdx];
     setActiveCommentId(prev.id);
     viewerRef.current?.scrollToComment(prev.id);
-  }, [comments, activeCommentId, enableResolve, viewerRef]);
+    rawViewRef.current?.scrollToComment(prev.id);
+  }, [comments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
 
   return {
     activeCommentId,

@@ -224,9 +224,14 @@ export function createApp(options: CreateAppOptions = {}) {
           const readBack = await readFile(resolved, 'utf-8');
           const readBackComments = (readBack.match(/@comment\{/g) ?? []).length;
           if (readBackComments !== commentCount) {
-            console.error(`[SAVE VERIFY FAIL] Wrote ${commentCount} comments but read back ${readBackComments} for ${resolved}`);
+            console.error(
+              `[SAVE VERIFY FAIL] Wrote ${commentCount} comments but read back ${readBackComments} for ${resolved}`,
+            );
+            lastWrittenContent.delete(resolved);
           } else {
-            console.log(`[SAVE OK] ${resolved} — ${commentCount} comment(s), ${body.content.length} bytes`);
+            console.log(
+              `[SAVE OK] ${resolved} — ${commentCount} comment(s), ${body.content.length} bytes`,
+            );
           }
         })
         .finally(() => {
@@ -428,7 +433,9 @@ export function createApp(options: CreateAppOptions = {}) {
             if (content === lastBroadcast) return;
             const extComments = (content.match(/@comment\{/g) ?? []).length;
             const prevComments = (lastBroadcast?.match(/@comment\{/g) ?? []).length;
-            console.warn(`[EXTERNAL CHANGE] ${resolved} — ${extComments} comment(s) (was ${prevComments})`);
+            console.warn(
+              `[EXTERNAL CHANGE] ${resolved} — ${extComments} comment(s) (was ${prevComments})`,
+            );
             lastWrittenContent.delete(resolved);
             lastBroadcast = content;
             const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
@@ -540,13 +547,19 @@ export function createApp(options: CreateAppOptions = {}) {
       await new Promise<void>((promiseResolve, reject) => {
         if (platformName === 'darwin') {
           const escaped = resolved.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-          execFileImpl('osascript', [
-            '-e', `tell application "Finder" to reveal POSIX file "${escaped}"`,
-            '-e', 'tell application "Finder" to activate',
-          ], (err) => {
-            if (err) return reject(err);
-            promiseResolve();
-          });
+          execFileImpl(
+            'osascript',
+            [
+              '-e',
+              `tell application "Finder" to reveal POSIX file "${escaped}"`,
+              '-e',
+              'tell application "Finder" to activate',
+            ],
+            (err) => {
+              if (err) return reject(err);
+              promiseResolve();
+            },
+          );
         } else if (platformName === 'linux') {
           execFileImpl('xdg-open', [dirname(resolved)], (err) => {
             if (err) return reject(err);

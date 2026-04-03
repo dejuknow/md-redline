@@ -56,7 +56,21 @@ export interface MarkdownViewerHandle {
 // the container's children — our useLayoutEffect is the sole DOM manager.
 export const MarkdownViewer = memo(
   forwardRef<MarkdownViewerHandle, Props>(function MarkdownViewer(
-    { html, cleanMarkdown, comments, activeCommentId, selectionText, selectionOffset, onHighlightClick, onContextMenu: onCtxMenu, enableResolve, searchQuery, searchActiveIndex, onSearchCount, theme },
+    {
+      html,
+      cleanMarkdown,
+      comments,
+      activeCommentId,
+      selectionText,
+      selectionOffset,
+      onHighlightClick,
+      onContextMenu: onCtxMenu,
+      enableResolve,
+      searchQuery,
+      searchActiveIndex,
+      onSearchCount,
+      theme,
+    },
     ref,
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -79,7 +93,9 @@ export const MarkdownViewer = memo(
       getContainer: () => containerRef.current,
       scrollToComment: (commentId: string) => {
         if (!containerRef.current) return;
-        const marks = containerRef.current.querySelectorAll('.comment-highlight, .mermaid-comment-highlight');
+        const marks = containerRef.current.querySelectorAll(
+          '.comment-highlight, .mermaid-comment-highlight',
+        );
         const mark = Array.from(marks).find((m) =>
           (m as HTMLElement).dataset.commentIds?.split(',').includes(commentId),
         );
@@ -91,7 +107,9 @@ export const MarkdownViewer = memo(
       getActiveMarks: () => {
         if (!containerRef.current) return [];
         return Array.from(
-          containerRef.current.querySelectorAll('.comment-highlight-active, .mermaid-comment-highlight-active'),
+          containerRef.current.querySelectorAll(
+            '.comment-highlight-active, .mermaid-comment-highlight-active',
+          ),
         ) as HTMLElement[];
       },
       getHeadings: () => {
@@ -151,11 +169,18 @@ export const MarkdownViewer = memo(
       // so wrapText can correctly match against DOM text node positions.
       const highlightGroups = new Map<
         string,
-        { ids: string[]; anchor: string; plainOffset?: number; contextBefore?: string; contextAfter?: string }
+        {
+          ids: string[];
+          anchor: string;
+          plainOffset?: number;
+          contextBefore?: string;
+          contextAfter?: string;
+        }
       >();
       for (const comment of comments) {
         if (enableResolve && getEffectiveStatus(comment) === 'resolved') continue;
-        const plainOffset = comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
+        const plainOffset =
+          comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
         const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
         const group = highlightGroups.get(key) || {
           ids: [],
@@ -168,7 +193,13 @@ export const MarkdownViewer = memo(
         highlightGroups.set(key, group);
       }
 
-      for (const { anchor, ids, plainOffset, contextBefore, contextAfter } of highlightGroups.values()) {
+      for (const {
+        anchor,
+        ids,
+        plainOffset,
+        contextBefore,
+        contextAfter,
+      } of highlightGroups.values()) {
         wrapText(
           container,
           anchor,
@@ -193,7 +224,9 @@ export const MarkdownViewer = memo(
       // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
       // Solution: keep the <mark> but swap class styles for inline styles.
       const mermaidTheme = getMermaidHighlightTheme(getComputedStyle(document.documentElement));
-      for (const mark of container.querySelectorAll('.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-active')) {
+      for (const mark of container.querySelectorAll(
+        '.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-active',
+      )) {
         const el = mark as HTMLElement;
         const isActive = el.classList.contains('comment-highlight-active');
         el.classList.remove('comment-highlight', 'comment-highlight-active');
@@ -231,7 +264,18 @@ export const MarkdownViewer = memo(
       ) as HTMLElement | null;
 
       return cleanupMermaidLayout;
-    }, [html, comments, activeCommentId, selectionText, selectionOffset, toPlainOffset, enableResolve, searchQuery, searchActiveIndex, mermaidSvgMap]);
+    }, [
+      html,
+      comments,
+      activeCommentId,
+      selectionText,
+      selectionOffset,
+      toPlainOffset,
+      enableResolve,
+      searchQuery,
+      searchActiveIndex,
+      mermaidSvgMap,
+    ]);
 
     const handleClick = (e: React.MouseEvent) => {
       const mark = (e.target as HTMLElement).closest(
@@ -259,7 +303,11 @@ export const MarkdownViewer = memo(
 
       // Check if there is a text selection within the container
       const sel = window.getSelection();
-      if (sel && sel.toString().trim().length > 0 && containerRef.current?.contains(sel.anchorNode)) {
+      if (
+        sel &&
+        sel.toString().trim().length > 0 &&
+        containerRef.current?.contains(sel.anchorNode)
+      ) {
         e.preventDefault();
         onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY });
         return;
@@ -346,7 +394,10 @@ function wrapText(
             }
           }
           if (contextAfter) {
-            const after = fullText.slice(occ + text.length, occ + text.length + contextAfter.length);
+            const after = fullText.slice(
+              occ + text.length,
+              occ + text.length + contextAfter.length,
+            );
             for (let j = 0; j < Math.min(after.length, contextAfter.length); j++) {
               if (after[j] === contextAfter[j]) score++;
               else break;
@@ -420,7 +471,7 @@ function wrapText(
   // (e.g. text nodes split by <strong>) into a single <mark>, while creating
   // separate marks for wraps in different blocks (e.g. different <li>s).
   const groups: { node: Text; start: number; end: number }[][] = [];
-  let currentGroup: typeof groups[0] = [];
+  let currentGroup: (typeof groups)[0] = [];
   let currentBlock: Element | null = null;
 
   for (const w of visibleWraps) {
@@ -481,8 +532,23 @@ function wrapText(
 }
 
 const BLOCK_TAGS = new Set([
-  'P', 'LI', 'DIV', 'BLOCKQUOTE', 'TD', 'TH', 'DD', 'DT',
-  'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SECTION', 'ARTICLE',
+  'P',
+  'LI',
+  'DIV',
+  'BLOCKQUOTE',
+  'TD',
+  'TH',
+  'DD',
+  'DT',
+  'PRE',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'SECTION',
+  'ARTICLE',
 ]);
 
 function getBlockParent(node: Node): Element | null {
@@ -537,7 +603,11 @@ function flexibleSearch(
 /** Find all case-insensitive occurrences of `query` in the container's text and wrap them
  *  in <mark class="search-highlight"> elements. The match at `activeIndex` gets an additional
  *  `search-highlight-active` class and is scrolled into view. */
-export function highlightSearchMatches(container: HTMLElement, query: string, activeIndex: number): number {
+export function highlightSearchMatches(
+  container: HTMLElement,
+  query: string,
+  activeIndex: number,
+): number {
   const textNodes = collectVisibleTextNodes(container);
   if (textNodes.length === 0) return 0;
 
@@ -548,7 +618,7 @@ export function highlightSearchMatches(container: HTMLElement, query: string, ac
     nodeInfo.push({ node: n, globalStart: pos, length: len });
     pos += len;
   }
-  const fullText = textNodes.map(n => n.textContent || '').join('');
+  const fullText = textNodes.map((n) => n.textContent || '').join('');
   const lowerFull = fullText.toLowerCase();
   const lowerQuery = query.toLowerCase();
 
@@ -594,7 +664,9 @@ export function highlightSearchMatches(container: HTMLElement, query: string, ac
           const fragment = range.extractContents();
           mark.appendChild(fragment);
           range.insertNode(mark);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
     }
   }

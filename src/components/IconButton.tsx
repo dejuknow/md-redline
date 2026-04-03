@@ -12,7 +12,8 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className
   children: ReactNode;
 }
 
-const baseClasses = 'p-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+const baseClasses =
+  'p-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 const variantClasses: Record<Variant, { on: string; off: string }> = {
   neutral: {
@@ -41,9 +42,7 @@ export function IconButton({
 
   return (
     <button className={`${baseClasses} ${stateClass}`} {...rest}>
-      <span className={size === 'sm' ? 'block w-3.5 h-3.5' : 'block w-4 h-4'}>
-        {children}
-      </span>
+      <span className={size === 'sm' ? 'block w-3.5 h-3.5' : 'block w-4 h-4'}>{children}</span>
     </button>
   );
 }

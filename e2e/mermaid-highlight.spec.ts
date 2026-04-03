@@ -148,9 +148,7 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
   await openFixture(page);
   await addComment(page, anchor, commentText);
 
-  await expect
-    .poll(() => readFileSync(FIXTURE, 'utf8'))
-    .toContain(`"text":"${commentText}"`);
+  await expect.poll(() => readFileSync(FIXTURE, 'utf8')).toContain(`"text":"${commentText}"`);
 
   const saved = readFileSync(FIXTURE, 'utf8');
   expect(saved).not.toMatch(/trebuchet ms|sans-serif|edge-animation/i);
@@ -187,40 +185,52 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
   expect(mermaidHighlight!.whiteSpace).toBe('pre-wrap');
   expect(mermaidHighlight!.borderBottom).not.toBe('0px none rgb(0, 0, 0)');
   expect(mermaidHighlight!.height).toBeGreaterThan(mermaidHighlight!.lineHeight * 1.5);
-  expect(mermaidHighlight!.foreignObjectHeight).toBeGreaterThanOrEqual(mermaidHighlight!.htmlRootHeight);
+  expect(mermaidHighlight!.foreignObjectHeight).toBeGreaterThanOrEqual(
+    mermaidHighlight!.htmlRootHeight,
+  );
   expect(mermaidHighlight!.nodeRectHeight).toBeGreaterThan(mermaidHighlight!.foreignObjectHeight);
 
   await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const secondDiagram = document.querySelectorAll('.mermaid-block .mermaid-svg')[1];
-        if (!secondDiagram) return ['missing second diagram'];
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const secondDiagram = document.querySelectorAll('.mermaid-block .mermaid-svg')[1];
+          if (!secondDiagram) return ['missing second diagram'];
 
-        return Array.from(secondDiagram.querySelectorAll('.node'))
-          .map((node) => {
-            const foreignObject = node.querySelector('foreignObject');
-            const htmlRoot = foreignObject?.firstElementChild;
-            const labelRect = node.querySelector('rect.label-container, rect.basic.label-container');
-            const text = htmlRoot?.textContent?.replace(/\s+/g, ' ').trim() || '';
-            return {
-              text,
-              foreignObjectHeight: Number(foreignObject?.getAttribute('height') || 0),
-              htmlRootHeight: htmlRoot instanceof HTMLElement ? htmlRoot.offsetHeight : 0,
-              labelRectHeight: Number(labelRect?.getAttribute('height') || 0),
-            };
-          })
-          .filter((node) => node.text && (
-            node.foreignObjectHeight + 1 < node.htmlRootHeight
-            || (node.labelRectHeight > 0 && node.labelRectHeight <= node.foreignObjectHeight)
-          ))
-          .map((node) => `${node.text} (${node.foreignObjectHeight}/${node.htmlRootHeight}/${node.labelRectHeight})`);
-      }),
+          return Array.from(secondDiagram.querySelectorAll('.node'))
+            .map((node) => {
+              const foreignObject = node.querySelector('foreignObject');
+              const htmlRoot = foreignObject?.firstElementChild;
+              const labelRect = node.querySelector(
+                'rect.label-container, rect.basic.label-container',
+              );
+              const text = htmlRoot?.textContent?.replace(/\s+/g, ' ').trim() || '';
+              return {
+                text,
+                foreignObjectHeight: Number(foreignObject?.getAttribute('height') || 0),
+                htmlRootHeight: htmlRoot instanceof HTMLElement ? htmlRoot.offsetHeight : 0,
+                labelRectHeight: Number(labelRect?.getAttribute('height') || 0),
+              };
+            })
+            .filter(
+              (node) =>
+                node.text &&
+                (node.foreignObjectHeight + 1 < node.htmlRootHeight ||
+                  (node.labelRectHeight > 0 && node.labelRectHeight <= node.foreignObjectHeight)),
+            )
+            .map(
+              (node) =>
+                `${node.text} (${node.foreignObjectHeight}/${node.htmlRootHeight}/${node.labelRectHeight})`,
+            );
+        }),
       { timeout: 5_000 },
     )
     .toEqual([]);
 
   const secondDiagramSizing = await page.evaluate(() => {
-    const secondDiagram = document.querySelectorAll('.mermaid-block .mermaid-svg')[1] as HTMLElement | undefined;
+    const secondDiagram = document.querySelectorAll('.mermaid-block .mermaid-svg')[1] as
+      | HTMLElement
+      | undefined;
     const svg = secondDiagram?.querySelector('svg');
     if (!secondDiagram || !svg) return null;
 
@@ -232,8 +242,12 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
   });
 
   expect(secondDiagramSizing).not.toBeNull();
-  expect(secondDiagramSizing!.wrapperScrollWidth).toBeLessThanOrEqual(secondDiagramSizing!.wrapperClientWidth + 1);
-  expect(secondDiagramSizing!.svgWidth).toBeLessThanOrEqual(secondDiagramSizing!.wrapperClientWidth + 1);
+  expect(secondDiagramSizing!.wrapperScrollWidth).toBeLessThanOrEqual(
+    secondDiagramSizing!.wrapperClientWidth + 1,
+  );
+  expect(secondDiagramSizing!.svgWidth).toBeLessThanOrEqual(
+    secondDiagramSizing!.wrapperClientWidth + 1,
+  );
 
   const firstDiagramOrder = await page.evaluate(() => {
     const svg = document.querySelector('.mermaid-block .mermaid-svg svg');
@@ -241,7 +255,13 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
     return root ? Array.from(root.children).map((el) => el.getAttribute('class')) : null;
   });
 
-  expect(firstDiagramOrder).toEqual(['clusters', 'edgePaths', 'nodes', 'edgeEndpointOverlays', 'edgeLabels']);
+  expect(firstDiagramOrder).toEqual([
+    'clusters',
+    'edgePaths',
+    'nodes',
+    'edgeEndpointOverlays',
+    'edgeLabels',
+  ]);
 
   const overlayStyle = await page.evaluate(() => {
     const overlay = document.querySelector('.mermaid-block g.edgeEndpointOverlays path');
@@ -261,15 +281,17 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
     const secondDiagram = document.querySelectorAll('.mermaid-block .mermaid-svg')[1];
     if (!secondDiagram) return [];
 
-    return Array.from(secondDiagram.querySelectorAll('g.edgeLabel')).map((edgeLabel) => {
-      const foreignObject = edgeLabel.querySelector('foreignObject');
-      const htmlRoot = foreignObject?.firstElementChild;
-      return {
-        text: htmlRoot?.textContent?.replace(/\s+/g, ' ').trim() || '',
-        foreignObjectHeight: Number(foreignObject?.getAttribute('height') || 0),
-        htmlRootHeight: htmlRoot instanceof HTMLElement ? htmlRoot.offsetHeight : 0,
-      };
-    }).filter((label) => label.text.includes('Removed from site'));
+    return Array.from(secondDiagram.querySelectorAll('g.edgeLabel'))
+      .map((edgeLabel) => {
+        const foreignObject = edgeLabel.querySelector('foreignObject');
+        const htmlRoot = foreignObject?.firstElementChild;
+        return {
+          text: htmlRoot?.textContent?.replace(/\s+/g, ' ').trim() || '',
+          foreignObjectHeight: Number(foreignObject?.getAttribute('height') || 0),
+          htmlRootHeight: htmlRoot instanceof HTMLElement ? htmlRoot.offsetHeight : 0,
+        };
+      })
+      .filter((label) => label.text.includes('Removed from site'));
   });
 
   expect(edgeLabelSizing).toEqual([
@@ -279,7 +301,9 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
       htmlRootHeight: expect.any(Number),
     }),
   ]);
-  expect(edgeLabelSizing[0].foreignObjectHeight).toBeGreaterThanOrEqual(edgeLabelSizing[0].htmlRootHeight);
+  expect(edgeLabelSizing[0].foreignObjectHeight).toBeGreaterThanOrEqual(
+    edgeLabelSizing[0].htmlRootHeight,
+  );
 });
 
 test('mermaid drag keeps mermaid-specific highlight styling and escape restores the anchor', async ({
@@ -301,11 +325,13 @@ test('mermaid drag keeps mermaid-specific highlight styling and escape restores 
 
   await endHandle.hover();
   await page.mouse.down();
-  await page.mouse.move(handleBox!.x - 30, handleBox!.y + (handleBox!.height / 2), { steps: 6 });
+  await page.mouse.move(handleBox!.x - 30, handleBox!.y + handleBox!.height / 2, { steps: 6 });
   await page.waitForTimeout(100);
 
   const dragState = await page.evaluate(() => {
-    const activeMark = document.querySelector('.mermaid-block .mermaid-comment-highlight-active') as HTMLElement | null;
+    const activeMark = document.querySelector(
+      '.mermaid-block .mermaid-comment-highlight-active',
+    ) as HTMLElement | null;
     const genericMark = document.querySelector('.mermaid-block .comment-highlight-active');
     if (!activeMark) return null;
 
@@ -327,7 +353,9 @@ test('mermaid drag keeps mermaid-specific highlight styling and escape restores 
   await page.keyboard.press('Escape');
 
   const postEscapeState = await page.evaluate(() => {
-    const activeMark = document.querySelector('.mermaid-block .mermaid-comment-highlight-active') as HTMLElement | null;
+    const activeMark = document.querySelector(
+      '.mermaid-block .mermaid-comment-highlight-active',
+    ) as HTMLElement | null;
     const genericMark = document.querySelector('.mermaid-block .comment-highlight-active');
     return {
       genericMarkExists: genericMark != null,
@@ -402,7 +430,9 @@ test('long wrapped mermaid labels do not overlap surrounding boxes', async ({ pa
 
     const parseEndpoint = (pathData: string | null) => {
       if (!pathData) return null;
-      const numbers = pathData.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map((value) => Number.parseFloat(value));
+      const numbers = pathData
+        .match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)
+        ?.map((value) => Number.parseFloat(value));
       if (!numbers || numbers.length < 2) return null;
       return {
         x: numbers[numbers.length - 2],
@@ -415,28 +445,33 @@ test('long wrapped mermaid labels do not overlap surrounding boxes', async ({ pa
       const markerId = markerUrl?.match(/url\(#([^)]+)\)/)?.[1];
       if (!markerId) return 0;
 
-      const marker = thirdDiagram.querySelector(`marker#${CSS.escape(markerId)}`) as SVGMarkerElement | null;
+      const marker = thirdDiagram.querySelector(
+        `marker#${CSS.escape(markerId)}`,
+      ) as SVGMarkerElement | null;
       if (!marker) return 0;
 
       const viewBox = marker.viewBox?.baseVal;
-      const refX = marker.refX?.baseVal?.value ?? Number.parseFloat(marker.getAttribute('refX') || '0');
-      let maxX = Number.isFinite(viewBox?.width) ? (viewBox!.x + viewBox!.width) : Number.NaN;
+      const refX =
+        marker.refX?.baseVal?.value ?? Number.parseFloat(marker.getAttribute('refX') || '0');
+      let maxX = Number.isFinite(viewBox?.width) ? viewBox!.x + viewBox!.width : Number.NaN;
 
       for (const child of Array.from(marker.children)) {
         if (!(child instanceof SVGGraphicsElement)) continue;
         const bbox = child.getBBox();
         if (Number.isFinite(bbox.width)) {
-          maxX = Number.isFinite(maxX) ? Math.max(maxX, bbox.x + bbox.width) : (bbox.x + bbox.width);
+          maxX = Number.isFinite(maxX) ? Math.max(maxX, bbox.x + bbox.width) : bbox.x + bbox.width;
         }
       }
 
       if (!Number.isFinite(maxX)) return 0;
 
-      const markerWidth = marker.markerWidth?.baseVal?.value
-        ?? Number.parseFloat(marker.getAttribute('markerWidth') || '0');
-      const scaleX = viewBox && viewBox.width > 0 && Number.isFinite(markerWidth) && markerWidth > 0
-        ? markerWidth / viewBox.width
-        : 1;
+      const markerWidth =
+        marker.markerWidth?.baseVal?.value ??
+        Number.parseFloat(marker.getAttribute('markerWidth') || '0');
+      const scaleX =
+        viewBox && viewBox.width > 0 && Number.isFinite(markerWidth) && markerWidth > 0
+          ? markerWidth / viewBox.width
+          : 1;
 
       return Math.max(0, (maxX - refX) * scaleX);
     };
@@ -448,7 +483,9 @@ test('long wrapped mermaid labels do not overlap surrounding boxes', async ({ pa
         const rect = node.querySelector('rect.label-container, rect.basic.label-container');
         return {
           text,
-          top: parseTranslateY(node.getAttribute('transform')) + Number.parseFloat(rect?.getAttribute('y') || '0'),
+          top:
+            parseTranslateY(node.getAttribute('transform')) +
+            Number.parseFloat(rect?.getAttribute('y') || '0'),
         };
       })
       .filter((node) => node.text);

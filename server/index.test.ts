@@ -180,7 +180,10 @@ describe('/api/preferences', () => {
 
   it('PUT merges partial updates', async () => {
     const { writeFile: wf, rm: rmf } = await import('fs/promises');
-    await wf(join(fakeHome, '.md-redline.json'), JSON.stringify({ author: 'Alice', theme: 'light' }));
+    await wf(
+      join(fakeHome, '.md-redline.json'),
+      JSON.stringify({ author: 'Alice', theme: 'light' }),
+    );
     const { response, body } = await requestJson(app, '/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

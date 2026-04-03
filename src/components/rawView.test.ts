@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildHighlightedHtml, escapeHtml, extractRawHeadings, splitHighlightedHtml } from './RawView';
+import {
+  buildHighlightedHtml,
+  escapeHtml,
+  extractRawHeadings,
+  splitHighlightedHtml,
+} from './RawView';
 
 describe('escapeHtml', () => {
   it('escapes &, <, >, "', () => {
@@ -129,7 +134,8 @@ describe('buildHighlightedHtml', () => {
   });
 
   describe('comment markers', () => {
-    const marker = '<!-- @comment{"id":"abc","anchor":"hello","text":"fix this","author":"User","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
+    const marker =
+      '<!-- @comment{"id":"abc","anchor":"hello","text":"fix this","author":"User","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
 
     it('highlights comment markers', () => {
       const html = buildHighlightedHtml(`Some text ${marker}hello world`);
@@ -143,7 +149,8 @@ describe('buildHighlightedHtml', () => {
 
     it('handles multiline comment markers', () => {
       // Use \\n in JSON (escaped newline) so JSON.parse succeeds — this is how the app serializes them
-      const multilineMarker = '<!-- @comment{"id":"m1","anchor":"test","text":"long\\ncomment","author":"User","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
+      const multilineMarker =
+        '<!-- @comment{"id":"m1","anchor":"test","text":"long\\ncomment","author":"User","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
       const html = buildHighlightedHtml(`before ${multilineMarker}after`);
       expect(html).toContain('data-comment-id="m1"');
       expect(html).toContain('raw-comment-marker');
@@ -168,8 +175,10 @@ describe('buildHighlightedHtml', () => {
     });
 
     it('handles multiple comment markers', () => {
-      const m1 = '<!-- @comment{"id":"c1","anchor":"a","text":"x","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
-      const m2 = '<!-- @comment{"id":"c2","anchor":"b","text":"y","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
+      const m1 =
+        '<!-- @comment{"id":"c1","anchor":"a","text":"x","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
+      const m2 =
+        '<!-- @comment{"id":"c2","anchor":"b","text":"y","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
       const html = buildHighlightedHtml(`${m1}alpha ${m2}beta`);
       expect(html).toContain('data-comment-id="c1"');
       expect(html).toContain('data-comment-id="c2"');
@@ -186,7 +195,8 @@ describe('buildHighlightedHtml', () => {
     });
 
     it('does not apply syntax highlighting inside comment markers', () => {
-      const marker = '<!-- @comment{"id":"x","anchor":"# heading","text":"fix","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
+      const marker =
+        '<!-- @comment{"id":"x","anchor":"# heading","text":"fix","author":"U","timestamp":"2026-01-01T00:00:00Z","replies":[]} -->';
       const html = buildHighlightedHtml(marker);
       // The "# heading" inside the JSON should not be highlighted as a heading
       expect(html).not.toContain('raw-heading');

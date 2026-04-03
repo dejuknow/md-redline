@@ -39,37 +39,39 @@ interface Point {
 
 type MermaidNodeGeometry =
   | {
-    center: Point;
-    kind: 'rect';
-    height: number;
-    width: number;
-  }
+      center: Point;
+      kind: 'rect';
+      height: number;
+      width: number;
+    }
   | {
-    center: Point;
-    kind: 'circle';
-    radius: number;
-  }
+      center: Point;
+      kind: 'circle';
+      radius: number;
+    }
   | {
-    center: Point;
-    kind: 'ellipse';
-    rx: number;
-    ry: number;
-  }
+      center: Point;
+      kind: 'ellipse';
+      rx: number;
+      ry: number;
+    }
   | {
-    center: Point;
-    kind: 'polygon';
-    points: Point[];
-  };
+      center: Point;
+      kind: 'polygon';
+      points: Point[];
+    };
 
 export function getMermaidHighlightTheme(rootStyles: CSSStyleDeclaration): MermaidHighlightTheme {
   return {
     background: rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim(),
-    activeBackground: rootStyles.getPropertyValue('--theme-comment-bg-hover-opaque').trim()
-      || rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim(),
+    activeBackground:
+      rootStyles.getPropertyValue('--theme-comment-bg-hover-opaque').trim() ||
+      rootStyles.getPropertyValue('--theme-comment-bg-opaque').trim(),
     color: rootStyles.getPropertyValue('--theme-text').trim(),
     underline: rootStyles.getPropertyValue('--theme-comment-underline').trim(),
-    activeUnderline: rootStyles.getPropertyValue('--theme-comment-underline-active').trim()
-      || rootStyles.getPropertyValue('--theme-comment-underline').trim(),
+    activeUnderline:
+      rootStyles.getPropertyValue('--theme-comment-underline-active').trim() ||
+      rootStyles.getPropertyValue('--theme-comment-underline').trim(),
     ring: rootStyles.getPropertyValue('--theme-comment-ring').trim(),
   };
 }
@@ -144,7 +146,7 @@ function rememberBaseAttribute(el: Element, attribute: string, storageAttribute:
   return current;
 }
 
-function parseTranslateTransform(transform: string | null): TranslateTransform | null {
+export function parseTranslateTransform(transform: string | null): TranslateTransform | null {
   if (!transform) return null;
 
   const match = transform.match(
@@ -159,7 +161,7 @@ function parseTranslateTransform(transform: string | null): TranslateTransform |
   };
 }
 
-function formatTranslateTransform(transform: TranslateTransform) {
+export function formatTranslateTransform(transform: TranslateTransform) {
   return `translate(${transform.x}, ${transform.y})${transform.suffix ? ` ${transform.suffix}` : ''}`;
 }
 
@@ -173,10 +175,10 @@ function applyTranslate(point: Point, transform: TranslateTransform | null) {
 function distanceSquared(a: Point, b: Point) {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
-  return (dx * dx) + (dy * dy);
+  return dx * dx + dy * dy;
 }
 
-function parsePolygonPoints(points: string | null) {
+export function parsePolygonPoints(points: string | null) {
   if (!points) return [];
 
   return points
@@ -187,14 +189,20 @@ function parsePolygonPoints(points: string | null) {
     .map(([x, y]) => ({ x, y }));
 }
 
-function pointInPolygon(point: Point, polygon: Point[]) {
+export function pointInPolygon(point: Point, polygon: Point[]) {
   let inside = false;
 
-  for (let index = 0, prevIndex = polygon.length - 1; index < polygon.length; prevIndex = index, index += 1) {
+  for (
+    let index = 0, prevIndex = polygon.length - 1;
+    index < polygon.length;
+    prevIndex = index, index += 1
+  ) {
     const current = polygon[index];
     const previous = polygon[prevIndex];
-    const intersects = ((current.y > point.y) !== (previous.y > point.y))
-      && (point.x < (((previous.x - current.x) * (point.y - current.y)) / (previous.y - current.y)) + current.x);
+    const intersects =
+      current.y > point.y !== previous.y > point.y &&
+      point.x <
+        ((previous.x - current.x) * (point.y - current.y)) / (previous.y - current.y) + current.x;
     if (intersects) {
       inside = !inside;
     }
@@ -206,17 +214,19 @@ function pointInPolygon(point: Point, polygon: Point[]) {
 function pointInsideGeometry(geometry: MermaidNodeGeometry, point: Point) {
   switch (geometry.kind) {
     case 'rect':
-      return point.x >= geometry.center.x - (geometry.width / 2)
-        && point.x <= geometry.center.x + (geometry.width / 2)
-        && point.y >= geometry.center.y - (geometry.height / 2)
-        && point.y <= geometry.center.y + (geometry.height / 2);
+      return (
+        point.x >= geometry.center.x - geometry.width / 2 &&
+        point.x <= geometry.center.x + geometry.width / 2 &&
+        point.y >= geometry.center.y - geometry.height / 2 &&
+        point.y <= geometry.center.y + geometry.height / 2
+      );
     case 'circle':
       return distanceSquared(point, geometry.center) <= geometry.radius * geometry.radius;
     case 'ellipse': {
       const dx = point.x - geometry.center.x;
       const dy = point.y - geometry.center.y;
       if (geometry.rx === 0 || geometry.ry === 0) return false;
-      return ((dx * dx) / (geometry.rx * geometry.rx)) + ((dy * dy) / (geometry.ry * geometry.ry)) <= 1;
+      return (dx * dx) / (geometry.rx * geometry.rx) + (dy * dy) / (geometry.ry * geometry.ry) <= 1;
     }
     case 'polygon':
       return pointInPolygon(point, geometry.points);
@@ -253,37 +263,40 @@ function intersectCircle(geometry: Extract<MermaidNodeGeometry, { kind: 'circle'
   if (length === 0) return null;
 
   return {
-    x: geometry.center.x + ((dx / length) * geometry.radius),
-    y: geometry.center.y + ((dy / length) * geometry.radius),
+    x: geometry.center.x + (dx / length) * geometry.radius,
+    y: geometry.center.y + (dy / length) * geometry.radius,
   };
 }
 
-function intersectEllipse(geometry: Extract<MermaidNodeGeometry, { kind: 'ellipse' }>, point: Point) {
+function intersectEllipse(
+  geometry: Extract<MermaidNodeGeometry, { kind: 'ellipse' }>,
+  point: Point,
+) {
   const dx = point.x - geometry.center.x;
   const dy = point.y - geometry.center.y;
   const scale = Math.sqrt(
-    ((dx * dx) / (geometry.rx * geometry.rx))
-      + ((dy * dy) / (geometry.ry * geometry.ry)),
+    (dx * dx) / (geometry.rx * geometry.rx) + (dy * dy) / (geometry.ry * geometry.ry),
   );
   if (!Number.isFinite(scale) || scale === 0) return null;
 
   return {
-    x: geometry.center.x + (dx / scale),
-    y: geometry.center.y + (dy / scale),
+    x: geometry.center.x + dx / scale,
+    y: geometry.center.y + dy / scale,
   };
 }
 
 function intersectLineSegments(start: Point, end: Point, edgeStart: Point, edgeEnd: Point) {
-  const denominator = ((end.x - start.x) * (edgeEnd.y - edgeStart.y))
-    - ((end.y - start.y) * (edgeEnd.x - edgeStart.x));
+  const denominator =
+    (end.x - start.x) * (edgeEnd.y - edgeStart.y) - (end.y - start.y) * (edgeEnd.x - edgeStart.x);
   if (Math.abs(denominator) < 0.000001) return null;
 
   const startToEdgeX = edgeStart.x - start.x;
   const startToEdgeY = edgeStart.y - start.y;
-  const lineProgress = ((startToEdgeX * (edgeEnd.y - edgeStart.y))
-    - (startToEdgeY * (edgeEnd.x - edgeStart.x))) / denominator;
-  const edgeProgress = ((startToEdgeX * (end.y - start.y))
-    - (startToEdgeY * (end.x - start.x))) / denominator;
+  const lineProgress =
+    (startToEdgeX * (edgeEnd.y - edgeStart.y) - startToEdgeY * (edgeEnd.x - edgeStart.x)) /
+    denominator;
+  const edgeProgress =
+    (startToEdgeX * (end.y - start.y) - startToEdgeY * (end.x - start.x)) / denominator;
 
   if (lineProgress < 0 || lineProgress > 1 || edgeProgress < 0 || edgeProgress > 1) {
     return null;
@@ -291,20 +304,25 @@ function intersectLineSegments(start: Point, end: Point, edgeStart: Point, edgeE
 
   return {
     point: {
-      x: start.x + ((end.x - start.x) * lineProgress),
-      y: start.y + ((end.y - start.y) * lineProgress),
+      x: start.x + (end.x - start.x) * lineProgress,
+      y: start.y + (end.y - start.y) * lineProgress,
     },
     progress: lineProgress,
   };
 }
 
-function intersectPolygon(geometry: Extract<MermaidNodeGeometry, { kind: 'polygon' }>, point: Point) {
+function intersectPolygon(
+  geometry: Extract<MermaidNodeGeometry, { kind: 'polygon' }>,
+  point: Point,
+) {
   const intersections = geometry.points
     .map((current, index) => {
       const next = geometry.points[(index + 1) % geometry.points.length];
       return intersectLineSegments(geometry.center, point, current, next);
     })
-    .filter((intersection): intersection is { point: Point; progress: number } => intersection != null)
+    .filter(
+      (intersection): intersection is { point: Point; progress: number } => intersection != null,
+    )
     .sort((a, b) => a.progress - b.progress);
 
   return intersections[0]?.point ?? null;
@@ -355,8 +373,8 @@ function getNodeGeometry(node: SVGGElement): MermaidNodeGeometry | null {
       return {
         kind: 'rect',
         center: {
-          x: nodeTransform.x + x + (width / 2),
-          y: nodeTransform.y + y + (height / 2),
+          x: nodeTransform.x + x + width / 2,
+          y: nodeTransform.y + y + height / 2,
         },
         width,
         height,
@@ -372,8 +390,14 @@ function getNodeGeometry(node: SVGGElement): MermaidNodeGeometry | null {
       return {
         kind: 'circle',
         center: {
-          x: nodeTransform.x + Number.parseFloat(circle.getAttribute('cx') || '0') + (circleTransform?.x ?? 0),
-          y: nodeTransform.y + Number.parseFloat(circle.getAttribute('cy') || '0') + (circleTransform?.y ?? 0),
+          x:
+            nodeTransform.x +
+            Number.parseFloat(circle.getAttribute('cx') || '0') +
+            (circleTransform?.x ?? 0),
+          y:
+            nodeTransform.y +
+            Number.parseFloat(circle.getAttribute('cy') || '0') +
+            (circleTransform?.y ?? 0),
         },
         radius,
       };
@@ -389,8 +413,14 @@ function getNodeGeometry(node: SVGGElement): MermaidNodeGeometry | null {
       return {
         kind: 'ellipse',
         center: {
-          x: nodeTransform.x + Number.parseFloat(ellipse.getAttribute('cx') || '0') + (ellipseTransform?.x ?? 0),
-          y: nodeTransform.y + Number.parseFloat(ellipse.getAttribute('cy') || '0') + (ellipseTransform?.y ?? 0),
+          x:
+            nodeTransform.x +
+            Number.parseFloat(ellipse.getAttribute('cx') || '0') +
+            (ellipseTransform?.x ?? 0),
+          y:
+            nodeTransform.y +
+            Number.parseFloat(ellipse.getAttribute('cy') || '0') +
+            (ellipseTransform?.y ?? 0),
         },
         rx,
         ry,
@@ -417,19 +447,21 @@ function getMarkerForwardExtent(path: SVGPathElement) {
   const markerId = markerIdMatch?.[1];
   if (!markerId) return 0;
 
-  const marker = path.ownerSVGElement?.querySelector(`marker#${CSS.escape(markerId)}`) as SVGMarkerElement | null;
+  const marker = path.ownerSVGElement?.querySelector(
+    `marker#${CSS.escape(markerId)}`,
+  ) as SVGMarkerElement | null;
   if (!marker) return 0;
 
   const viewBox = marker.viewBox?.baseVal;
   const refX = marker.refX?.baseVal?.value ?? Number.parseFloat(marker.getAttribute('refX') || '0');
-  let maxX = Number.isFinite(viewBox?.width) ? (viewBox!.x + viewBox!.width) : Number.NaN;
+  let maxX = Number.isFinite(viewBox?.width) ? viewBox!.x + viewBox!.width : Number.NaN;
 
   for (const child of marker.children) {
     if (!(child instanceof SVGGraphicsElement)) continue;
     try {
       const bbox = child.getBBox();
       if (Number.isFinite(bbox.width)) {
-        maxX = Number.isFinite(maxX) ? Math.max(maxX, bbox.x + bbox.width) : (bbox.x + bbox.width);
+        maxX = Number.isFinite(maxX) ? Math.max(maxX, bbox.x + bbox.width) : bbox.x + bbox.width;
       }
     } catch {
       // Ignore marker children that cannot report bounds.
@@ -438,15 +470,18 @@ function getMarkerForwardExtent(path: SVGPathElement) {
 
   if (!Number.isFinite(maxX)) return 0;
 
-  const markerWidth = marker.markerWidth?.baseVal?.value ?? Number.parseFloat(marker.getAttribute('markerWidth') || '0');
-  const scaleX = viewBox && viewBox.width > 0 && Number.isFinite(markerWidth) && markerWidth > 0
-    ? markerWidth / viewBox.width
-    : 1;
+  const markerWidth =
+    marker.markerWidth?.baseVal?.value ??
+    Number.parseFloat(marker.getAttribute('markerWidth') || '0');
+  const scaleX =
+    viewBox && viewBox.width > 0 && Number.isFinite(markerWidth) && markerWidth > 0
+      ? markerWidth / viewBox.width
+      : 1;
 
   return Math.max(0, (maxX - refX) * scaleX);
 }
 
-function parseViewBox(viewBox: string | null) {
+export function parseViewBox(viewBox: string | null) {
   if (!viewBox) return null;
   const parts = viewBox
     .trim()
@@ -518,7 +553,7 @@ function getRankShiftResolver(ranks: MermaidRankLayout[]) {
         const span = next.centerY - current.centerY;
         if (span <= 0) return next.shift;
         const ratio = (y - current.centerY) / span;
-        return current.shift + ((next.shift - current.shift) * ratio);
+        return current.shift + (next.shift - current.shift) * ratio;
       }
     }
 
@@ -531,7 +566,7 @@ interface PathCommand {
   values: number[];
 }
 
-function parsePathCommands(pathData: string) {
+export function parsePathCommands(pathData: string) {
   const commands: PathCommand[] = [];
   const commandRe = /([AaCcHhLlMmQqSsTtVvZz])([^AaCcHhLlMmQqSsTtVvZz]*)/g;
   const numberRe = /[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi;
@@ -545,13 +580,13 @@ function parsePathCommands(pathData: string) {
   return commands;
 }
 
-function formatPathCommands(commands: PathCommand[]) {
+export function formatPathCommands(commands: PathCommand[]) {
   return commands
     .map(({ cmd, values }) => (values.length > 0 ? `${cmd}${values.join(' ')}` : cmd))
     .join('');
 }
 
-function transformPathY(pathData: string, transformY: (y: number) => number) {
+export function transformPathY(pathData: string, transformY: (y: number) => number) {
   const commands = parsePathCommands(pathData);
   if (commands.some(({ cmd }) => cmd !== cmd.toUpperCase())) {
     return pathData;
@@ -657,10 +692,15 @@ function stabilizeMermaidRenderedLayout(container: HTMLElement) {
       const el = edgePathEl as SVGPathElement;
       const basePathData = rememberBaseAttribute(el, 'd', MERMAID_BASE_D_ATTR);
       if (!basePathData) continue;
-      el.setAttribute('d', transformPathY(basePathData, (y) => y + shiftAtY(y)));
+      el.setAttribute(
+        'd',
+        transformPathY(basePathData, (y) => y + shiftAtY(y)),
+      );
     }
 
-    const baseViewBox = parseViewBox(rememberBaseAttribute(svg, 'viewBox', MERMAID_BASE_VIEWBOX_ATTR));
+    const baseViewBox = parseViewBox(
+      rememberBaseAttribute(svg, 'viewBox', MERMAID_BASE_VIEWBOX_ATTR),
+    );
     if (baseViewBox) {
       svg.setAttribute(
         'viewBox',
@@ -693,16 +733,10 @@ function findPathPointOutsideGeometry(
   totalLength: number,
   geometry: MermaidNodeGeometry,
 ) {
-  const sampleOffsets = [
-    24,
-    48,
-    96,
-    Math.max(0, totalLength - 1),
-  ].filter((offset, index, offsets) => (
-    offset > 0
-    && offset < totalLength
-    && offsets.indexOf(offset) === index
-  ));
+  const sampleOffsets = [24, 48, 96, Math.max(0, totalLength - 1)].filter(
+    (offset, index, offsets) =>
+      offset > 0 && offset < totalLength && offsets.indexOf(offset) === index,
+  );
 
   for (const offset of sampleOffsets) {
     const samplePoint = path.getPointAtLength(Math.max(0, totalLength - offset));
@@ -727,10 +761,12 @@ function buildArrowEndpointSegment(
   const originalEnd = path.getPointAtLength(totalLength);
   const endPoint = { x: originalEnd.x, y: originalEnd.y };
   const externalPoint = geometry ? findPathPointOutsideGeometry(path, totalLength, geometry) : null;
-  const targetEnd = geometry && externalPoint
-    ? intersectNodeGeometry(geometry, externalPoint) ?? endPoint
-    : endPoint;
-  const directionPoint = externalPoint ?? path.getPointAtLength(Math.max(0, totalLength - segmentLength));
+  const targetEnd =
+    geometry && externalPoint
+      ? (intersectNodeGeometry(geometry, externalPoint) ?? endPoint)
+      : endPoint;
+  const directionPoint =
+    externalPoint ?? path.getPointAtLength(Math.max(0, totalLength - segmentLength));
   const dx = targetEnd.x - directionPoint.x;
   const dy = targetEnd.y - directionPoint.y;
   const length = Math.hypot(dx, dy);
@@ -740,9 +776,9 @@ function buildArrowEndpointSegment(
     return `M${targetEnd.x},${targetEnd.y}L${targetEnd.x},${targetEnd.y}`;
   }
 
-  const endX = targetEnd.x - ((dx / length) * markerForwardExtent);
-  const endY = targetEnd.y - ((dy / length) * markerForwardExtent);
-  return `M${endX - ((dx / length) * segmentLength)},${endY - ((dy / length) * segmentLength)}L${endX},${endY}`;
+  const endX = targetEnd.x - (dx / length) * markerForwardExtent;
+  const endY = targetEnd.y - (dy / length) * markerForwardExtent;
+  return `M${endX - (dx / length) * segmentLength},${endY - (dy / length) * segmentLength}L${endX},${endY}`;
 }
 
 function stabilizeMermaidArrowEndpoints(container: HTMLElement) {
@@ -808,7 +844,9 @@ export function stabilizeMermaidLabelLayout(container: HTMLElement) {
 
     const labelGroup = foreignObject.parentElement as SVGGElement | null;
     const nodeGroup = labelGroup?.closest('.node') as SVGGElement | null;
-    const labelRect = nodeGroup?.querySelector('rect.label-container, rect.basic.label-container') as SVGRectElement | null;
+    const labelRect = nodeGroup?.querySelector(
+      'rect.label-container, rect.basic.label-container',
+    ) as SVGRectElement | null;
 
     foreignObject.setAttribute('height', String(measuredHeight));
 
@@ -839,7 +877,10 @@ export function stabilizeMermaidLabelLayout(container: HTMLElement) {
     applyWrappedLabelTextStyles(contentRoot, width);
 
     const measuredHeight = getRenderedLabelHeight(contentRoot);
-    const targetHeight = Math.max(Number.isFinite(currentHeight) ? currentHeight : 0, measuredHeight);
+    const targetHeight = Math.max(
+      Number.isFinite(currentHeight) ? currentHeight : 0,
+      measuredHeight,
+    );
     if (!Number.isFinite(targetHeight) || targetHeight <= 0) continue;
 
     foreignObject.setAttribute('height', String(targetHeight));

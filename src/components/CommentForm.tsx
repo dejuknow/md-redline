@@ -7,7 +7,13 @@ import { getPrimaryModifierLabel } from '../lib/platform';
 interface Props {
   selection: SelectionInfo;
   autoExpand?: boolean;
-  onSubmit: (anchor: string, text: string, contextBefore: string, contextAfter: string, hintOffset: number) => void;
+  onSubmit: (
+    anchor: string,
+    text: string,
+    contextBefore: string,
+    contextAfter: string,
+    hintOffset: number,
+  ) => void;
   onCancel: () => void;
   onLock: () => void;
 }
@@ -119,7 +125,13 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   const handleSubmit = () => {
     if (!text.trim() || text.length > COMMENT_MAX_LENGTH) return;
-    onSubmit(selection.text, text.trim(), selection.contextBefore, selection.contextAfter, selection.offset);
+    onSubmit(
+      selection.text,
+      text.trim(),
+      selection.contextBefore,
+      selection.contextAfter,
+      selection.offset,
+    );
     setText('');
     setIsExpanded(false);
     setShowTemplates(false);
@@ -216,17 +228,17 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           className="w-full text-sm border border-border-subtle rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content overflow-hidden"
         />
         {text.length > COMMENT_MAX_LENGTH * 0.8 && (
-          <p className={`text-right text-xs mt-1 ${
-            text.length >= COMMENT_MAX_LENGTH ? 'text-danger font-medium' : 'text-content-muted'
-          }`}>
+          <p
+            className={`text-right text-xs mt-1 ${
+              text.length >= COMMENT_MAX_LENGTH ? 'text-danger font-medium' : 'text-content-muted'
+            }`}
+          >
             {text.length}/{COMMENT_MAX_LENGTH}
           </p>
         )}
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-content-muted">
-              {modLabel}+Enter
-            </span>
+            <span className="text-xs text-content-muted">{modLabel}+Enter</span>
             <button
               onClick={() => setShowTemplates(!showTemplates)}
               className={`text-xs px-1.5 py-0.5 rounded transition-colors ${

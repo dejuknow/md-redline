@@ -232,6 +232,8 @@ function fuzzyReMatch(cleanMarkdown: string, comment: MdComment): number | null 
   }
 
   // Fallback: try contextAfter only (only if it appears exactly once)
+  // The anchor text should end right where contextAfter begins, so
+  // subtract the anchor length to find where the anchor starts.
   if (contextAfter && contextAfter.length >= 10) {
     const firstIdx = cleanMarkdown.indexOf(contextAfter);
     if (
@@ -239,7 +241,7 @@ function fuzzyReMatch(cleanMarkdown: string, comment: MdComment): number | null 
       firstIdx > 0 &&
       cleanMarkdown.indexOf(contextAfter, firstIdx + 1) === -1
     ) {
-      return Math.max(0, firstIdx);
+      return Math.max(0, firstIdx - comment.anchor.length);
     }
   }
 
@@ -827,14 +829,14 @@ export function stripInlineFormatting(md: string): {
 
     // List markers at line start: - item, * item, N. item
     if (atLineStart(i)) {
-      if ((md[i] === '-' || md[i] === '*') && md[i + 1] === ' ') {
+      if ((md[i] === '-' || md[i] === '*') && i + 1 < len && md[i + 1] === ' ') {
         i += 2;
         continue;
       }
       if (/\d/.test(md[i])) {
         let j = i;
         while (j < len && /\d/.test(md[j])) j++;
-        if (md[j] === '.' && md[j + 1] === ' ') {
+        if (j < len && md[j] === '.' && j + 1 < len && md[j + 1] === ' ') {
           i = j + 2;
           continue;
         }

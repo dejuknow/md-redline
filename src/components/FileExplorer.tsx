@@ -28,7 +28,14 @@ interface Props {
   hideHeader?: boolean;
 }
 
-export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, onContextMenu: onCtxMenu, hideHeader }: Props) {
+export function FileExplorer({
+  initialDir,
+  activeFilePath,
+  onOpenFile,
+  onClose,
+  onContextMenu: onCtxMenu,
+  hideHeader,
+}: Props) {
   const [data, setData] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +67,9 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
 
   useEffect(() => {
     browse(initialDir);
-    return () => { abortRef.current?.abort(); };
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [browse, initialDir]);
 
   const dirName = getPathBasename(data?.dir || '') || data?.dir || 'Files';
@@ -79,7 +88,13 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
             title="Close panel"
             aria-label="Close panel"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -95,7 +110,13 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
               className="p-1 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors shrink-0"
               title="Go up"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
@@ -130,7 +151,13 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
             // If the target is inside a button (file/dir item), let that handler take over
             if ((e.target as HTMLElement).closest('button')) return;
             e.preventDefault();
-            onCtxMenu({ type: 'blank', path: data.dir, name: getPathBasename(data.dir) || data.dir, x: e.clientX, y: e.clientY });
+            onCtxMenu({
+              type: 'blank',
+              path: data.dir,
+              name: getPathBasename(data.dir) || data.dir,
+              x: e.clientX,
+              y: e.clientY,
+            });
           }}
         >
           {/* Directories */}
@@ -141,7 +168,13 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
               onContextMenu={(e) => {
                 if (!onCtxMenu) return;
                 e.preventDefault();
-                onCtxMenu({ type: 'directory', path: dir.path, name: dir.name, x: e.clientX, y: e.clientY });
+                onCtxMenu({
+                  type: 'directory',
+                  path: dir.path,
+                  name: dir.name,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
               }}
               className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-tint transition-colors"
             >
@@ -172,7 +205,13 @@ export function FileExplorer({ initialDir, activeFilePath, onOpenFile, onClose, 
                 onContextMenu={(e) => {
                   if (!onCtxMenu) return;
                   e.preventDefault();
-                  onCtxMenu({ type: 'file', path: file.path, name: file.name, x: e.clientX, y: e.clientY });
+                  onCtxMenu({
+                    type: 'file',
+                    path: file.path,
+                    name: file.name,
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
                 }}
                 className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                   isActive

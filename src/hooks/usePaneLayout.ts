@@ -25,8 +25,14 @@ export function load(): PaneLayout {
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
     return {
-      explorerVisible: typeof parsed.explorerVisible === 'boolean' ? parsed.explorerVisible : DEFAULTS.explorerVisible,
-      sidebarVisible: typeof parsed.sidebarVisible === 'boolean' ? parsed.sidebarVisible : DEFAULTS.sidebarVisible,
+      explorerVisible:
+        typeof parsed.explorerVisible === 'boolean'
+          ? parsed.explorerVisible
+          : DEFAULTS.explorerVisible,
+      sidebarVisible:
+        typeof parsed.sidebarVisible === 'boolean'
+          ? parsed.sidebarVisible
+          : DEFAULTS.sidebarVisible,
       leftPanelView: parsed.leftPanelView === 'outline' ? 'outline' : 'explorer',
       viewMode: parsed.viewMode === 'raw' || parsed.viewMode === 'diff' ? 'raw' : 'rendered',
     };
@@ -38,7 +44,9 @@ export function load(): PaneLayout {
 export function save(layout: PaneLayout) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function usePaneLayout() {
@@ -52,25 +60,25 @@ export function usePaneLayout() {
   }, [layout]);
 
   const setExplorerVisible = useCallback((v: boolean | ((prev: boolean) => boolean)) => {
-    setLayout(prev => {
+    setLayout((prev) => {
       const next = typeof v === 'function' ? v(prev.explorerVisible) : v;
       return { ...prev, explorerVisible: next };
     });
   }, []);
 
   const setSidebarVisible = useCallback((v: boolean | ((prev: boolean) => boolean)) => {
-    setLayout(prev => {
+    setLayout((prev) => {
       const next = typeof v === 'function' ? v(prev.sidebarVisible) : v;
       return { ...prev, sidebarVisible: next };
     });
   }, []);
 
   const setLeftPanelView = useCallback((v: LeftPanelView) => {
-    setLayout(prev => ({ ...prev, leftPanelView: v }));
+    setLayout((prev) => ({ ...prev, leftPanelView: v }));
   }, []);
 
   const setViewMode = useCallback((v: ViewMode | ((prev: ViewMode) => ViewMode)) => {
-    setLayout(prev => {
+    setLayout((prev) => {
       const next = typeof v === 'function' ? v(prev.viewMode) : v;
       return { ...prev, viewMode: next };
     });

@@ -61,7 +61,10 @@ export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
   const [savedSession] = useState(() => loadSession());
   const showToastRef = useRef<((msg: string) => void) | null>(null);
-  const onSaveError = useCallback((msg: string) => showToastRef.current?.(`Save failed: ${msg}`), []);
+  const onSaveError = useCallback(
+    (msg: string) => showToastRef.current?.(`Save failed: ${msg}`),
+    [],
+  );
   const {
     tabs,
     activeFilePath,
@@ -417,11 +420,14 @@ export default function App() {
             if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
             const diffAction =
               cleanContentChanged && currentSnapshotRef.current
-                ? { label: 'View diff', onClick: () => {
-                    setViewMode('raw');
-                    setDiffEnabled(true);
-                    setDiffPending(false);
-                  }}
+                ? {
+                    label: 'View diff',
+                    onClick: () => {
+                      setViewMode('raw');
+                      setDiffEnabled(true);
+                      setDiffPending(false);
+                    },
+                  }
                 : undefined;
             showToast(`${parts.join(', ')} externally`, diffAction);
           }
@@ -457,7 +463,7 @@ export default function App() {
     // exhausting the browser's per-origin HTTP/1.1 connection limit (6).
     // Also closed when the browser tab is hidden so multiple browser tabs
     // to the same server don't exhaust the limit.
-    const params = paths.map(p => `path=${encodeURIComponent(p)}`).join('&');
+    const params = paths.map((p) => `path=${encodeURIComponent(p)}`).join('&');
     const es = new EventSource(`/api/watch?${params}`);
     es.addEventListener('change', (e) => {
       try {
@@ -1403,7 +1409,12 @@ export default function App() {
       </>
 
       {/* Toast notification (Feature 8) */}
-      <Toast message={toast.message} visible={toast.visible} onDismiss={dismissToast} action={toast.action} />
+      <Toast
+        message={toast.message}
+        visible={toast.visible}
+        onDismiss={dismissToast}
+        action={toast.action}
+      />
 
       {/* Command palette */}
       <CommandPalette

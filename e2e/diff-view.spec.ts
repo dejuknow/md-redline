@@ -25,7 +25,10 @@ async function openFixture(page: Page) {
 }
 
 /** Trigger a snapshot by adding a comment and handing off to agent. */
-async function takeSnapshotViaHandoff(page: Page, context: { grantPermissions: (p: string[]) => Promise<void> }) {
+async function takeSnapshotViaHandoff(
+  page: Page,
+  context: { grantPermissions: (p: string[]) => Promise<void> },
+) {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await addComment(page, 'Section One', 'placeholder');
   await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
@@ -64,7 +67,10 @@ async function expectInactive(btn: Locator) {
 // ---------------------------------------------------------------------------
 
 test.describe('Diff overlay', () => {
-  test('diff toggle appears in raw view after handoff creates a snapshot', async ({ page, context }) => {
+  test('diff toggle appears in raw view after handoff creates a snapshot', async ({
+    page,
+    context,
+  }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
@@ -72,7 +78,10 @@ test.describe('Diff overlay', () => {
     await expect(toggleBtn(page, 'diff')).toBeVisible();
   });
 
-  test('diff auto-enables on raw mode entry and shows "No changes" when content matches snapshot', async ({ page, context }) => {
+  test('diff auto-enables on raw mode entry and shows "No changes" when content matches snapshot', async ({
+    page,
+    context,
+  }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
@@ -132,7 +141,9 @@ test.describe('Diff overlay', () => {
     const modified = FIXTURE_ORIGINAL.replace('## Section One', '## Updated Section');
     writeFileSync(FIXTURE, modified);
 
-    await expect(page.getByRole('heading', { name: 'Updated Section' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'Updated Section' })).toBeVisible({
+      timeout: 15_000,
+    });
 
     const rawBtn = page.locator('button[title="View raw markdown"]');
     const badge = rawBtn.locator('.animate-pulse');

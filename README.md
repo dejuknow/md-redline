@@ -134,8 +134,7 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 | `Cmd+O` / `Ctrl+O` | Open file |
 | `Cmd+,` / `Ctrl+,` | Open settings |
 | `Cmd+Enter` / `Ctrl+Enter` | Submit comment / expand comment form |
-| `Cmd+1-8` / `Ctrl+1-8` | Apply quick template |
-| `Cmd+Shift+M` / `Ctrl+Shift+M` | Start commenting on selection |
+| `Cmd+Shift+M` / `Ctrl+Shift+M` | Lock selection for commenting |
 | `Cmd+Shift+O` / `Ctrl+Shift+O` | Toggle document outline |
 | `Cmd+Shift+[ / ]` / `Ctrl+Shift+[ / ]` | Previous / next tab |
 | `Cmd+\` / `Ctrl+\` | Toggle comments sidebar |

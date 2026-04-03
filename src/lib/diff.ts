@@ -127,7 +127,12 @@ function computeDiffLargeFile(oldLines: string[], newLines: string[]): DiffLine[
   for (let i = 0; i < suffixLen; i++) {
     const oldIdx = oldLines.length - suffixLen + i;
     const newIdx = newLines.length - suffixLen + i;
-    result.push({ type: 'same', text: oldLines[oldIdx], oldLineNo: oldIdx + 1, newLineNo: newIdx + 1 });
+    result.push({
+      type: 'same',
+      text: oldLines[oldIdx],
+      oldLineNo: oldIdx + 1,
+      newLineNo: newIdx + 1,
+    });
   }
 
   return result;

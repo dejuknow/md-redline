@@ -53,9 +53,8 @@ export function useMermaidRenderer(
         const result = await renderMermaidBlock(source, theme);
         if (cancelled) return;
 
-        const mermaidResult: MermaidResult = 'svg' in result
-          ? { svg: result.svg }
-          : { error: result.error };
+        const mermaidResult: MermaidResult =
+          'svg' in result ? { svg: result.svg } : { error: result.error };
         newMap.set(source, mermaidResult);
         cache.set(source, { theme, result: mermaidResult });
       }

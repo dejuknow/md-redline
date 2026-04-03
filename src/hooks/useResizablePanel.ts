@@ -9,7 +9,7 @@ interface PanelWidths {
 
 const DEFAULTS: PanelWidths = {
   explorer: 224, // w-56
-  sidebar: 320,  // w-80
+  sidebar: 320, // w-80
 };
 
 const MIN_WIDTHS: PanelWidths = {
@@ -28,7 +28,11 @@ export function loadWidths(): PanelWidths {
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
     return {
-      explorer: clamp(parsed.explorer ?? DEFAULTS.explorer, MIN_WIDTHS.explorer, MAX_WIDTHS.explorer),
+      explorer: clamp(
+        parsed.explorer ?? DEFAULTS.explorer,
+        MIN_WIDTHS.explorer,
+        MAX_WIDTHS.explorer,
+      ),
       sidebar: clamp(parsed.sidebar ?? DEFAULTS.sidebar, MIN_WIDTHS.sidebar, MAX_WIDTHS.sidebar),
     };
   } catch {
@@ -50,35 +54,34 @@ export function useResizablePanel() {
   const persist = useCallback((w: PanelWidths) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(w));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
-  const onMouseDown = useCallback((panel: 'explorer' | 'sidebar', e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = panel;
-    setIsDragging(true);
-    startX.current = e.clientX;
-    startWidth.current = widths[panel];
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [widths]);
+  const onMouseDown = useCallback(
+    (panel: 'explorer' | 'sidebar', e: React.MouseEvent) => {
+      e.preventDefault();
+      dragging.current = panel;
+      setIsDragging(true);
+      startX.current = e.clientX;
+      startWidth.current = widths[panel];
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [widths],
+  );
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const panel = dragging.current;
       if (!panel) return;
 
-      const delta = panel === 'explorer'
-        ? e.clientX - startX.current
-        : startX.current - e.clientX; // sidebar drags leftward to grow
+      const delta = panel === 'explorer' ? e.clientX - startX.current : startX.current - e.clientX; // sidebar drags leftward to grow
 
-      const newWidth = clamp(
-        startWidth.current + delta,
-        MIN_WIDTHS[panel],
-        MAX_WIDTHS[panel],
-      );
+      const newWidth = clamp(startWidth.current + delta, MIN_WIDTHS[panel], MAX_WIDTHS[panel]);
 
-      setWidths(prev => ({ ...prev, [panel]: newWidth }));
+      setWidths((prev) => ({ ...prev, [panel]: newWidth }));
     };
 
     const onMouseUp = () => {
@@ -87,7 +90,7 @@ export function useResizablePanel() {
       setIsDragging(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
-      setWidths(prev => {
+      setWidths((prev) => {
         persist(prev);
         return prev;
       });

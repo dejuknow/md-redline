@@ -25,16 +25,17 @@ const sizeClasses: Record<Size, string> = {
   sm: 'text-xs px-2 py-1',
 };
 
-export const ActionButton = forwardRef<HTMLButtonElement, Props>(
-  function ActionButton({ intent = 'neutral', size = 'xs', children, ...rest }, ref) {
-    return (
-      <button
-        ref={ref}
-        className={`rounded transition-colors ${sizeClasses[size]} ${intentClasses[intent]}`}
-        {...rest}
-      >
-        {children}
-      </button>
-    );
-  },
-);
+export const ActionButton = forwardRef<HTMLButtonElement, Props>(function ActionButton(
+  { intent = 'neutral', size = 'xs', children, ...rest },
+  ref,
+) {
+  return (
+    <button
+      ref={ref}
+      className={`rounded transition-colors ${sizeClasses[size]} ${intentClasses[intent]}`}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+});

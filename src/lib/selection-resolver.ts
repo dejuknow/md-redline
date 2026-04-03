@@ -5,7 +5,8 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed) return null;
 
-  const text = sel.toString().trim();
+  const rawText = sel.toString();
+  const text = rawText.trim();
   if (!text || text.length < 2) return null;
 
   const range = sel.getRangeAt(0);
@@ -15,8 +16,14 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
   const fullText = getVisibleTextContent(containerEl);
   const selStart = getVisibleTextOffset(containerEl, range.startContainer, range.startOffset);
 
-  const contextBefore = fullText.slice(Math.max(0, selStart - 40), selStart);
-  const contextAfter = fullText.slice(selStart + text.length, selStart + text.length + 40);
+  // Adjust for leading whitespace that trim() removed so context windows
+  // align with the trimmed anchor text, not the raw selection boundaries.
+  const leadingTrim = rawText.length - rawText.trimStart().length;
+  const adjustedStart = selStart + leadingTrim;
+  const selEnd = adjustedStart + text.length;
+
+  const contextBefore = fullText.slice(Math.max(0, adjustedStart - 40), adjustedStart);
+  const contextAfter = fullText.slice(selEnd, selEnd + 40);
 
   const rect = range.getBoundingClientRect();
 
@@ -25,6 +32,6 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
     rect,
     contextBefore,
     contextAfter,
-    offset: selStart,
+    offset: adjustedStart,
   };
 }

@@ -25,7 +25,9 @@ export function useDiffSnapshot(
       } else {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(snapshots)));
       }
-    } catch { /* ignore quota errors */ }
+    } catch {
+      /* ignore quota errors */
+    }
   }, [snapshots]);
 
   const currentSnapshot = activeFilePath ? (snapshots.get(activeFilePath) ?? null) : null;
@@ -33,7 +35,9 @@ export function useDiffSnapshot(
   const handleSnapshot = useCallback(
     (extraEntries?: Map<string, string>) => {
       if (!activeFilePath) return;
+      let isUpdate = false;
       setSnapshots((prev) => {
+        isUpdate = prev.has(activeFilePath);
         const next = new Map(prev);
         next.set(activeFilePath, rawMarkdownRef.current);
         if (extraEntries) {
@@ -43,10 +47,9 @@ export function useDiffSnapshot(
         }
         return next;
       });
-      const isUpdate = snapshots.has(activeFilePath);
       showToast(isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes');
     },
-    [activeFilePath, snapshots, showToast, rawMarkdownRef],
+    [activeFilePath, showToast, rawMarkdownRef],
   );
 
   const handleClearSnapshot = useCallback(() => {

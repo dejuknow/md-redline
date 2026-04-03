@@ -8,6 +8,7 @@ export function useSearch(onClose: () => void) {
 
   const handleSearchCount = useCallback((count: number) => {
     setSearchMatchCount(count);
+    setActiveSearchIndex((prev) => (count === 0 ? 0 : Math.min(prev, count - 1)));
   }, []);
 
   const handleSearchNext = useCallback(() => {
@@ -32,6 +33,7 @@ export function useSearch(onClose: () => void) {
 
   const handleRawSearchCount = useCallback((count: number) => {
     setSearchMatchCount(count);
+    setActiveSearchIndex((prev) => (count === 0 ? 0 : Math.min(prev, count - 1)));
   }, []);
 
   return {

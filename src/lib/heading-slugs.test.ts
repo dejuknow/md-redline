@@ -40,7 +40,7 @@ describe('slugify', () => {
   });
 
   it('handles tabs and newlines as whitespace', () => {
-    expect(slugify("Hello\tWorld\nFoo")).toBe('hello-world-foo');
+    expect(slugify('Hello\tWorld\nFoo')).toBe('hello-world-foo');
   });
 });
 
@@ -76,10 +76,7 @@ describe('uniqueSlugs', () => {
 
   it('handles headings that become identical after slugification', () => {
     // "Hello World!" and "Hello World?" both slugify to "hello-world"
-    expect(uniqueSlugs(['Hello World!', 'Hello World?'])).toEqual([
-      'hello-world',
-      'hello-world-1',
-    ]);
+    expect(uniqueSlugs(['Hello World!', 'Hello World?'])).toEqual(['hello-world', 'hello-world-1']);
   });
 
   it('returns empty array for no headings', () => {

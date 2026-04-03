@@ -92,7 +92,10 @@ export function applyLoadedTabState(
   const hasLoadedPath = nextData.has(loadedPath);
 
   nextData.delete(requestedPath);
-  nextData.set(loadedPath, hasLoadedPath ? { ...nextData.get(loadedPath)!, ...loadedTabState } : loadedTabState);
+  nextData.set(
+    loadedPath,
+    hasLoadedPath ? { ...nextData.get(loadedPath)!, ...loadedTabState } : loadedTabState,
+  );
 
   if (!hasLoadedPath) {
     const requestedIndex = prevOrder.indexOf(requestedPath);
@@ -124,39 +127,23 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   const abortControllersRef = useRef(new Map<string, AbortController>());
 
   const setTabDataState = useCallback(
-    (
-      updater:
-        | Map<string, TabState>
-        | ((prev: Map<string, TabState>) => Map<string, TabState>),
-    ) => {
-      const next =
-        typeof updater === 'function'
-          ? updater(tabDataRef.current)
-          : updater;
+    (updater: Map<string, TabState> | ((prev: Map<string, TabState>) => Map<string, TabState>)) => {
+      const next = typeof updater === 'function' ? updater(tabDataRef.current) : updater;
       tabDataRef.current = next;
       setTabData(next);
     },
     [],
   );
 
-  const setTabOrderState = useCallback(
-    (updater: string[] | ((prev: string[]) => string[])) => {
-      const next =
-        typeof updater === 'function'
-          ? updater(tabOrderRef.current)
-          : updater;
-      tabOrderRef.current = next;
-      setTabOrder(next);
-    },
-    [],
-  );
+  const setTabOrderState = useCallback((updater: string[] | ((prev: string[]) => string[])) => {
+    const next = typeof updater === 'function' ? updater(tabOrderRef.current) : updater;
+    tabOrderRef.current = next;
+    setTabOrder(next);
+  }, []);
 
   const setActiveFilePathState = useCallback(
     (updater: string | null | ((prev: string | null) => string | null)) => {
-      const next =
-        typeof updater === 'function'
-          ? updater(activeFilePathRef.current)
-          : updater;
+      const next = typeof updater === 'function' ? updater(activeFilePathRef.current) : updater;
       activeFilePathRef.current = next;
       setActiveFilePath(next);
     },
@@ -185,17 +172,20 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     abortControllersRef.current.delete(path);
   }, []);
 
-  const updateTab = useCallback((path: string, updates: Partial<TabState>) => {
-    setTabDataState((prev) => {
-      const next = new Map(prev);
-      const tabKey = findTabKey(next, path);
-      const existing = tabKey ? next.get(tabKey) : undefined;
-      if (existing) {
-        next.set(tabKey!, { ...existing, ...updates });
-      }
-      return next;
-    });
-  }, [setTabDataState]);
+  const updateTab = useCallback(
+    (path: string, updates: Partial<TabState>) => {
+      setTabDataState((prev) => {
+        const next = new Map(prev);
+        const tabKey = findTabKey(next, path);
+        const existing = tabKey ? next.get(tabKey) : undefined;
+        if (existing) {
+          next.set(tabKey!, { ...existing, ...updates });
+        }
+        return next;
+      });
+    },
+    [setTabDataState],
+  );
 
   const applyLoadedResponse = useCallback(
     (requestedPath: string, loadedPath: string, content: string) => {
@@ -215,143 +205,174 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     [setActiveFilePathState, setTabDataState, setTabOrderState],
   );
 
-  const openTab = useCallback(async (path: string) => {
-    const existingPath = findTabKey(tabDataRef.current, path);
-    // If already open, just switch to it
-    if (existingPath) {
-      setActiveFilePathState(existingPath);
-      return;
-    }
-
-    const next = applyPendingTabState(
-      tabDataRef.current,
-      tabOrderRef.current,
-      activeFilePathRef.current,
-      path,
-      true,
-    );
-    setTabDataState(next.tabData);
-    setTabOrderState(next.tabOrder);
-    setActiveFilePathState(next.activeFilePath);
-    const requestId = startLoadRequest(path);
-    abortControllersRef.current.get(path)?.abort();
-    const controller = new AbortController();
-    abortControllersRef.current.set(path, controller);
-
-    // Fetch file content
-    try {
-      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal: controller.signal });
-      const data = await readJsonResponse<FileResponse>(res);
-      if (!res.ok || !data) {
-        throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+  const openTab = useCallback(
+    async (path: string) => {
+      const existingPath = findTabKey(tabDataRef.current, path);
+      // If already open, just switch to it
+      if (existingPath) {
+        setActiveFilePathState(existingPath);
+        return;
       }
-      if (!isCurrentLoadRequest(path, requestId)) return;
-      applyLoadedResponse(path, data.path, data.content);
-      finishLoadRequest(path, requestId);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-      if (!isCurrentLoadRequest(path, requestId)) return;
+
+      const next = applyPendingTabState(
+        tabDataRef.current,
+        tabOrderRef.current,
+        activeFilePathRef.current,
+        path,
+        true,
+      );
+      setTabDataState(next.tabData);
+      setTabOrderState(next.tabOrder);
+      setActiveFilePathState(next.activeFilePath);
+      const requestId = startLoadRequest(path);
+      abortControllersRef.current.get(path)?.abort();
+      const controller = new AbortController();
+      abortControllersRef.current.set(path, controller);
+
+      // Fetch file content
+      try {
+        const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, {
+          signal: controller.signal,
+        });
+        const data = await readJsonResponse<FileResponse>(res);
+        if (!res.ok || !data) {
+          throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+        }
+        if (!isCurrentLoadRequest(path, requestId)) return;
+        applyLoadedResponse(path, data.path, data.content);
+        finishLoadRequest(path, requestId);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (!isCurrentLoadRequest(path, requestId)) return;
+        setTabDataState((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(path);
+          if (existing) {
+            next.set(path, {
+              ...existing,
+              isLoading: false,
+              error: err instanceof Error ? err.message : 'Failed to load file',
+            });
+          }
+          return next;
+        });
+        finishLoadRequest(path, requestId);
+      } finally {
+        abortControllersRef.current.delete(path);
+      }
+    },
+    [
+      applyLoadedResponse,
+      finishLoadRequest,
+      isCurrentLoadRequest,
+      setActiveFilePathState,
+      setTabDataState,
+      setTabOrderState,
+      startLoadRequest,
+    ],
+  );
+
+  const openTabInBackground = useCallback(
+    async (path: string) => {
+      // If already open, do nothing (don't switch)
+      if (findTabKey(tabDataRef.current, path)) return;
+
+      const next = applyPendingTabState(
+        tabDataRef.current,
+        tabOrderRef.current,
+        activeFilePathRef.current,
+        path,
+        false,
+      );
+      setTabDataState(next.tabData);
+      setTabOrderState(next.tabOrder);
+      const requestId = startLoadRequest(path);
+      abortControllersRef.current.get(path)?.abort();
+      const controller = new AbortController();
+      abortControllersRef.current.set(path, controller);
+
+      try {
+        const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, {
+          signal: controller.signal,
+        });
+        const data = await readJsonResponse<FileResponse>(res);
+        if (!res.ok || !data) {
+          throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+        }
+        if (!isCurrentLoadRequest(path, requestId)) return;
+        applyLoadedResponse(path, data.path, data.content);
+        finishLoadRequest(path, requestId);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (!isCurrentLoadRequest(path, requestId)) return;
+        setTabDataState((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(path);
+          if (existing) {
+            next.set(path, {
+              ...existing,
+              isLoading: false,
+              error: err instanceof Error ? err.message : 'Failed to load file',
+            });
+          }
+          return next;
+        });
+        finishLoadRequest(path, requestId);
+      } finally {
+        abortControllersRef.current.delete(path);
+      }
+    },
+    [
+      applyLoadedResponse,
+      finishLoadRequest,
+      isCurrentLoadRequest,
+      setTabDataState,
+      setTabOrderState,
+      startLoadRequest,
+    ],
+  );
+
+  const closeTab = useCallback(
+    (path: string) => {
+      const tabKey = findTabKey(tabDataRef.current, path) ?? path;
+      cancelLoadRequest(tabKey);
+      const currentOrder = tabOrderRef.current;
+      const idx = currentOrder.indexOf(tabKey);
+      const remaining = currentOrder.filter((p) => p !== tabKey);
+
+      setTabOrderState(remaining);
+      // If closing the active tab, switch to an adjacent one
+      setActiveFilePathState((currentActive) => {
+        if (tabKey !== currentActive) return currentActive;
+        if (remaining.length === 0) return null;
+        return remaining[Math.min(idx, remaining.length - 1)];
+      });
       setTabDataState((prev) => {
         const next = new Map(prev);
-        const existing = next.get(path);
-        if (existing) {
-          next.set(path, {
-            ...existing,
-            isLoading: false,
-            error: err instanceof Error ? err.message : 'Failed to load file',
-          });
-        }
+        next.delete(tabKey);
         return next;
       });
-      finishLoadRequest(path, requestId);
-    } finally {
-      abortControllersRef.current.delete(path);
-    }
-  }, [applyLoadedResponse, finishLoadRequest, isCurrentLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState, startLoadRequest]);
+    },
+    [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState],
+  );
 
-  const openTabInBackground = useCallback(async (path: string) => {
-    // If already open, do nothing (don't switch)
-    if (findTabKey(tabDataRef.current, path)) return;
-
-    const next = applyPendingTabState(
-      tabDataRef.current,
-      tabOrderRef.current,
-      activeFilePathRef.current,
-      path,
-      false,
-    );
-    setTabDataState(next.tabData);
-    setTabOrderState(next.tabOrder);
-    const requestId = startLoadRequest(path);
-    abortControllersRef.current.get(path)?.abort();
-    const controller = new AbortController();
-    abortControllersRef.current.set(path, controller);
-
-    try {
-      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal: controller.signal });
-      const data = await readJsonResponse<FileResponse>(res);
-      if (!res.ok || !data) {
-        throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+  const closeOtherTabs = useCallback(
+    (keepPath: string) => {
+      const keepKey = findTabKey(tabDataRef.current, keepPath) ?? keepPath;
+      for (const path of tabDataRef.current.keys()) {
+        if (path !== keepKey) cancelLoadRequest(path);
       }
-      if (!isCurrentLoadRequest(path, requestId)) return;
-      applyLoadedResponse(path, data.path, data.content);
-      finishLoadRequest(path, requestId);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-      if (!isCurrentLoadRequest(path, requestId)) return;
+      setTabOrderState((prev) => prev.filter((p) => p === keepKey));
+      setActiveFilePathState(keepKey);
       setTabDataState((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(path);
-        if (existing) {
-          next.set(path, {
-            ...existing,
-            isLoading: false,
-            error: err instanceof Error ? err.message : 'Failed to load file',
-          });
-        }
+        const next = new Map<string, TabState>();
+        const kept = prev.get(keepKey);
+        if (kept) next.set(keepKey, kept);
         return next;
       });
-      finishLoadRequest(path, requestId);
-    } finally {
-      abortControllersRef.current.delete(path);
-    }
-  }, [applyLoadedResponse, finishLoadRequest, isCurrentLoadRequest, setTabDataState, setTabOrderState, startLoadRequest]);
-
-  const closeTab = useCallback((path: string) => {
-    const tabKey = findTabKey(tabDataRef.current, path) ?? path;
-    cancelLoadRequest(tabKey);
-    const currentOrder = tabOrderRef.current;
-    const idx = currentOrder.indexOf(tabKey);
-    const remaining = currentOrder.filter((p) => p !== tabKey);
-
-    setTabOrderState(remaining);
-    // If closing the active tab, switch to an adjacent one
-    setActiveFilePathState((currentActive) => {
-      if (tabKey !== currentActive) return currentActive;
-      if (remaining.length === 0) return null;
-      return remaining[Math.min(idx, remaining.length - 1)];
-    });
-    setTabDataState((prev) => {
-      const next = new Map(prev);
-      next.delete(tabKey);
-      return next;
-    });
-  }, [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState]);
-
-  const closeOtherTabs = useCallback((keepPath: string) => {
-    const keepKey = findTabKey(tabDataRef.current, keepPath) ?? keepPath;
-    for (const path of tabDataRef.current.keys()) {
-      if (path !== keepKey) cancelLoadRequest(path);
-    }
-    setTabOrderState((prev) => prev.filter((p) => p === keepKey));
-    setActiveFilePathState(keepKey);
-    setTabDataState((prev) => {
-      const next = new Map<string, TabState>();
-      const kept = prev.get(keepKey);
-      if (kept) next.set(keepKey, kept);
-      return next;
-    });
-  }, [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState]);
+    },
+    [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState],
+  );
 
   const closeAllTabs = useCallback(() => {
     for (const controller of abortControllersRef.current.values()) {
@@ -364,34 +385,40 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     setActiveFilePathState(null);
   }, [setActiveFilePathState, setTabDataState, setTabOrderState]);
 
-  const closeTabsToRight = useCallback((path: string) => {
-    const currentOrder = tabOrderRef.current;
-    const tabKey = findTabKey(tabDataRef.current, path) ?? path;
-    const idx = currentOrder.indexOf(tabKey);
-    if (idx === -1) return;
+  const closeTabsToRight = useCallback(
+    (path: string) => {
+      const currentOrder = tabOrderRef.current;
+      const tabKey = findTabKey(tabDataRef.current, path) ?? path;
+      const idx = currentOrder.indexOf(tabKey);
+      if (idx === -1) return;
 
-    const kept = currentOrder.slice(0, idx + 1);
-    const removed = currentOrder.slice(idx + 1);
+      const kept = currentOrder.slice(0, idx + 1);
+      const removed = currentOrder.slice(idx + 1);
 
-    setTabOrderState(kept);
-    setActiveFilePathState((currentActive) => {
-      if (currentActive && kept.includes(currentActive)) return currentActive;
-      return tabKey;
-    });
-    if (removed.length > 0) {
-      for (const removedPath of removed) cancelLoadRequest(removedPath);
-      setTabDataState((prevData) => {
-        const nextData = new Map(prevData);
-        for (const p of removed) nextData.delete(p);
-        return nextData;
+      setTabOrderState(kept);
+      setActiveFilePathState((currentActive) => {
+        if (currentActive && kept.includes(currentActive)) return currentActive;
+        return tabKey;
       });
-    }
-  }, [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState]);
+      if (removed.length > 0) {
+        for (const removedPath of removed) cancelLoadRequest(removedPath);
+        setTabDataState((prevData) => {
+          const nextData = new Map(prevData);
+          for (const p of removed) nextData.delete(p);
+          return nextData;
+        });
+      }
+    },
+    [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState],
+  );
 
-  const switchTab = useCallback((path: string) => {
-    const existingPath = findTabKey(tabDataRef.current, path);
-    if (existingPath) setActiveFilePathState(existingPath);
-  }, [setActiveFilePathState]);
+  const switchTab = useCallback(
+    (path: string) => {
+      const existingPath = findTabKey(tabDataRef.current, path);
+      if (existingPath) setActiveFilePathState(existingPath);
+    },
+    [setActiveFilePathState],
+  );
 
   const activeTab = activeFilePath ? (tabData.get(activeFilePath) ?? null) : null;
 

@@ -1,5 +1,5 @@
-import { readFile, writeFile, rename } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, writeFile, rename } from 'fs/promises';
+import { join } from 'path';
 
 const PREFS_FILENAME = '.md-redline.json';
 

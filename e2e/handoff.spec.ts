@@ -73,7 +73,9 @@ test.describe('Single-file hand-off', () => {
     await page.getByTestId('handoff-button').click();
 
     // Check toast
-    await expect(page.getByText('Copied agent instructions for 1 file (snapshot saved)')).toBeVisible();
+    await expect(
+      page.getByText('Copied agent instructions for 1 file (snapshot saved)'),
+    ).toBeVisible();
 
     // Verify clipboard content
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
@@ -243,7 +245,9 @@ test.describe('Multi-file hand-off', () => {
     const dropdown = page.locator('.absolute.right-0.top-full');
     await dropdown.getByText('Copy handoff for 2 files').click();
 
-    await expect(page.getByText('Copied agent instructions for 2 files (snapshot saved)')).toBeVisible();
+    await expect(
+      page.getByText('Copied agent instructions for 2 files (snapshot saved)'),
+    ).toBeVisible();
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboard).toContain('Files to review');
@@ -353,7 +357,10 @@ test.describe('Handoff + snapshot', () => {
     await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
 
     // Clear via the diff toggle's dropdown chevron
-    const diffChevron = page.locator('button[title="View diff since snapshot"]').locator('..').locator('button[title="Diff options"]');
+    const diffChevron = page
+      .locator('button[title="View diff since snapshot"]')
+      .locator('..')
+      .locator('button[title="Diff options"]');
     await diffChevron.click();
     await page.getByText('Clear snapshot').click();
 

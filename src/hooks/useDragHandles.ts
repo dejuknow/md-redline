@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { MdComment } from '../types';
-import {
-  applyMermaidHighlightStyles,
-  getMermaidHighlightTheme,
-} from '../lib/mermaid-highlights';
+import { applyMermaidHighlightStyles, getMermaidHighlightTheme } from '../lib/mermaid-highlights';
 import { collectVisibleTextNodes, getVisibleTextContent } from '../lib/visible-text';
 
 interface Position {
@@ -288,7 +285,9 @@ export function useDragHandles({
           // Nothing to wrap — roll back so the old highlight stays visible
           container.innerHTML = snapshot;
           drag.markEls = Array.from(
-            container.querySelectorAll('mark.comment-highlight-active, mark.mermaid-comment-highlight-active'),
+            container.querySelectorAll(
+              'mark.comment-highlight-active, mark.mermaid-comment-highlight-active',
+            ),
           ) as HTMLElement[];
           return;
         }
@@ -329,7 +328,9 @@ export function useDragHandles({
           // All wrapping failed — roll back
           container.innerHTML = snapshot;
           drag.markEls = Array.from(
-            container.querySelectorAll('mark.comment-highlight-active, mark.mermaid-comment-highlight-active'),
+            container.querySelectorAll(
+              'mark.comment-highlight-active, mark.mermaid-comment-highlight-active',
+            ),
           ) as HTMLElement[];
         }
 

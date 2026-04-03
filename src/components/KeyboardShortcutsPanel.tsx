@@ -78,10 +78,7 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40" />
       <div
         className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden"
@@ -94,7 +91,13 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
             onClick={onClose}
             className="text-content-muted hover:text-content transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -115,10 +118,7 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
                 </h3>
                 <div className="space-y-1">
                   {visibleShortcuts.map((shortcut) => (
-                    <div
-                      key={shortcut.keys}
-                      className="flex items-center justify-between py-1.5"
-                    >
+                    <div key={shortcut.keys} className="flex items-center justify-between py-1.5">
                       <span className="text-sm text-content">{shortcut.label}</span>
                       <kbd className="text-[11px] px-2 py-0.5 rounded border border-border-subtle text-content-muted bg-surface font-mono min-w-[2rem] text-center">
                         <StyledShortcut text={shortcut.keys} />
@@ -130,7 +130,6 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
             );
           })}
         </div>
-
       </div>
     </div>
   );

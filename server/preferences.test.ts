@@ -18,10 +18,14 @@ beforeEach(async () => {
   // Clean up the prefs file between tests
   try {
     await rm(join(testDir, '.md-redline.json'));
-  } catch { /* doesn't exist */ }
+  } catch {
+    /* doesn't exist */
+  }
   try {
     await rm(join(testDir, '.md-redline.json.tmp'));
-  } catch { /* doesn't exist */ }
+  } catch {
+    /* doesn't exist */
+  }
 });
 
 describe('readPreferences', () => {

@@ -2,7 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { useThemePersistence } from '../hooks/useThemePersistence';
 import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
 
-function ThemeButton({ t, theme, onClick }: { t: { key: string; label: string; colors: string[] }; theme: string | undefined; onClick: () => void }) {
+function ThemeButton({
+  t,
+  theme,
+  onClick,
+}: {
+  t: { key: string; label: string; colors: string[] };
+  theme: string | undefined;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
@@ -23,7 +31,13 @@ function ThemeButton({ t, theme, onClick }: { t: { key: string; label: string; c
       </div>
       {t.label}
       {theme === t.key && (
-        <svg className="w-3.5 h-3.5 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg
+          className="w-3.5 h-3.5 ml-auto"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
       )}
@@ -52,7 +66,13 @@ export function ThemeSelector() {
         className="text-content-muted hover:text-content-secondary transition-colors p-1 rounded hover:bg-tint"
         title="Switch theme"
       >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -64,34 +84,73 @@ export function ThemeSelector() {
         <div className="absolute right-0 mt-1 w-44 bg-surface-raised rounded-lg shadow-lg border border-border overflow-hidden z-50 max-h-[70vh] overflow-y-auto">
           {/* System */}
           <button
-            onClick={() => { setTheme('system'); setOpen(false); }}
+            onClick={() => {
+              setTheme('system');
+              setOpen(false);
+            }}
             className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
               theme === 'system'
                 ? 'bg-primary-bg text-primary-text font-medium'
                 : 'text-content-secondary hover:bg-tint'
             }`}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z"
+              />
             </svg>
             System
             {theme === 'system' && (
-              <svg className="w-3.5 h-3.5 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="w-3.5 h-3.5 ml-auto"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
               </svg>
             )}
           </button>
 
           <div className="border-t border-border-subtle my-1" />
-          <div className="px-3 py-1 text-[10px] font-medium text-content-muted uppercase tracking-wider">Light</div>
+          <div className="px-3 py-1 text-[10px] font-medium text-content-muted uppercase tracking-wider">
+            Light
+          </div>
           {LIGHT_THEMES.map((t) => (
-            <ThemeButton key={t.key} t={t} theme={theme} onClick={() => { setTheme(t.key); setOpen(false); }} />
+            <ThemeButton
+              key={t.key}
+              t={t}
+              theme={theme}
+              onClick={() => {
+                setTheme(t.key);
+                setOpen(false);
+              }}
+            />
           ))}
 
           <div className="border-t border-border-subtle my-1" />
-          <div className="px-3 py-1 text-[10px] font-medium text-content-muted uppercase tracking-wider">Dark</div>
+          <div className="px-3 py-1 text-[10px] font-medium text-content-muted uppercase tracking-wider">
+            Dark
+          </div>
           {DARK_THEMES.map((t) => (
-            <ThemeButton key={t.key} t={t} theme={theme} onClick={() => { setTheme(t.key); setOpen(false); }} />
+            <ThemeButton
+              key={t.key}
+              t={t}
+              theme={theme}
+              onClick={() => {
+                setTheme(t.key);
+                setOpen(false);
+              }}
+            />
           ))}
         </div>
       )}

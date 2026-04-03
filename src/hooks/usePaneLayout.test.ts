@@ -4,10 +4,18 @@ import { load, save } from './usePaneLayout';
 const store: Record<string, string> = {};
 const localStorageMock = {
   getItem: vi.fn((key: string) => store[key] ?? null),
-  setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
-  removeItem: vi.fn((key: string) => { delete store[key]; }),
-  clear: vi.fn(() => { for (const key in store) delete store[key]; }),
-  get length() { return Object.keys(store).length; },
+  setItem: vi.fn((key: string, value: string) => {
+    store[key] = value;
+  }),
+  removeItem: vi.fn((key: string) => {
+    delete store[key];
+  }),
+  clear: vi.fn(() => {
+    for (const key in store) delete store[key];
+  }),
+  get length() {
+    return Object.keys(store).length;
+  },
   key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
 };
 Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
@@ -74,13 +82,26 @@ describe('load', () => {
 
 describe('save', () => {
   it('persists layout to localStorage', () => {
-    const layout = { explorerVisible: false, sidebarVisible: true, leftPanelView: 'outline' as const, viewMode: 'raw' as const };
+    const layout = {
+      explorerVisible: false,
+      sidebarVisible: true,
+      leftPanelView: 'outline' as const,
+      viewMode: 'raw' as const,
+    };
     save(layout);
-    expect(localStorageMock.setItem).toHaveBeenCalledWith('md-redline-pane-layout', JSON.stringify(layout));
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'md-redline-pane-layout',
+      JSON.stringify(layout),
+    );
   });
 
   it('round-trips through load', () => {
-    const layout = { explorerVisible: false, sidebarVisible: false, leftPanelView: 'outline' as const, viewMode: 'raw' as const };
+    const layout = {
+      explorerVisible: false,
+      sidebarVisible: false,
+      leftPanelView: 'outline' as const,
+      viewMode: 'raw' as const,
+    };
     save(layout);
     expect(load()).toEqual(layout);
   });

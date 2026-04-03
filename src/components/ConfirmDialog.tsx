@@ -38,10 +38,7 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
-      onClick={onCancel}
-    >
+    <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onCancel}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40" />
 
@@ -57,12 +54,7 @@ export function ConfirmDialog({
           <ActionButton size="sm" intent="neutral" onClick={onCancel}>
             {cancelLabel}
           </ActionButton>
-          <ActionButton
-            ref={confirmRef}
-            size="sm"
-            intent="danger"
-            onClick={onConfirm}
-          >
+          <ActionButton ref={confirmRef} size="sm" intent="danger" onClick={onConfirm}>
             {confirmLabel}
           </ActionButton>
         </div>

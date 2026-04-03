@@ -25,7 +25,12 @@ export interface UseContextMenuItemsParams {
   handleResolve: (id: string) => void;
   handleUnresolve: (id: string) => void;
   handleDelete: (id: string) => void;
-  handleAddComment: (anchor: string, text: string, contextBefore?: string, contextAfter?: string) => void;
+  handleAddComment: (
+    anchor: string,
+    text: string,
+    contextBefore?: string,
+    contextAfter?: string,
+  ) => void;
   setActiveCommentId: Dispatch<SetStateAction<string | null>>;
   setSidebarVisible: (v: boolean | ((prev: boolean) => boolean)) => void;
   selectionRef: RefObject<SelectionInfo | null>;
@@ -54,15 +59,37 @@ export interface UseContextMenuItemsParams {
 
 export function useContextMenuItems(params: UseContextMenuItemsParams) {
   const {
-    comments, enableResolve, templates,
-    handleResolve, handleUnresolve, handleDelete, handleAddComment,
-    setActiveCommentId, setSidebarVisible,
-    selectionRef, lockSelection, setAutoExpandForm,
-    triggerEdit, triggerReply, viewerRef,
-    handleExplorerOpenFile, openTabInBackground, addRecentFile,
-    revealInFinder, revealLabel, setExplorerDir, setExplorerVisible,
-    tabs, closeTab, closeOtherTabs, closeAllTabs, closeTabsToRight,
-    viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+    comments,
+    enableResolve,
+    templates,
+    handleResolve,
+    handleUnresolve,
+    handleDelete,
+    handleAddComment,
+    setActiveCommentId,
+    setSidebarVisible,
+    selectionRef,
+    lockSelection,
+    setAutoExpandForm,
+    triggerEdit,
+    triggerReply,
+    viewerRef,
+    handleExplorerOpenFile,
+    openTabInBackground,
+    addRecentFile,
+    revealInFinder,
+    revealLabel,
+    setExplorerDir,
+    setExplorerVisible,
+    tabs,
+    closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
+    viewerCtxMenu,
+    explorerCtxMenu,
+    tabCtxMenu,
+    sidebarCtxMenu,
   } = params;
 
   const [ctxMenuItems, setCtxMenuItems] = useState<ContextMenuEntry[]>([]);
@@ -171,11 +198,24 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       }
     },
     [
-      comments, enableResolve, templates,
-      handleResolve, handleUnresolve, handleDelete, handleAddComment,
-      lockSelection, setSidebarVisible, triggerEdit, triggerReply,
-      selectionRef, setActiveCommentId, setAutoExpandForm,
-      viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+      comments,
+      enableResolve,
+      templates,
+      handleResolve,
+      handleUnresolve,
+      handleDelete,
+      handleAddComment,
+      lockSelection,
+      setSidebarVisible,
+      triggerEdit,
+      triggerReply,
+      selectionRef,
+      setActiveCommentId,
+      setAutoExpandForm,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
     ],
   );
 
@@ -190,7 +230,10 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           { label: 'Open', onClick: () => handleExplorerOpenFile(info.path) },
           {
             label: 'Open in Background Tab',
-            onClick: () => { openTabInBackground(info.path); addRecentFile(info.path); },
+            onClick: () => {
+              openTabInBackground(info.path);
+              addRecentFile(info.path);
+            },
           },
           { type: 'divider' as const },
           { label: revealLabel, onClick: () => revealInFinder(info.path) },
@@ -203,7 +246,10 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         const items: ContextMenuEntry[] = [
           {
             label: 'Open in Explorer',
-            onClick: () => { setExplorerDir(info.path); setExplorerVisible(true); },
+            onClick: () => {
+              setExplorerDir(info.path);
+              setExplorerVisible(true);
+            },
           },
           { type: 'divider' as const },
           { label: revealLabel, onClick: () => revealInFinder(info.path) },
@@ -221,9 +267,17 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       }
     },
     [
-      handleExplorerOpenFile, openTabInBackground, addRecentFile,
-      revealInFinder, revealLabel, setExplorerVisible, setExplorerDir,
-      viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+      handleExplorerOpenFile,
+      openTabInBackground,
+      addRecentFile,
+      revealInFinder,
+      revealLabel,
+      setExplorerVisible,
+      setExplorerDir,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
     ],
   );
 
@@ -240,8 +294,16 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
 
       const items: ContextMenuEntry[] = [
         { label: 'Close', onClick: () => closeTab(info.filePath) },
-        { label: 'Close Others', onClick: () => closeOtherTabs(info.filePath), disabled: !hasOtherTabs },
-        { label: 'Close Tabs to the Right', onClick: () => closeTabsToRight(info.filePath), disabled: !hasTabsToRight },
+        {
+          label: 'Close Others',
+          onClick: () => closeOtherTabs(info.filePath),
+          disabled: !hasOtherTabs,
+        },
+        {
+          label: 'Close Tabs to the Right',
+          onClick: () => closeTabsToRight(info.filePath),
+          disabled: !hasTabsToRight,
+        },
         { label: 'Close All', onClick: () => closeAllTabs() },
         { type: 'divider' as const },
         { label: revealLabel, onClick: () => revealInFinder(info.filePath) },
@@ -252,9 +314,17 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       tabCtxMenu.open(info.x, info.y);
     },
     [
-      tabs, closeTab, closeOtherTabs, closeAllTabs, closeTabsToRight,
-      revealInFinder, revealLabel,
-      viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+      tabs,
+      closeTab,
+      closeOtherTabs,
+      closeAllTabs,
+      closeTabsToRight,
+      revealInFinder,
+      revealLabel,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
     ],
   );
 
@@ -294,9 +364,17 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       sidebarCtxMenu.open(info.x, info.y);
     },
     [
-      comments, enableResolve, handleResolve, handleUnresolve, handleDelete,
-      setActiveCommentId, viewerRef,
-      viewerCtxMenu, explorerCtxMenu, tabCtxMenu, sidebarCtxMenu,
+      comments,
+      enableResolve,
+      handleResolve,
+      handleUnresolve,
+      handleDelete,
+      setActiveCommentId,
+      viewerRef,
+      viewerCtxMenu,
+      explorerCtxMenu,
+      tabCtxMenu,
+      sidebarCtxMenu,
     ],
   );
 
