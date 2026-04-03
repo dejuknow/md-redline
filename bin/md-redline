@@ -102,13 +102,19 @@ function delay(ms) {
 function spawnDetached(command, args) {
   return new Promise((resolveSpawn, rejectSpawn) => {
     const isWin = process.platform === 'win32';
-    const child = spawn(command, args, {
-      cwd: APP_DIR,
-      detached: !isWin,
-      stdio: 'ignore',
-      shell: isWin,
-      windowsHide: true,
-    });
+    const child = isWin
+      ? spawn([command, ...args].join(' '), {
+          cwd: APP_DIR,
+          stdio: 'ignore',
+          shell: true,
+          windowsHide: true,
+        })
+      : spawn(command, args, {
+          cwd: APP_DIR,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        });
 
     child.once('error', rejectSpawn);
     child.once('spawn', () => {
