@@ -1,4 +1,5 @@
-import { readFile, writeFile, rename } from 'fs/promises';
+import { readFile, rename, open } from 'fs/promises';
+import { unlinkSync } from 'fs';
 import { join } from 'path';
 
 const PREFS_FILENAME = '.md-redline.json';
@@ -53,7 +54,17 @@ export async function writePreferences(
         const merged = { ...existing, ...patch };
         const filePath = prefsPath(homeDir);
         const tmpPath = filePath + '.tmp';
-        await writeFile(tmpPath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+        try {
+          unlinkSync(tmpPath);
+        } catch {
+          // No existing file — fine
+        }
+        const fd = await open(tmpPath, 'wx');
+        try {
+          await fd.writeFile(JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+        } finally {
+          await fd.close();
+        }
         await rename(tmpPath, filePath);
         resolve(merged);
       } catch (err) {

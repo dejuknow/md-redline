@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
-import { readFile, writeFile, readdir, stat, realpath, rename, open } from 'fs/promises';
+import { readFile, readdir, stat, realpath, rename, open } from 'fs/promises';
 import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
@@ -260,8 +260,19 @@ export function createApp(options: CreateAppOptions = {}) {
 
           // Atomic write: write to a temp file then rename, so a crash
           // mid-write can't leave a half-written file on disk.
+          // Use O_EXCL to prevent symlink clobber attacks on the temp file.
           const tmpPath = `${resolved}.tmp`;
-          await writeFile(tmpPath, body.content, 'utf-8');
+          try {
+            unlinkSync(tmpPath);
+          } catch {
+            // No existing file — fine
+          }
+          const fd = await open(tmpPath, 'wx');
+          try {
+            await fd.writeFile(body.content, 'utf-8');
+          } finally {
+            await fd.close();
+          }
           await rename(tmpPath, resolved);
           lastWrittenContent.set(resolved, body.content);
           console.log(
@@ -480,7 +491,9 @@ export function createApp(options: CreateAppOptions = {}) {
               JSON.stringify({ content, path: resolved, mtime: fileStat.mtimeMs }),
             );
             for (const client of clients) {
-              client.write(frame).catch(() => {});
+              client.write(frame).catch(() => {
+                clients.delete(client);
+              });
             }
           } catch {
             const frame = sseFrame(
@@ -488,7 +501,9 @@ export function createApp(options: CreateAppOptions = {}) {
               JSON.stringify({ path: resolved, reason: 'file_gone' }),
             );
             for (const client of clients) {
-              client.write(frame).catch(() => {});
+              client.write(frame).catch(() => {
+                clients.delete(client);
+              });
             }
             cleanUpWatcher();
           }
@@ -534,6 +549,7 @@ export function createApp(options: CreateAppOptions = {}) {
           clients.clear();
           activeWatcher.close();
           fileWatchers.delete(resolved);
+          lastWrittenContent.delete(resolved);
         };
 
         activeWatcher.on('error', cleanUpWatcher);
@@ -635,7 +651,7 @@ const PORT_FILE = join(tmpdir(), 'md-redline.port');
 
 function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
   return new Promise((res, rej) => {
-    const server = serve({ fetch: appFetch, port }, () => res(port));
+    const server = serve({ fetch: appFetch, port, hostname: '127.0.0.1' }, () => res(port));
     server.on('error', (err: NodeJS.ErrnoException) => {
       rej(err);
     });

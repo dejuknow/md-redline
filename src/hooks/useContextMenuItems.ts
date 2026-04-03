@@ -30,6 +30,7 @@ export interface UseContextMenuItemsParams {
     text: string,
     contextBefore?: string,
     contextAfter?: string,
+    hintOffset?: number,
   ) => void;
   setActiveCommentId: Dispatch<SetStateAction<string | null>>;
   setSidebarVisible: (v: boolean | ((prev: boolean) => boolean)) => void;
@@ -168,7 +169,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         const templateItems: ContextMenuItem[] = templates.map((t) => ({
           label: t.label,
           onClick: () => {
-            handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter);
+            handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter, sel.offset);
           },
         }));
 

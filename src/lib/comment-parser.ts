@@ -74,7 +74,13 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
     let parsedComment: MdComment | null = null;
     try {
       const data = JSON.parse(match[1]) as MdComment;
-      if (data.id && data.anchor) {
+      if (
+        typeof data.id === 'string' &&
+        typeof data.anchor === 'string' &&
+        typeof data.text === 'string' &&
+        typeof data.author === 'string' &&
+        (!data.replies || Array.isArray(data.replies))
+      ) {
         parsedComment = data;
       }
     } catch {
@@ -562,6 +568,25 @@ export function updateCommentAnchor(
   commentId: string,
   newAnchor: string,
 ): string {
+  // Recompute contextBefore/contextAfter from the clean markdown so they stay
+  // consistent with the new anchor. Without this, later fuzzy re-matching can
+  // attach the comment to the wrong text after document edits.
+  // Use the comment's cleanOffset to find the right occurrence when the anchor
+  // text appears multiple times.
+  const { cleanMarkdown, comments } = parseComments(rawMarkdown);
+  const target = comments.find((c) => c.id === commentId);
+  let newContextBefore: string | undefined;
+  let newContextAfter: string | undefined;
+  if (target?.cleanOffset !== undefined) {
+    // The new anchor starts at the comment's existing position in clean markdown
+    const anchorIdx = target.cleanOffset;
+    const CONTEXT_LEN = 30;
+    const beforeStart = Math.max(0, anchorIdx - CONTEXT_LEN);
+    newContextBefore = cleanMarkdown.slice(beforeStart, anchorIdx);
+    const afterEnd = Math.min(cleanMarkdown.length, anchorIdx + newAnchor.length + CONTEXT_LEN);
+    newContextAfter = cleanMarkdown.slice(anchorIdx + newAnchor.length, afterEnd);
+  }
+
   return transformCommentMarkers(rawMarkdown, (comment) => {
     if (comment?.id === commentId) {
       return {
@@ -569,6 +594,8 @@ export function updateCommentAnchor(
         comment: {
           ...comment,
           anchor: newAnchor,
+          ...(newContextBefore !== undefined ? { contextBefore: newContextBefore } : {}),
+          ...(newContextAfter !== undefined ? { contextAfter: newContextAfter } : {}),
         },
       };
     }
