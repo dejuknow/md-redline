@@ -3,7 +3,7 @@ import { usePageVisible } from './usePageVisible';
 
 interface Options {
   filePath: string | null;
-  onExternalChange: (content: string) => void;
+  onExternalChange: (content: string, mtime?: number) => void;
 }
 
 /**
@@ -27,8 +27,8 @@ export function useFileWatcher({ filePath, onExternalChange }: Options) {
 
     es.addEventListener('change', (e) => {
       try {
-        const { content } = JSON.parse(e.data);
-        callbackRef.current(content);
+        const { content, mtime } = JSON.parse(e.data);
+        callbackRef.current(content, mtime);
       } catch {
         // Ignore malformed events
       }

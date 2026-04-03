@@ -371,7 +371,7 @@ export default function App() {
   useFileWatcher({
     filePath: activeFilePath,
     onExternalChange: useCallback(
-      (content: string) => {
+      (content: string, mtime?: number) => {
         // Detect comment changes before updating
         let cleanContentChanged = false;
         try {
@@ -436,13 +436,25 @@ export default function App() {
         }
 
         setRawMarkdown(content);
+        // Update mtime so the next save uses the correct expected value
+        if (mtime != null && activeFilePath) {
+          updateTab(activeFilePath, { mtime });
+        }
 
         // Flag the diff button when content changed and a snapshot exists
         if (cleanContentChanged && currentSnapshotRef.current) {
           setDiffPending(true);
         }
       },
-      [setDiffEnabled, setRawMarkdown, setViewMode, settings.enableResolve, showToast],
+      [
+        activeFilePath,
+        setDiffEnabled,
+        setRawMarkdown,
+        setViewMode,
+        settings.enableResolve,
+        showToast,
+        updateTab,
+      ],
     ),
   });
 
@@ -467,8 +479,8 @@ export default function App() {
     const es = new EventSource(`/api/watch?${params}`);
     es.addEventListener('change', (e) => {
       try {
-        const { content, path } = JSON.parse(e.data);
-        updateTab(path, { rawMarkdown: content });
+        const { content, path, mtime } = JSON.parse(e.data);
+        updateTab(path, { rawMarkdown: content, ...(mtime != null ? { mtime } : {}) });
       } catch {
         // ignore malformed events
       }

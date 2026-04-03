@@ -7,6 +7,8 @@ export interface TabState {
   isLoading: boolean;
   error: string | null;
   lastSaved: Date | null;
+  /** Server-reported mtime (ms since epoch) for conflict detection */
+  mtime?: number;
 }
 
 interface PendingTabUpdate {
@@ -32,11 +34,20 @@ interface LoadedTabUpdate {
 type FileResponse = {
   path: string;
   content: string;
+  mtime?: number;
 } & ApiErrorPayload;
 
 type SaveFileResponse = {
   success: boolean;
   path: string;
+  mtime?: number;
+} & ApiErrorPayload;
+
+type ConflictResponse = {
+  error: string;
+  code: 'CONFLICT';
+  currentContent: string;
+  mtime: number;
 } & ApiErrorPayload;
 
 export function applyPendingTabState(
@@ -240,6 +251,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         }
         if (!isCurrentLoadRequest(path, requestId)) return;
         applyLoadedResponse(path, data.path, data.content);
+        if (data.mtime != null) updateTab(data.path, { mtime: data.mtime });
         finishLoadRequest(path, requestId);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -269,6 +281,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
       setTabDataState,
       setTabOrderState,
       startLoadRequest,
+      updateTab,
     ],
   );
 
@@ -301,6 +314,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         }
         if (!isCurrentLoadRequest(path, requestId)) return;
         applyLoadedResponse(path, data.path, data.content);
+        if (data.mtime != null) updateTab(data.path, { mtime: data.mtime });
         finishLoadRequest(path, requestId);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -329,6 +343,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
       setTabDataState,
       setTabOrderState,
       startLoadRequest,
+      updateTab,
     ],
   );
 
@@ -443,17 +458,33 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   const saveFile = useCallback(
     async (content: string) => {
       if (!activeFilePath) return;
+      const currentTab = tabDataRef.current.get(activeFilePath);
       try {
         const res = await fetch('/api/file', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: activeFilePath, content }),
+          body: JSON.stringify({
+            path: activeFilePath,
+            content,
+            expectedMtime: currentTab?.mtime,
+          }),
         });
+        if (res.status === 409) {
+          const conflict = await readJsonResponse<ConflictResponse>(res);
+          const msg = conflict?.error || 'File was modified externally. Reload to see changes.';
+          updateTab(activeFilePath, { error: msg });
+          onSaveError?.(msg);
+          return;
+        }
         const data = await readJsonResponse<SaveFileResponse>(res);
         if (!res.ok || !data) {
           throw new Error(getApiErrorMessage(res, data, 'Failed to save file'));
         }
-        updateTab(activeFilePath, { lastSaved: new Date(), error: null });
+        updateTab(activeFilePath, {
+          lastSaved: new Date(),
+          error: null,
+          mtime: data.mtime,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to save file';
         updateTab(activeFilePath, { error: msg });
@@ -477,6 +508,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         isLoading: false,
         lastSaved: new Date(),
         error: null,
+        mtime: data.mtime,
       });
     } catch (err) {
       updateTab(activeFilePath, {

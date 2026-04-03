@@ -186,8 +186,11 @@ export function createApp(options: CreateAppOptions = {}) {
       if (!isMdFile(resolved)) {
         return c.json({ error: 'Only .md files are supported' }, 400);
       }
-      const content = await readFile(resolved, 'utf-8');
-      return c.json({ content, path: resolved });
+      const [content, fileStat] = await Promise.all([
+        readFile(resolved, 'utf-8'),
+        stat(resolved),
+      ]);
+      return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         return c.json({ error: err.message }, 403);
@@ -198,9 +201,9 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   app.put('/api/file', async (c) => {
-    let body: { path: string; content: string };
+    let body: { path: string; content: string; expectedMtime?: number };
     try {
-      body = await c.req.json<{ path: string; content: string }>();
+      body = await c.req.json<{ path: string; content: string; expectedMtime?: number }>();
     } catch {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
@@ -216,8 +219,32 @@ export function createApp(options: CreateAppOptions = {}) {
       // Serialize writes to the same path to prevent concurrent write races
       const commentCount = (body.content.match(/@comment\{/g) ?? []).length;
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
+      let conflictResponse: Response | null = null;
       const currentWrite = prevLock
         .then(async () => {
+          // Conflict detection: if the client sent an expectedMtime, verify the
+          // file hasn't been modified externally since the client last loaded it.
+          if (body.expectedMtime != null) {
+            try {
+              const currentStat = await stat(resolved);
+              if (Math.abs(currentStat.mtimeMs - body.expectedMtime) > 1) {
+                const currentContent = await readFile(resolved, 'utf-8');
+                conflictResponse = c.json(
+                  {
+                    error: 'File was modified externally. Reload to see the latest version.',
+                    code: 'CONFLICT',
+                    currentContent,
+                    mtime: currentStat.mtimeMs,
+                  },
+                  409,
+                );
+                return;
+              }
+            } catch {
+              // File may have been deleted — proceed with write to recreate it
+            }
+          }
+
           await writeFile(resolved, body.content, 'utf-8');
           lastWrittenContent.set(resolved, body.content);
           // Verify write persisted
@@ -241,7 +268,9 @@ export function createApp(options: CreateAppOptions = {}) {
         });
       writeLocks.set(resolved, currentWrite);
       await currentWrite;
-      return c.json({ success: true, path: resolved });
+      if (conflictResponse) return conflictResponse;
+      const newStat = await stat(resolved);
+      return c.json({ success: true, path: resolved, mtime: newStat.mtimeMs });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         return c.json({ error: err.message }, 403);
@@ -438,7 +467,11 @@ export function createApp(options: CreateAppOptions = {}) {
             );
             lastWrittenContent.delete(resolved);
             lastBroadcast = content;
-            const frame = sseFrame('change', JSON.stringify({ content, path: resolved }));
+            const fileStat = await stat(resolved);
+            const frame = sseFrame(
+              'change',
+              JSON.stringify({ content, path: resolved, mtime: fileStat.mtimeMs }),
+            );
             for (const client of clients) {
               client.write(frame).catch(() => {});
             }

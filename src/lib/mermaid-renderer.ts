@@ -1,3 +1,5 @@
+import DOMPurify from 'dompurify';
+
 let mermaidModule: typeof import('mermaid') | null = null;
 let initTheme: string | null = null;
 let themeChangePromise: Promise<void> | null = null;
@@ -13,7 +15,7 @@ async function getMermaid() {
     mermaidModule = await import('mermaid');
     mermaidModule.default.initialize({
       startOnLoad: false,
-      securityLevel: 'loose',
+      securityLevel: 'strict',
       theme: 'default',
       htmlLabels: true,
       flowchart: FLOWCHART_CONFIG,
@@ -58,7 +60,7 @@ export async function renderMermaidBlock(
         themeChangePromise = (async () => {
           mermaid.initialize({
             startOnLoad: false,
-            securityLevel: 'loose',
+            securityLevel: 'strict',
             theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
             htmlLabels: true,
             flowchart: FLOWCHART_CONFIG,
@@ -72,7 +74,11 @@ export async function renderMermaidBlock(
 
     const id = `mermaid-svg-${++renderCounter}`;
     const { svg } = await mermaid.render(id, source.trim());
-    return { svg };
+    const cleanSvg = DOMPurify.sanitize(svg, {
+      USE_PROFILES: { html: true, svg: true, svgFilters: true },
+      ADD_TAGS: ['foreignObject'],
+    });
+    return { svg: cleanSvg };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }

@@ -344,8 +344,61 @@ describe('PUT /api/file', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ success: true, path: writtenFile });
+    expect(body).toMatchObject({ success: true, path: writtenFile });
+    expect(typeof body.mtime).toBe('number');
     await expect(readFile(writtenFile, 'utf-8')).resolves.toBe(newContent);
+  });
+
+  it('returns 409 when expectedMtime does not match (conflict detection)', async () => {
+    // First write to establish the file
+    const content1 = '# Version 1\n';
+    const write1 = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: writtenFile, content: content1 }),
+    });
+    expect(write1.response.status).toBe(200);
+    const mtime1 = write1.body.mtime;
+
+    // Simulate external edit by writing directly
+    await writeFile(writtenFile, '# External edit\n', 'utf-8');
+
+    // Try to save with the old mtime — should conflict
+    const { response, body } = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: writtenFile, content: '# Version 2\n', expectedMtime: mtime1 }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe('CONFLICT');
+    expect(body.currentContent).toBe('# External edit\n');
+    expect(typeof body.mtime).toBe('number');
+    // File should NOT have been overwritten
+    await expect(readFile(writtenFile, 'utf-8')).resolves.toBe('# External edit\n');
+  });
+
+  it('allows save when expectedMtime matches', async () => {
+    // Write and get mtime
+    const content1 = '# Saved\n';
+    const write1 = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: writtenFile, content: content1 }),
+    });
+    const mtime1 = write1.body.mtime;
+
+    // Save again with correct mtime
+    const content2 = '# Updated\n';
+    const { response, body } = await requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: writtenFile, content: content2, expectedMtime: mtime1 }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true });
+    await expect(readFile(writtenFile, 'utf-8')).resolves.toBe(content2);
   });
 
   it('rejects new files under symlinked directories that point outside allowed roots', async () => {
@@ -369,7 +422,8 @@ describe('PUT /api/file', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ success: true, path: initialSiblingFile });
+    expect(body).toMatchObject({ success: true, path: initialSiblingFile });
+    expect(typeof body.mtime).toBe('number');
     await expect(readFile(initialSiblingFile, 'utf-8')).resolves.toBe(newContent);
   });
 });
