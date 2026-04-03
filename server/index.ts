@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
-import { readFile, writeFile, readdir, stat, realpath, rename } from 'fs/promises';
-import { watch, statSync, realpathSync, writeFileSync, unlinkSync, type FSWatcher } from 'fs';
+import { readFile, writeFile, readdir, stat, realpath, rename, open } from 'fs/promises';
+import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
@@ -68,15 +68,28 @@ export function createApp(options: CreateAppOptions = {}) {
   const caseInsensitivePaths = platformName === 'win32';
 
   const app = new Hono();
-  // Allow CORS from any localhost port (Vite may start on 5189+ if 5188 is busy)
+  // Allow CORS only from Vite dev server ports (default 5188-5197, or custom via env)
+  const viteBasePort = Number.parseInt(process.env.MD_REDLINE_VITE_PORT ?? '5188', 10);
+  const allowedPorts = new Set<number>();
+  for (let p = viteBasePort; p < viteBasePort + 10; p++) allowedPorts.add(p);
+  // Also allow the default range if a custom port is configured
+  if (viteBasePort !== 5188) {
+    for (let p = 5188; p < 5198; p++) allowedPorts.add(p);
+  }
   app.use(
     '*',
     cors({
       origin: (origin) => {
-        if (!origin) return 'http://localhost:5188';
+        if (!origin) return `http://localhost:${viteBasePort}`;
         try {
           const url = new URL(origin);
-          if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return origin;
+          if (
+            (url.hostname === 'localhost' || url.hostname === '127.0.0.1') &&
+            url.port !== '' &&
+            allowedPorts.has(Number(url.port))
+          ) {
+            return origin;
+          }
         } catch {
           /* invalid origin */
         }
@@ -648,8 +661,24 @@ const isMainModule =
 
 if (isMainModule) {
   findAvailablePort(app.fetch)
-    .then((port) => {
-      writeFileSync(PORT_FILE, String(port));
+    .then(async (port) => {
+      // Write port file safely: use O_EXCL to prevent symlink clobber attacks.
+      // If the file already exists (previous unclean exit), unlink it first
+      // to avoid following a symlink that may have replaced the stale file.
+      try {
+        const fd = await open(PORT_FILE, 'wx');
+        await fd.writeFile(String(port));
+        await fd.close();
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+          unlinkSync(PORT_FILE);
+          const fd = await open(PORT_FILE, 'wx');
+          await fd.writeFile(String(port));
+          await fd.close();
+        } else {
+          throw e;
+        }
+      }
       console.log(`md-redline server running on http://localhost:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
       if (initialArg) {

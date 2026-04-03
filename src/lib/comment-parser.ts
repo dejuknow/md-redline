@@ -26,7 +26,7 @@ type CommentTransform =
 
 function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
   const codeBlockRanges: CodeBlockRange[] = [];
-  const fenceRegex = /^(`{3,}|~{3,}).*$/gm;
+  const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
   let fenceMatch: RegExpExecArray | null;
   let openFence: { marker: string; start: number } | null = null;
 
@@ -442,7 +442,7 @@ export function insertComment(
   // HTML comment markers are literal text inside code blocks, so the marker must go outside.
   let movedBeforeFence = false;
   {
-    const fenceRegex = /^(`{3,}|~{3,}).*$/gm;
+    const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
     let fm: RegExpExecArray | null;
     let openF: { marker: string; start: number } | null = null;
     while ((fm = fenceRegex.exec(cleanMarkdown)) !== null) {

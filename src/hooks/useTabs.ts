@@ -136,6 +136,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   const loadRequestIdsRef = useRef(new Map<string, number>());
   const nextLoadRequestIdRef = useRef(1);
   const abortControllersRef = useRef(new Map<string, AbortController>());
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const setTabDataState = useCallback(
     (updater: Map<string, TabState> | ((prev: Map<string, TabState>) => Map<string, TabState>)) => {
@@ -456,40 +457,47 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   );
 
   const saveFile = useCallback(
-    async (content: string) => {
+    (content: string) => {
       if (!activeFilePath) return;
-      const currentTab = tabDataRef.current.get(activeFilePath);
-      try {
-        const res = await fetch('/api/file', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            path: activeFilePath,
-            content,
-            expectedMtime: currentTab?.mtime,
-          }),
-        });
-        if (res.status === 409) {
-          const conflict = await readJsonResponse<ConflictResponse>(res);
-          const msg = conflict?.error || 'File was modified externally. Reload to see changes.';
-          updateTab(activeFilePath, { error: msg });
+      // Queue saves so rapid edits don't race: each save waits for the
+      // previous one to finish. Reading mtime from tabDataRef at execution time
+      // is correct because the queue serializes saves, so save1's returned mtime
+      // is already written to the ref before save2 runs.
+      const path = activeFilePath;
+      saveQueueRef.current = saveQueueRef.current.then(async () => {
+        const currentMtime = tabDataRef.current.get(path)?.mtime;
+        try {
+          const res = await fetch('/api/file', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              path,
+              content,
+              expectedMtime: currentMtime,
+            }),
+          });
+          if (res.status === 409) {
+            const conflict = await readJsonResponse<ConflictResponse>(res);
+            const msg = conflict?.error || 'File was modified externally. Reload to see changes.';
+            updateTab(path, { error: msg });
+            onSaveError?.(msg);
+            return;
+          }
+          const data = await readJsonResponse<SaveFileResponse>(res);
+          if (!res.ok || !data) {
+            throw new Error(getApiErrorMessage(res, data, 'Failed to save file'));
+          }
+          updateTab(path, {
+            lastSaved: new Date(),
+            error: null,
+            mtime: data.mtime,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to save file';
+          updateTab(path, { error: msg });
           onSaveError?.(msg);
-          return;
         }
-        const data = await readJsonResponse<SaveFileResponse>(res);
-        if (!res.ok || !data) {
-          throw new Error(getApiErrorMessage(res, data, 'Failed to save file'));
-        }
-        updateTab(activeFilePath, {
-          lastSaved: new Date(),
-          error: null,
-          mtime: data.mtime,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to save file';
-        updateTab(activeFilePath, { error: msg });
-        onSaveError?.(msg);
-      }
+      });
     },
     [activeFilePath, updateTab, onSaveError],
   );
