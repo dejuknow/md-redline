@@ -1,4 +1,4 @@
-# md-redline
+# <img src="public/favicon.svg" width="30" align="center" /> md-redline
 
 Inline review for markdown files — designed for human + AI agent workflows.
 
