@@ -92,19 +92,6 @@ describe('resolveSelection', () => {
   });
 
   it('handles leading whitespace in selection correctly', () => {
-    const content = 'Hello World Goodbye';
-    document.body.innerHTML = `<div id="root">${content}</div>`;
-    const container = document.getElementById('root')!;
-    const textNode = container.firstChild!;
-
-    // Select "  World " (with leading/trailing spaces) — raw text includes spaces
-    // The selection starts at index 5 (" World Goodbye" starts there)
-    const rawText = '  World ';
-    const selStart = 4; // "Hello" ends at 5, space starts at 5, so "  World " starts at 4? Let's be precise.
-    // content = "Hello World Goodbye"
-    //            01234567890123456789
-    // Select from index 5 to 13 = " World G" — actually let's pick a cleaner example.
-
     // Simpler: content "Hello  World Goodbye"
     document.body.innerHTML = '<div id="root">Hello  World Goodbye</div>';
     const container2 = document.getElementById('root')!;

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
