@@ -659,7 +659,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                   className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-colors mb-5 flex items-center gap-3 ${
                     theme === 'system'
                       ? 'border-primary bg-primary-bg'
-                      : 'border-border-subtle hover:border-primary-border hover:bg-tint'
+                      : 'border-border hover:border-primary-border hover:bg-tint'
                   }`}
                 >
                   <svg
@@ -712,7 +712,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                         theme === t.key
                           ? 'border-primary bg-primary-bg'
-                          : 'border-border-subtle hover:border-primary-border hover:bg-tint'
+                          : 'border-border hover:border-primary-border hover:bg-tint'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
@@ -764,7 +764,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       className={`text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                         theme === t.key
                           ? 'border-primary bg-primary-bg'
-                          : 'border-border-subtle hover:border-primary-border hover:bg-tint'
+                          : 'border-border hover:border-primary-border hover:bg-tint'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
