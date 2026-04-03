@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
-import { readFile, writeFile, readdir, stat, realpath } from 'fs/promises';
+import { readFile, writeFile, readdir, stat, realpath, rename } from 'fs/promises';
 import { watch, statSync, realpathSync, writeFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
@@ -245,21 +245,15 @@ export function createApp(options: CreateAppOptions = {}) {
             }
           }
 
-          await writeFile(resolved, body.content, 'utf-8');
+          // Atomic write: write to a temp file then rename, so a crash
+          // mid-write can't leave a half-written file on disk.
+          const tmpPath = `${resolved}.tmp`;
+          await writeFile(tmpPath, body.content, 'utf-8');
+          await rename(tmpPath, resolved);
           lastWrittenContent.set(resolved, body.content);
-          // Verify write persisted
-          const readBack = await readFile(resolved, 'utf-8');
-          const readBackComments = (readBack.match(/@comment\{/g) ?? []).length;
-          if (readBackComments !== commentCount) {
-            console.error(
-              `[SAVE VERIFY FAIL] Wrote ${commentCount} comments but read back ${readBackComments} for ${resolved}`,
-            );
-            lastWrittenContent.delete(resolved);
-          } else {
-            console.log(
-              `[SAVE OK] ${resolved} — ${commentCount} comment(s), ${body.content.length} bytes`,
-            );
-          }
+          console.log(
+            `[SAVE OK] ${resolved} — ${commentCount} comment(s), ${body.content.length} bytes`,
+          );
         })
         .finally(() => {
           if (writeLocks.get(resolved) === currentWrite) {

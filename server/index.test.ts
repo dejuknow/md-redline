@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createApp, isPathInsideRoot, type CreateAppOptions } from './index';
@@ -360,8 +360,10 @@ describe('PUT /api/file', () => {
     expect(write1.response.status).toBe(200);
     const mtime1 = write1.body.mtime;
 
-    // Simulate external edit by writing directly
+    // Simulate external edit by writing directly and ensuring a different mtime
     await writeFile(writtenFile, '# External edit\n', 'utf-8');
+    const futureTime = new Date(Date.now() + 5000);
+    await utimes(writtenFile, futureTime, futureTime);
 
     // Try to save with the old mtime — should conflict
     const { response, body } = await requestJson(app, '/api/file', {
