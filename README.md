@@ -1,24 +1,23 @@
 # md-redline
 
-*Reviewing markdown with AI agents shouldn't require leaving the file.*
+Inline review for markdown files — designed for human + AI agent workflows.
 
-`mdr` is a local app for inline review of markdown files — built for the loop between humans and AI agents.
+Markdown is the lingua franca of an AI-native world. It's the one format that's equally readable by humans and machines — every AI agent can parse it, every developer can read it, and every tool can render it. `mdr` adds a missing piece: structured inline review that both sides can work with.
 
-Highlight text, leave inline comments, and hand the file to an agent or teammate. Comments are stored as HTML comment markers directly in the `.md` file — no sidecar files, no database, no external service. The file is the source of truth.
+AI agents can read and write files, but they can't participate in review UIs. `mdr` bridges that gap: you leave inline comments in a rendered view, the agent addresses them by reading the same file. No sidecar files, no database, no external service. The `.md` file is the source of truth.
 
-## Why it exists
+## The loop
 
-AI agents can read and write files, but they can't use review UIs. `mdr` bridges that gap: you review in a rendered view, and the agent addresses your feedback by reading the same file.
-
-1. open a markdown file
-2. highlight text
-3. leave inline comments
-4. let an agent address them in-place
-5. review the result in raw or diff view
+1. Open a markdown file in `mdr`
+2. Highlight text, leave inline comments
+3. Click "Hand off to agent" — copies instructions + takes a diff snapshot
+4. The agent reads the file, addresses your comments, deletes the markers
+5. Review the result in diff view
+6. Repeat until done
 
 ## How comments work
 
-Comments are stored immediately before the text they refer to:
+Comments are stored as HTML comment markers directly in the markdown:
 
 ```markdown
 Some text <!-- @comment{
@@ -31,45 +30,12 @@ Some text <!-- @comment{
 } -->highlighted text continues here.
 ```
 
-The app writes the same marker inline on one line; it is expanded here only for readability.
+This keeps feedback:
 
-That design keeps the feedback:
-
-- visible to AI agents with a plain file read
+- visible to AI agents via a plain file read
 - portable with the markdown file
-- invisible in normal markdown renderers like GitHub and VS Code preview
-- resilient in rendered Mermaid diagrams: diagram anchors are matched against visible label text, not hidden SVG metadata or injected CSS text
-
-## Current feature set
-
-- Inline comments with overlapping anchors
-- Newly added comments become active and focused in the sidebar
-- Threaded replies with inline edit/delete
-- Drag-resize comment anchors
-- Multi-tab editing with tab context menus (close, close others, close to right)
-- File explorer, recent files, and native OS file picker
-- Command palette (`Cmd+K`) and comprehensive keyboard shortcuts
-- Rendered, raw, and diff views
-- Find in document (`Cmd+F`) with match counting and navigation
-- Table of contents with active heading tracking and scroll spy
-- Comment sidebar search across text, anchors, authors, and replies
-- Real-time reload via SSE when files change outside the app
-- Optional resolve workflow for human review
-- Agent hand-off prompt copying for one or multiple files
-- Mermaid rendering with commentable diagram text
-- 8 themes: Light, Dark, Sepia, Nord, Solarized, GitHub, Rosé Pine, Catppuccin
-- Customizable comment templates (add, remove, reorder via drag-and-drop)
-- Quick comment mode (skip the "Comment" button, open form immediately on selection)
-- Resizable panels with draggable dividers between explorer, viewer, and sidebar
-- Right-click context menus on tabs, files, comments, and selections
-- Settings panel (`Cmd+,`) with General, Templates, and Theme tabs
-- Session persistence: open tabs, panel layout, panel widths, view mode, and diff snapshots saved to localStorage; author, theme, recent files, and settings are also mirrored to `~/.md-redline.json`
-
-## Supported platforms
-
-- macOS: supported
-- Linux: supported for the core app; the system file picker requires `zenity`
-- Windows: supported for the core app and CLI; the system file picker uses PowerShell
+- invisible in normal renderers (GitHub, VS Code preview)
+- resilient in Mermaid diagrams: anchors match visible label text
 
 ## Quick start
 
@@ -80,49 +46,56 @@ npm install
 npm run dev
 ```
 
-Then open the local URL printed by Vite in your terminal. By default this is usually `http://localhost:5188`, but it may move to the next available port.
-
-## Open a file quickly
+Open the local URL printed by Vite (usually `http://localhost:5188`).
 
 ```bash
 npm link
 mdr /path/to/spec.md        # Open a file
 mdr /path/to/dir             # Open a directory
 mdr --stop                   # Stop the running server
-mdr -h                       # Show help
 ```
 
 `md-redline` also works as an alias for `mdr`.
 
-On Windows, the same CLI works with paths like:
+## Who this is for
 
-```powershell
-mdr C:\docs\spec.md
-mdr .\spec.md
-```
+- **Spec authors** writing markdown specs, prompts, or design docs locally while using file-based AI agents
+- **Teams** doing pre-commit review on docs that haven't hit git yet
+- **Anyone** in the human + agent editing loop who needs structured inline feedback in plain files
 
-You can also open a file or directory directly by URL:
+### Non-goals
 
-- `http://localhost:<vite-port>?file=/absolute/path/to/file.md`
-- `http://localhost:<vite-port>?dir=/absolute/path/to/folder`
+- Not a collaborative multi-user editing tool
+- Not a replacement for GitHub PR reviews (use those once the file is in git)
+- Not designed for untrusted content — this is a local dev tool for your own files
 
-Use the actual client port Vite is running on. On Windows, absolute paths like `C:\docs\spec.md` work as well.
+## Features
+
+- Inline comments with overlapping anchors, threaded replies, drag-resize anchors
+- Multi-tab editing with tab context menus
+- File explorer, recent files, native OS file picker
+- Command palette (`Cmd+K`) and keyboard shortcuts
+- Rendered, raw, and diff views
+- Find in document (`Cmd+F`) with match navigation
+- Table of contents with scroll spy
+- Real-time reload via SSE when files change externally
+- Optional resolve workflow for human review
+- Agent hand-off prompt copying for one or multiple files
+- Mermaid diagram rendering with commentable text
+- 8 themes: Light, Dark, Sepia, Nord, Solarized, GitHub, Rosé Pine, Catppuccin
+- Customizable comment templates
+- Resizable panels, right-click context menus, settings panel (`Cmd+,`)
+- Session persistence across tabs and panel layout
 
 ## Review workflows
 
-### Default workflow: comments as agent instructions
+### Default: comments as agent instructions
 
-By default, comments are instructions to an agent:
+The reviewer adds comments, hands off to the agent, and the agent addresses them in-place by deleting the markers. The reviewer checks the diff.
 
-1. the reviewer adds comments
-2. the reviewer clicks "Hand off to agent" — this copies instructions to the clipboard and takes a diff snapshot
-3. the agent reads the file and updates the content
-4. the agent deletes the addressed markers
-5. the reviewer checks the result in diff view
+### Optional: resolve workflow
 
-### Optional resolve workflow
-
-If you enable the resolve workflow in Settings, comments get explicit `open` and `resolved` states for human-to-human review.
+Enable in Settings for human-to-human review with explicit `open` / `resolved` states.
 
 ## Keyboard shortcuts
 
@@ -141,10 +114,22 @@ If you enable the resolve workflow in Settings, comments get explicit `open` and
 | `N` / `J` | Next comment |
 | `P` / `K` | Previous comment |
 | `D` | Delete active comment |
-| `A` / `X` | Resolve active comment when resolve workflow is enabled |
-| `U` | Reopen active comment when resolve workflow is enabled |
+| `A` / `X` | Resolve active comment |
+| `U` | Reopen active comment |
 | `?` | Show keyboard shortcuts help |
 | `Escape` | Cancel form, unlock selection, or cancel drag |
+
+## Supported platforms
+
+- **macOS**: supported
+- **Linux**: supported; system file picker requires `zenity`
+- **Windows**: supported; system file picker uses PowerShell
+
+## Security model
+
+`mdr` is a local dev tool. The server reads and writes markdown files inside the current working directory, the user's home directory, and any path passed at startup. File saves use atomic write-then-rename and mtime-based conflict detection to prevent data loss from concurrent edits.
+
+Only run it in environments you trust. Mermaid SVG output is sanitized via DOMPurify before rendering.
 
 ## Architecture
 
@@ -163,45 +148,18 @@ e2e/                       Playwright end-to-end coverage
 ## Development
 
 ```bash
-npm run dev
-npm run lint
-npm test
-npm run test:e2e
+npm run dev          # Start dev server
+npm run lint         # Lint
+npm test             # Unit tests
+npm run test:e2e     # Playwright E2E tests
+npm run build        # Production build
 ```
-
-On Windows, you can use the helper script to set up and run tests:
-
-```powershell
-.\bin\test-windows.ps1 -Headed  # Run E2E tests with a visible browser
-.\bin\test-windows.ps1 -UI      # Open Playwright UI
-.\bin\test-windows.ps1          # Standard headless run
-```
-
-Useful scripts:
-
-- `npm run dev:server`
-- `npm run dev:client`
-- `npm run build`
-- `npm run test:watch`
-- `npm run test:e2e:ui`
 
 ### Eval
 
-- `npm run eval:dry` validates eval fixtures only
-- `npm run eval` runs the full eval harness and writes scored results to `eval/results/`
-- The eval is a file-based regression harness for agent handling of inline markdown comments, not a UI benchmark
-- The current eval adapter id is `claude-cli`; it shells out to the local `claude` CLI, and the effective model is whatever that CLI is configured to use by default
-- See [eval/README.md](./eval/README.md) for fixture structure, scoring, and flags
-
-## Security model
-
-`mdr` is a local app. The server can read and write markdown files inside:
-
-- the current working directory
-- the current user's home directory
-- any initial file or directory passed at startup
-
-This is intentional so the tool can work with real docs on your machine, but it also means you should only run it in environments you trust.
+- `npm run eval:dry` validates eval fixtures
+- `npm run eval` runs the full eval harness
+- See [eval/README.md](./eval/README.md) for details
 
 ## License
 
