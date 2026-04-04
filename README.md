@@ -1,23 +1,53 @@
 # <img src="public/favicon.svg" width="30" align="center" /> md-redline
 
-Inline review for markdown files — designed for human + AI agent workflows.
+Inline review for markdown files, built for human + AI agent workflows.
 
-Markdown is the lingua franca of an AI-native world. It's the one format that's equally readable by humans and machines — every AI agent can parse it, every developer can read it, and every tool can render it. `mdr` adds a missing piece: structured inline review that both sides can work with.
+Sean Grove makes the case that [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4). Markdown has become the standard for structured documents between humans and AI agents, and it needs review tooling the way code already has it. That's what `mdr` is.
 
-AI agents can read and write files, but they can't participate in review UIs. `mdr` bridges that gap: you leave inline comments in a rendered view, the agent addresses them by reading the same file. No sidecar files, no database, no external service. The `.md` file is the source of truth.
+Agents read and write markdown all day, but they don't participate in review UIs. `mdr` bridges that gap: you leave inline comments in a rendered markdown view, the agent addresses them by reading the same `.md` file. No sidecar files, no database, no external service. The markdown file is the source of truth.
 
-## The loop
+## How it works
 
-1. Open a markdown file in `mdr`
+1. Open a markdown file in `mdr` (often one an agent just generated or edited)
 2. Highlight text, leave inline comments
-3. Click "Hand off to agent" — copies instructions + takes a diff snapshot
-4. The agent reads the file, addresses your comments, deletes the markers
-5. Review the result in diff view
+3. <!-- @comment{"id":"0fe00629-8a8d-4d23-8e43-0c8a215da617","anchor":"Click \"Hand off to agent\" (copies instructions + takes a diff snapshot)","text":"Instead of Click \"Hand off to agent\" (a button that new users are unfamiliar with), this should be something like \"Click the hand-off button to copy instructions\"\n\nWe also need a step after this that the instructions need to be pasted to the agent","author":"Dennis","timestamp":"2026-04-04T02:41:37.756Z","contextBefore":")\nHighlight text, leave inline comments\n","contextAfter":"\nThe agent reads the file, addresses you"} -->Click "Hand off to agent" (copies instructions + takes a diff snapshot)
+4. The agent reads the file, addresses your feedback and removes the comments
+5. Review the agent's changes in diff view
 6. Repeat until done
+
+## Quick start
+
+Prerequisite: Node 20 or newer.
+
+```bash
+npx md-redline /path/to/spec.md
+```
+
+Or install globally:
+
+```bash
+npm install -g md-redline
+mdr /path/to/spec.md        # Open a file
+mdr /path/to/dir             # Open a directory
+mdr --stop                   # Stop the running server
+```
+
+`md-redline` also works as an alias for `mdr`.
+
+### From source
+
+```bash
+git clone https://github.com/dejuknow/md-redline.git
+cd md-redline
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite (usually `http://localhost:5188`).
 
 ## How comments work
 
-Comments are stored as HTML comment markers directly in the markdown:
+Comments are stored as invisible HTML markers directly in the markdown, so both humans and agents can work from the same file.
 
 ```markdown
 Some text <!-- @comment{
@@ -35,39 +65,18 @@ This keeps feedback:
 - visible to AI agents via a plain file read
 - portable with the markdown file
 - invisible in normal renderers (GitHub, VS Code preview)
-- resilient in Mermaid diagrams: anchors match visible label text
-
-## Quick start
-
-Prerequisite: Node 20 or newer.
-
-```bash
-npm install
-npm run dev
-```
-
-Open the local URL printed by Vite (usually `http://localhost:5188`).
-
-```bash
-npm link
-mdr /path/to/spec.md        # Open a file
-mdr /path/to/dir             # Open a directory
-mdr --stop                   # Stop the running server
-```
-
-`md-redline` also works as an alias for `mdr`.
 
 ## Who this is for
 
-- **Spec authors** writing markdown specs, prompts, or design docs locally while using file-based AI agents
+- **Spec authors** writing markdown specs, prompts, or design docs locally with file-based AI agents
 - **Teams** doing pre-commit review on docs that haven't hit git yet
-- **Anyone** in the human + agent editing loop who needs structured inline feedback in plain files
+- **Anyone** in a human + agent editing loop who needs structured inline feedback in plain files
 
 ### Non-goals
 
 - Not a collaborative multi-user editing tool
 - Not a replacement for GitHub PR reviews (use those once the file is in git)
-- Not designed for untrusted content — this is a local dev tool for your own files
+- Not designed for untrusted content. This is a local dev tool for your own files
 
 ## Features
 
@@ -125,11 +134,30 @@ Enable in Settings for human-to-human review with explicit `open` / `resolved` s
 - **Linux**: supported; system file picker requires `zenity`
 - **Windows**: supported; system file picker uses PowerShell
 
+
 ## Security model
 
 `mdr` is a local dev tool. The server reads and writes markdown files inside the current working directory, the user's home directory, and any path passed at startup. File saves use atomic write-then-rename and mtime-based conflict detection to prevent data loss from concurrent edits.
 
 Only run it in environments you trust. Mermaid SVG output is sanitized via DOMPurify before rendering.
+
+## Development
+
+```bash
+npm run dev          # Start dev server
+npm run lint         # Lint
+npm test             # Unit tests
+npm run test:e2e     # Playwright E2E tests
+npm run build        # Production build
+```
+
+### Agent eval
+
+The eval harness tests whether AI agents correctly read, address, and remove inline comments.
+
+- `npm run eval:dry` validates eval fixtures
+- `npm run eval` runs the full eval harness
+- See [eval/README.md](./eval/README.md) for details
 
 ## Architecture
 
@@ -144,22 +172,6 @@ src/markdown/pipeline.ts   Markdown rendering pipeline
 eval/                      Eval harness for agent behavior against inline comments
 e2e/                       Playwright end-to-end coverage
 ```
-
-## Development
-
-```bash
-npm run dev          # Start dev server
-npm run lint         # Lint
-npm test             # Unit tests
-npm run test:e2e     # Playwright E2E tests
-npm run build        # Production build
-```
-
-### Eval
-
-- `npm run eval:dry` validates eval fixtures
-- `npm run eval` runs the full eval harness
-- See [eval/README.md](./eval/README.md) for details
 
 ## License
 
