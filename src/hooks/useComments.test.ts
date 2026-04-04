@@ -711,6 +711,48 @@ describe('useComments', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // updateAndSave — synchronous ref update for back-to-back mutations
+  // -----------------------------------------------------------------------
+  describe('back-to-back mutations', () => {
+    it('second mutation sees the first mutation via rawMarkdownRef', () => {
+      const setRawMarkdown = vi.fn();
+      const saveFile = vi.fn();
+      const raw = `Hello ${makeComment({ id: 'c1', anchor: 'Hello', status: 'open' })}${makeComment({ id: 'c2', anchor: 'Hello', status: 'open' })}world`;
+      const rawMarkdownRef = { current: raw };
+      const params = defaultParams({
+        rawMarkdown: raw,
+        rawMarkdownRef: rawMarkdownRef as unknown as UseCommentsParams['rawMarkdownRef'],
+        setRawMarkdown,
+        saveFile,
+        enableResolve: true,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      // Resolve c1, then immediately delete c2 in the same synchronous block.
+      // Without the ref fix, handleDelete would read the pre-resolve rawMarkdownRef
+      // and the resolve would be lost.
+      act(() => {
+        result.current.handleResolve('c1');
+        result.current.handleDelete('c2');
+      });
+
+      expect(setRawMarkdown).toHaveBeenCalledTimes(2);
+      expect(saveFile).toHaveBeenCalledTimes(2);
+
+      // The second call should contain the resolve from the first call
+      const secondContent = setRawMarkdown.mock.calls[1][0] as string;
+      // c1 should be resolved (still present with status resolved)
+      expect(secondContent).toContain('"id":"c1"');
+      expect(secondContent).toContain('"status":"resolved"');
+      // c2 should be deleted
+      expect(secondContent).not.toContain('"id":"c2"');
+
+      // rawMarkdownRef should reflect the final state
+      expect(rawMarkdownRef.current).toBe(secondContent);
+    });
+  });
+
   describe('navigation with no comments', () => {
     it('handleJumpToNext does nothing with no comments', () => {
       const params = defaultParams({ rawMarkdown: 'No comments here' });

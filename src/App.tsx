@@ -32,6 +32,7 @@ import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu } from './components/ContextMenu';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
 import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
@@ -73,16 +74,88 @@ export default function App() {
     updateTab,
     isLoading,
     error,
+    isTabDirty,
     openTab,
     openTabInBackground,
-    closeTab,
-    closeOtherTabs,
-    closeAllTabs,
-    closeTabsToRight,
+    closeTab: closeTabDirect,
+    closeOtherTabs: closeOtherTabsDirect,
+    closeAllTabs: closeAllTabsDirect,
+    closeTabsToRight: closeTabsToRightDirect,
     switchTab,
     saveFile,
     reloadFile,
   } = useTabs({ onSaveError });
+
+  // Dirty-tab close guard: when closing tabs that have unsaved changes
+  // (e.g. save failed), show a confirmation dialog before discarding.
+  const [pendingClose, setPendingClose] = useState<{
+    type: 'single' | 'others' | 'all' | 'right';
+    path?: string;
+  } | null>(null);
+
+  const executePendingClose = useCallback(() => {
+    if (!pendingClose) return;
+    switch (pendingClose.type) {
+      case 'single':
+        if (pendingClose.path) closeTabDirect(pendingClose.path);
+        break;
+      case 'others':
+        if (pendingClose.path) closeOtherTabsDirect(pendingClose.path);
+        break;
+      case 'all':
+        closeAllTabsDirect();
+        break;
+      case 'right':
+        if (pendingClose.path) closeTabsToRightDirect(pendingClose.path);
+        break;
+    }
+    setPendingClose(null);
+  }, [pendingClose, closeTabDirect, closeOtherTabsDirect, closeAllTabsDirect, closeTabsToRightDirect]);
+
+  const closeTab = useCallback(
+    (path: string) => {
+      if (isTabDirty(path)) {
+        setPendingClose({ type: 'single', path });
+        return;
+      }
+      closeTabDirect(path);
+    },
+    [isTabDirty, closeTabDirect],
+  );
+
+  const closeOtherTabs = useCallback(
+    (keepPath: string) => {
+      const hasDirty = tabs.some((t) => t.filePath !== keepPath && isTabDirty(t.filePath));
+      if (hasDirty) {
+        setPendingClose({ type: 'others', path: keepPath });
+        return;
+      }
+      closeOtherTabsDirect(keepPath);
+    },
+    [tabs, isTabDirty, closeOtherTabsDirect],
+  );
+
+  const closeAllTabs = useCallback(() => {
+    const hasDirty = tabs.some((t) => isTabDirty(t.filePath));
+    if (hasDirty) {
+      setPendingClose({ type: 'all' });
+      return;
+    }
+    closeAllTabsDirect();
+  }, [tabs, isTabDirty, closeAllTabsDirect]);
+
+  const closeTabsToRight = useCallback(
+    (path: string) => {
+      const idx = tabs.findIndex((t) => t.filePath === path);
+      const hasDirty = tabs.slice(idx + 1).some((t) => isTabDirty(t.filePath));
+      if (hasDirty) {
+        setPendingClose({ type: 'right', path });
+        return;
+      }
+      closeTabsToRightDirect(path);
+    },
+    [tabs, isTabDirty, closeTabsToRightDirect],
+  );
 
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
@@ -1505,6 +1578,16 @@ export default function App() {
         open={activeModal === 'shortcuts'}
         onClose={() => setActiveModal(null)}
         resolveEnabled={settings.enableResolve}
+      />
+
+      <ConfirmDialog
+        open={pendingClose !== null}
+        title="Unsaved changes"
+        message="This file has unsaved changes that will be lost. Close anyway?"
+        confirmLabel="Close"
+        cancelLabel="Cancel"
+        onConfirm={executePendingClose}
+        onCancel={() => setPendingClose(null)}
       />
 
       {/* Keyboard shortcuts hint */}

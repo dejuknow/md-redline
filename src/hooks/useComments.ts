@@ -126,13 +126,15 @@ export function useComments(params: UseCommentsParams) {
     ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
     : comments.length;
 
-  // Core update helper
+  // Core update helper — synchronously updates the ref so back-to-back
+  // mutations (e.g. rapid keyboard shortcuts) each read the latest state.
   const updateAndSave = useCallback(
     (newRaw: string) => {
+      rawMarkdownRef.current = newRaw;
       setRawMarkdown(newRaw);
       saveFile(newRaw);
     },
-    [setRawMarkdown, saveFile],
+    [setRawMarkdown, saveFile, rawMarkdownRef],
   );
 
   const handleAddComment = useCallback(

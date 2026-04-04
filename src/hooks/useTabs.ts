@@ -9,6 +9,8 @@ export interface TabState {
   lastSaved: Date | null;
   /** Server-reported mtime (ms since epoch) for conflict detection */
   mtime?: number;
+  /** True when local content has not yet been successfully saved to disk */
+  dirty?: boolean;
 }
 
 interface PendingTabUpdate {
@@ -449,9 +451,17 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   const error = activeTab?.error ?? null;
   const filePath = activeTab?.filePath ?? '';
 
+  const isTabDirty = useCallback(
+    (path: string): boolean => {
+      const key = findTabKey(tabDataRef.current, path) ?? path;
+      return tabDataRef.current.get(key)?.dirty === true;
+    },
+    [],
+  );
+
   const setRawMarkdown = useCallback(
     (content: string) => {
-      if (activeFilePath) updateTab(activeFilePath, { rawMarkdown: content });
+      if (activeFilePath) updateTab(activeFilePath, { rawMarkdown: content, dirty: true });
     },
     [activeFilePath, updateTab],
   );
@@ -491,6 +501,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
             lastSaved: new Date(),
             error: null,
             mtime: data.mtime,
+            dirty: false,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Failed to save file';
@@ -536,6 +547,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     updateTab,
     isLoading,
     error,
+    isTabDirty,
     openTab,
     openTabInBackground,
     closeTab,

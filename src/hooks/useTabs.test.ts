@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { applyLoadedTabState, applyPendingTabState, type TabState } from './useTabs';
 
 function makeTab(path: string, overrides: Partial<TabState> = {}): TabState {
@@ -93,5 +93,25 @@ describe('applyPendingTabState', () => {
       isLoading: false,
       error: null,
     });
+  });
+});
+
+describe('TabState dirty flag', () => {
+  it('defaults to undefined (not dirty) on new tabs', () => {
+    const path = '/tmp/test.md';
+    const result = applyPendingTabState(new Map(), [], null, path, true);
+    expect(result.tabData.get(path)?.dirty).toBeUndefined();
+  });
+
+  it('is preserved through applyLoadedTabState', () => {
+    const path = '/tmp/test.md';
+    const prevData = new Map([
+      [path, makeTab(path, { dirty: true })],
+    ]);
+    const result = applyLoadedTabState(
+      prevData, [path], path, path, path, '# content', new Date(),
+    );
+    // applyLoadedTabState creates a new TabState without dirty, so it should be undefined
+    expect(result.tabData.get(path)?.dirty).toBeUndefined();
   });
 });

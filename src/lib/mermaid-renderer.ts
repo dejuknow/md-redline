@@ -76,7 +76,6 @@ export async function renderMermaidBlock(
     const { svg } = await mermaid.render(id, source.trim());
     const cleanSvg = DOMPurify.sanitize(svg, {
       USE_PROFILES: { html: true, svg: true, svgFilters: true },
-      ADD_TAGS: ['foreignObject'],
     });
     return { svg: cleanSvg };
   } catch (e) {

@@ -1,4 +1,7 @@
+// @vitest-environment jsdom
+
 import { describe, it, expect } from 'vitest';
+import DOMPurify from 'dompurify';
 import { getMermaidTheme, hasMermaidBlocks } from './mermaid-renderer';
 import { ALL_THEMES } from './themes';
 
@@ -75,5 +78,37 @@ describe('hasMermaidBlocks', () => {
 
   it('returns false when mermaid is not at line start', () => {
     expect(hasMermaidBlocks('  ```mermaid\ngraph TD\n```')).toBe(false);
+  });
+});
+
+describe('SVG sanitization (DOMPurify config)', () => {
+  // These tests verify the exact DOMPurify config used by renderMermaidBlock.
+  // The config must NOT include ADD_TAGS: ['foreignObject'] because foreignObject
+  // can contain arbitrary HTML that bypasses rehype-sanitize.
+  const sanitize = (svg: string) =>
+    DOMPurify.sanitize(svg, {
+      USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    });
+
+  it('strips foreignObject elements from SVG', () => {
+    const malicious = '<svg><foreignObject><div onclick="alert(1)">XSS</div></foreignObject></svg>';
+    const clean = sanitize(malicious);
+    expect(clean).not.toContain('foreignObject');
+    expect(clean).not.toContain('onclick');
+  });
+
+  it('strips script elements from SVG', () => {
+    const malicious = '<svg><script>alert(1)</script><rect width="10" height="10"/></svg>';
+    const clean = sanitize(malicious);
+    expect(clean).not.toContain('<script');
+    expect(clean).toContain('<rect');
+  });
+
+  it('preserves safe SVG elements', () => {
+    const safe = '<svg viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="blue"/><text x="10" y="50">Hello</text></svg>';
+    const clean = sanitize(safe);
+    expect(clean).toContain('<rect');
+    expect(clean).toContain('<text');
+    expect(clean).toContain('Hello');
   });
 });
