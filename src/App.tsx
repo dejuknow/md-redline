@@ -1410,8 +1410,6 @@ export default function App() {
                   onBulkDeleteResolved={handleBulkDeleteResolved}
                   onContextMenu={handleSidebarContextMenu}
                   requestedEditor={requestedEditor}
-                  isCommentFormOpen={!!selection && viewMode === 'rendered'}
-                  onEditorOpen={clearSelection}
                   requestedFocus={requestedCommentFocus}
                   onFocusHandled={() => setRequestedCommentFocus(null)}
                 />

@@ -320,41 +320,7 @@ test.describe('Comment editing and replies', () => {
     await expect(secondReply.getByRole('textbox')).toHaveCount(0);
   });
 
-  test('selecting text to add a comment closes the sidebar editor', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Existing comment');
 
-    // Open the edit editor on the existing comment
-    await clickCardAction(page, 'Existing comment', 'Edit');
-    const card = getCard(page, 'Existing comment');
-    await expect(card.locator('textarea')).toHaveCount(1);
-
-    // Select text in the document to open the comment form
-    await selectText(page, 'double-submit cookie pattern');
-    const commentForm = page.locator('[data-comment-form]');
-    await expect(commentForm).toBeVisible();
-
-    // The sidebar edit editor should be dismissed
-    await expect(card.locator('textarea')).toHaveCount(0);
-  });
-
-  test('clicking edit on sidebar closes the new comment form', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Sidebar edit test');
-
-    // Select text to open the comment form
-    await selectText(page, 'double-submit cookie pattern');
-    const commentForm = page.locator('[data-comment-form]');
-    await expect(commentForm).toBeVisible();
-
-    // Click edit on the existing comment
-    await clickCardAction(page, 'Sidebar edit test', 'Edit');
-    const card = getCard(page, 'Sidebar edit test');
-    await expect(card.locator('textarea')).toHaveCount(1);
-
-    // The comment form should be dismissed
-    await expect(commentForm).not.toBeVisible();
-  });
 });
 
 test.describe('Sidebar filtering', () => {
