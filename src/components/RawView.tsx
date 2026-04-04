@@ -309,6 +309,11 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
   const [showComments, setShowComments] = useState(true);
   const [activeDiffChunk, setActiveDiffChunk] = useState(0);
 
+  // Hide comment markers when entering diff mode so user sees only diffs
+  useEffect(() => {
+    if (diffEnabled) setShowComments(false);
+  }, [diffEnabled]);
+
   // Clean up flash timer on unmount
   useEffect(() => {
     return () => {
