@@ -151,6 +151,7 @@ export const MarkdownViewer = memo(
           wrapper.className = 'mermaid-block';
           const svgDiv = document.createElement('div');
           svgDiv.className = 'mermaid-svg';
+          // SVG is already sanitized via DOMPurify in mermaid-renderer.ts
           svgDiv.innerHTML = result.svg;
           wrapper.appendChild(svgDiv);
           pre.replaceWith(wrapper);

@@ -35,6 +35,7 @@ function normalizePathForComparison(path: string, caseInsensitive: boolean): str
 export function isPathInsideRoot(path: string, root: string, caseInsensitive = false): boolean {
   const normalizedPath = normalizePathForComparison(path, caseInsensitive);
   const normalizedRoot = normalizePathForComparison(root, caseInsensitive);
+  if (normalizedRoot === '/') return true;
   return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
 }
 
@@ -98,6 +99,16 @@ export function createApp(options: CreateAppOptions = {}) {
     }),
   );
   app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 }));
+  // Enforce application/json Content-Type on POST/PUT to block CSRF via text/plain forms
+  app.use('*', async (c, next) => {
+    if (c.req.method === 'POST' || c.req.method === 'PUT') {
+      const ct = c.req.header('content-type') ?? '';
+      if (!ct.includes('application/json')) {
+        return c.json({ error: 'Content-Type must be application/json' }, 415);
+      }
+    }
+    await next();
+  });
 
   let initialFile = '';
   let initialDir = '';
@@ -112,7 +123,7 @@ export function createApp(options: CreateAppOptions = {}) {
     if (initialArg) initialFile = initialArg;
   }
 
-  const allowedRoots = [canonicalize(cwd), canonicalize(homeDir)];
+  const allowedRoots = [canonicalize(cwd)];
   // When opening a single file, grant access to its parent directory so
   // the user can navigate to sibling files via the explorer.
   if (initialFile) {

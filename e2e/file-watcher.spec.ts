@@ -150,4 +150,29 @@ test.describe('File watcher - external changes', () => {
     // The "Changed" badge should NOT appear for our own save
     await expect(page.getByText('Changed')).not.toBeVisible();
   });
+
+  test('external change does not mark tab as dirty (no false unsaved-changes dialog)', async ({
+    page,
+  }) => {
+    await openFixture(page);
+
+    // Wait for SSE connection to establish
+    await page.waitForTimeout(1500);
+
+    // Modify the file externally
+    const modified = FIXTURE_ORIGINAL.replace('## Section One', '## Dirty Flag Test');
+    writeFileSync(FIXTURE, modified);
+
+    // Wait for the change to propagate
+    await expect(page.getByRole('heading', { name: 'Dirty Flag Test' })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Close the tab via middle-click on the tab itself (avoids tiny close-button hit target)
+    const tab = page.getByRole('button', { name: /test-doc\.md/ }).first();
+    await tab.click({ button: 'middle' });
+
+    // The "Unsaved changes" dialog should NOT appear — the tab should close cleanly
+    await expect(page.getByText('Unsaved changes')).not.toBeVisible({ timeout: 2000 });
+  });
 });

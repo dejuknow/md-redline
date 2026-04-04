@@ -114,4 +114,14 @@ describe('TabState dirty flag', () => {
     // applyLoadedTabState creates a new TabState without dirty, so it should be undefined
     expect(result.tabData.get(path)?.dirty).toBeUndefined();
   });
+
+  it('can be cleared by spreading dirty:false over a dirty tab', () => {
+    // This pattern is used by onExternalChange: external SSE content should
+    // NOT mark the tab dirty since the content already matches disk.
+    const path = '/tmp/test.md';
+    const tab = makeTab(path, { dirty: true, rawMarkdown: '# old' });
+    const updated = { ...tab, rawMarkdown: '# new', dirty: false };
+    expect(updated.dirty).toBe(false);
+    expect(updated.rawMarkdown).toBe('# new');
+  });
 });

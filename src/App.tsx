@@ -269,7 +269,6 @@ export default function App() {
     handleSearchPrev,
     handleSearchClose,
     handleSearchQueryChange,
-    handleRawSearchCount,
   } = useSearch(() => setActiveModal(null));
 
   // Platform info for context menu labels
@@ -506,10 +505,17 @@ export default function App() {
         // Ignore parse errors — still update the content
       }
 
-      setRawMarkdown(content);
-      // Update mtime so the next save uses the correct expected value
-      if (mtime != null && activeFilePath) {
-        updateTab(activeFilePath, { mtime });
+      // Update content directly via updateTab (NOT setRawMarkdown which marks
+      // dirty:true). External changes already match disk, so dirty must be false.
+      // Also synchronously update rawMarkdownRef so back-to-back user edits
+      // (e.g. add-comment right after SSE) read the latest content, not stale state.
+      rawMarkdownRef.current = content;
+      if (activeFilePath) {
+        updateTab(activeFilePath, {
+          rawMarkdown: content,
+          ...(mtime != null ? { mtime } : {}),
+          dirty: false,
+        });
       }
 
       // Flag the diff button when content changed and a snapshot exists
@@ -520,7 +526,6 @@ export default function App() {
     [
       activeFilePath,
       setDiffEnabled,
-      setRawMarkdown,
       setViewMode,
       settings.enableResolve,
       showToast,
@@ -577,7 +582,10 @@ export default function App() {
     }
     if (wasHiddenRef.current && activeFilePath) {
       wasHiddenRef.current = false;
-      fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`)
+      const controller = new AbortController();
+      fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`, {
+        signal: controller.signal,
+      })
         .then((res) => (res.ok ? res.json() : null))
         .then((data: { content?: string; mtime?: number } | null) => {
           if (!data?.content) return;
@@ -585,10 +593,12 @@ export default function App() {
             onExternalChangeRef.current(data.content, data.mtime);
           }
         })
-        .catch(() => {
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
           // Network error — fall back to silent reload
           reloadFile();
         });
+      return () => controller.abort();
     }
   }, [pageVisible, activeFilePath, reloadFile]);
 
@@ -1373,7 +1383,7 @@ export default function App() {
                   rawMarkdown={rawMarkdown}
                   searchQuery={showSearch ? searchQuery : undefined}
                   searchActiveIndex={activeSearchIndex}
-                  onSearchCount={handleRawSearchCount}
+                  onSearchCount={handleSearchCount}
                   activeCommentId={activeCommentId}
                   diffSnapshot={currentSnapshot}
                   diffEnabled={diffEnabled}

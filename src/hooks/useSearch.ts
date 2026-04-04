@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 export function useSearch(onClose: () => void) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -6,18 +6,25 @@ export function useSearch(onClose: () => void) {
   const [searchMatchCount, setSearchMatchCount] = useState(0);
   const [searchFocusTrigger, setSearchFocusTrigger] = useState(0);
 
+  const searchMatchCountRef = useRef(searchMatchCount);
+  searchMatchCountRef.current = searchMatchCount;
+
   const handleSearchCount = useCallback((count: number) => {
     setSearchMatchCount(count);
     setActiveSearchIndex((prev) => (count === 0 ? 0 : Math.min(prev, count - 1)));
   }, []);
 
   const handleSearchNext = useCallback(() => {
-    setActiveSearchIndex((prev) => (prev < searchMatchCount - 1 ? prev + 1 : 0));
-  }, [searchMatchCount]);
+    setActiveSearchIndex((prev) =>
+      prev < searchMatchCountRef.current - 1 ? prev + 1 : 0,
+    );
+  }, []);
 
   const handleSearchPrev = useCallback(() => {
-    setActiveSearchIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, searchMatchCount - 1)));
-  }, [searchMatchCount]);
+    setActiveSearchIndex((prev) =>
+      prev > 0 ? prev - 1 : Math.max(0, searchMatchCountRef.current - 1),
+    );
+  }, []);
 
   const handleSearchClose = useCallback(() => {
     onClose();
@@ -31,11 +38,6 @@ export function useSearch(onClose: () => void) {
     setActiveSearchIndex(0);
   }, []);
 
-  const handleRawSearchCount = useCallback((count: number) => {
-    setSearchMatchCount(count);
-    setActiveSearchIndex((prev) => (count === 0 ? 0 : Math.min(prev, count - 1)));
-  }, []);
-
   return {
     searchQuery,
     activeSearchIndex,
@@ -47,6 +49,5 @@ export function useSearch(onClose: () => void) {
     handleSearchPrev,
     handleSearchClose,
     handleSearchQueryChange,
-    handleRawSearchCount,
   };
 }

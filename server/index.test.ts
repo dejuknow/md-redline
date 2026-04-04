@@ -15,6 +15,7 @@ let fakeHome: string;
 let initialDir: string;
 let externalDir: string;
 let docsDir: string;
+let nestedDir: string;
 
 let rootFile: string;
 let docsFile: string;
@@ -61,7 +62,7 @@ beforeAll(async () => {
   externalDir = await realpath(externalDir);
 
   docsDir = join(cwdRoot, 'docs');
-  const nestedDir = join(docsDir, 'nested');
+  nestedDir = join(docsDir, 'nested');
   const hiddenDir = join(docsDir, '.hidden-dir');
 
   await mkdir(docsDir, { recursive: true });
@@ -93,9 +94,9 @@ beforeAll(async () => {
   await writeFile(join(initialDir, 'initial.md'), '# Initial\n');
   await writeFile(initialSiblingFile, '# Follow-up\n\nInitial sibling\n');
 
-  await symlink(homeFile, allowedSymlinkFile);
+  await symlink(rootFile, allowedSymlinkFile);
   await symlink(externalFile, outsideSymlinkFile);
-  await symlink(fakeHome, allowedSymlinkDir);
+  await symlink(nestedDir, allowedSymlinkDir);
   await symlink(externalDir, outsideSymlinkDir);
 
   app = createApp({
@@ -217,6 +218,11 @@ describe('isPathInsideRoot', () => {
     expect(isPathInsideRoot('C:\\Work\\Docs\\Spec.md', 'c:\\work', true)).toBe(true);
     expect(isPathInsideRoot('D:\\Work\\Docs\\Spec.md', 'c:\\work', true)).toBe(false);
   });
+
+  it('accepts all paths when root is /', () => {
+    expect(isPathInsideRoot('/etc/foo', '/')).toBe(true);
+    expect(isPathInsideRoot('/home/user/file.md', '/')).toBe(true);
+  });
 });
 
 describe('/api/file', () => {
@@ -240,29 +246,31 @@ describe('/api/file', () => {
     });
   });
 
-  it('expands tilde paths against the configured home directory', async () => {
+  it('rejects tilde paths when home directory is outside allowed roots', async () => {
     const { response, body } = await requestJson(
       app,
       `/api/file?path=${encodeURIComponent('~/home.md')}`,
     );
 
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      path: homeFile,
-      content: '# Home\n',
-    });
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
   });
 
-  it('expands Windows-style tilde paths against the configured home directory', async () => {
+  it('expands tilde paths when home directory is inside an allowed root', async () => {
+    const homeInCwdApp = createApp({
+      cwd: cwdRoot,
+      homeDir: cwdRoot,
+      platformName: 'linux',
+    });
     const { response, body } = await requestJson(
-      app,
-      `/api/file?path=${encodeURIComponent('~\\home.md')}`,
+      homeInCwdApp,
+      `/api/file?path=${encodeURIComponent('~/root.md')}`,
     );
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
-      path: homeFile,
-      content: '# Home\n',
+      path: rootFile,
+      content: '# Root\n',
     });
   });
 
@@ -294,8 +302,8 @@ describe('/api/file', () => {
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
-      path: homeFile,
-      content: '# Home\n',
+      path: rootFile,
+      content: '# Root\n',
     });
   });
 
@@ -464,8 +472,8 @@ describe('/api/files', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      dir: fakeHome,
-      files: [homeFile],
+      dir: nestedDir,
+      files: [join(nestedDir, 'nested.md')],
     });
   });
 
@@ -532,10 +540,10 @@ describe('/api/browse', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      dir: fakeHome,
-      parent: null,
+      dir: nestedDir,
+      parent: docsDir,
       directories: [],
-      files: [{ name: 'home.md', path: homeFile }],
+      files: [{ name: 'nested.md', path: join(nestedDir, 'nested.md') }],
     });
   });
 
@@ -722,6 +730,36 @@ describe('/api/pick-file', () => {
     expect(calls[0].file).toBe('powershell');
     expect(calls[0].args).toContain('-STA');
     expect(calls[0].args.join(' ')).toContain('OpenFileDialog');
+  });
+});
+
+describe('Content-Type enforcement', () => {
+  it('rejects POST requests without application/json Content-Type', async () => {
+    const response = await app.request('/api/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ path: docsFile }),
+    });
+
+    expect(response.status).toBe(415);
+    expect(await response.json()).toEqual({ error: 'Content-Type must be application/json' });
+  });
+
+  it('rejects PUT requests without Content-Type header', async () => {
+    const response = await app.request('/api/file', {
+      method: 'PUT',
+      body: JSON.stringify({ path: writtenFile, content: '# Test\n' }),
+    });
+
+    expect(response.status).toBe(415);
+  });
+
+  it('allows GET requests without Content-Type', async () => {
+    const response = await app.request(
+      `http://localhost/api/file?path=${encodeURIComponent(docsFile)}`,
+    );
+
+    expect(response.status).toBe(200);
   });
 });
 
