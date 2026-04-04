@@ -368,95 +368,99 @@ export default function App() {
   }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId]);
 
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
-  useFileWatcher({
-    filePath: activeFilePath,
-    onExternalChange: useCallback(
-      (content: string, mtime?: number) => {
-        // Detect comment changes before updating
-        let cleanContentChanged = false;
-        try {
-          const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(
-            rawMarkdownRef.current,
-          );
-          const { comments: newComments, cleanMarkdown: newClean } = parseComments(content);
-          cleanContentChanged = oldClean !== newClean;
-          const newById = new Map(newComments.map((c) => [c.id, c]));
+  const onExternalChange = useCallback(
+    (content: string, mtime?: number) => {
+      // Detect comment changes before updating
+      let cleanContentChanged = false;
+      try {
+        const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(
+          rawMarkdownRef.current,
+        );
+        const { comments: newComments, cleanMarkdown: newClean } = parseComments(content);
+        cleanContentChanged = oldClean !== newClean;
+        const newById = new Map(newComments.map((c) => [c.id, c]));
 
-          let deletedCount = 0;
-          let resolvedCount = 0;
-          let newReplyCount = 0;
-          for (const oldC of oldComments) {
-            const newC = newById.get(oldC.id);
-            if (!newC) {
-              deletedCount++;
-              continue;
-            }
-            if (settings.enableResolve) {
-              const oldStatus = getEffectiveStatus(oldC);
-              const newStatus = getEffectiveStatus(newC);
-              if (oldStatus === 'open' && newStatus === 'resolved') {
-                resolvedCount++;
-              }
-            }
-            const oldReplies = oldC.replies?.length ?? 0;
-            const newReplies = newC.replies?.length ?? 0;
-            if (newReplies > oldReplies) {
-              newReplyCount += newReplies - oldReplies;
+        let deletedCount = 0;
+        let resolvedCount = 0;
+        let newReplyCount = 0;
+        for (const oldC of oldComments) {
+          const newC = newById.get(oldC.id);
+          if (!newC) {
+            deletedCount++;
+            continue;
+          }
+          if (settings.enableResolve) {
+            const oldStatus = getEffectiveStatus(oldC);
+            const newStatus = getEffectiveStatus(newC);
+            if (oldStatus === 'open' && newStatus === 'resolved') {
+              resolvedCount++;
             }
           }
-
-          // Accumulate across rapid events so the toast coalesces
-          accResolvedRef.current += resolvedCount;
-          accDeletedRef.current += deletedCount;
-          accRepliesRef.current += newReplyCount;
-
-          const r = accResolvedRef.current;
-          const d = accDeletedRef.current;
-          const rp = accRepliesRef.current;
-          if (r > 0 || d > 0 || rp > 0) {
-            const parts: string[] = [];
-            if (r > 0) parts.push(`${r} resolved`);
-            if (d > 0) parts.push(`${d} addressed`);
-            if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
-            const diffAction =
-              cleanContentChanged && currentSnapshotRef.current
-                ? {
-                    label: 'View diff',
-                    onClick: () => {
-                      setViewMode('raw');
-                      setDiffEnabled(true);
-                      setDiffPending(false);
-                    },
-                  }
-                : undefined;
-            showToast(`${parts.join(', ')} externally`, diffAction);
+          const oldReplies = oldC.replies?.length ?? 0;
+          const newReplies = newC.replies?.length ?? 0;
+          if (newReplies > oldReplies) {
+            newReplyCount += newReplies - oldReplies;
           }
-        } catch {
-          // Ignore parse errors — still update the content
         }
 
-        setRawMarkdown(content);
-        // Update mtime so the next save uses the correct expected value
-        if (mtime != null && activeFilePath) {
-          updateTab(activeFilePath, { mtime });
-        }
+        // Accumulate across rapid events so the toast coalesces
+        accResolvedRef.current += resolvedCount;
+        accDeletedRef.current += deletedCount;
+        accRepliesRef.current += newReplyCount;
 
-        // Flag the diff button when content changed and a snapshot exists
-        if (cleanContentChanged && currentSnapshotRef.current) {
-          setDiffPending(true);
+        const r = accResolvedRef.current;
+        const d = accDeletedRef.current;
+        const rp = accRepliesRef.current;
+        if (r > 0 || d > 0 || rp > 0) {
+          const parts: string[] = [];
+          if (r > 0) parts.push(`${r} resolved`);
+          if (d > 0) parts.push(`${d} addressed`);
+          if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
+          const diffAction =
+            cleanContentChanged && currentSnapshotRef.current
+              ? {
+                  label: 'View diff',
+                  onClick: () => {
+                    setViewMode('raw');
+                    setDiffEnabled(true);
+                    setDiffPending(false);
+                  },
+                }
+              : undefined;
+          showToast(`${parts.join(', ')} externally`, diffAction);
         }
-      },
-      [
-        activeFilePath,
-        setDiffEnabled,
-        setRawMarkdown,
-        setViewMode,
-        settings.enableResolve,
-        showToast,
-        updateTab,
-      ],
-    ),
-  });
+      } catch {
+        // Ignore parse errors — still update the content
+      }
+
+      setRawMarkdown(content);
+      // Update mtime so the next save uses the correct expected value
+      if (mtime != null && activeFilePath) {
+        updateTab(activeFilePath, { mtime });
+      }
+
+      // Flag the diff button when content changed and a snapshot exists
+      if (cleanContentChanged && currentSnapshotRef.current) {
+        setDiffPending(true);
+      }
+    },
+    [
+      activeFilePath,
+      setDiffEnabled,
+      setRawMarkdown,
+      setViewMode,
+      settings.enableResolve,
+      showToast,
+      updateTab,
+    ],
+  );
+
+  // Keep a stable ref so the visibility-restore effect can call it without
+  // adding it to its dependency array (which would cause reconnect churn).
+  const onExternalChangeRef = useRef(onExternalChange);
+  onExternalChangeRef.current = onExternalChange;
+
+  useFileWatcher({ filePath: activeFilePath, onExternalChange });
 
   // Watch background tabs for external changes so they stay fresh during handoff.
   // The active tab is handled by useFileWatcher above; this covers the rest.
@@ -489,19 +493,31 @@ export default function App() {
     return () => es.close();
   }, [backgroundPathsKey, pageVisible, updateTab]);
 
-  // When the browser tab becomes visible again, reload the active file
-  // to catch any changes that were missed while SSE was disconnected.
+  // When the browser tab becomes visible again, fetch the active file and
+  // route through onExternalChange so the user gets toast/blue-dot notifications
+  // for changes that happened while SSE was disconnected.
   const wasHiddenRef = useRef(false);
   useEffect(() => {
     if (!pageVisible) {
       wasHiddenRef.current = true;
       return;
     }
-    if (wasHiddenRef.current) {
+    if (wasHiddenRef.current && activeFilePath) {
       wasHiddenRef.current = false;
-      reloadFile();
+      fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { content?: string; mtime?: number } | null) => {
+          if (!data?.content) return;
+          if (data.content !== rawMarkdownRef.current) {
+            onExternalChangeRef.current(data.content, data.mtime);
+          }
+        })
+        .catch(() => {
+          // Network error — fall back to silent reload
+          reloadFile();
+        });
     }
-  }, [pageVisible, reloadFile]);
+  }, [pageVisible, activeFilePath, reloadFile]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
@@ -1394,6 +1410,7 @@ export default function App() {
                   onBulkDeleteResolved={handleBulkDeleteResolved}
                   onContextMenu={handleSidebarContextMenu}
                   requestedEditor={requestedEditor}
+                  isCommentFormOpen={!!selection && viewMode === 'rendered'}
                   requestedFocus={requestedCommentFocus}
                   onFocusHandled={() => setRequestedCommentFocus(null)}
                 />
