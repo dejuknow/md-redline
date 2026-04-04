@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-
-type Variant = 'neutral' | 'active' | 'success';
+import { variantClasses, type Variant } from './iconButtonVariants';
 
 interface MenuItem {
   label: string;
@@ -36,24 +35,6 @@ type Props = BaseProps &
 
 const baseClasses =
   'transition-[color,background-color,border-radius] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
-
-const variantClasses: Record<Variant, { on: string; off: string; coordinated: string }> = {
-  neutral: {
-    on: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-    coordinated: 'text-content-secondary bg-surface-inset',
-  },
-  active: {
-    on: 'text-primary-text bg-primary-bg',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-    coordinated: 'text-content-secondary bg-surface-inset',
-  },
-  success: {
-    on: 'text-success-text hover:text-success hover:bg-tint-success',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-    coordinated: 'text-content-secondary bg-surface-inset',
-  },
-};
 
 export function SplitIconButton({
   icon,
@@ -113,7 +94,7 @@ export function SplitIconButton({
         title={chevronTitle}
         data-testid={chevronTestId ?? (testId ? `${testId}-chevron` : undefined)}
         className={`px-0.5 self-stretch flex items-center rounded-r ${baseClasses} ${
-          open ? v.coordinated : 'text-content-muted hover:text-content-secondary hover:bg-tint'
+          open || chevronHover ? v.coordinated : 'text-content-muted hover:text-content-secondary hover:bg-tint'
         }`}
       >
         <svg

@@ -1,6 +1,5 @@
 import type { ReactNode, ButtonHTMLAttributes } from 'react';
-
-type Variant = 'neutral' | 'active' | 'success';
+import { variantClasses, type Variant } from './iconButtonVariants';
 
 interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
   /** Visual variant: neutral (default muted), active (primary toggle), success (green toggle) */
@@ -14,21 +13,6 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className
 
 const baseClasses =
   'p-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
-
-const variantClasses: Record<Variant, { on: string; off: string }> = {
-  neutral: {
-    on: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-  },
-  active: {
-    on: 'text-primary-text bg-primary-bg',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-  },
-  success: {
-    on: 'text-success-text hover:text-success hover:bg-tint-success',
-    off: 'text-content-muted hover:text-content-secondary hover:bg-tint',
-  },
-};
 
 export function IconButton({
   variant = 'neutral',
