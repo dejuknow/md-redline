@@ -35,6 +35,8 @@ interface Props {
   onBulkDeleteResolved?: () => void;
   onContextMenu?: (info: SidebarContextMenuInfo) => void;
   requestedEditor?: SidebarCommentEditorState;
+  isCommentFormOpen?: boolean;
+  onEditorOpen?: () => void;
   requestedFocus?: SidebarCommentFocusRequest | null;
   onFocusHandled?: () => void;
 }
@@ -58,6 +60,8 @@ export function CommentSidebar({
   onBulkDeleteResolved,
   onContextMenu: onCtxMenu,
   requestedEditor,
+  isCommentFormOpen,
+  onEditorOpen,
   requestedFocus,
   onFocusHandled,
 }: Props) {
@@ -106,6 +110,13 @@ export function CommentSidebar({
     }
   }, [requestedEditor]);
 
+  // Close any open editor when the floating comment form appears
+  useEffect(() => {
+    if (isCommentFormOpen) {
+      setActiveEditor(null);
+    }
+  }, [isCommentFormOpen]);
+
   useEffect(() => {
     if (!activeEditor) return;
 
@@ -125,14 +136,17 @@ export function CommentSidebar({
 
   const openCommentEdit = (commentId: string) => {
     setActiveEditor({ mode: 'comment-edit', commentId, token: Date.now() });
+    onEditorOpen?.();
   };
 
   const openReplyCompose = (commentId: string) => {
     setActiveEditor({ mode: 'reply-compose', commentId, token: Date.now() });
+    onEditorOpen?.();
   };
 
   const openReplyEdit = (commentId: string, replyId: string) => {
     setActiveEditor({ mode: 'reply-edit', commentId, replyId, token: Date.now() });
+    onEditorOpen?.();
   };
 
   const closeEditor = () => {

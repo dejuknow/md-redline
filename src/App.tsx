@@ -1411,6 +1411,7 @@ export default function App() {
                   onContextMenu={handleSidebarContextMenu}
                   requestedEditor={requestedEditor}
                   isCommentFormOpen={!!selection && viewMode === 'rendered'}
+                  onEditorOpen={clearSelection}
                   requestedFocus={requestedCommentFocus}
                   onFocusHandled={() => setRequestedCommentFocus(null)}
                 />
