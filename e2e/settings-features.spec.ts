@@ -152,6 +152,40 @@ test.describe('Resolve workflow toggle', () => {
     await expect(getCard(page, 'Another open')).toHaveClass(/ring-1/);
   });
 
+  test('resolved comments hide reply edit and delete actions', async ({ page }) => {
+    await openFixture(page);
+    await toggleSetting(page, 'Enable resolve workflow');
+
+    await addComment(page, 'valid credentials', 'Resolved reply test');
+
+    const card = getCard(page, 'Resolved reply test');
+
+    // Add a reply
+    await card.getByRole('button', { name: 'Reply' }).click();
+    const replyArea = card.getByPlaceholder('Write a reply...');
+    await replyArea.fill('A reply');
+    await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
+
+    const reply = card.locator('[data-reply-id]').first();
+    await expect(reply).toContainText('A reply');
+
+    // Before resolving, reply actions should be available
+    await reply.hover();
+    await expect(reply.getByRole('button', { name: 'Edit' })).toBeVisible();
+
+    // Resolve the comment
+    await clickCardAction(page, 'Resolved reply test', 'Resolve');
+    await expect(card.getByText('Resolved', { exact: true })).toBeVisible();
+
+    // After resolving, reply edit/delete should be hidden
+    await reply.hover();
+    await expect(reply.getByRole('button', { name: 'Edit' })).not.toBeVisible();
+
+    // Primary comment should still have Reopen and Delete
+    await card.hover();
+    await expect(card.getByRole('button', { name: 'Reopen' })).toBeVisible();
+  });
+
   test('hiding resolve actions when toggle is turned off', async ({ page }) => {
     await openFixture(page);
 

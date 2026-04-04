@@ -432,23 +432,25 @@ export const CommentCard = memo(function CommentCard({
                       />
                       {reply.author} &middot; {getTimeAgo(reply.timestamp)}
                     </span>
-                    <div
-                      className="invisible flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:visible group-hover/reply:opacity-100 group-focus-within/reply:visible group-focus-within/reply:opacity-100"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <ActionButton
-                        onClick={() => {
-                          onRequestReplyEdit(comment.id, reply.id);
-                        }}
+                    {!isResolved && (
+                      <div
+                        className="invisible flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:visible group-hover/reply:opacity-100 group-focus-within/reply:visible group-focus-within/reply:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        Edit
-                      </ActionButton>
-                      <DeleteIconButton
-                        onClick={() => {
-                          onDeleteReply(comment.id, reply.id);
-                        }}
-                      />
-                    </div>
+                        <ActionButton
+                          onClick={() => {
+                            onRequestReplyEdit(comment.id, reply.id);
+                          }}
+                        >
+                          Edit
+                        </ActionButton>
+                        <DeleteIconButton
+                          onClick={() => {
+                            onDeleteReply(comment.id, reply.id);
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </>
               )}
