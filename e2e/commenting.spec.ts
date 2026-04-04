@@ -319,8 +319,6 @@ test.describe('Comment editing and replies', () => {
     await expect(firstCard.locator('textarea')).toHaveCount(1);
     await expect(secondReply.getByRole('textbox')).toHaveCount(0);
   });
-
-
 });
 
 test.describe('Sidebar filtering', () => {
