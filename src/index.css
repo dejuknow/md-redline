@@ -146,7 +146,7 @@
   --theme-bg: #0f172a;
   --theme-bg-secondary: #1e293b;
   --theme-bg-raised: #1e293b;
-  --theme-bg-inset: #0f172a;
+  --theme-bg-inset: #0a1120;
   --theme-border: #334155;
   --theme-border-subtle: #1e293b;
   --theme-text: #f1f5f9;
@@ -276,7 +276,7 @@
   --theme-bg: #2e3440;
   --theme-bg-secondary: #3b4252;
   --theme-bg-raised: #3b4252;
-  --theme-bg-inset: #2e3440;
+  --theme-bg-inset: #272d38;
   --theme-border: #4c566a;
   --theme-border-subtle: #3b4252;
   --theme-text: #eceff4;
@@ -341,7 +341,7 @@
   --theme-bg: #191724;
   --theme-bg-secondary: #1f1d2e;
   --theme-bg-raised: #26233a;
-  --theme-bg-inset: #191724;
+  --theme-bg-inset: #13111e;
   --theme-border: #403d52;
   --theme-border-subtle: #26233a;
   --theme-text: #e0def4;
@@ -676,6 +676,8 @@
 
 .prose :where(pre code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   padding: 0;
+  background-color: transparent;
+  color: inherit;
 }
 
 /* Reset prose mark styling so our highlights aren't overridden by the
