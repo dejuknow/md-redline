@@ -25,7 +25,7 @@ describe('getEffectiveStatus', () => {
   it("returns 'resolved' when status is 'accepted' (legacy backward compat)", () => {
     const comment = makeComment();
     // Cast to bypass type checking since 'accepted' is a legacy value
-    (comment as Record<string, unknown>).status = 'accepted';
+    (comment as unknown as Record<string, unknown>).status = 'accepted';
     expect(getEffectiveStatus(comment)).toBe('resolved');
   });
 
