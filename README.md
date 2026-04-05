@@ -6,7 +6,7 @@ Review rendered markdown with inline comments that live in the file.
 
 Markdown has become a common working format for specs, prompts, and design docs between humans and agents. `mdr` gives that workflow review tooling closer to code review: rendered context, inline comments, and a clean diff after changes are made. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. You write and review the spec, agents write the code.
 
-![md-redline screenshot](public/screenshot.png)
+![md-redline screenshot](https://raw.githubusercontent.com/dejuknow/md-redline/main/public/screenshot.png)
 
 **See the full review workflow in 30 seconds:**
 
