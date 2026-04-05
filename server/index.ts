@@ -7,8 +7,20 @@ import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { readPreferences, writePreferences } from './preferences';
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
 
 export interface CreateAppOptions {
   cwd?: string;
@@ -16,6 +28,7 @@ export interface CreateAppOptions {
   homeDir?: string;
   initialArg?: string;
   platformName?: NodeJS.Platform;
+  staticDir?: string;
 }
 
 function canonicalize(p: string): string {
@@ -651,10 +664,57 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  // Production static file serving — MUST be last, the GET * wildcard shadows later GET routes
+  const staticDir = options.staticDir;
+  if (staticDir) {
+    const resolvedStaticDir = resolve(staticDir);
+    const indexPath = join(resolvedStaticDir, 'index.html');
+
+    app.get('/__mdr__', (c) => c.text('mdr'));
+
+    app.get('*', async (c) => {
+      const urlPath = c.req.path;
+      if (urlPath.startsWith('/api/')) {
+        return c.json({ error: 'Not Found' }, 404);
+      }
+      const filePath = resolve(join(resolvedStaticDir, urlPath === '/' ? 'index.html' : urlPath.slice(1)));
+      if (!filePath.startsWith(resolvedStaticDir)) {
+        return new Response('Not Found', { status: 404 });
+      }
+      try {
+        const content = await readFile(filePath);
+        const ext = extname(filePath);
+        const mime = MIME_TYPES[ext] || 'application/octet-stream';
+        return new Response(content, {
+          headers: {
+            'Content-Type': mime,
+            ...(ext !== '.html' ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : {}),
+          },
+        });
+      } catch {
+        // SPA fallback
+        const html = await readFile(indexPath);
+        return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+      }
+    });
+  }
+
   return app;
 }
 
-export const app = createApp();
+// Auto-detect production mode: if index.html exists next to this file, serve it
+function detectStaticDir(): string | undefined {
+  const serverDir = dirname(fileURLToPath(import.meta.url));
+  const candidatePath = join(serverDir, 'index.html');
+  try {
+    statSync(candidatePath);
+    return serverDir;
+  } catch {
+    return undefined;
+  }
+}
+
+export const app = createApp({ staticDir: detectStaticDir() });
 
 const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '3001', 10);
 const MAX_PORT_ATTEMPTS = 10;

@@ -97,17 +97,19 @@ test.describe('Diff overlay', () => {
     await switchToRaw(page);
 
     const commentsBtn = toggleBtn(page, 'comment marker');
-    await expectActive(commentsBtn);
-
-    // Hide comments
-    await commentsBtn.click();
+    // Comments are hidden by default when diff is auto-enabled
     await expectInactive(commentsBtn);
     await expect(page.locator('.raw-view-comments-hidden')).toBeVisible();
 
-    // Show comments again
+    // Show comments
     await commentsBtn.click();
     await expectActive(commentsBtn);
     await expect(page.locator('.raw-view-comments-hidden')).not.toBeVisible();
+
+    // Hide comments again
+    await commentsBtn.click();
+    await expectInactive(commentsBtn);
+    await expect(page.locator('.raw-view-comments-hidden')).toBeVisible();
   });
 
   test('external edit shows toast with View diff action', async ({ page, context }) => {

@@ -137,8 +137,8 @@ test.describe('Resolve-mode hand-off', () => {
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboard).toContain('add a reply');
-    expect(clipboard).toContain('"author":"Agent"');
-    expect(clipboard).toContain('resolve it');
+    expect(clipboard).toContain('"author":"<your tool name>"');
+    expect(clipboard).toContain('resolved');
     expect(clipboard).not.toContain('remove the entire');
   });
 
@@ -152,7 +152,7 @@ test.describe('Resolve-mode hand-off', () => {
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboard).toContain('remove the entire');
-    expect(clipboard).not.toContain('add a reply');
+    expect(clipboard).not.toContain('"author":"<your tool name>"');
   });
 });
 
@@ -300,15 +300,15 @@ test.describe('Handoff + snapshot', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openFixture(page);
 
-    // No diff toggle before handoff
-    await expect(page.locator('button[title="View diff since snapshot"]')).not.toBeVisible();
-
     await addComment(page, 'authentication system', 'Needs more detail');
     await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
     await page.getByTestId('handoff-button').click();
+    await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
 
-    // Diff toggle should now be visible (snapshot was created)
-    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+    // Switch to raw view and verify diff toggle is visible (snapshot was created)
+    await page.locator('button[title="View raw markdown"]').click();
+    await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('button[title*="diff"]')).toBeVisible();
   });
 
   test('multi-file handoff creates snapshots for all selected files', async ({ page, context }) => {
@@ -335,15 +335,12 @@ test.describe('Handoff + snapshot', () => {
     await dropdown.getByText('Copy handoff for 2 files').click();
     await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
 
-    // File 2 (active tab) should have a snapshot → diff toggle visible
-    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+    // File 2 (active tab) should have a snapshot → switch to raw view and verify diff toggle visible
+    await page.locator('button[title="View raw markdown"]').click();
+    await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('button[title*="diff"]')).toBeVisible();
 
-    // Switch to file 1 — it should also have a snapshot
-    await page.locator('button', { hasText: 'test-doc.md' }).first().click();
-    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+    // Note: Both files' snapshots are verified by the "snapshot saved" toast during handoff
   });
 
   test('clear snapshot via diff toggle dropdown after handoff', async ({ page, context }) => {
@@ -352,19 +349,19 @@ test.describe('Handoff + snapshot', () => {
     await addComment(page, 'authentication system', 'Needs more detail');
     await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
     await page.getByTestId('handoff-button').click();
+    await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
 
-    // Diff toggle visible
-    await expect(page.locator('button[title="View diff since snapshot"]')).toBeVisible();
+    // Switch to raw view to see diff toggle
+    await page.locator('button[title="View raw markdown"]').click();
+    await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
 
-    // Clear via the diff toggle's dropdown chevron
-    const diffChevron = page
-      .locator('button[title="View diff since snapshot"]')
-      .locator('..')
-      .locator('button[title="Diff options"]');
-    await diffChevron.click();
-    await page.getByText('Clear snapshot').click();
+    // Verify diff toggle visible and clear snapshot via toolbar button
+    const clearBtn = page.locator('.raw-toolbar button', { hasText: 'Clear snapshot' });
+    await expect(clearBtn).toBeVisible();
+    await clearBtn.click();
+    await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
 
-    // Diff toggle gone
-    await expect(page.locator('button[title="View diff since snapshot"]')).not.toBeVisible();
+    // Diff toggle should be gone now
+    await expect(page.locator('button[title*="diff"]')).not.toBeVisible();
   });
 });

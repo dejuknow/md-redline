@@ -16,7 +16,6 @@ import { highlightSearchMatches } from './MarkdownViewer';
 import { COMMENT_MARKER_RE, parseComments } from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
 import { computeDiff, type DiffLine } from '../lib/diff';
-import { SplitIconButton } from './SplitIconButton';
 
 // Markdown syntax highlighting patterns (order matters — first match wins per region)
 interface SyntaxRule {
@@ -591,10 +590,6 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
   }, []);
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(rawMarkdown).then(showCopyFeedback, () => {});
-  }, [rawMarkdown, showCopyFeedback]);
-
   const handleCopyWithoutComments = useCallback(() => {
     COMMENT_MARKER_RE.lastIndex = 0;
     const clean = rawMarkdown.replace(COMMENT_MARKER_RE, '');
@@ -699,44 +694,30 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
           </div>
         )}
         {hasDiffSnapshot && onClearSnapshot && (
-          <button className={actionClass} onClick={onClearSnapshot} title="Clear diff snapshot">
+          <button className={actionClass} onClick={onClearSnapshot} title="Clear snapshot">
             Clear snapshot
           </button>
         )}
       </div>
       <div className="raw-toolbar-right">
-        <SplitIconButton
-          icon={
-            copyFeedback ? (
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-            ) : (
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"
-                />
-              </svg>
-            )
-          }
-          onClick={handleCopy}
-          title={copyFeedback ? 'Copied!' : 'Copy document'}
-          chevronTitle="Copy options"
-          menu={[{ label: 'Copy without comments', onClick: handleCopyWithoutComments }]}
-        />
+        <button
+          className={`raw-copy-clean-btn ${actionClass}`}
+          onClick={handleCopyWithoutComments}
+          title={copyFeedback ? 'Copied!' : 'Copy clean'}
+        >
+          {copyFeedback ? 'Copied' : 'Copy clean'}
+        </button>
       </div>
     </div>
   );
 
-  const containerClass = `raw-view flex flex-col h-full${showComments ? '' : ' raw-view-comments-hidden'}`;
+  const containerClass = `raw-view overflow-y-auto px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16${showComments ? '' : ' raw-view-comments-hidden'}`;
 
   if (diffEnabled && diffLines && !hasChanges) {
     return (
       <div ref={containerRef} className={containerClass}>
         {toolbar}
-        <div className="flex flex-col items-center justify-center flex-1 text-content-muted px-6">
+        <div className="flex flex-col items-center justify-center flex-1 text-content-muted">
           <svg
             className="w-12 h-12 mb-3 text-content-faint"
             fill="none"
@@ -765,32 +746,30 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     <div ref={containerRef} className={containerClass}>
       {toolbar}
 
-      <div className="flex-1 overflow-y-auto px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16">
-        <div className="max-w-3xl mx-auto">
-          <div ref={tableRef} className="raw-view-table">
-            {displayRows.map((row, i) => {
-              const diffClass =
-                row.type === 'added'
-                  ? 'raw-line-diff-added'
-                  : row.type === 'removed'
-                    ? 'raw-line-diff-removed'
-                    : '';
-              return (
-                <div
-                  key={i}
-                  className={`raw-line ${diffClass}`}
-                  data-heading-id={
-                    row.sourceLineIndex != null
-                      ? headingIdsByLine.get(row.sourceLineIndex)
-                      : undefined
-                  }
-                >
-                  <span className="raw-line-number">{row.lineNo}</span>
-                  <span className="raw-line-content" />
-                </div>
-              );
-            })}
-          </div>
+      <div className="max-w-3xl mx-auto">
+        <div ref={tableRef} className="raw-view-table">
+          {displayRows.map((row, i) => {
+            const diffClass =
+              row.type === 'added'
+                ? 'raw-line-diff-added'
+                : row.type === 'removed'
+                  ? 'raw-line-diff-removed'
+                  : '';
+            return (
+              <div
+                key={i}
+                className={`raw-line ${diffClass}`}
+                data-heading-id={
+                  row.sourceLineIndex != null
+                    ? headingIdsByLine.get(row.sourceLineIndex)
+                    : undefined
+                }
+              >
+                <span className="raw-line-number">{row.lineNo}</span>
+                <span className="raw-line-content" />
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

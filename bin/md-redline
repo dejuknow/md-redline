@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync, spawn } from 'child_process';
+import { statSync } from 'fs';
 import { readFile, stat, unlink } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
@@ -11,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const APP_DIR = resolve(__dirname, '..');
+const DIST_SERVER = join(APP_DIR, 'dist', 'server.js');
 const DEFAULT_SERVER_PORT = 3001;
 const DEFAULT_CLIENT_PORT = 5188;
 const MAX_PORT_SCAN = 10;
@@ -165,14 +167,28 @@ async function stopServer() {
   console.log('mdr stopped.');
 }
 
+function isProductionMode() {
+  try {
+    statSync(DIST_SERVER);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function ensureServerRunning() {
   const existing = await findServerPort();
   if (existing) return;
 
   console.log('Starting mdr...');
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   let childExited = false;
-  const child = await spawnDetached(npmCommand, ['run', 'dev']);
+  let child;
+  if (isProductionMode()) {
+    child = await spawnDetached(process.execPath, [DIST_SERVER]);
+  } else {
+    const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    child = await spawnDetached(npmCommand, ['run', 'dev']);
+  }
   child.once('exit', () => {
     childExited = true;
   });
@@ -189,6 +205,11 @@ async function ensureServerRunning() {
   if (!(await findServerPort())) {
     throw new Error('server did not start within 15 seconds.');
   }
+  if (isProductionMode()) {
+    // In production, server serves everything — no Vite client to wait for
+    console.log('mdr is running.');
+    return;
+  }
   // Also wait for Vite client to be ready
   while (Date.now() < deadline) {
     if (await findClientPort()) {
@@ -202,8 +223,10 @@ async function ensureServerRunning() {
 }
 
 async function buildUrl(file, dir) {
-  const clientPort = await findClientPort() ?? DEFAULT_CLIENT_PORT;
-  const baseUrl = `http://localhost:${clientPort}`;
+  const clientPort = await findClientPort();
+  const serverPort = await findServerPort();
+  const port = clientPort ?? serverPort ?? DEFAULT_CLIENT_PORT;
+  const baseUrl = `http://localhost:${port}`;
   if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
   if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
   return baseUrl;

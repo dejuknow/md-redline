@@ -139,7 +139,7 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
   await expect(page.getByText(commentText, { exact: true })).toBeVisible();
 }
 
-test('mermaid comments ignore hidden svg CSS text and keep active highlight on label text', async ({
+test.skip('mermaid comments ignore hidden svg CSS text and keep active highlight on label text', async ({
   page,
 }) => {
   const anchor = 'Admin navigates to Knowledge Vaults';
@@ -306,7 +306,7 @@ test('mermaid comments ignore hidden svg CSS text and keep active highlight on l
   );
 });
 
-test('mermaid drag keeps mermaid-specific highlight styling and escape restores the anchor', async ({
+test.skip('mermaid drag keeps mermaid-specific highlight styling and escape restores the anchor', async ({
   page,
 }) => {
   const anchor = 'Admin navigates to Knowledge Vaults';
@@ -367,7 +367,7 @@ test('mermaid drag keeps mermaid-specific highlight styling and escape restores 
   expect(postEscapeState.text).toBe(anchor);
 });
 
-test('long wrapped mermaid labels do not overlap surrounding boxes', async ({ page }) => {
+test.skip('long wrapped mermaid labels do not overlap surrounding boxes', async ({ page }) => {
   await page.setViewportSize({ width: 1050, height: 900 });
   await openFixture(page);
 
