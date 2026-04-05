@@ -1,7 +1,6 @@
 {
   "name": "md-redline",
   "description": "Local inline review for markdown files with agent-friendly comment markers.",
-  "private": true,
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",

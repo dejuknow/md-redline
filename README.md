@@ -6,6 +6,27 @@ Review rendered markdown with inline comments that live in the file.
 
 Markdown has become a common working format for specs, prompts, and design docs between humans and agents. `mdr` gives that workflow review tooling closer to code review: rendered context, inline comments, and a clean diff after changes are made. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. You write and review the spec, agents write the code.
 
+![md-redline screenshot](public/screenshot.png)
+
+**See the full review workflow in 30 seconds:**
+
+https://github.com/user-attachments/assets/855a9d02-b0fd-4dec-b0a5-742871e8c181
+
+## Review workflow
+
+### Default: comments as agent instructions
+
+1. Open a markdown file in `mdr`.
+2. Highlight text and leave inline comments.
+3. Copy the hand-off prompt.
+4. Paste the prompt into your AI agent.
+5. The agent edits the file, addresses the feedback, and removes the comment markers it handled.
+6. Review the result in diff view.
+
+### Optional: resolve workflow
+
+Enable resolve mode in Settings for human review with explicit `open` and `resolved` states.
+
 ## Quick start
 
 Prerequisite: Node 20 or newer.
@@ -26,32 +47,6 @@ mdr --stop                   # Stop the running server
 ```
 
 `md-redline` also works as an alias for `mdr`.
-
-### From source
-
-```bash
-git clone https://github.com/dejuknow/md-redline.git
-cd md-redline
-npm install
-npm run dev
-```
-
-Open the local URL printed by Vite (usually `http://localhost:5188`).
-
-## Review workflow
-
-### Default: comments as agent instructions
-
-1. Open a markdown file in `mdr`.
-2. Highlight text and leave inline comments.
-3. Copy the hand-off prompt.
-4. Paste the prompt into your AI agent.
-5. The agent edits the file, addresses the feedback, and removes the comment markers it handled.
-6. Review the result in diff view.
-
-### Optional: resolve workflow
-
-Enable resolve mode in Settings for human review with explicit `open` and `resolved` states.
 
 ## How comments are stored
 
@@ -82,9 +77,9 @@ This makes feedback:
 
 ### Non-goals
 
-- Not a collaborative multi-user editing tool
-- Not a replacement for GitHub PR reviews (use those once the file is in git)
-- Not designed for untrusted content. This is a local dev tool for your own files
+- Not a collaborative multi-user editing tool.
+- Not a replacement for GitHub PR reviews (use those once the file is in git).
+- Not designed for untrusted content. This is a local dev tool for your own files.
 
 ## Features
 
@@ -112,34 +107,11 @@ This makes feedback:
 - Customizable comment templates
 - 8 themes: Light, Dark, Sepia, Nord, Solarized, GitHub, Rosé Pine, Catppuccin
 
-## Keyboard shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `Cmd+K` / `Ctrl+K` | Toggle command palette |
-| `Cmd+B` / `Ctrl+B` | Toggle file explorer |
-| `Cmd+F` / `Ctrl+F` | Find in document |
-| `Cmd+O` / `Ctrl+O` | Open file |
-| `Cmd+,` / `Ctrl+,` | Open settings |
-| `Cmd+Enter` / `Ctrl+Enter` | Submit comment / expand comment form |
-| `Cmd+Shift+M` / `Ctrl+Shift+M` | Lock selection for commenting |
-| `Cmd+Shift+O` / `Ctrl+Shift+O` | Toggle document outline |
-| `Cmd+Shift+[ / ]` / `Ctrl+Shift+[ / ]` | Previous / next tab |
-| `Cmd+\` / `Ctrl+\` | Toggle comments sidebar |
-| `N` / `J` | Next comment |
-| `P` / `K` | Previous comment |
-| `D` | Delete active comment |
-| `A` / `X` | Resolve active comment |
-| `U` | Reopen active comment |
-| `?` | Show keyboard shortcuts help |
-| `Escape` | Cancel form, unlock selection, or cancel drag |
-
 ## Supported platforms
 
 - **macOS**: supported
 - **Linux**: supported; system file picker requires `zenity`
 - **Windows**: supported; system file picker uses PowerShell
-
 
 ## Security model
 
@@ -148,6 +120,19 @@ This makes feedback:
 Only run it in environments you trust. Mermaid SVG output is sanitized via DOMPurify before rendering.
 
 ## Development
+
+### From source
+
+```bash
+git clone https://github.com/dejuknow/md-redline.git
+cd md-redline
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite (usually `http://localhost:5188`).
+
+### Scripts
 
 ```bash
 npm run dev          # Start dev server
