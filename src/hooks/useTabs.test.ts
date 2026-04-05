@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { applyLoadedTabState, applyPendingTabState, type TabState } from './useTabs';
 
 function makeTab(path: string, overrides: Partial<TabState> = {}): TabState {
