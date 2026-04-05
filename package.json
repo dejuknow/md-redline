@@ -1,7 +1,7 @@
 {
   "name": "md-redline",
   "description": "Local inline review for markdown files with agent-friendly comment markers.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "type": "module",
   "homepage": "https://github.com/dejuknow/md-redline",
