@@ -13,7 +13,6 @@ As a new user, I want to register with my email and password so that I can acces
 **Acceptance Criteria:**
 
 - User provides email, password, and display name
-<!-- @comment{"id":"demo-comment-2","text":"Should we also enforce a max length? Some password managers generate very long passwords and I've seen backends silently truncate them.","author":"Bob","timestamp":"2026-03-29T14:30:00.000Z","anchor":"Password must be at least 8 characters with one uppercase, one number, and one special character","contextBefore":"**Acceptance Criteria:**\n\n- User provides email, password, and display name\n- ","contextAfter":"\n- System sends verification email within 30 seconds"} -->
 - Password must be at least 8 characters with one uppercase, one number, and one special character
 - System sends verification email within 30 seconds
 - User cannot access protected routes until email is verified
@@ -39,6 +38,7 @@ As a user, I want to sign in via a magic link sent to my email so that I can acc
 - User enters their email on the login page
 - System sends a one-time login link valid for 15 minutes
 - Clicking the link authenticates the user and redirects to the dashboard
+<!-- @comment{"id":"demo-comment-2","text":"What happens if the user requests a second magic link before the first expires?","author":"Dennis","timestamp":"2026-04-04T10:02:00.000Z","anchor":"Each link can only be used once","contextBefore":"- Clicking the link authenticates the user and redirects to the dashboard\n- ","contextAfter":"\n\n## Technical Architecture"} -->
 - Each link can only be used once
 
 ## Technical Architecture
@@ -84,7 +84,7 @@ sequenceDiagram
 ### Security Considerations
 
 - All passwords are hashed with bcrypt (cost factor 12)
-<!-- @comment{"id":"demo-comment-1","text":"5 attempts per 15 minutes feels tight — legitimate users on flaky connections could get locked out. Worth considering exponential backoff instead of a hard cutoff.","author":"Alice","timestamp":"2026-03-28T10:00:00.000Z","anchor":"Rate limiting: 5 failed login attempts per IP per 15-minute window","contextBefore":"- All passwords are hashed with bcrypt (cost factor 12)\n- ","contextAfter":"\n- CSRF protection via double-submit cookie pattern"} -->
+<!-- @comment{"id":"demo-comment-1","text":"Too aggressive. Change to exponential backoff.","author":"Dennis","timestamp":"2026-04-04T10:00:00.000Z","anchor":"Rate limiting: 5 failed login attempts per IP per 15-minute window","contextBefore":"- All passwords are hashed with bcrypt (cost factor 12)\n- ","contextAfter":"\n- CSRF protection via double-submit cookie pattern"} -->
 - Rate limiting: 5 failed login attempts per IP per 15-minute window
 - CSRF protection via double-submit cookie pattern
 - Session invalidation on password change
