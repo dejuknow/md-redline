@@ -8,10 +8,14 @@ import { dirname, join, resolve } from 'path';
 import process from 'process';
 import { fileURLToPath } from 'url';
 
+import { createRequire } from 'module';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const APP_DIR = resolve(__dirname, '..');
+const require = createRequire(import.meta.url);
+const { version: CLI_VERSION } = require(join(APP_DIR, 'package.json'));
 const DIST_SERVER = join(APP_DIR, 'dist', 'server.js');
 const DEFAULT_SERVER_PORT = 3001;
 const DEFAULT_CLIENT_PORT = 5188;
@@ -29,8 +33,9 @@ function printHelp() {
   console.log('Supported platforms: macOS, Linux, and Windows.');
   console.log('');
   console.log('Options:');
-  console.log('  --stop       Stop the running mdr server');
-  console.log('  -h, --help   Show this help message');
+  console.log('  --stop          Stop the running mdr server');
+  console.log('  -v, --version   Show version number');
+  console.log('  -h, --help      Show this help message');
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -168,6 +173,19 @@ async function stopServer() {
   console.log('mdr stopped.');
 }
 
+async function getServerVersion(port) {
+  try {
+    const response = await fetch(`http://localhost:${port}/api/version`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      return data.version ?? null;
+    }
+  } catch {}
+  return null;
+}
+
 function isProductionMode() {
   try {
     statSync(DIST_SERVER);
@@ -179,7 +197,15 @@ function isProductionMode() {
 
 async function ensureServerRunning() {
   const existing = await findServerPort();
-  if (existing) return;
+  if (existing) {
+    const serverVersion = await getServerVersion(existing);
+    if (serverVersion && serverVersion !== CLI_VERSION) {
+      console.log(`Updating mdr (${serverVersion} → ${CLI_VERSION})...`);
+      await stopServer();
+    } else {
+      return;
+    }
+  }
 
   console.log('Starting mdr...');
   let childExited = false;
@@ -257,6 +283,11 @@ async function openInBrowser(url) {
 async function main() {
   if (process.argv[2] === '-h' || process.argv[2] === '--help') {
     printHelp();
+    return;
+  }
+
+  if (process.argv[2] === '-v' || process.argv[2] === '--version') {
+    console.log(CLI_VERSION);
     return;
   }
 

@@ -8,7 +8,11 @@ import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { createRequire } from 'module';
 import { readPreferences, writePreferences } from './preferences';
+
+const require = createRequire(import.meta.url);
+const { version: APP_VERSION } = require('../package.json') as { version: string };
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -189,6 +193,10 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.get('/api/config', (c) => {
     return c.json({ initialFile, initialDir });
+  });
+
+  app.get('/api/version', (c) => {
+    return c.json({ version: APP_VERSION });
   });
 
   app.get('/api/preferences', async (c) => {
