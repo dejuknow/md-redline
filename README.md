@@ -1,5 +1,7 @@
 # <img src="public/favicon.svg" width="30" align="center" /> md-redline
 
+[![npm version](https://img.shields.io/npm/v/md-redline)](https://www.npmjs.com/package/md-redline)
+
 Review rendered markdown with inline comments that live in the file.
 
 `mdr` is a local review tool for markdown files in human + AI agent workflows. Highlight text in the rendered document, leave feedback, then hand the same file to an agent. Comments are stored inline in the `.md` file itself, so agents can read and address them directly. No sidecar files, no database, no external service. The markdown file stays the source of truth.
