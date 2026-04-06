@@ -48,6 +48,18 @@ mdr --stop                   # Stop the running server
 
 `md-redline` also works as an alias for `mdr`.
 
+## Who this is for
+
+- **People writing specs, prompts, or design docs locally** with file-based AI agents
+- **Teams reviewing docs before they are committed** or sent out for wider review
+- **Anyone in a human + agent editing loop** who wants structured inline feedback in plain files
+
+### Non-goals
+
+- Not a collaborative multi-user editing tool.
+- Not a replacement for GitHub PR reviews (use those once the file is in git).
+- Not designed for untrusted content. This is a local dev tool for your own files.
+
 ## How comments are stored
 
 Comments are stored as invisible HTML markers directly in the markdown, immediately before the text they refer to, so both humans and agents can work from the same file.
@@ -68,18 +80,6 @@ This makes feedback:
 - visible to AI agents via a plain file read
 - portable with the markdown file
 - invisible in normal renderers (GitHub, VS Code preview)
-
-## Who this is for
-
-- **People writing specs, prompts, or design docs locally** with file-based AI agents
-- **Teams reviewing docs before they are committed** or sent out for wider review
-- **Anyone in a human + agent editing loop** who wants structured inline feedback in plain files
-
-### Non-goals
-
-- Not a collaborative multi-user editing tool.
-- Not a replacement for GitHub PR reviews (use those once the file is in git).
-- Not designed for untrusted content. This is a local dev tool for your own files.
 
 ## Features
 
