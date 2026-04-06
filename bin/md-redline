@@ -101,18 +101,19 @@ function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-function spawnDetached(command, args) {
+function spawnDetached(command, args, options = {}) {
   return new Promise((resolveSpawn, rejectSpawn) => {
     const isWin = process.platform === 'win32';
+    const spawnCwd = options.cwd ?? APP_DIR;
     const child = isWin
       ? spawn([command, ...args].join(' '), {
-          cwd: APP_DIR,
+          cwd: spawnCwd,
           stdio: 'ignore',
           shell: true,
           windowsHide: true,
         })
       : spawn(command, args, {
-          cwd: APP_DIR,
+          cwd: spawnCwd,
           detached: true,
           stdio: 'ignore',
           windowsHide: true,
@@ -184,7 +185,12 @@ async function ensureServerRunning() {
   let childExited = false;
   let child;
   if (isProductionMode()) {
-    child = await spawnDetached(process.execPath, [DIST_SERVER]);
+    const serverArgs = [DIST_SERVER];
+    const userArg = process.argv[2];
+    if (userArg && !userArg.startsWith('-')) {
+      serverArgs.push(resolve(userArg));
+    }
+    child = await spawnDetached(process.execPath, serverArgs, { cwd: process.cwd() });
   } else {
     const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
     child = await spawnDetached(npmCommand, ['run', 'dev']);
