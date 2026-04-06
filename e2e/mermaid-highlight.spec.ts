@@ -139,6 +139,11 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
   await expect(page.getByText(commentText, { exact: true })).toBeVisible();
 }
 
+// SKIPPED: Requires selecting text inside mermaid SVG foreignObject elements, which headless browsers cannot do.
+// Mermaid text is rendered inside <foreignObject> SVG elements where the DOM selection API doesn't work.
+// The feature itself works (tested manually), but automating comment creation on mermaid content
+// requires either: (1) support for selecting foreignObject text in headless Chromium, (2) direct
+// fixture injection with proper comment marker parsing, or (3) a separate testing approach.
 test.skip('mermaid comments ignore hidden svg CSS text and keep active highlight on label text', async ({
   page,
 }) => {
@@ -306,6 +311,8 @@ test.skip('mermaid comments ignore hidden svg CSS text and keep active highlight
   );
 });
 
+// SKIPPED: Same issue as above - requires selecting text inside mermaid SVG foreignObject elements.
+// Tests the mermaid comment highlighting behavior during drag operations.
 test.skip('mermaid drag keeps mermaid-specific highlight styling and escape restores the anchor', async ({
   page,
 }) => {
@@ -367,6 +374,9 @@ test.skip('mermaid drag keeps mermaid-specific highlight styling and escape rest
   expect(postEscapeState.text).toBe(anchor);
 });
 
+// SKIPPED: This test verifies mermaid layout behavior for long wrapped labels.
+// It fails in headless browsers due to rendering differences in how mermaid calculates dimensions
+// for nodes with wrapped text inside foreignObject elements.
 test.skip('long wrapped mermaid labels do not overlap surrounding boxes', async ({ page }) => {
   await page.setViewportSize({ width: 1050, height: 900 });
   await openFixture(page);
