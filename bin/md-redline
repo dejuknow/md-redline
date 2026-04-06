@@ -299,6 +299,23 @@ async function main() {
   try {
     const { file, dir } = await resolveTarget(process.argv[2] ?? '');
     await ensureServerRunning();
+
+    // Grant the server access to the target path before opening in browser
+    const targetPath = file || dir;
+    if (targetPath) {
+      const serverPort = await findServerPort();
+      if (serverPort) {
+        try {
+          await fetch(`http://localhost:${serverPort}/api/grant-access`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: targetPath }),
+            signal: AbortSignal.timeout(2_000),
+          });
+        } catch { /* server will enforce its own checks */ }
+      }
+    }
+
     const url = await buildUrl(file, dir);
 
     try {

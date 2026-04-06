@@ -199,6 +199,36 @@ export function createApp(options: CreateAppOptions = {}) {
     return c.json({ version: APP_VERSION });
   });
 
+  app.post('/api/grant-access', async (c) => {
+    let body: { path?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+    const inputPath = body?.path;
+    if (!inputPath || typeof inputPath !== 'string') {
+      return c.json({ error: 'Missing path' }, 400);
+    }
+    const expanded = expandHomePath(inputPath, homeDir);
+    const resolved = resolve(cwd, expanded);
+    let real: string;
+    try {
+      real = await realpath(resolved);
+    } catch {
+      try {
+        real = await realpath(dirname(resolved));
+      } catch {
+        return c.json({ error: 'Path does not exist' }, 404);
+      }
+    }
+    const canon = canonicalize(real);
+    if (!allowedRoots.some((root) => isPathInsideRoot(canon, root, caseInsensitivePaths))) {
+      allowedRoots.push(canon);
+    }
+    return c.json({ granted: canon });
+  });
+
   app.get('/api/preferences', async (c) => {
     return c.json(await readPreferences(homeDir));
   });

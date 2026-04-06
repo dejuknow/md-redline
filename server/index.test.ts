@@ -812,3 +812,82 @@ describe('/api/reveal', () => {
     });
   });
 });
+
+describe('/api/grant-access', () => {
+  it('grants access to an external directory', async () => {
+    const freshApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+    });
+
+    // External file should be blocked initially
+    const before = await requestJson(
+      freshApp,
+      `/api/file?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(before.response.status).toBe(403);
+
+    // Grant access to the external directory
+    const grant = await requestJson(freshApp, '/api/grant-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: externalDir }),
+    });
+    expect(grant.response.status).toBe(200);
+    expect(grant.body).toEqual({ granted: externalDir });
+
+    // External file should now be accessible
+    const after = await requestJson(
+      freshApp,
+      `/api/file?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(after.response.status).toBe(200);
+    expect(after.body).toMatchObject({ content: '# Outside\n' });
+  });
+
+  it('is idempotent for already-allowed paths', async () => {
+    const { response, body } = await requestJson(app, '/api/grant-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: cwdRoot }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ granted: cwdRoot });
+  });
+
+  it('rejects missing path', async () => {
+    const { response, body } = await requestJson(app, '/api/grant-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'Missing path' });
+  });
+
+  it('rejects non-existent path', async () => {
+    const { response, body } = await requestJson(app, '/api/grant-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/no/such/path/anywhere' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(body).toEqual({ error: 'Path does not exist' });
+  });
+
+  it('rejects invalid JSON', async () => {
+    const response = await app.request('http://localhost/api/grant-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not json',
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toEqual({ error: 'Invalid JSON body' });
+  });
+});
