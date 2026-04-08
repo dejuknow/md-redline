@@ -116,11 +116,13 @@ This makes feedback:
 - **Linux**: supported; system file picker requires `zenity`
 - **Windows**: supported; system file picker uses PowerShell
 
-## Security model
+## Permissions
 
-`mdr` is a local dev tool. The server reads and writes markdown files inside the current working directory and any path explicitly opened at startup or through the system file picker. File saves use atomic write-then-rename and mtime-based conflict detection to prevent data loss from concurrent edits.
+By default, md-redline can read any markdown file in your home directory. The first time you run `mdr` (or the first time after upgrading from a version without the trusted-roots feature), your home folder is added to a trusted-roots list at `~/.md-redline.json`. Files outside your home directory (`/tmp`, mounted volumes, system paths) require an explicit permission grant via the OS folder picker the first time you open them. Granted folders are remembered across restarts.
 
-Only run it in environments you trust. Mermaid SVG output is sanitized via DOMPurify before rendering.
+To use the strict per-folder model instead, run `mdr --restrict` once after install. This creates a `~/.md-redline.json` with no default trust, and you'll grant each folder explicitly the first time you open a file in it.
+
+File saves use atomic write-then-rename and mtime-based conflict detection to prevent data loss from concurrent edits. Mermaid SVG output is sanitized via DOMPurify before rendering. Only run md-redline in environments you trust.
 
 ## Development
 

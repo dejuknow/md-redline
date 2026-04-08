@@ -78,6 +78,7 @@ export default function App() {
     updateTab,
     isLoading,
     error,
+    errorKind,
     isTabDirty,
     openTab,
     openTabInBackground,
@@ -90,6 +91,7 @@ export default function App() {
     saveFileAt,
     getTabSnapshot,
     reloadFile,
+    retryAllAccessDenied,
   } = useTabs({ onSaveError });
 
   // Dirty-tab close guard: when closing tabs that have unsaved changes
@@ -163,7 +165,46 @@ export default function App() {
     [tabs, isTabDirty, closeTabsToRightDirect],
   );
 
+  const trustFolderInFlightRef = useRef(false);
+  const handleTrustFolder = useCallback(
+    async (defaultPathOverride?: string) => {
+      if (trustFolderInFlightRef.current) return;
+      trustFolderInFlightRef.current = true;
+      try {
+        // Only accept string overrides. The Toolbar binds this directly to a
+        // button onClick, which passes a SyntheticEvent as the first arg —
+        // we need to ignore it and fall back to deriving from activeFilePath.
+        const overrideDir =
+          typeof defaultPathOverride === 'string' ? defaultPathOverride : null;
+        let hint: string | null = null;
+        if (overrideDir) {
+          hint = overrideDir;
+        } else if (activeFilePath) {
+          const lastSlash = activeFilePath.lastIndexOf('/');
+          hint = lastSlash > 0 ? activeFilePath.slice(0, lastSlash) : null;
+        }
+        const url = hint
+          ? `/api/pick-folder?defaultPath=${encodeURIComponent(hint)}`
+          : '/api/pick-folder';
+        const res = await fetch(url);
+        const data = (await res.json()) as { path?: string; cancelled?: boolean };
+        if (!res.ok || data.cancelled || !data.path) {
+          // Cancelled, failed, or returned no path. Leave the existing error
+          // in place; the user can click the button again or close the tab.
+          return;
+        }
+        await retryAllAccessDenied();
+      } catch {
+        // Network or parse error. Leave the existing error in place.
+      } finally {
+        trustFolderInFlightRef.current = false;
+      }
+    },
+    [activeFilePath, retryAllAccessDenied],
+  );
+
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
+  const [homeDir, setHomeDir] = useState<string>('');
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
@@ -659,6 +700,25 @@ export default function App() {
     }
   }, [pageVisible, activeFilePath, reloadFile]);
 
+  // Fetch the server's homeDir on mount so the trust prompt can show paths
+  // in tilde-shortened form. Independent of the initial-file effect below
+  // because that one short-circuits on URL params and we still want homeDir.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/config')
+      .then((r) => (r.ok ? readJsonResponse<{ homeDir?: string }>(r) : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (typeof data.homeDir === 'string') {
+          setHomeDir(data.homeDir);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -668,6 +728,12 @@ export default function App() {
     if (urlFile) {
       openTab(urlFile);
       addRecentFile(urlFile);
+      // Also point the explorer at the file's parent dir so the user can
+      // browse siblings, rather than falling back to the server's cwd.
+      const lastSlash = urlFile.lastIndexOf('/');
+      if (lastSlash > 0) {
+        setExplorerDir(urlFile.slice(0, lastSlash));
+      }
       window.history.replaceState({}, '', window.location.pathname);
       return;
     }
@@ -687,6 +753,12 @@ export default function App() {
         if (!data) return;
         if (data.initialFile) {
           openTab(data.initialFile);
+          // Same as the urlFile path: point the explorer at the file's
+          // parent dir so siblings are browsable.
+          const lastSlash = data.initialFile.lastIndexOf('/');
+          if (lastSlash > 0) {
+            setExplorerDir(data.initialFile.slice(0, lastSlash));
+          }
         }
         if (data.initialDir) {
           setExplorerDir(data.initialDir);
@@ -1260,10 +1332,24 @@ export default function App() {
     ],
   );
 
+  // The directory the trust prompt would grant if the user clicks. For the
+  // toolbar's access-denied state, this is the parent dir of the active tab's
+  // file. Computed here so the Toolbar can render the path in its prompt.
+  const accessDeniedDir =
+    errorKind === 'access-denied' && activeFilePath
+      ? (() => {
+          const lastSlash = activeFilePath.lastIndexOf('/');
+          return lastSlash > 0 ? activeFilePath.slice(0, lastSlash) : null;
+        })()
+      : null;
+
   return (
     <div className="h-screen flex flex-col bg-surface">
       <Toolbar
         error={error}
+        errorKind={errorKind}
+        accessDeniedDir={accessDeniedDir}
+        homeDir={homeDir}
         isLoading={isLoading}
         showExplorer={explorerVisible}
         sidebarVisible={sidebarVisible}
@@ -1272,6 +1358,7 @@ export default function App() {
         onToggleExplorer={() => setExplorerVisible((p) => !p)}
         onToggleSidebar={() => setSidebarVisible((p) => !p)}
         onOpenSettings={() => setActiveModal('settings')}
+        onTrustFolder={handleTrustFolder}
       />
       <TabBar
         tabs={tabs}
@@ -1396,9 +1483,11 @@ export default function App() {
                 <FileExplorer
                   initialDir={explorerDir}
                   activeFilePath={activeFilePath}
+                  homeDir={homeDir}
                   onOpenFile={handleExplorerOpenFile}
                   onClose={() => setExplorerVisible(false)}
                   onContextMenu={handleExplorerContextMenu}
+                  onTrustFolder={handleTrustFolder}
                   hideHeader
                 />
               ) : (

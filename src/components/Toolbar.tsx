@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { getPrimaryModifierLabel } from '../lib/platform';
+import { tildeShortenPath } from '../lib/path-utils';
 import { IconButton } from './IconButton';
 import { Separator } from './Separator';
 
@@ -7,6 +8,11 @@ export type ViewMode = 'rendered' | 'raw';
 
 interface Props {
   error: string | null;
+  errorKind: 'access-denied' | 'generic' | null;
+  /** When errorKind is 'access-denied', the directory the trust click would grant. */
+  accessDeniedDir: string | null;
+  /** User's home directory; used to tilde-shorten the path in the trust prompt. */
+  homeDir: string;
   isLoading: boolean;
   showExplorer: boolean;
   sidebarVisible: boolean;
@@ -15,10 +21,14 @@ interface Props {
   onToggleExplorer: () => void;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
+  onTrustFolder: () => void;
 }
 
 export function Toolbar({
   error,
+  errorKind,
+  accessDeniedDir,
+  homeDir,
   isLoading,
   showExplorer,
   sidebarVisible,
@@ -27,6 +37,7 @@ export function Toolbar({
   onToggleExplorer,
   onToggleSidebar,
   onOpenSettings,
+  onTrustFolder,
 }: Props) {
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft] = useState(author);
@@ -92,7 +103,26 @@ export function Toolbar({
 
       {/* Center spacer with status */}
       <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
-        {error && <span className="text-xs text-danger font-medium">{error}</span>}
+        {error && (
+          <span className="text-xs text-danger font-medium flex items-center gap-2 min-w-0">
+            <span className="truncate" title={accessDeniedDir ?? undefined}>
+              {errorKind === 'access-denied'
+                ? accessDeniedDir
+                  ? `Allow md-redline to read ${tildeShortenPath(accessDeniedDir, homeDir)}?`
+                  : 'Allow md-redline to read this folder?'
+                : error}
+            </span>
+            {errorKind === 'access-denied' && (
+              <button
+                type="button"
+                onClick={() => onTrustFolder()}
+                className="shrink-0 px-2 py-0.5 rounded border border-danger/50 text-danger hover:bg-danger/10 transition-colors text-[11px] font-medium"
+              >
+                Allow access
+              </button>
+            )}
+          </span>
+        )}
         {isLoading && <span className="text-xs text-content-muted">Loading...</span>}
       </div>
 

@@ -139,21 +139,32 @@ describe('/api/config', () => {
     const { response, body } = await requestJson(app, '/api/config');
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ initialFile: '', initialDir: '' });
+    expect(body).toMatchObject({ initialFile: '', initialDir: '' });
+    expect(typeof body.homeDir).toBe('string');
   });
 
   it('returns the configured initial file or directory', async () => {
     const fileConfig = await requestJson(initialFileApp, '/api/config');
     const dirConfig = await requestJson(initialDirApp, '/api/config');
 
-    expect(fileConfig.body).toEqual({
+    expect(fileConfig.body).toMatchObject({
       initialFile: join(initialDir, 'initial.md'),
       initialDir: '',
     });
-    expect(dirConfig.body).toEqual({
+    expect(typeof fileConfig.body.homeDir).toBe('string');
+    expect(dirConfig.body).toMatchObject({
       initialFile: '',
       initialDir,
     });
+    expect(typeof dirConfig.body.homeDir).toBe('string');
+  });
+
+  it('returns the homeDir for tilde-shortening on the client', async () => {
+    const { response, body } = await requestJson(app, '/api/config');
+    expect(response.status).toBe(200);
+    // The fake homeDir for `app` is fakeHome. /api/config should expose it
+    // so the frontend can render trust prompts with ~/path-style display.
+    expect(body.homeDir).toBe(fakeHome);
   });
 });
 
@@ -884,6 +895,183 @@ describe('/api/pick-file', () => {
     expect(calls[0].args).toContain('-STA');
     expect(calls[0].args.join(' ')).toContain('OpenFileDialog');
   });
+
+  it('persists the picked file directory to trustedRoots in preferences', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pick-persist-'));
+    const realHome = await realpath(localHome);
+    // No prior prefs file.
+
+    const { execFileImpl } = createExecFileStub(externalFile + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const { response, body } = await requestJson(pickApp, '/api/pick-file');
+    expect(response.status).toBe(200);
+    expect(body.path).toBe(externalFile);
+
+    // Allow fire-and-forget addTrustedRoot to flush.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.trustedRoots).toContain(externalDir);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('passes defaultPath to the macOS osascript invocation', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pick-default-'));
+    const realHome = await realpath(localHome);
+    const { calls, execFileImpl } = createExecFileStub(externalFile + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const targetPath = '/Users/example/notes/my-doc.md';
+    const { response } = await requestJson(
+      pickApp,
+      `/api/pick-file?defaultPath=${encodeURIComponent(targetPath)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    const argsJoined = calls[0].args.join(' ');
+    expect(argsJoined).toContain(`default location POSIX file "${targetPath}"`);
+
+    // Allow fire-and-forget addTrustedRoot to flush before removing the temp dir.
+    await new Promise((r) => setTimeout(r, 50));
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('escapes quotes and backslashes in defaultPath for osascript', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pick-escape-'));
+    const realHome = await realpath(localHome);
+    const { calls, execFileImpl } = createExecFileStub(externalFile + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const trickyPath = '/tmp/has "quote" and \\back/file.md';
+    await requestJson(
+      pickApp,
+      `/api/pick-file?defaultPath=${encodeURIComponent(trickyPath)}`,
+    );
+    expect(calls).toHaveLength(1);
+    const argsJoined = calls[0].args.join(' ');
+    // Quotes should be backslash-escaped, backslashes doubled.
+    expect(argsJoined).toContain('/tmp/has \\"quote\\" and \\\\back/file.md');
+
+    // Allow fire-and-forget addTrustedRoot to flush before removing the temp dir.
+    await new Promise((r) => setTimeout(r, 50));
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('omits the default location clause when defaultPath is missing', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pick-nodefault-'));
+    const realHome = await realpath(localHome);
+    const { calls, execFileImpl } = createExecFileStub(externalFile + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    await requestJson(pickApp, '/api/pick-file');
+    expect(calls).toHaveLength(1);
+    const argsJoined = calls[0].args.join(' ');
+    expect(argsJoined).not.toContain('default location');
+
+    // Allow fire-and-forget addTrustedRoot to flush before removing the temp dir.
+    await new Promise((r) => setTimeout(r, 50));
+    await rm(realHome, { recursive: true, force: true });
+  });
+});
+
+describe('/api/pick-folder', () => {
+  it('persists the picked folder to trustedRoots', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-persist-'));
+    const realHome = await realpath(localHome);
+    // Create a real directory the picker can return.
+    const pickedRoot = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-target-'));
+    const realPicked = await realpath(pickedRoot);
+    const { execFileImpl } = createExecFileStub(realPicked + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const { response, body } = await requestJson(pickApp, '/api/pick-folder');
+    expect(response.status).toBe(200);
+    expect(body.path).toBe(realPicked);
+
+    await new Promise((r) => setTimeout(r, 50));
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.trustedRoots).toContain(realPicked);
+
+    await rm(realHome, { recursive: true, force: true });
+    await rm(pickedRoot, { recursive: true, force: true });
+  });
+
+  it('passes defaultPath to the macOS osascript invocation', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-default-'));
+    const realHome = await realpath(localHome);
+    const pickedRoot = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-target-'));
+    const realPicked = await realpath(pickedRoot);
+    const { calls, execFileImpl } = createExecFileStub(realPicked + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const targetPath = '/Users/example/notes';
+    const { response } = await requestJson(
+      pickApp,
+      `/api/pick-folder?defaultPath=${encodeURIComponent(targetPath)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    const argsJoined = calls[0].args.join(' ');
+    expect(argsJoined).toContain('choose folder');
+    expect(argsJoined).toContain(`default location POSIX file "${targetPath}"`);
+
+    await new Promise((r) => setTimeout(r, 50));
+    await rm(realHome, { recursive: true, force: true });
+    await rm(pickedRoot, { recursive: true, force: true });
+  });
+
+  it('rejects when the picked path is not a directory', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-notadir-'));
+    const realHome = await realpath(localHome);
+    // Stub returns a path to a FILE (externalFile), not a directory.
+    const { execFileImpl } = createExecFileStub(externalFile + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const { response, body } = await requestJson(pickApp, '/api/pick-folder');
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/not a directory/);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
 });
 
 describe('Content-Type enforcement', () => {
@@ -1055,5 +1243,239 @@ describe('/api/grant-access', () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body).toEqual({ error: 'Invalid JSON body' });
+  });
+});
+
+describe('persisted trustedRoots hydration', () => {
+  it('makes files in a persisted trusted root accessible without initialArg', async () => {
+    // Seed prefs with externalDir as a trusted root, then construct an app
+    // with cwd that does NOT include externalDir.
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-trusted-home-'));
+    const realHome = await realpath(localHome);
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: [externalDir] }),
+    );
+
+    const trustedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+    });
+
+    const { response, body } = await requestJson(
+      trustedApp,
+      `/api/file?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(body.path).toBe(externalFile);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('skips persisted trustedRoots whose paths no longer exist', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-trusted-skip-'));
+    const realHome = await realpath(localHome);
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({
+        trustedRoots: [externalDir, '/tmp/md-redline-ghost-vault-does-not-exist-xyz'],
+      }),
+    );
+
+    const skipApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+    });
+
+    // The real path is still accessible.
+    const ok = await requestJson(
+      skipApp,
+      `/api/file?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(ok.response.status).toBe(200);
+
+    // The ghost path 403s — it was NOT silently pushed into allowedRoots.
+    const ghost = await requestJson(
+      skipApp,
+      '/api/file?path=/tmp/md-redline-ghost-vault-does-not-exist-xyz/missing.md',
+    );
+    expect(ghost.response.status).toBe(403);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('writes back the cleaned trustedRoots when entries are dropped', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-trusted-prune-'));
+    const realHome = await realpath(localHome);
+    const ghostPath = '/tmp/md-redline-ghost-vault-does-not-exist-xyz';
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: [externalDir, ghostPath] }),
+    );
+
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+    });
+
+    // Allow fire-and-forget writePreferences to flush.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.trustedRoots).toEqual([externalDir]);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('migrates recentFiles parent dirs into trustedRoots on first run', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-migrate-home-'));
+    const realHome = await realpath(localHome);
+    // Seed prefs with recentFiles only (no trustedRoots — simulates a user
+    // upgrading from a version that didn't have the field).
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({
+        recentFiles: [
+          { path: externalFile, name: 'outside.md', openedAt: '2026-01-01T00:00:00Z' },
+        ],
+      }),
+    );
+
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.trustedRoots).toEqual([externalDir]);
+
+    // Construct again with the same home dir — migration should NOT re-run.
+    // (We assert by clearing trustedRoots and verifying it stays empty.)
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({
+        recentFiles: parsed.recentFiles,
+        trustedRoots: [],
+      }),
+    );
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const raw2 = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed2 = JSON.parse(raw2);
+    expect(parsed2.trustedRoots).toEqual([]);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('seeds the home directory on first launch when defaultTrustHome is true', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-default-trust-'));
+    const realHome = await realpath(localHome);
+
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+      defaultTrustHome: true,
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.trustedRoots).toEqual([realHome]);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('does not seed home directory when defaultTrustHome is false (default)', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-no-default-trust-'));
+    const realHome = await realpath(localHome);
+
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+      // defaultTrustHome omitted, default is false
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // No prefs file should have been created
+    let exists = false;
+    try {
+      await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+      exists = true;
+    } catch {
+      /* expected */
+    }
+    expect(exists).toBe(false);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('does not re-seed home directory when trustedRoots is already defined as empty', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-empty-trust-'));
+    const realHome = await realpath(localHome);
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: [] }),
+    );
+
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+      defaultTrustHome: true,
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.trustedRoots).toEqual([]);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('combines seed-home with recentFiles migration on first launch', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-combined-seed-'));
+    const realHome = await realpath(localHome);
+    await writeFile(
+      join(realHome, '.md-redline.json'),
+      JSON.stringify({
+        recentFiles: [
+          { path: externalFile, name: 'outside.md', openedAt: '2026-01-01T00:00:00Z' },
+        ],
+      }),
+    );
+
+    createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'linux',
+      defaultTrustHome: true,
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    // Expect both the home dir AND the recent file's parent dir to be present
+    expect(parsed.trustedRoots).toContain(realHome);
+    expect(parsed.trustedRoots).toContain(externalDir);
+
+    await rm(realHome, { recursive: true, force: true });
   });
 });

@@ -1,4 +1,5 @@
 import { readFile, rename, open } from 'fs/promises';
+import { readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 
@@ -23,6 +24,7 @@ export interface Preferences {
   settings?: AppSettings;
   theme?: string;
   recentFiles?: RecentFile[];
+  trustedRoots?: string[];
 }
 
 function prefsPath(homeDir: string): string {
@@ -40,17 +42,29 @@ export async function readPreferences(homeDir: string): Promise<Preferences> {
   }
 }
 
+export function readPreferencesSync(homeDir: string): Preferences {
+  try {
+    const raw = readFileSync(prefsPath(homeDir), 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return parsed as Preferences;
+  } catch {
+    return {};
+  }
+}
+
 // Write lock to serialize concurrent writes
 let writeLock: Promise<void> = Promise.resolve();
 
 export async function writePreferences(
   homeDir: string,
-  patch: Partial<Preferences>,
+  patchOrFn: Partial<Preferences> | ((current: Preferences) => Partial<Preferences>),
 ): Promise<Preferences> {
   const result = await new Promise<Preferences>((resolve, reject) => {
     writeLock = writeLock.then(async () => {
       try {
         const existing = await readPreferences(homeDir);
+        const patch = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
         const merged = { ...existing, ...patch };
         const filePath = prefsPath(homeDir);
         const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
@@ -68,4 +82,17 @@ export async function writePreferences(
     });
   });
   return result;
+}
+
+/**
+ * Atomically append a path to the trustedRoots list, deduping against the
+ * current contents. Runs inside the existing writeLock so concurrent calls
+ * (e.g. from rapid pick-file invocations) are serialized.
+ */
+export async function addTrustedRoot(homeDir: string, path: string): Promise<void> {
+  await writePreferences(homeDir, (current) => {
+    const list = current.trustedRoots ?? [];
+    if (list.includes(path)) return {};
+    return { trustedRoots: [...list, path] };
+  });
 }

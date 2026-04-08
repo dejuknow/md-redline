@@ -6,6 +6,7 @@ export interface TabState {
   rawMarkdown: string;
   isLoading: boolean;
   error: string | null;
+  errorKind: 'access-denied' | 'generic' | null;
   lastSaved: Date | null;
   /** Server-reported mtime (ms since epoch) for conflict detection */
   mtime?: number;
@@ -25,6 +26,18 @@ function findTabKey(tabData: Map<string, TabState>, path: string): string | null
     if (tab.filePath === path) return key;
   }
   return null;
+}
+
+export function isAccessDeniedError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('Access denied');
+}
+
+export function findAccessDeniedTabs(tabData: Map<string, TabState>): string[] {
+  const out: string[] = [];
+  for (const [, tab] of tabData) {
+    if (tab.errorKind === 'access-denied') out.push(tab.filePath);
+  }
+  return out;
 }
 
 interface LoadedTabUpdate {
@@ -65,6 +78,7 @@ export function applyPendingTabState(
     rawMarkdown: '',
     isLoading: true,
     error: null,
+    errorKind: null,
     lastSaved: null,
   });
   return {
@@ -89,6 +103,7 @@ export function applyLoadedTabState(
     rawMarkdown: content,
     isLoading: false,
     error: null,
+    errorKind: null,
     lastSaved: savedAt,
   };
 
@@ -259,6 +274,9 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (!isCurrentLoadRequest(path, requestId)) return;
+        const errorKind: TabState['errorKind'] = isAccessDeniedError(err)
+          ? 'access-denied'
+          : 'generic';
         setTabDataState((prev) => {
           const next = new Map(prev);
           const existing = next.get(path);
@@ -267,6 +285,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
               ...existing,
               isLoading: false,
               error: err instanceof Error ? err.message : 'Failed to load file',
+              errorKind,
             });
           }
           return next;
@@ -322,6 +341,9 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (!isCurrentLoadRequest(path, requestId)) return;
+        const errorKind: TabState['errorKind'] = isAccessDeniedError(err)
+          ? 'access-denied'
+          : 'generic';
         setTabDataState((prev) => {
           const next = new Map(prev);
           const existing = next.get(path);
@@ -330,6 +352,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
               ...existing,
               isLoading: false,
               error: err instanceof Error ? err.message : 'Failed to load file',
+              errorKind,
             });
           }
           return next;
@@ -449,6 +472,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   const rawMarkdown = activeTab?.rawMarkdown ?? '';
   const isLoading = activeTab?.isLoading ?? false;
   const error = activeTab?.error ?? null;
+  const errorKind = activeTab?.errorKind ?? null;
   const filePath = activeTab?.filePath ?? '';
 
   const isTabDirty = useCallback(
@@ -538,15 +562,65 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         isLoading: false,
         lastSaved: new Date(),
         error: null,
+        errorKind: null,
         mtime: data.mtime,
       });
     } catch (err) {
       updateTab(activeFilePath, {
         isLoading: false,
         error: err instanceof Error ? err.message : 'Failed to reload file',
+        errorKind: isAccessDeniedError(err) ? 'access-denied' : 'generic',
       });
     }
   }, [activeFilePath, updateTab]);
+
+  const retryAllAccessDenied = useCallback(async () => {
+    const paths = findAccessDeniedTabs(tabDataRef.current);
+    for (const path of paths) {
+      // Clear the error so the tab re-enters the loading state, then re-fetch
+      // via the same code path used by openTab. We avoid calling openTab
+      // directly because it short-circuits when the tab already exists; we
+      // want to force a refetch.
+      const requestId = startLoadRequest(path);
+      abortControllersRef.current.get(path)?.abort();
+      const controller = new AbortController();
+      abortControllersRef.current.set(path, controller);
+      updateTab(path, { isLoading: true, error: null, errorKind: null });
+      try {
+        const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, {
+          signal: controller.signal,
+        });
+        const data = await readJsonResponse<FileResponse>(res);
+        if (!res.ok || !data) {
+          throw new Error(getApiErrorMessage(res, data, 'Failed to load file'));
+        }
+        if (!isCurrentLoadRequest(path, requestId)) continue;
+        applyLoadedResponse(path, data.path, data.content);
+        if (data.mtime != null) updateTab(data.path, { mtime: data.mtime });
+        finishLoadRequest(path, requestId);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') continue;
+        if (!isCurrentLoadRequest(path, requestId)) continue;
+        const errorKind: TabState['errorKind'] = isAccessDeniedError(err)
+          ? 'access-denied'
+          : 'generic';
+        updateTab(path, {
+          isLoading: false,
+          error: err instanceof Error ? err.message : 'Failed to load file',
+          errorKind,
+        });
+        finishLoadRequest(path, requestId);
+      } finally {
+        abortControllersRef.current.delete(path);
+      }
+    }
+  }, [
+    applyLoadedResponse,
+    finishLoadRequest,
+    isCurrentLoadRequest,
+    startLoadRequest,
+    updateTab,
+  ]);
 
   return {
     tabs,
@@ -558,6 +632,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     updateTab,
     isLoading,
     error,
+    errorKind,
     isTabDirty,
     openTab,
     openTabInBackground,
@@ -570,5 +645,6 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     saveFileAt,
     getTabSnapshot,
     reloadFile,
+    retryAllAccessDenied,
   };
 }

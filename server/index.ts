@@ -10,7 +10,12 @@ import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
-import { readPreferences, writePreferences } from './preferences';
+import {
+  addTrustedRoot,
+  readPreferences,
+  readPreferencesSync,
+  writePreferences,
+} from './preferences';
 import { injectSvgDimensions } from './svg-dimensions';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +53,7 @@ export interface CreateAppOptions {
   initialArg?: string;
   platformName?: NodeJS.Platform;
   staticDir?: string;
+  defaultTrustHome?: boolean;
 }
 
 function canonicalize(p: string): string {
@@ -174,6 +180,83 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   }
 
+  // Hydrate allowedRoots from persisted trustedRoots in preferences. This
+  // restores folders the user previously consented to via /api/pick-file
+  // across server restarts. Stale entries are pruned from disk.
+  const persistedPrefs = readPreferencesSync(homeDir);
+  let persistedRoots = persistedPrefs.trustedRoots;
+  let migratedFromRecent = false;
+
+  // First-launch seed: when trustedRoots has never been written, the
+  // production server seeds the user's home directory by default so the
+  // tool works like a normal editor for the typical single-user case. The
+  // recentFiles migration ALSO runs in this branch so existing users
+  // upgrading from a version without trustedRoots get their previously-
+  // opened files trusted automatically. Triggered by `trustedRoots ===
+  // undefined`; once we write the field (even as []), this never re-runs.
+  if (persistedRoots === undefined) {
+    const seen = new Set<string>();
+    const derived: string[] = [];
+
+    if (options.defaultTrustHome) {
+      let canonHome: string;
+      try {
+        canonHome = realpathSync(homeDir);
+      } catch {
+        canonHome = homeDir;
+      }
+      if (!seen.has(canonHome)) {
+        seen.add(canonHome);
+        derived.push(canonHome);
+      }
+    }
+
+    if (persistedPrefs.recentFiles?.length) {
+      for (const recent of persistedPrefs.recentFiles) {
+        let canon: string;
+        try {
+          canon = realpathSync(dirname(recent.path));
+        } catch {
+          continue;
+        }
+        if (seen.has(canon)) continue;
+        seen.add(canon);
+        derived.push(canon);
+      }
+    }
+
+    if (derived.length > 0) {
+      persistedRoots = derived;
+      migratedFromRecent = true;
+    }
+  }
+  persistedRoots = persistedRoots ?? [];
+
+  const survivingRoots: string[] = [];
+  for (const persisted of persistedRoots) {
+    let canon: string;
+    try {
+      canon = realpathSync(persisted);
+    } catch {
+      continue;
+    }
+    survivingRoots.push(canon);
+    if (allowedRoots.length >= MAX_ALLOWED_ROOTS) continue;
+    if (allowedRoots.some((root) => isPathInsideRoot(canon, root, caseInsensitivePaths))) {
+      continue;
+    }
+    allowedRoots.push(canon);
+  }
+
+  const prunedSomething =
+    survivingRoots.length !== persistedRoots.length ||
+    survivingRoots.some((p, i) => p !== persistedRoots[i]);
+  if (migratedFromRecent || prunedSomething) {
+    void writePreferences(homeDir, { trustedRoots: survivingRoots }).catch((err) => {
+      console.error('Failed to persist trustedRoots:', err);
+    });
+  }
+
   async function resolveAndValidate(inputPath: string): Promise<string> {
     const expanded = expandHomePath(inputPath, homeDir);
     const resolved = resolve(cwd, expanded);
@@ -193,6 +276,10 @@ export function createApp(options: CreateAppOptions = {}) {
     }
     const allowed = allowedRoots.some((root) => isPathInsideRoot(real, root, caseInsensitivePaths));
     if (!allowed) {
+      // The 'Access denied' prefix is part of the client contract: the
+      // frontend's isAccessDeniedError helper (src/hooks/useTabs.ts) keys
+      // off it to render the trust button. Don't change without updating
+      // both call sites.
       throw new Error('Access denied: path outside allowed directories');
     }
     return real;
@@ -210,7 +297,7 @@ export function createApp(options: CreateAppOptions = {}) {
   >();
 
   app.get('/api/config', (c) => {
-    return c.json({ initialFile, initialDir });
+    return c.json({ initialFile, initialDir, homeDir });
   });
 
   app.get('/api/version', (c) => {
@@ -502,14 +589,20 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   app.get('/api/pick-file', async (c) => {
+    const defaultPath = c.req.query('defaultPath') ?? '';
     try {
       const path = await new Promise<string>((promiseResolve, reject) => {
         if (platformName === 'darwin') {
+          // AppleScript string literal: backslash-escape \ and " in the path.
+          const escaped = defaultPath
+            ? defaultPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+            : '';
+          const defaultClause = escaped ? ` default location POSIX file "${escaped}"` : '';
           execFileImpl(
             'osascript',
             [
               '-e',
-              'set f to POSIX path of (choose file of type {"md", "markdown", "public.plain-text"} with prompt "Choose a markdown file")',
+              `set f to POSIX path of (choose file of type {"md", "markdown", "public.plain-text"} with prompt "Choose a markdown file"${defaultClause})`,
               '-e',
               'return f',
             ],
@@ -519,26 +612,34 @@ export function createApp(options: CreateAppOptions = {}) {
             },
           );
         } else if (platformName === 'linux') {
+          // zenity --filename takes a separate argv, no shell interpolation needed.
+          const args = [
+            '--file-selection',
+            '--title=Choose a markdown file',
+            '--file-filter=Markdown files | *.md *.markdown',
+          ];
+          if (defaultPath) args.push(`--filename=${defaultPath}`);
           execFileImpl(
             'zenity',
-            [
-              '--file-selection',
-              '--title=Choose a markdown file',
-              '--file-filter=Markdown files | *.md *.markdown',
-            ],
+            args,
             (err, stdout) => {
               if (err) return reject(err);
               promiseResolve(stdout.trim());
             },
           );
         } else if (platformName === 'win32') {
+          // PowerShell single-quoted strings escape ' by doubling.
+          const escaped = defaultPath ? defaultPath.replace(/'/g, "''") : '';
+          const initialClause = escaped
+            ? `$dialog.FileName = '${escaped}'; $dialog.InitialDirectory = (Split-Path -Parent '${escaped}'); `
+            : '';
           execFileImpl(
             'powershell',
             [
               '-NoProfile',
               '-STA',
               '-Command',
-              'Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Filter = "Markdown files (*.md;*.markdown)|*.md;*.markdown|All files (*.*)|*.*"; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }',
+              `Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Filter = "Markdown files (*.md;*.markdown)|*.md;*.markdown|All files (*.*)|*.*"; ${initialClause}if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }`,
             ],
             (err, stdout) => {
               if (err) return reject(err);
@@ -554,8 +655,10 @@ export function createApp(options: CreateAppOptions = {}) {
       if (!isMdFile(path)) {
         return c.json({ error: 'Only .md files are supported' }, 400);
       }
-      // Grant access to the file's directory so subsequent API calls work
+      // Grant access to the file's directory so subsequent API calls work,
+      // and persist the grant so it survives server restarts.
       const pickedDir = dirname(resolve(path));
+      let persistedDir: string | null = null;
       try {
         const realDir = canonicalize(pickedDir);
         if (
@@ -564,16 +667,119 @@ export function createApp(options: CreateAppOptions = {}) {
         ) {
           allowedRoots.push(realDir);
         }
+        persistedDir = realDir;
       } catch {
-        // Can't canonicalize — add the raw resolved dir
+        // Can't canonicalize — add the raw resolved dir.
         if (
           allowedRoots.length < MAX_ALLOWED_ROOTS &&
           !allowedRoots.some((root) => isPathInsideRoot(pickedDir, root, caseInsensitivePaths))
         ) {
           allowedRoots.push(pickedDir);
         }
+        persistedDir = pickedDir;
+      }
+      if (persistedDir) {
+        void addTrustedRoot(homeDir, persistedDir).catch((err) => {
+          console.error('Failed to persist new trustedRoot:', err);
+        });
       }
       return c.json({ path });
+    } catch {
+      return c.json({ cancelled: true });
+    }
+  });
+
+  app.get('/api/pick-folder', async (c) => {
+    const defaultPath = c.req.query('defaultPath') ?? '';
+    try {
+      const path = await new Promise<string>((promiseResolve, reject) => {
+        if (platformName === 'darwin') {
+          // AppleScript string literal: backslash-escape \ and " in the path.
+          const escaped = defaultPath
+            ? defaultPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+            : '';
+          const defaultClause = escaped ? ` default location POSIX file "${escaped}"` : '';
+          execFileImpl(
+            'osascript',
+            [
+              '-e',
+              `set f to POSIX path of (choose folder with prompt "Allow md-redline to access this folder"${defaultClause})`,
+              '-e',
+              'return f',
+            ],
+            (err, stdout) => {
+              if (err) return reject(err);
+              promiseResolve(stdout.trim());
+            },
+          );
+        } else if (platformName === 'linux') {
+          // zenity --directory + --filename takes separate argv, no shell interpolation needed.
+          const args = [
+            '--file-selection',
+            '--directory',
+            '--title=Allow md-redline to access this folder',
+          ];
+          if (defaultPath) args.push(`--filename=${defaultPath}/`);
+          execFileImpl(
+            'zenity',
+            args,
+            (err, stdout) => {
+              if (err) return reject(err);
+              promiseResolve(stdout.trim());
+            },
+          );
+        } else if (platformName === 'win32') {
+          // PowerShell single-quoted strings escape ' by doubling.
+          const escaped = defaultPath ? defaultPath.replace(/'/g, "''") : '';
+          const initialClause = escaped ? `$dialog.SelectedPath = '${escaped}'; ` : '';
+          execFileImpl(
+            'powershell',
+            [
+              '-NoProfile',
+              '-STA',
+              '-Command',
+              `Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = "Allow md-redline to access this folder"; ${initialClause}if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }`,
+            ],
+            (err, stdout) => {
+              if (err) return reject(err);
+              promiseResolve(stdout.trim());
+            },
+          );
+        } else {
+          reject(new Error('Unsupported platform'));
+        }
+      });
+      if (!path) return c.json({ error: 'No folder selected' }, 400);
+
+      // Resolve and validate that it's actually a directory.
+      const resolved = resolve(path);
+      let realDir: string;
+      try {
+        realDir = canonicalize(resolved);
+      } catch {
+        realDir = resolved;
+      }
+      try {
+        const dirStat = statSync(realDir);
+        if (!dirStat.isDirectory()) {
+          return c.json({ error: 'Picked path is not a directory' }, 400);
+        }
+      } catch {
+        return c.json({ error: 'Picked path does not exist' }, 400);
+      }
+
+      // Grant access and persist.
+      if (
+        allowedRoots.length < MAX_ALLOWED_ROOTS &&
+        !allowedRoots.some((root) => isPathInsideRoot(realDir, root, caseInsensitivePaths))
+      ) {
+        allowedRoots.push(realDir);
+      }
+      void addTrustedRoot(homeDir, realDir).catch((err) => {
+        console.error('Failed to persist new trustedRoot:', err);
+      });
+
+      return c.json({ path: realDir });
     } catch {
       return c.json({ cancelled: true });
     }
@@ -842,7 +1048,7 @@ function detectStaticDir(): string | undefined {
   }
 }
 
-export const app = createApp({ staticDir: detectStaticDir() });
+export const app = createApp({ staticDir: detectStaticDir(), defaultTrustHome: true });
 
 const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '3001', 10);
 const MAX_PORT_ATTEMPTS = 10;

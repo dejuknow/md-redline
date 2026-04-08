@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { applyLoadedTabState, applyPendingTabState, type TabState } from './useTabs';
+import {
+  applyLoadedTabState,
+  applyPendingTabState,
+  findAccessDeniedTabs,
+  isAccessDeniedError,
+  type TabState,
+} from './useTabs';
 
 function makeTab(path: string, overrides: Partial<TabState> = {}): TabState {
   return {
@@ -7,6 +13,7 @@ function makeTab(path: string, overrides: Partial<TabState> = {}): TabState {
     rawMarkdown: '',
     isLoading: true,
     error: null,
+    errorKind: null,
     lastSaved: null,
     ...overrides,
   };
@@ -253,5 +260,72 @@ describe('TabState dirty flag', () => {
     const updated = { ...tab, rawMarkdown: '# new', dirty: false };
     expect(updated.dirty).toBe(false);
     expect(updated.rawMarkdown).toBe('# new');
+  });
+});
+
+describe('TabState errorKind', () => {
+  it('applyPendingTabState initializes errorKind to null', () => {
+    const result = applyPendingTabState(new Map(), [], null, '/tmp/x.md', true);
+    expect(result.tabData.get('/tmp/x.md')?.errorKind).toBeNull();
+  });
+
+  it('applyLoadedTabState clears errorKind on success', () => {
+    const path = '/tmp/x.md';
+    const prevData = new Map<string, TabState>([
+      [path, makeTab(path, { error: 'Access denied', errorKind: 'access-denied' })],
+    ]);
+    const result = applyLoadedTabState(
+      prevData,
+      [path],
+      path,
+      path,
+      path,
+      '# Loaded\n',
+      new Date(),
+    );
+    expect(result.tabData.get(path)?.error).toBeNull();
+    expect(result.tabData.get(path)?.errorKind).toBeNull();
+  });
+});
+
+describe('isAccessDeniedError', () => {
+  it('returns true for an Error whose message starts with "Access denied"', () => {
+    expect(
+      isAccessDeniedError(new Error('Access denied: path outside allowed directories')),
+    ).toBe(true);
+  });
+
+  it('returns false for an Error with an unrelated message', () => {
+    expect(isAccessDeniedError(new Error('File not found or not readable'))).toBe(false);
+  });
+
+  it('returns false for non-Error values', () => {
+    expect(isAccessDeniedError('Access denied: foo')).toBe(false);
+    expect(isAccessDeniedError(undefined)).toBe(false);
+    expect(isAccessDeniedError(null)).toBe(false);
+    expect(isAccessDeniedError({ message: 'Access denied: foo' })).toBe(false);
+  });
+});
+
+describe('findAccessDeniedTabs', () => {
+  it('returns paths of tabs whose errorKind is access-denied', () => {
+    const tabs = new Map<string, TabState>([
+      ['/a.md', makeTab('/a.md', { error: 'Access denied', errorKind: 'access-denied' })],
+      ['/b.md', makeTab('/b.md', { error: 'Not found', errorKind: 'generic' })],
+      ['/c.md', makeTab('/c.md', { error: null, errorKind: null, isLoading: false })],
+      ['/d.md', makeTab('/d.md', { error: 'Access denied', errorKind: 'access-denied' })],
+    ]);
+    expect(findAccessDeniedTabs(tabs)).toEqual(['/a.md', '/d.md']);
+  });
+
+  it('returns an empty array when no tabs are access-denied', () => {
+    const tabs = new Map<string, TabState>([
+      ['/a.md', makeTab('/a.md', { error: 'Not found', errorKind: 'generic' })],
+    ]);
+    expect(findAccessDeniedTabs(tabs)).toEqual([]);
+  });
+
+  it('returns an empty array for an empty map', () => {
+    expect(findAccessDeniedTabs(new Map())).toEqual([]);
   });
 });

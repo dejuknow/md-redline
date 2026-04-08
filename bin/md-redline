@@ -2,7 +2,7 @@
 
 import { execSync, spawn } from 'child_process';
 import { statSync } from 'fs';
-import { readFile, stat, unlink } from 'fs/promises';
+import { readFile, stat, unlink, writeFile } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import process from 'process';
@@ -27,6 +27,7 @@ const POLL_INTERVAL_MS = 500;
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
   console.log('       mdr --stop');
+  console.log('       mdr --restrict');
   console.log('');
   console.log('Opens a markdown file or folder in mdr for inline commenting.');
   console.log('Starts the app automatically if it is not already running.');
@@ -34,10 +35,23 @@ function printHelp() {
   console.log('');
   console.log('Options:');
   console.log('  --stop          Stop the running mdr server');
+  console.log('  --restrict      Disable the default home-directory trust');
   console.log('  -v, --version   Show version number');
   console.log('  -h, --help      Show this help message');
   console.log('');
   console.log('Alias: md-redline');
+}
+
+async function isFirstLaunch() {
+  const prefsPath = join(homedir(), '.md-redline.json');
+  try {
+    const raw = await readFile(prefsPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return true;
+    return parsed.trustedRoots === undefined;
+  } catch {
+    return true;
+  }
 }
 
 function expandHomePath(inputPath) {
@@ -174,6 +188,24 @@ async function stopServer() {
   console.log('mdr stopped.');
 }
 
+async function enableRestrictedMode() {
+  const prefsPath = join(homedir(), '.md-redline.json');
+  try {
+    await stat(prefsPath);
+    console.error(`Refusing to overwrite existing ${prefsPath}.`);
+    console.error('Restricted mode would clobber your trust settings.');
+    console.error('Edit the file manually to set trustedRoots: [].');
+    process.exitCode = 1;
+    return;
+  } catch {
+    /* file does not exist; safe to write */
+  }
+
+  await writeFile(prefsPath, JSON.stringify({ trustedRoots: [] }, null, 2) + '\n', 'utf-8');
+  console.log('Restricted mode enabled. Each folder will require explicit consent.');
+  console.log(`Wrote ${prefsPath}`);
+}
+
 async function getServerVersion(port) {
   try {
     const response = await fetch(`http://localhost:${port}/api/version`, {
@@ -206,6 +238,15 @@ async function ensureServerRunning() {
     } else {
       return;
     }
+  }
+
+  // Detect first ever launch (no prefs file yet) so we can disclose the
+  // default trust behavior. The server itself will write the prefs file on
+  // boot; we check BEFORE spawning so the message corresponds to the very
+  // first invocation only.
+  if (await isFirstLaunch()) {
+    console.log('Welcome to md-redline! Trusting your home directory by default.');
+    console.log('Run `mdr --restrict` to opt out. See https://github.com/dejuknow/md-redline#permissions for details.');
   }
 
   console.log('Starting mdr...');
@@ -294,6 +335,11 @@ async function main() {
 
   if (process.argv[2] === '--stop') {
     await stopServer();
+    return;
+  }
+
+  if (process.argv[2] === '--restrict') {
+    await enableRestrictedMode();
     return;
   }
 

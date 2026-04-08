@@ -2,7 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { readPreferences, writePreferences } from './preferences';
+import {
+  addTrustedRoot,
+  readPreferences,
+  readPreferencesSync,
+  writePreferences,
+} from './preferences';
 
 let testDir: string;
 
@@ -122,5 +127,91 @@ describe('writePreferences', () => {
     const raw = await readFile(join(testDir, '.md-redline.json'), 'utf-8');
     expect(raw.endsWith('\n')).toBe(true);
     expect(() => JSON.parse(raw)).not.toThrow();
+  });
+
+  it('round-trips trustedRoots field', async () => {
+    await writePreferences(testDir, {
+      trustedRoots: ['/Users/test/vault-a', '/Users/test/vault-b'],
+    });
+    const result = await readPreferences(testDir);
+    expect(result.trustedRoots).toEqual([
+      '/Users/test/vault-a',
+      '/Users/test/vault-b',
+    ]);
+  });
+});
+
+describe('readPreferencesSync', () => {
+  it('returns {} when dotfile does not exist', () => {
+    expect(readPreferencesSync(testDir)).toEqual({});
+  });
+
+  it('returns parsed content when dotfile exists', async () => {
+    await writeFile(
+      join(testDir, '.md-redline.json'),
+      JSON.stringify({ author: 'Sync', trustedRoots: ['/x'] }),
+    );
+    expect(readPreferencesSync(testDir)).toEqual({
+      author: 'Sync',
+      trustedRoots: ['/x'],
+    });
+  });
+
+  it('returns {} on invalid JSON', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), 'definitely not json');
+    expect(readPreferencesSync(testDir)).toEqual({});
+  });
+
+  it('returns {} if file contains a JSON array', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), '["array"]');
+    expect(readPreferencesSync(testDir)).toEqual({});
+  });
+
+  it('returns {} if file contains a JSON null', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), 'null');
+    expect(readPreferencesSync(testDir)).toEqual({});
+  });
+});
+
+describe('addTrustedRoot', () => {
+  it('adds a new path to an empty list', async () => {
+    await addTrustedRoot(testDir, '/Users/test/vault');
+    const prefs = await readPreferences(testDir);
+    expect(prefs.trustedRoots).toEqual(['/Users/test/vault']);
+  });
+
+  it('appends to an existing list', async () => {
+    await writePreferences(testDir, { trustedRoots: ['/a'] });
+    await addTrustedRoot(testDir, '/b');
+    const prefs = await readPreferences(testDir);
+    expect(prefs.trustedRoots).toEqual(['/a', '/b']);
+  });
+
+  it('does not duplicate when called twice with the same path', async () => {
+    await addTrustedRoot(testDir, '/Users/test/vault');
+    await addTrustedRoot(testDir, '/Users/test/vault');
+    const prefs = await readPreferences(testDir);
+    expect(prefs.trustedRoots).toEqual(['/Users/test/vault']);
+  });
+
+  it('serializes concurrent calls without race', async () => {
+    await Promise.all([
+      addTrustedRoot(testDir, '/p1'),
+      addTrustedRoot(testDir, '/p2'),
+      addTrustedRoot(testDir, '/p3'),
+    ]);
+    const prefs = await readPreferences(testDir);
+    // All three must land; order is the order in which the lock released them.
+    expect(prefs.trustedRoots).toHaveLength(3);
+    expect(prefs.trustedRoots).toEqual(expect.arrayContaining(['/p1', '/p2', '/p3']));
+  });
+
+  it('preserves other preference keys', async () => {
+    await writePreferences(testDir, { author: 'Alice', theme: 'dark' });
+    await addTrustedRoot(testDir, '/x');
+    const prefs = await readPreferences(testDir);
+    expect(prefs.author).toBe('Alice');
+    expect(prefs.theme).toBe('dark');
+    expect(prefs.trustedRoots).toEqual(['/x']);
   });
 });

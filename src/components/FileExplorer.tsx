@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getApiErrorMessage, readJsonResponse, type ApiErrorPayload } from '../lib/http';
-import { getPathBasename } from '../lib/path-utils';
+import { getPathBasename, tildeShortenPath } from '../lib/path-utils';
 
 interface BrowseResult {
   dir: string;
@@ -22,23 +22,30 @@ export interface ExplorerContextMenuInfo {
 interface Props {
   initialDir?: string;
   activeFilePath: string | null;
+  /** User's home directory; used to tilde-shorten the path in the trust prompt. */
+  homeDir?: string;
   onOpenFile: (path: string) => void;
   onClose: () => void;
   onContextMenu?: (info: ExplorerContextMenuInfo) => void;
   hideHeader?: boolean;
+  onTrustFolder?: (deniedDir: string) => Promise<void>;
 }
 
 export function FileExplorer({
   initialDir,
   activeFilePath,
+  homeDir = '',
   onOpenFile,
   onClose,
   onContextMenu: onCtxMenu,
   hideHeader,
+  onTrustFolder,
 }: Props) {
   const [data, setData] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'access-denied' | 'generic' | null>(null);
+  const [accessDeniedDir, setAccessDeniedDir] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -49,6 +56,8 @@ export function FileExplorer({
 
     setLoading(true);
     setError(null);
+    setErrorKind(null);
+    setAccessDeniedDir(null);
     try {
       const params = dir ? `?dir=${encodeURIComponent(dir)}` : '';
       const res = await fetch(`/api/browse${params}`, { signal: controller.signal });
@@ -59,7 +68,14 @@ export function FileExplorer({
       setData(result);
     } catch (err) {
       if (controller.signal.aborted) return;
-      setError(err instanceof Error ? err.message : 'Failed to browse');
+      const msg = err instanceof Error ? err.message : 'Failed to browse';
+      setError(msg);
+      if (err instanceof Error && err.message.startsWith('Access denied')) {
+        setErrorKind('access-denied');
+        setAccessDeniedDir(dir ?? '');
+      } else {
+        setErrorKind('generic');
+      }
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -136,8 +152,26 @@ export function FileExplorer({
 
       {/* Error */}
       {error && !data && (
-        <div className="flex-1 flex items-center justify-center text-xs text-danger px-3 text-center">
-          {error}
+        <div className="flex-1 flex flex-col items-center justify-center text-xs text-danger px-3 text-center gap-2">
+          <span className="break-all" title={accessDeniedDir ?? undefined}>
+            {errorKind === 'access-denied' && accessDeniedDir
+              ? `Allow md-redline to read ${tildeShortenPath(accessDeniedDir, homeDir)}?`
+              : errorKind === 'access-denied'
+                ? 'Allow md-redline to read this folder?'
+                : error}
+          </span>
+          {errorKind === 'access-denied' && onTrustFolder && accessDeniedDir && (
+            <button
+              type="button"
+              onClick={async () => {
+                await onTrustFolder(accessDeniedDir);
+                browse(accessDeniedDir);
+              }}
+              className="px-2 py-0.5 rounded border border-danger/50 text-danger hover:bg-danger/10 transition-colors text-[11px] font-medium"
+            >
+              Allow access
+            </button>
+          )}
         </div>
       )}
 

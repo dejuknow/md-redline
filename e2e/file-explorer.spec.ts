@@ -81,6 +81,29 @@ test.describe('File explorer', () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
+  test('opens explorer at the file parent directory when launched with ?file=', async ({
+    page,
+  }) => {
+    // Regression: when ?file= is in the URL, the explorer used to fall back to
+    // the server's cwd (the repo root) instead of the file's parent directory,
+    // so siblings weren't immediately browsable.
+    await page.goto(`/?file=${FIXTURE}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+    await ensureExplorerVisible(page);
+
+    // The explorer's file buttons use `w-full text-left` classes; the TabBar's
+    // tab buttons (which also carry title=filePath) do not. Scoping by
+    // `w-full` distinguishes the two.
+    //
+    // test-doc.md exists only inside e2e/fixtures; it is NOT at the repo root.
+    // Its visibility in the explorer panel confirms the explorer is pointing
+    // at e2e/fixtures, the file's actual parent directory. If the regression
+    // returns (explorer falls back to cwd), this assertion fails.
+    await expect(
+      page.locator(`button.w-full[title$="/test-doc.md"]`),
+    ).toBeVisible({ timeout: 5_000 });
+  });
+
   test('clicking a file in explorer opens it', async ({ page }) => {
     await page.goto('/');
     await page.waitForTimeout(500);
