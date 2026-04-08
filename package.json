@@ -51,9 +51,9 @@
     "test:e2e:ui": "playwright test --ui",
     "eval": "tsx eval/runner.ts",
     "eval:dry": "tsx eval/runner.ts --dry-run",
-    "release": "npm test && npm run test:e2e && npm version patch && npm publish && git push && git push --tags",
-    "release:minor": "npm test && npm run test:e2e && npm version minor && npm publish && git push && git push --tags",
-    "release:major": "npm test && npm run test:e2e && npm version major && npm publish && git push && git push --tags"
+    "release": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",

@@ -52,3 +52,6 @@ CLAUDE.md
 
 # Git worktrees
 .worktrees/
+
+# Release notes temp file (created by scripts/release.mjs)
+.release-notes-v*.md
