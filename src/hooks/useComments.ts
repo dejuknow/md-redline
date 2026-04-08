@@ -77,7 +77,10 @@ export function useComments(params: UseCommentsParams) {
   );
 
   // Render markdown to HTML
-  const html = useMemo(() => (cleanMarkdown ? renderMarkdown(cleanMarkdown) : ''), [cleanMarkdown]);
+  const html = useMemo(
+    () => (cleanMarkdown ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined) : ''),
+    [cleanMarkdown, activeFilePath],
+  );
 
   // Detect missing anchors
   const missingAnchors = useMemo(

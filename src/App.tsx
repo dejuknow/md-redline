@@ -1463,6 +1463,9 @@ export default function App() {
                     selectionText={selection?.text ?? null}
                     selectionOffset={selection?.offset ?? null}
                     onHighlightClick={handleHighlightClick}
+                    // Fragment arg is intentionally ignored in v1; openTab
+                    // takes only the path. See spec §3 non-goals.
+                    onLocalLinkClick={openTab}
                     onContextMenu={handleViewerContextMenu}
                     enableResolve={settings.enableResolve}
                     searchQuery={showSearch ? searchQuery : undefined}

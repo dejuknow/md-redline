@@ -29,6 +29,7 @@ interface Props {
   selectionText: string | null;
   selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
+  onLocalLinkClick?: (path: string, fragment?: string) => void;
   onContextMenu?: (info: ViewerContextMenuInfo) => void;
   enableResolve?: boolean;
   searchQuery?: string;
@@ -64,6 +65,7 @@ export const MarkdownViewer = memo(
       selectionText,
       selectionOffset,
       onHighlightClick,
+      onLocalLinkClick,
       onContextMenu: onCtxMenu,
       enableResolve,
       searchQuery,
@@ -279,6 +281,18 @@ export const MarkdownViewer = memo(
     ]);
 
     const handleClick = (e: React.MouseEvent) => {
+      const link = (e.target as HTMLElement).closest(
+        'a[data-mdr-local-md]',
+      ) as HTMLAnchorElement | null;
+      if (link) {
+        e.preventDefault();
+        const path = link.dataset.mdrLocalMd;
+        if (path) {
+          onLocalLinkClick?.(path, link.dataset.mdrFragment);
+        }
+        return;
+      }
+
       const mark = (e.target as HTMLElement).closest(
         '.comment-highlight, .mermaid-comment-highlight',
       ) as HTMLElement | null;

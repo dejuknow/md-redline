@@ -10,6 +10,7 @@ import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import { readPreferences, writePreferences } from './preferences';
+import { injectSvgDimensions } from './svg-dimensions';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION } = require('../package.json') as { version: string };
@@ -25,6 +26,19 @@ const MIME_TYPES: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
 };
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.avif': 'image/avif',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+};
+const IMAGE_EXTENSIONS = new Set(Object.keys(IMAGE_MIME_TYPES));
 
 export interface CreateAppOptions {
   cwd?: string;
@@ -357,6 +371,43 @@ export function createApp(options: CreateAppOptions = {}) {
       }
       console.error('PUT /api/file failed:', err);
       return c.json({ error: 'Failed to write file' }, 500);
+    }
+  });
+
+  app.get('/api/asset', async (c) => {
+    const path = c.req.query('path');
+    if (!path) return c.json({ error: 'path query parameter is required' }, 400);
+
+    try {
+      const resolved = await resolveAndValidate(path);
+      const ext = extname(resolved).toLowerCase();
+      if (!IMAGE_EXTENSIONS.has(ext)) {
+        return c.json({ error: 'Unsupported asset type' }, 400);
+      }
+      // SVG safety: SVGs can contain scripts, but browsers do not execute
+      // scripts inside an SVG loaded via <img src>. The render pipeline only
+      // emits SVGs through <img>, never <object>/<iframe>/inline injection.
+      const headers = {
+        'Content-Type': IMAGE_MIME_TYPES[ext],
+        'Cache-Control': 'private, max-age=300',
+        'X-Content-Type-Options': 'nosniff',
+      };
+      if (ext === '.svg') {
+        // For SVGs that have a viewBox but no explicit width/height, inject
+        // dimensions derived from the viewBox so the browser renders them
+        // at their natural pixel size instead of stretching to fill the
+        // container.
+        const content = injectSvgDimensions(await readFile(resolved));
+        return new Response(content, { headers });
+      }
+      const content = await readFile(resolved);
+      return new Response(content, { headers });
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Access denied')) {
+        return c.json({ error: err.message }, 403);
+      }
+      console.error('GET /api/asset failed:', err);
+      return c.json({ error: 'File not found or not readable' }, 404);
     }
   });
 

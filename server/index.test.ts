@@ -28,6 +28,7 @@ let allowedSymlinkDir: string;
 let outsideSymlinkDir: string;
 let writtenFile: string;
 let initialSiblingFile: string;
+let imageFile: string;
 
 function createExecFileStub(stdout: string) {
   const calls: Array<{ file: string; args: string[] }> = [];
@@ -93,6 +94,14 @@ beforeAll(async () => {
   await writeFile(join(hiddenDir, 'secret.md'), '# Secret\n');
   await writeFile(join(initialDir, 'initial.md'), '# Initial\n');
   await writeFile(initialSiblingFile, '# Follow-up\n\nInitial sibling\n');
+
+  // Tiny 1x1 transparent PNG used for /api/asset tests
+  const TINY_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Z6OFP8AAAAASUVORK5CYII=',
+    'base64',
+  );
+  imageFile = join(docsDir, 'pixel.png');
+  await writeFile(imageFile, TINY_PNG);
 
   await symlink(rootFile, allowedSymlinkFile);
   await symlink(externalFile, outsideSymlinkFile);
@@ -435,6 +444,123 @@ describe('PUT /api/file', () => {
     expect(body).toMatchObject({ success: true, path: initialSiblingFile });
     expect(typeof body.mtime).toBe('number');
     await expect(readFile(initialSiblingFile, 'utf-8')).resolves.toBe(newContent);
+  });
+});
+
+describe('GET /api/asset', () => {
+  it('requires a path query parameter', async () => {
+    const { response, body } = await requestJson(app, '/api/asset');
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'path query parameter is required' });
+  });
+
+  it('serves an image with the correct content type', async () => {
+    const response = await app.request(
+      `http://localhost/api/asset?path=${encodeURIComponent(imageFile)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/png');
+    const buf = Buffer.from(await response.arrayBuffer());
+    expect(buf.length).toBeGreaterThan(0);
+  });
+
+  it('sets a private cache-control header', async () => {
+    const response = await app.request(
+      `http://localhost/api/asset?path=${encodeURIComponent(imageFile)}`,
+    );
+    expect(response.headers.get('cache-control')).toBe('private, max-age=300');
+  });
+
+  it('sets x-content-type-options nosniff', async () => {
+    const response = await app.request(
+      `http://localhost/api/asset?path=${encodeURIComponent(imageFile)}`,
+    );
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('treats an empty path query the same as missing', async () => {
+    const { response, body } = await requestJson(app, '/api/asset?path=');
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'path query parameter is required' });
+  });
+
+  it('rejects paths outside allowed roots with 403', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/asset?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: 'Access denied: path outside allowed directories' });
+  });
+
+  it('rejects non-image extensions with 400', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/asset?path=${encodeURIComponent(textFile)}`,
+    );
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: 'Unsupported asset type' });
+  });
+
+  it('returns 404 for a missing image file', async () => {
+    const missing = join(docsDir, 'does-not-exist.png');
+    const { response, body } = await requestJson(
+      app,
+      `/api/asset?path=${encodeURIComponent(missing)}`,
+    );
+    expect(response.status).toBe(404);
+    expect(body).toEqual({ error: 'File not found or not readable' });
+  });
+
+  it('serves an image referenced via a symlink that resolves inside allowed roots', async () => {
+    const link = join(docsDir, 'pixel-link.png');
+    await symlink(imageFile, link);
+    try {
+      const response = await app.request(
+        `http://localhost/api/asset?path=${encodeURIComponent(link)}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
+    } finally {
+      await rm(link, { force: true });
+    }
+  });
+
+  it('injects width/height into a viewBox-only svg', async () => {
+    const svgPath = join(docsDir, 'viewbox-only.svg');
+    await writeFile(
+      svgPath,
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 116"><rect/></svg>',
+    );
+    try {
+      const response = await app.request(
+        `http://localhost/api/asset?path=${encodeURIComponent(svgPath)}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/svg+xml');
+      const text = await response.text();
+      expect(text).toContain('width="100"');
+      expect(text).toContain('height="116"');
+      expect(text).toContain('viewBox="0 0 100 116"');
+    } finally {
+      await rm(svgPath, { force: true });
+    }
+  });
+
+  it('leaves a sized svg unchanged', async () => {
+    const svgPath = join(docsDir, 'sized.svg');
+    const original = '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect/></svg>';
+    await writeFile(svgPath, original);
+    try {
+      const response = await app.request(
+        `http://localhost/api/asset?path=${encodeURIComponent(svgPath)}`,
+      );
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toBe(original);
+    } finally {
+      await rm(svgPath, { force: true });
+    }
   });
 });
 

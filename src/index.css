@@ -680,6 +680,18 @@
   color: inherit;
 }
 
+/* Image sizing.
+   Constrain to the prose container width and preserve aspect ratio.
+   The server-side /api/asset route injects width/height attributes for
+   dimensionless SVGs (those with only viewBox), so the browser renders
+   them at their natural pixel size instead of stretching to fill the
+   container. Raster images and explicitly-sized SVGs already render at
+   their intrinsic size. */
+.prose :where(img):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Reset prose mark styling so our highlights aren't overridden by the
    Typography plugin or browser dark-mode defaults */
 .prose mark,
