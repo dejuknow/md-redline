@@ -96,6 +96,136 @@ describe('applyPendingTabState', () => {
   });
 });
 
+describe('applyPendingTabState — extended', () => {
+  it('sets isLoading and empty markdown on new pending tab', () => {
+    const path = '/tmp/new.md';
+    const result = applyPendingTabState(new Map(), [], null, path, true);
+
+    const tab = result.tabData.get(path)!;
+    expect(tab.isLoading).toBe(true);
+    expect(tab.rawMarkdown).toBe('');
+    expect(tab.error).toBeNull();
+    expect(tab.lastSaved).toBeNull();
+  });
+
+  it('activate=true sets the new path as activeFilePath', () => {
+    const existing = '/tmp/existing.md';
+    const newPath = '/tmp/new.md';
+    const prevData = new Map([[existing, makeTab(existing, { isLoading: false })]]);
+    const result = applyPendingTabState(prevData, [existing], existing, newPath, true);
+
+    expect(result.activeFilePath).toBe(newPath);
+    expect(result.tabOrder).toEqual([existing, newPath]);
+  });
+
+  it('activate=false preserves previous activeFilePath', () => {
+    const existing = '/tmp/existing.md';
+    const newPath = '/tmp/bg.md';
+    const prevData = new Map([[existing, makeTab(existing, { isLoading: false })]]);
+    const result = applyPendingTabState(prevData, [existing], existing, newPath, false);
+
+    expect(result.activeFilePath).toBe(existing);
+    expect(result.tabOrder).toEqual([existing, newPath]);
+  });
+
+  it('appends to the end of tabOrder', () => {
+    const a = '/tmp/a.md';
+    const b = '/tmp/b.md';
+    const c = '/tmp/c.md';
+
+    let state = applyPendingTabState(new Map(), [], null, a, true);
+    state = applyPendingTabState(state.tabData, state.tabOrder, state.activeFilePath, b, false);
+    state = applyPendingTabState(state.tabData, state.tabOrder, state.activeFilePath, c, false);
+
+    expect(state.tabOrder).toEqual([a, b, c]);
+  });
+});
+
+describe('applyLoadedTabState — extended', () => {
+  it('same-path load updates content in place without modifying order', () => {
+    const path = '/tmp/file.md';
+    const prevData = new Map([[path, makeTab(path)]]);
+    const result = applyLoadedTabState(
+      prevData, [path], path, path, path, '# Content\n', new Date(),
+    );
+
+    expect(result.tabOrder).toEqual([path]);
+    expect(result.activeFilePath).toBe(path);
+    expect(result.tabData.get(path)).toMatchObject({
+      rawMarkdown: '# Content\n',
+      isLoading: false,
+    });
+  });
+
+  it('preserves position in order when re-keying a tab', () => {
+    const a = '/tmp/a.md';
+    const link = '/tmp/link.md';
+    const real = '/tmp/real.md';
+    const c = '/tmp/c.md';
+
+    const prevData = new Map<string, TabState>([
+      [a, makeTab(a, { isLoading: false })],
+      [link, makeTab(link)],
+      [c, makeTab(c, { isLoading: false })],
+    ]);
+
+    const result = applyLoadedTabState(
+      prevData, [a, link, c], link, link, real, '# Real\n', new Date(),
+    );
+
+    // 'real' should replace 'link' in position index 1
+    expect(result.tabOrder).toEqual([a, real, c]);
+    expect(result.tabData.has(link)).toBe(false);
+    expect(result.tabData.get(real)?.rawMarkdown).toBe('# Real\n');
+  });
+
+  it('does not change activeFilePath when a non-active tab is re-keyed', () => {
+    const active = '/tmp/active.md';
+    const link = '/tmp/link.md';
+    const real = '/tmp/real.md';
+
+    const prevData = new Map<string, TabState>([
+      [active, makeTab(active, { isLoading: false })],
+      [link, makeTab(link)],
+    ]);
+
+    const result = applyLoadedTabState(
+      prevData, [active, link], active, link, real, '# Content\n', new Date(),
+    );
+
+    // activeFilePath should remain 'active', not switch to 'real'
+    expect(result.activeFilePath).toBe(active);
+  });
+
+  it('updates activeFilePath when the active tab is re-keyed', () => {
+    const link = '/tmp/link.md';
+    const real = '/tmp/real.md';
+    const other = '/tmp/other.md';
+
+    const prevData = new Map<string, TabState>([
+      [link, makeTab(link)],
+      [other, makeTab(other, { isLoading: false })],
+    ]);
+
+    const result = applyLoadedTabState(
+      prevData, [link, other], link, link, real, '# Content\n', new Date(),
+    );
+
+    expect(result.activeFilePath).toBe(real);
+  });
+
+  it('sets lastSaved on loaded tab', () => {
+    const path = '/tmp/file.md';
+    const savedAt = new Date('2026-01-15T12:00:00.000Z');
+    const prevData = new Map([[path, makeTab(path)]]);
+    const result = applyLoadedTabState(
+      prevData, [path], path, path, path, '# Content\n', savedAt,
+    );
+
+    expect(result.tabData.get(path)?.lastSaved).toEqual(savedAt);
+  });
+});
+
 describe('TabState dirty flag', () => {
   it('defaults to undefined (not dirty) on new tabs', () => {
     const path = '/tmp/test.md';

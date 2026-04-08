@@ -49,3 +49,6 @@ eval/results/
 .gstack/
 AGENTS.md
 CLAUDE.md
+
+# Git worktrees
+.worktrees/

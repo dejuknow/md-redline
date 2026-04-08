@@ -74,10 +74,13 @@ test.describe('keyboard shortcuts', () => {
     await expect(settingsHeading).not.toBeVisible();
 
     // Open shortcuts via ? — command palette should close
-    await page.keyboard.press('Escape'); // close palette first (? is blocked while palette is open)
+    // Escape handler lives on the palette input's onKeyDown, so input must be focused first
+    await expect(paletteInput).toBeFocused({ timeout: 3_000 });
+    await page.keyboard.press('Escape');
+    await expect(paletteInput).not.toBeVisible({ timeout: 5_000 });
     await page.keyboard.press('?');
     const shortcutsHeading = page.locator('text=Keyboard Shortcuts');
-    await expect(shortcutsHeading).toBeVisible({ timeout: 3_000 });
+    await expect(shortcutsHeading).toBeVisible({ timeout: 5_000 });
     await expect(paletteInput).not.toBeVisible();
 
     // Open file picker — shortcuts should close

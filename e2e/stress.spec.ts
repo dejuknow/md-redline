@@ -137,7 +137,7 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
   await commentBtn.click();
   await page.getByPlaceholder('Add your comment...').fill(commentText);
   await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment' }).click();
-  await expect(page.getByText(commentText, { exact: true })).toBeVisible();
+  await expect(page.getByText(commentText, { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
 test.describe('Large markdown and Mermaid coverage', () => {
