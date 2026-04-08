@@ -705,11 +705,14 @@ mark {
 mark.comment-highlight {
   background-color: var(--theme-comment-bg);
   color: var(--theme-text);
-  text-decoration: underline 2px var(--theme-comment-underline);
+  text-decoration: underline 3px var(--theme-comment-underline);
   text-underline-offset: 2px;
   cursor: pointer;
-  border-radius: 2px;
-  transition: background-color 0.15s ease;
+  border-radius: 3px;
+  transition:
+    background-color 0.15s ease,
+    text-decoration-color 0.15s ease,
+    outline-color 0.15s ease;
   line-height: inherit;
 }
 

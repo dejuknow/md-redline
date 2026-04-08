@@ -3,12 +3,15 @@ import DOMPurify from 'dompurify';
 let mermaidModule: typeof import('mermaid') | null = null;
 let initTheme: string | null = null;
 let themeChangePromise: Promise<void> | null = null;
+let renderQueue: Promise<unknown> = Promise.resolve();
 
 const FLOWCHART_CONFIG = {
   useMaxWidth: true,
   wrappingWidth: 200,
   rankSpacing: 70,
 } as const;
+
+const VALID_MERMAID_THEMES = new Set(['default', 'dark', 'forest', 'neutral', 'base']);
 
 async function getMermaid() {
   if (!mermaidModule) {
@@ -39,6 +42,7 @@ const THEME_MAP: Record<string, string> = {
 };
 
 export function getMermaidTheme(appTheme: string): string {
+  if (VALID_MERMAID_THEMES.has(appTheme)) return appTheme;
   return THEME_MAP[appTheme] || 'default';
 }
 
@@ -48,39 +52,53 @@ export async function renderMermaidBlock(
   source: string,
   appTheme: string,
 ): Promise<{ svg: string } | { error: string }> {
-  try {
-    const mermaid = await getMermaid();
-    const mermaidTheme = getMermaidTheme(appTheme);
+  const run = async (): Promise<{ svg: string } | { error: string }> => {
+    try {
+      const mermaid = await getMermaid();
+      const mermaidTheme = getMermaidTheme(appTheme);
 
-    // Serialize theme changes to avoid concurrent re-initialization races.
-    // After awaiting a pending promise, re-check in case a newer theme was
-    // requested while we were waiting (rapid toggling).
-    while (mermaidTheme !== initTheme) {
-      if (!themeChangePromise) {
-        themeChangePromise = (async () => {
-          mermaid.initialize({
-            startOnLoad: false,
-            securityLevel: 'strict',
-            theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
-            htmlLabels: true,
-            flowchart: FLOWCHART_CONFIG,
+      // Serialize theme changes to avoid concurrent re-initialization races.
+      // After awaiting a pending promise, re-check in case a newer theme was
+      // requested while we were waiting (rapid toggling).
+      while (mermaidTheme !== initTheme) {
+        if (!themeChangePromise) {
+          const currentThemeChange = Promise.resolve().then(() => {
+            mermaid.initialize({
+              startOnLoad: false,
+              securityLevel: 'strict',
+              theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
+              htmlLabels: true,
+              flowchart: FLOWCHART_CONFIG,
+            });
+            initTheme = mermaidTheme;
           });
-          initTheme = mermaidTheme;
-          themeChangePromise = null;
-        })();
+          const wrappedThemeChange = currentThemeChange.finally(() => {
+            if (themeChangePromise === wrappedThemeChange) {
+              themeChangePromise = null;
+            }
+          });
+          themeChangePromise = wrappedThemeChange;
+        }
+        await themeChangePromise;
       }
-      await themeChangePromise;
-    }
 
-    const id = `mermaid-svg-${++renderCounter}`;
-    const { svg } = await mermaid.render(id, source.trim());
-    const cleanSvg = DOMPurify.sanitize(svg, {
-      USE_PROFILES: { html: true, svg: true, svgFilters: true },
-    });
-    return { svg: cleanSvg };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
-  }
+      const id = `mermaid-svg-${++renderCounter}`;
+      const { svg } = await mermaid.render(id, source.trim());
+      const cleanSvg = DOMPurify.sanitize(svg, {
+        USE_PROFILES: { html: true, svg: true, svgFilters: true },
+      });
+      return { svg: cleanSvg };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  };
+
+  const queuedRender = renderQueue.then(run, run);
+  renderQueue = queuedRender.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queuedRender;
 }
 
 /** Quick check if clean markdown contains any mermaid fenced code blocks */

@@ -1,10 +1,12 @@
 import {
+  forwardRef,
   useState,
   useRef,
   useMemo,
   useCallback,
   useEffect,
   useLayoutEffect,
+  type ComponentProps,
   type RefObject,
 } from 'react';
 import { useTabs } from './hooks/useTabs';
@@ -42,10 +44,11 @@ import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
-import { useThemePersistence } from './hooks/useThemePersistence';
+import { usePersistedTheme, useSetPersistedTheme } from './hooks/useThemePersistence';
 import { migrateLocalStorageToDisk } from './lib/preferences-client';
 import { readJsonResponse } from './lib/http';
 import { ALL_THEMES } from './lib/themes';
+import { hasMermaidBlocks } from './lib/mermaid-renderer';
 import { usePaneLayout } from './hooks/usePaneLayout';
 import { useToast } from './hooks/useToast';
 import { useModalState } from './hooks/useModalState';
@@ -55,12 +58,20 @@ import { useDiffSnapshot } from './hooks/useDiffSnapshot';
 import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
+import { getCopySelectionFallbackText } from './lib/copy-selection';
 import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
 const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
+
+const ThemedMarkdownViewer = forwardRef<MarkdownViewerHandle, ComponentProps<typeof MarkdownViewer>>(
+  function ThemedMarkdownViewer(props, ref) {
+    const theme = usePersistedTheme();
+    return <MarkdownViewer ref={ref} {...props} theme={theme} />;
+  },
+);
 
 export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
@@ -208,7 +219,7 @@ export default function App() {
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
-  const { theme, setTheme } = useThemePersistence();
+  const setTheme = useSetPersistedTheme();
   const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
   const pageVisible = usePageVisible();
   const {
@@ -452,6 +463,8 @@ export default function App() {
       setDiffEnabled(false);
     }
   }, [diffEnabled, viewMode, setViewMode, setDiffEnabled]);
+
+  const viewerNeedsTheme = useMemo(() => hasMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
 
   // Heading tracking / table of contents
   const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
@@ -1060,6 +1073,26 @@ export default function App() {
     setSearchFocusTrigger,
   ]);
 
+  useEffect(() => {
+    const handleCopy = (e: ClipboardEvent) => {
+      const fallbackText = getCopySelectionFallbackText({
+        nativeSelectionText: window.getSelection()?.toString() ?? '',
+        viewerSelectionText: selectionRef.current?.text ?? null,
+        activeElement: document.activeElement as HTMLElement | null,
+        viewMode,
+      });
+      if (!fallbackText || !e.clipboardData) return;
+
+      // The viewer paints its own selection highlight, which clears the native
+      // browser selection range. Restore expected copy behavior from app state.
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', fallbackText);
+    };
+
+    document.addEventListener('copy', handleCopy);
+    return () => document.removeEventListener('copy', handleCopy);
+  }, [viewMode]);
+
   // Command palette commands — split into categories for manageable dependency arrays
   const navigationCommands = useMemo(
     (): Command[] => [
@@ -1543,25 +1576,45 @@ export default function App() {
                 className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
               >
                 <div className="max-w-3xl mx-auto">
-                  <MarkdownViewer
-                    ref={viewerRef}
-                    html={html}
-                    cleanMarkdown={cleanMarkdown}
-                    comments={comments}
-                    activeCommentId={activeCommentId}
-                    selectionText={selection?.text ?? null}
-                    selectionOffset={selection?.offset ?? null}
-                    onHighlightClick={handleHighlightClick}
-                    // Fragment arg is intentionally ignored in v1; openTab
-                    // takes only the path. See spec §3 non-goals.
-                    onLocalLinkClick={openTab}
-                    onContextMenu={handleViewerContextMenu}
-                    enableResolve={settings.enableResolve}
-                    searchQuery={showSearch ? searchQuery : undefined}
-                    searchActiveIndex={activeSearchIndex}
-                    onSearchCount={handleSearchCount}
-                    theme={theme}
-                  />
+                  {viewerNeedsTheme ? (
+                    <ThemedMarkdownViewer
+                      ref={viewerRef}
+                      html={html}
+                      cleanMarkdown={cleanMarkdown}
+                      comments={comments}
+                      activeCommentId={activeCommentId}
+                      selectionText={selection?.text ?? null}
+                      selectionOffset={selection?.offset ?? null}
+                      onHighlightClick={handleHighlightClick}
+                      // Fragment arg is intentionally ignored in v1; openTab
+                      // takes only the path. See spec §3 non-goals.
+                      onLocalLinkClick={openTab}
+                      onContextMenu={handleViewerContextMenu}
+                      enableResolve={settings.enableResolve}
+                      searchQuery={showSearch ? searchQuery : undefined}
+                      searchActiveIndex={activeSearchIndex}
+                      onSearchCount={handleSearchCount}
+                    />
+                  ) : (
+                    <MarkdownViewer
+                      ref={viewerRef}
+                      html={html}
+                      cleanMarkdown={cleanMarkdown}
+                      comments={comments}
+                      activeCommentId={activeCommentId}
+                      selectionText={selection?.text ?? null}
+                      selectionOffset={selection?.offset ?? null}
+                      onHighlightClick={handleHighlightClick}
+                      // Fragment arg is intentionally ignored in v1; openTab
+                      // takes only the path. See spec §3 non-goals.
+                      onLocalLinkClick={openTab}
+                      onContextMenu={handleViewerContextMenu}
+                      enableResolve={settings.enableResolve}
+                      searchQuery={showSearch ? searchQuery : undefined}
+                      searchActiveIndex={activeSearchIndex}
+                      onSearchCount={handleSearchCount}
+                    />
+                  )}
                   <DragHandles
                     startPos={handlePositions?.start ?? null}
                     endPos={handlePositions?.end ?? null}

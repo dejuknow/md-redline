@@ -247,7 +247,6 @@ export const MarkdownViewer = memo(
         applyMermaidHighlightStyles(el, mermaidTheme, isActive);
       }
       const cleanupMermaidLayout = scheduleMermaidLayoutStabilization(container);
-
       // --- Selection highlight ---
       if (selectionText) {
         wrapText(
