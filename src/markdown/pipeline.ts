@@ -10,6 +10,14 @@ import { rewriteLocalUrls } from './rewriteLocalUrls';
 
 // Allow mark elements (used for comment highlights), data-* attributes, and
 // the data-mdr-* attrs that the local-link rewriter emits on <a> tags.
+// Allow className only on elements that remark-gfm / remark-rehype / our
+// highlight pipeline actually emit classes on. A wildcard `*` would let
+// markdown authors apply arbitrary CSS classes for UI spoofing.
+const CLASS_NAME_ELEMENTS = [
+  'code', 'pre', 'span', 'li', 'input', 'div',
+  'table', 'thead', 'tbody', 'tr', 'td', 'th',
+] as const;
+
 const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames || []), 'mark'],
@@ -23,7 +31,12 @@ const sanitizeSchema = {
       'target',
       'rel',
     ],
-    '*': [...(defaultSchema.attributes?.['*'] || []), 'className'],
+    ...Object.fromEntries(
+      CLASS_NAME_ELEMENTS.map((tag) => [
+        tag,
+        [...(defaultSchema.attributes?.[tag] || []), 'className'],
+      ]),
+    ),
   },
 };
 

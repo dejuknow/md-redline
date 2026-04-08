@@ -39,8 +39,17 @@ export function loadSettings(): AppSettings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
+    const validTemplates = Array.isArray(parsed.templates)
+      ? parsed.templates.filter(
+          (t: unknown) =>
+            typeof t === 'object' &&
+            t !== null &&
+            typeof (t as Record<string, unknown>).label === 'string' &&
+            typeof (t as Record<string, unknown>).text === 'string',
+        )
+      : DEFAULT_SETTINGS.templates;
     return {
-      templates: Array.isArray(parsed.templates) ? parsed.templates : DEFAULT_SETTINGS.templates,
+      templates: validTemplates,
       commentMaxLength:
         typeof parsed.commentMaxLength === 'number' && parsed.commentMaxLength > 0
           ? parsed.commentMaxLength

@@ -547,6 +547,33 @@ describe('GET /api/asset', () => {
     }
   });
 
+  it('sets Content-Security-Policy sandbox on SVG responses to prevent XSS', async () => {
+    const svgPath = join(docsDir, 'csp-test.svg');
+    await writeFile(
+      svgPath,
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>alert(1)</script></svg>',
+    );
+    try {
+      const response = await app.request(
+        `http://localhost/api/asset?path=${encodeURIComponent(svgPath)}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-security-policy')).toBe(
+        "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      );
+    } finally {
+      await rm(svgPath, { force: true });
+    }
+  });
+
+  it('does not set CSP sandbox header on non-SVG images', async () => {
+    const response = await app.request(
+      `http://localhost/api/asset?path=${encodeURIComponent(imageFile)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-security-policy')).toBeNull();
+  });
+
   it('leaves a sized svg unchanged', async () => {
     const svgPath = join(docsDir, 'sized.svg');
     const original = '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect/></svg>';
@@ -890,7 +917,7 @@ describe('Content-Type enforcement', () => {
 });
 
 describe('/api/reveal', () => {
-  it('uses osascript on macOS to reveal and activate Finder', async () => {
+  it('uses osascript on macOS with argv pattern to reveal and activate Finder', async () => {
     const { calls, execFileImpl } = createExecFileStub('');
     const macApp = createApp({
       cwd: cwdRoot,
@@ -909,8 +936,11 @@ describe('/api/reveal', () => {
     expect(body).toEqual({ success: true });
     expect(calls).toHaveLength(1);
     expect(calls[0].file).toBe('osascript');
-    expect(calls[0].args).toContain('-e');
-    expect(calls[0].args.join(' ')).toContain('tell application "Finder" to reveal');
+    // Verify argv-based pattern (no string interpolation of the path)
+    expect(calls[0].args).toContain('on run argv');
+    expect(calls[0].args).toContain('end run');
+    expect(calls[0].args).toContain(docsFile);
+    expect(calls[0].args.join(' ')).toContain('item 1 of argv');
     expect(calls[0].args.join(' ')).toContain('tell application "Finder" to activate');
   });
 
@@ -940,7 +970,7 @@ describe('/api/reveal', () => {
 });
 
 describe('/api/grant-access', () => {
-  it('grants access to an external directory', async () => {
+  it('rejects granting access to an external directory outside allowed roots', async () => {
     const freshApp = createApp({
       cwd: cwdRoot,
       homeDir: fakeHome,
@@ -954,22 +984,32 @@ describe('/api/grant-access', () => {
     );
     expect(before.response.status).toBe(403);
 
-    // Grant access to the external directory
+    // Grant access to the external directory — should be rejected
     const grant = await requestJson(freshApp, '/api/grant-access', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: externalDir }),
     });
-    expect(grant.response.status).toBe(200);
-    expect(grant.body).toEqual({ granted: externalDir });
+    expect(grant.response.status).toBe(403);
+    expect(grant.body).toEqual({ error: 'Cannot grant access outside allowed directories' });
 
-    // External file should now be accessible
+    // External file should still be blocked
     const after = await requestJson(
       freshApp,
       `/api/file?path=${encodeURIComponent(externalFile)}`,
     );
-    expect(after.response.status).toBe(200);
-    expect(after.body).toMatchObject({ content: '# Outside\n' });
+    expect(after.response.status).toBe(403);
+  });
+
+  it('allows granting access to a subdirectory of an allowed root', async () => {
+    const { response, body } = await requestJson(app, '/api/grant-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: docsDir }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ granted: docsDir });
   });
 
   it('is idempotent for already-allowed paths', async () => {

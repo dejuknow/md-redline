@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import { readFile, readdir, stat, realpath, rename, open } from 'fs/promises';
+import { randomBytes } from 'crypto';
 import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
@@ -89,6 +90,9 @@ function sseFrame(event: string, data: string): Uint8Array {
 }
 
 const sseEncoder = new TextEncoder();
+
+const MAX_ALLOWED_ROOTS = 50;
+const MAX_WRITTEN_CACHE = 100;
 
 export function createApp(options: CreateAppOptions = {}) {
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
@@ -237,8 +241,14 @@ export function createApp(options: CreateAppOptions = {}) {
       }
     }
     const canon = canonicalize(real);
-    if (!allowedRoots.some((root) => isPathInsideRoot(canon, root, caseInsensitivePaths))) {
-      allowedRoots.push(canon);
+    // Only allow granting access to paths within existing allowed roots.
+    // This prevents a cross-origin attacker from escalating to arbitrary
+    // filesystem paths via a rogue localhost process.
+    const withinExisting = allowedRoots.some((root) =>
+      isPathInsideRoot(canon, root, caseInsensitivePaths),
+    );
+    if (!withinExisting) {
+      return c.json({ error: 'Cannot grant access outside allowed directories' }, 403);
     }
     return c.json({ granted: canon });
   });
@@ -275,11 +285,19 @@ export function createApp(options: CreateAppOptions = {}) {
       if (!isMdFile(resolved)) {
         return c.json({ error: 'Only .md files are supported' }, 400);
       }
-      const [content, fileStat] = await Promise.all([
-        readFile(resolved, 'utf-8'),
-        stat(resolved),
-      ]);
-      return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
+      // Use a file descriptor so content and mtime are read from the
+      // same inode, preventing a TOCTOU race where an external write
+      // between readFile and stat yields mismatched content/mtime.
+      const fd = await open(resolved, 'r');
+      try {
+        const [content, fileStat] = await Promise.all([
+          fd.readFile('utf-8'),
+          fd.stat(),
+        ]);
+        return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
+      } finally {
+        await fd.close();
+      }
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         return c.json({ error: err.message }, 403);
@@ -336,13 +354,9 @@ export function createApp(options: CreateAppOptions = {}) {
 
           // Atomic write: write to a temp file then rename, so a crash
           // mid-write can't leave a half-written file on disk.
-          // Use O_EXCL to prevent symlink clobber attacks on the temp file.
-          const tmpPath = `${resolved}.tmp`;
-          try {
-            unlinkSync(tmpPath);
-          } catch {
-            // No existing file — fine
-          }
+          // Use a random suffix to prevent DoS from a stale or adversarial
+          // .tmp file blocking saves, and O_EXCL to prevent symlink attacks.
+          const tmpPath = `${resolved}.${randomBytes(6).toString('hex')}.tmp`;
           const fd = await open(tmpPath, 'wx');
           try {
             await fd.writeFile(body.content, 'utf-8');
@@ -351,6 +365,11 @@ export function createApp(options: CreateAppOptions = {}) {
           }
           await rename(tmpPath, resolved);
           lastWrittenContent.set(resolved, body.content);
+          // LRU eviction: cap cache size to prevent unbounded memory growth
+          if (lastWrittenContent.size > MAX_WRITTEN_CACHE) {
+            const oldest = lastWrittenContent.keys().next().value!;
+            lastWrittenContent.delete(oldest);
+          }
           console.log(
             `[SAVE OK] ${resolved} — ${commentCount} comment(s), ${body.content.length} bytes`,
           );
@@ -384,14 +403,19 @@ export function createApp(options: CreateAppOptions = {}) {
       if (!IMAGE_EXTENSIONS.has(ext)) {
         return c.json({ error: 'Unsupported asset type' }, 400);
       }
-      // SVG safety: SVGs can contain scripts, but browsers do not execute
-      // scripts inside an SVG loaded via <img src>. The render pipeline only
-      // emits SVGs through <img>, never <object>/<iframe>/inline injection.
-      const headers = {
+      const headers: Record<string, string> = {
         'Content-Type': IMAGE_MIME_TYPES[ext],
         'Cache-Control': 'private, max-age=300',
         'X-Content-Type-Options': 'nosniff',
       };
+      // SVG safety: when loaded via <img src>, browsers block embedded
+      // scripts. But if the user opens the SVG directly in a new tab
+      // (middle-click, crafted target="_blank"), scripts execute on our
+      // origin. The CSP sandbox + script-src 'none' prevent this.
+      if (ext === '.svg') {
+        headers['Content-Security-Policy'] =
+          "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+      }
       if (ext === '.svg') {
         // For SVGs that have a viewBox but no explicit width/height, inject
         // dimensions derived from the viewBox so the browser renders them
@@ -534,12 +558,18 @@ export function createApp(options: CreateAppOptions = {}) {
       const pickedDir = dirname(resolve(path));
       try {
         const realDir = canonicalize(pickedDir);
-        if (!allowedRoots.some((root) => isPathInsideRoot(realDir, root, caseInsensitivePaths))) {
+        if (
+          allowedRoots.length < MAX_ALLOWED_ROOTS &&
+          !allowedRoots.some((root) => isPathInsideRoot(realDir, root, caseInsensitivePaths))
+        ) {
           allowedRoots.push(realDir);
         }
       } catch {
         // Can't canonicalize — add the raw resolved dir
-        if (!allowedRoots.some((root) => isPathInsideRoot(pickedDir, root, caseInsensitivePaths))) {
+        if (
+          allowedRoots.length < MAX_ALLOWED_ROOTS &&
+          !allowedRoots.some((root) => isPathInsideRoot(pickedDir, root, caseInsensitivePaths))
+        ) {
           allowedRoots.push(pickedDir);
         }
       }
@@ -715,14 +745,17 @@ export function createApp(options: CreateAppOptions = {}) {
       const resolved = await resolveAndValidate(body.path);
       await new Promise<void>((promiseResolve, reject) => {
         if (platformName === 'darwin') {
-          const escaped = resolved.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          // Use 'on run argv' to pass the path as an argument instead of
+          // interpolating it into AppleScript source, eliminating any
+          // injection surface from exotic path characters.
           execFileImpl(
             'osascript',
             [
-              '-e',
-              `tell application "Finder" to reveal POSIX file "${escaped}"`,
-              '-e',
-              'tell application "Finder" to activate',
+              '-e', 'on run argv',
+              '-e', 'tell application "Finder" to reveal POSIX file (item 1 of argv)',
+              '-e', 'tell application "Finder" to activate',
+              '-e', 'end run',
+              resolved,
             ],
             (err) => {
               if (err) return reject(err);
@@ -770,6 +803,8 @@ export function createApp(options: CreateAppOptions = {}) {
       if (!filePath.startsWith(resolvedStaticDir)) {
         return new Response('Not Found', { status: 404 });
       }
+      const CSP_HTML =
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'";
       try {
         const content = await readFile(filePath);
         const ext = extname(filePath);
@@ -777,13 +812,17 @@ export function createApp(options: CreateAppOptions = {}) {
         return new Response(content, {
           headers: {
             'Content-Type': mime,
-            ...(ext !== '.html' ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : {}),
+            ...(ext === '.html'
+              ? { 'Content-Security-Policy': CSP_HTML }
+              : { 'Cache-Control': 'public, max-age=31536000, immutable' }),
           },
         });
       } catch {
         // SPA fallback
         const html = await readFile(indexPath);
-        return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+        return new Response(html, {
+          headers: { 'Content-Type': 'text/html', 'Content-Security-Policy': CSP_HTML },
+        });
       }
     });
   }

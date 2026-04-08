@@ -133,6 +133,7 @@ function spawnDetached(command, args, options = {}) {
 }
 
 function killPort(port) {
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return false;
   try {
     if (process.platform === 'win32') {
       const output = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8' });

@@ -258,10 +258,11 @@ export function serializeComment(comment: MdComment): string {
   // Strip cleanOffset — it's computed at parse time, not persisted
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { cleanOffset, ...data } = comment;
-  // Escape --> in the JSON to prevent it from closing the HTML comment
-  // prematurely. \u003e is the Unicode escape for >, which JSON.parse
-  // decodes back to > automatically — no manual unescaping needed.
-  const json = JSON.stringify(data).replace(/-->/g, '--\\u003e');
+  // Escape --> and --!> in the JSON to prevent them from closing the HTML
+  // comment prematurely. The HTML spec treats both as comment-close sequences.
+  // \u003e is the Unicode escape for >, which JSON.parse decodes back to >
+  // automatically — no manual unescaping needed.
+  const json = JSON.stringify(data).replace(/-->/g, '--\\u003e').replace(/--!>/g, '--!\\u003e');
   return `<!-- @comment${json} -->`;
 }
 
@@ -740,7 +741,12 @@ export function removeResolvedComments(rawMarkdown: string): string {
  * allowing any single whitespace char in the needle to match any single whitespace char
  * in the haystack (e.g. space matches newline). Returns {start, end} in haystack coords
  * or null if not found.
+ *
+ * Bail out after MAX_FLEXIBLE_SEARCH_ITERATIONS to prevent O(N*M) DoS when a
+ * malicious file has a highly repetitive pattern and the anchor's first word
+ * matches everywhere.
  */
+const MAX_FLEXIBLE_SEARCH_ITERATIONS = 10_000;
 function flexibleIndexOf(
   haystack: string,
   needle: string,
@@ -760,7 +766,9 @@ function flexibleIndexOf(
   }
 
   let search = startFrom;
+  let iterations = 0;
   while (search < haystack.length) {
+    if (++iterations > MAX_FLEXIBLE_SEARCH_ITERATIONS) return null;
     const firstIdx = haystack.indexOf(parts[0], search);
     if (firstIdx === -1) return null;
 

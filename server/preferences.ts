@@ -1,5 +1,5 @@
 import { readFile, rename, open } from 'fs/promises';
-import { unlinkSync } from 'fs';
+import { randomBytes } from 'crypto';
 import { join } from 'path';
 
 const PREFS_FILENAME = '.md-redline.json';
@@ -53,12 +53,7 @@ export async function writePreferences(
         const existing = await readPreferences(homeDir);
         const merged = { ...existing, ...patch };
         const filePath = prefsPath(homeDir);
-        const tmpPath = filePath + '.tmp';
-        try {
-          unlinkSync(tmpPath);
-        } catch {
-          // No existing file — fine
-        }
+        const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
         const fd = await open(tmpPath, 'wx');
         try {
           await fd.writeFile(JSON.stringify(merged, null, 2) + '\n', 'utf-8');
