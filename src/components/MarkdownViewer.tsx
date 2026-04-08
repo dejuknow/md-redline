@@ -550,6 +550,8 @@ function wrapText(
       }
     }
   }
+
+  pruneEmptyInlineFormatting(container);
 }
 
 const BLOCK_TAGS = new Set([
@@ -619,6 +621,26 @@ function flexibleSearch(
     searchFrom = firstIdx + 1;
   }
   return null;
+}
+
+const EMPTY_INLINE_TAGS = new Set(['CODE', 'EM', 'STRONG', 'DEL', 'S', 'SUB', 'SUP', 'SPAN', 'A']);
+
+function pruneEmptyInlineFormatting(container: HTMLElement) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
+  const toRemove: HTMLElement[] = [];
+  let node: Node | null;
+
+  while ((node = walker.nextNode())) {
+    const el = node as HTMLElement;
+    if (!EMPTY_INLINE_TAGS.has(el.tagName)) continue;
+    if (el.querySelector('img, svg, input, br, hr, iframe, video, audio, canvas')) continue;
+    if ((el.textContent || '').trim().length > 0) continue;
+    toRemove.push(el);
+  }
+
+  for (const el of toRemove.reverse()) {
+    el.remove();
+  }
 }
 
 /** Find all case-insensitive occurrences of `query` in the container's text and wrap them
