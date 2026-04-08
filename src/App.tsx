@@ -14,7 +14,11 @@ import { useFileWatcher } from './hooks/useFileWatcher';
 import { usePageVisible } from './hooks/usePageVisible';
 import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
-import { parseComments } from './lib/comment-parser';
+import {
+  backfillReplyTimestamps,
+  findNewReplyIds,
+  parseComments,
+} from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
@@ -83,6 +87,8 @@ export default function App() {
     closeTabsToRight: closeTabsToRightDirect,
     switchTab,
     saveFile,
+    saveFileAt,
+    getTabSnapshot,
     reloadFile,
   } = useTabs({ onSaveError });
 
@@ -439,10 +445,31 @@ export default function App() {
     }
   }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId]);
 
+  // Override agent-supplied reply timestamps with the file's mtime. LLM agents
+  // can't reliably know "now," so without this they hallucinate timestamps
+  // that look like reasonable ISO-8601 strings but are hours stale. Returns
+  // the corrected content (or the original if no override was needed).
+  const correctReplyTimestamps = useCallback(
+    (oldContent: string, newContent: string, mtime: number | undefined): string => {
+      try {
+        const { comments: oldComments } = parseComments(oldContent);
+        const { comments: newComments } = parseComments(newContent);
+        const newReplyIds = findNewReplyIds(oldComments, newComments);
+        if (newReplyIds.size === 0) return newContent;
+        const fallbackIso =
+          mtime != null ? new Date(mtime).toISOString() : new Date().toISOString();
+        return backfillReplyTimestamps(newContent, newReplyIds, fallbackIso);
+      } catch {
+        return newContent;
+      }
+    },
+    [],
+  );
+
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
   const onExternalChange = useCallback(
     (content: string, mtime?: number) => {
-      // Detect comment changes before updating
+      // Detect comment changes before updating so we can show toast/diff hints.
       let cleanContentChanged = false;
       try {
         const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(
@@ -454,7 +481,6 @@ export default function App() {
 
         let deletedCount = 0;
         let resolvedCount = 0;
-        let newReplyCount = 0;
         for (const oldC of oldComments) {
           const newC = newById.get(oldC.id);
           if (!newC) {
@@ -468,12 +494,8 @@ export default function App() {
               resolvedCount++;
             }
           }
-          const oldReplies = oldC.replies?.length ?? 0;
-          const newReplies = newC.replies?.length ?? 0;
-          if (newReplies > oldReplies) {
-            newReplyCount += newReplies - oldReplies;
-          }
         }
+        const newReplyCount = findNewReplyIds(oldComments, newComments).size;
 
         // Accumulate across rapid events so the toast coalesces
         accResolvedRef.current += resolvedCount;
@@ -505,17 +527,26 @@ export default function App() {
         // Ignore parse errors — still update the content
       }
 
+      const nextContent = correctReplyTimestamps(rawMarkdownRef.current, content, mtime);
+
       // Update content directly via updateTab (NOT setRawMarkdown which marks
       // dirty:true). External changes already match disk, so dirty must be false.
       // Also synchronously update rawMarkdownRef so back-to-back user edits
       // (e.g. add-comment right after SSE) read the latest content, not stale state.
-      rawMarkdownRef.current = content;
+      rawMarkdownRef.current = nextContent;
       if (activeFilePath) {
         updateTab(activeFilePath, {
-          rawMarkdown: content,
+          rawMarkdown: nextContent,
           ...(mtime != null ? { mtime } : {}),
           dirty: false,
         });
+      }
+
+      // Persist the corrected timestamps back to disk so reloads see the right
+      // values. Uses the SSE-delivered mtime as expectedMtime, so this save
+      // races cleanly against the next external edit (no false conflicts).
+      if (nextContent !== content && activeFilePath) {
+        saveFile(nextContent);
       }
 
       // Flag the diff button when content changed and a snapshot exists
@@ -525,6 +556,8 @@ export default function App() {
     },
     [
       activeFilePath,
+      correctReplyTimestamps,
+      saveFile,
       setDiffEnabled,
       setViewMode,
       settings.enableResolve,
@@ -562,14 +595,38 @@ export default function App() {
     es.addEventListener('change', (e) => {
       try {
         const { content, path, mtime } = JSON.parse(e.data);
-        updateTab(path, { rawMarkdown: content, ...(mtime != null ? { mtime } : {}) });
+        const snapshot = getTabSnapshot(path);
+        // Skip dirty background tabs entirely. The user has unsaved local
+        // edits we'd otherwise overwrite (in memory AND on disk via the
+        // saveFileAt below). They should resolve the conflict by switching
+        // to the tab and reloading explicitly.
+        if (snapshot?.dirty === true) return;
+        // Backfill agent-supplied reply timestamps the same way the active-tab
+        // handler does, so background files don't show stale times when the
+        // user switches to them. No toast — background tabs aren't visible.
+        const oldContent = snapshot?.rawMarkdown ?? '';
+        const nextContent = correctReplyTimestamps(oldContent, content, mtime);
+        updateTab(path, {
+          rawMarkdown: nextContent,
+          ...(mtime != null ? { mtime } : {}),
+        });
+        if (nextContent !== content) {
+          saveFileAt(path, nextContent);
+        }
       } catch {
         // ignore malformed events
       }
     });
 
     return () => es.close();
-  }, [backgroundPathsKey, pageVisible, updateTab]);
+  }, [
+    backgroundPathsKey,
+    correctReplyTimestamps,
+    getTabSnapshot,
+    pageVisible,
+    saveFileAt,
+    updateTab,
+  ]);
 
   // When the browser tab becomes visible again, fetch the active file and
   // route through onExternalChange so the user gets toast/blue-dot notifications

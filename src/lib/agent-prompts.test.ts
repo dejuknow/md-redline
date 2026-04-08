@@ -31,4 +31,16 @@ describe('buildAddressCommentsPrompt', () => {
     expect(prompt).toContain('"status":"resolved"');
     expect(prompt).toContain('add a reply to the `replies` array');
   });
+
+  it('does not ask the agent to fill in a timestamp (md-redline assigns it)', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 1]]),
+      enableResolve: true,
+    });
+    // The example reply schema must NOT include a timestamp field, since
+    // agents can't reliably know "now" and tend to hallucinate stale values.
+    expect(prompt).not.toContain('"timestamp"');
+    expect(prompt).toContain('Do NOT include a `timestamp` field');
+  });
 });

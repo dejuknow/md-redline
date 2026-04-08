@@ -17,6 +17,8 @@ import {
   removeAllComments,
   resolveAllComments,
   removeResolvedComments,
+  backfillReplyTimestamps,
+  findNewReplyIds,
 } from './comment-parser';
 import type { MdComment } from '../types';
 
@@ -334,6 +336,176 @@ describe('removeReply', () => {
     const result = removeReply(raw, 'rp1', 'r1');
     const parsed = parseComments(result);
     expect(parsed.comments[0].replies).toBeUndefined();
+  });
+});
+
+describe('findNewReplyIds', () => {
+  function makeComment(
+    id: string,
+    replies: { id: string; text: string }[] = [],
+  ): MdComment {
+    return {
+      id,
+      anchor: 'a',
+      text: 't',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      replies: replies.map((r) => ({
+        id: r.id,
+        text: r.text,
+        author: 'A',
+        timestamp: '2024-01-01T00:00:00.000Z',
+      })),
+    };
+  }
+
+  it('returns empty when nothing changed', () => {
+    const old = [makeComment('c1', [{ id: 'r1', text: 'first' }])];
+    const next = [makeComment('c1', [{ id: 'r1', text: 'first' }])];
+    expect(findNewReplyIds(old, next).size).toBe(0);
+  });
+
+  it('finds replies added to an existing comment', () => {
+    const old = [makeComment('c1', [{ id: 'r1', text: 'first' }])];
+    const next = [
+      makeComment('c1', [
+        { id: 'r1', text: 'first' },
+        { id: 'r2', text: 'second' },
+      ]),
+    ];
+    const ids = findNewReplyIds(old, next);
+    expect(ids.size).toBe(1);
+    expect(ids.has('r2')).toBe(true);
+  });
+
+  it('finds replies on brand-new comments', () => {
+    const old = [makeComment('c1', [{ id: 'r1', text: 'first' }])];
+    const next = [
+      makeComment('c1', [{ id: 'r1', text: 'first' }]),
+      makeComment('c2', [{ id: 'r2', text: 'fresh' }]),
+    ];
+    const ids = findNewReplyIds(old, next);
+    expect(ids.size).toBe(1);
+    expect(ids.has('r2')).toBe(true);
+  });
+
+  it('counts replies added in the same edit that removed others', () => {
+    // Agent removes r1 and adds r2 + r3 in the same edit. The naive
+    // length-diff approach would say "1 new reply"; ID-based correctly
+    // identifies 2 truly new replies.
+    const old = [makeComment('c1', [{ id: 'r1', text: 'old' }])];
+    const next = [
+      makeComment('c1', [
+        { id: 'r2', text: 'new1' },
+        { id: 'r3', text: 'new2' },
+      ]),
+    ];
+    const ids = findNewReplyIds(old, next);
+    expect(ids.size).toBe(2);
+    expect(ids.has('r2')).toBe(true);
+    expect(ids.has('r3')).toBe(true);
+  });
+
+  it('ignores replies that were removed', () => {
+    const old = [
+      makeComment('c1', [
+        { id: 'r1', text: 'one' },
+        { id: 'r2', text: 'two' },
+      ]),
+    ];
+    const next = [makeComment('c1', [{ id: 'r1', text: 'one' }])];
+    expect(findNewReplyIds(old, next).size).toBe(0);
+  });
+});
+
+describe('backfillReplyTimestamps', () => {
+  const FALLBACK = '2026-04-06T23:00:00.000Z';
+
+  it('overrides the timestamp on a reply whose ID is in forceIds', () => {
+    const raw = `${marker({
+      id: 'c1',
+      replies: [
+        { id: 'r1', text: 'reply', author: 'Gemini CLI', timestamp: '2026-04-06T12:07:00.000Z' },
+      ],
+    })}hello`;
+    const result = backfillReplyTimestamps(raw, new Set(['r1']), FALLBACK);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies![0].timestamp).toBe(FALLBACK);
+    // Other reply fields preserved.
+    expect(parsed.comments[0].replies![0].text).toBe('reply');
+    expect(parsed.comments[0].replies![0].author).toBe('Gemini CLI');
+  });
+
+  it('leaves replies whose ID is not in forceIds untouched', () => {
+    const raw = `${marker({
+      id: 'c1',
+      replies: [
+        { id: 'r1', text: 'old', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+        { id: 'r2', text: 'new', author: 'B', timestamp: '2026-04-06T12:07:00.000Z' },
+      ],
+    })}hello`;
+    const result = backfillReplyTimestamps(raw, new Set(['r2']), FALLBACK);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies![0].timestamp).toBe('2024-01-01T00:00:00.000Z');
+    expect(parsed.comments[0].replies![1].timestamp).toBe(FALLBACK);
+  });
+
+  it('returns the original string when forceIds is empty', () => {
+    const raw = `${marker({
+      id: 'c1',
+      replies: [
+        { id: 'r1', text: 'reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+      ],
+    })}hello`;
+    const result = backfillReplyTimestamps(raw, new Set(), FALLBACK);
+    expect(result).toBe(raw);
+  });
+
+  it('returns the original string when no matching reply is found', () => {
+    const raw = `${marker({
+      id: 'c1',
+      replies: [
+        { id: 'r1', text: 'reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+      ],
+    })}hello`;
+    const result = backfillReplyTimestamps(raw, new Set(['nonexistent']), FALLBACK);
+    expect(result).toBe(raw);
+  });
+
+  it('fills in a missing timestamp when the ID is in forceIds', () => {
+    // Build a raw marker by hand so the reply genuinely has no timestamp field.
+    const json = JSON.stringify({
+      id: 'c1',
+      anchor: 'hello',
+      text: 'comment',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      replies: [{ id: 'r1', text: 'reply', author: 'Gemini CLI' }],
+    });
+    const raw = `<!-- @comment${json} -->hello`;
+    const result = backfillReplyTimestamps(raw, new Set(['r1']), FALLBACK);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies![0].timestamp).toBe(FALLBACK);
+  });
+
+  it('preserves comment fields and other replies when patching one reply', () => {
+    const raw = `${marker({
+      id: 'c1',
+      anchor: 'hello',
+      text: 'a comment',
+      author: 'User',
+      replies: [
+        { id: 'r1', text: 'first', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
+        { id: 'r2', text: 'second', author: 'Gemini CLI', timestamp: '2026-04-06T12:07:00.000Z' },
+      ],
+    })}hello`;
+    const result = backfillReplyTimestamps(raw, new Set(['r2']), FALLBACK);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].id).toBe('c1');
+    expect(parsed.comments[0].text).toBe('a comment');
+    expect(parsed.comments[0].replies).toHaveLength(2);
+    expect(parsed.comments[0].replies![0].timestamp).toBe('2024-01-01T00:00:00.000Z');
+    expect(parsed.comments[0].replies![1].timestamp).toBe(FALLBACK);
   });
 });
 

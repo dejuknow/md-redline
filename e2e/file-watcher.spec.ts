@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
@@ -174,5 +174,116 @@ test.describe('File watcher - external changes', () => {
 
     // The "Unsaved changes" dialog should NOT appear — the tab should close cleanly
     await expect(page.getByText('Unsaved changes')).not.toBeVisible({ timeout: 2000 });
+  });
+
+  test('agent-style reply without a timestamp gets backfilled and persisted', async ({ page }) => {
+    await openFixture(page);
+
+    // Wait for SSE connection to establish
+    await page.waitForTimeout(1500);
+
+    // Step 1: externally add a comment marker to the file. This is the comment
+    // the "agent" will reply to. We use a stable past timestamp for the comment
+    // itself so it can't be confused with the reply backfill below.
+    const commentJson = JSON.stringify({
+      id: 'agent-test-c1',
+      anchor: 'valid credentials',
+      text: 'Should we say "active credentials"?',
+      author: 'Dennis',
+      timestamp: '2025-01-01T00:00:00.000Z',
+    });
+    const withComment = FIXTURE_ORIGINAL.replace(
+      'valid credentials',
+      `<!-- @comment${commentJson} -->valid credentials`,
+    );
+    writeFileSync(FIXTURE, withComment);
+
+    // Wait for the comment to render in the sidebar so we know SSE round-trip
+    // and the in-memory state are settled before the next external write.
+    await expect(page.getByText('Should we say "active credentials"?')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Step 2: simulate the agent adding a reply with NO timestamp field, the
+    // shape Gemini CLI / Claude / Codex produce after the prompt change.
+    const withReply = FIXTURE_ORIGINAL.replace(
+      'valid credentials',
+      `<!-- @comment${JSON.stringify({
+        id: 'agent-test-c1',
+        anchor: 'valid credentials',
+        text: 'Should we say "active credentials"?',
+        author: 'Dennis',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        replies: [
+          { id: 'agent-test-r1', text: 'Yes, "active" is more precise.', author: 'Gemini CLI' },
+        ],
+      })} -->valid credentials`,
+    );
+    writeFileSync(FIXTURE, withReply);
+
+    // Wait for the reply to render in the sidebar.
+    await expect(page.getByText('Yes, "active" is more precise.')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Defensive render: the reply must NOT show "Invalid Date" anywhere.
+    await expect(page.getByText('Invalid Date')).not.toBeVisible();
+
+    // Wait for the persistence write-back to land. Polls because the
+    // saveFileAt call is queued asynchronously after the SSE handler.
+    await expect
+      .poll(
+        () => {
+          const onDisk = readFileSync(FIXTURE, 'utf-8');
+          const m = onDisk.match(/"id":"agent-test-r1"[^}]*"timestamp":"([^"]+)"/);
+          return m?.[1] ?? null;
+        },
+        { timeout: 10_000 },
+      )
+      .not.toBeNull();
+
+    // The persisted timestamp must be a valid ISO-8601 string close to "now,"
+    // not a stale agent guess. We allow a generous 5-minute window to absorb
+    // mtime granularity and CI clock skew.
+    const onDisk = readFileSync(FIXTURE, 'utf-8');
+    const match = onDisk.match(/"id":"agent-test-r1"[^}]*"timestamp":"([^"]+)"/);
+    expect(match).not.toBeNull();
+    const persistedMs = new Date(match![1]).getTime();
+    expect(Number.isNaN(persistedMs)).toBe(false);
+    const skew = Math.abs(Date.now() - persistedMs);
+    expect(skew).toBeLessThan(5 * 60_000);
+  });
+
+  test('reply with missing timestamp does not render "Invalid Date" on first load', async ({
+    page,
+  }) => {
+    // Pre-populate the file BEFORE md-redline loads it, so the missing-timestamp
+    // reply goes through the parse path (not the SSE backfill path). This is
+    // the workflow where the agent edits while md-redline is closed.
+    const commentJson = JSON.stringify({
+      id: 'load-test-c1',
+      anchor: 'valid credentials',
+      text: 'Should we say "active credentials"?',
+      author: 'Dennis',
+      timestamp: '2025-01-01T00:00:00.000Z',
+      replies: [
+        { id: 'load-test-r1', text: 'Yes, "active" is more precise.', author: 'Gemini CLI' },
+      ],
+    });
+    writeFileSync(
+      FIXTURE,
+      FIXTURE_ORIGINAL.replace(
+        'valid credentials',
+        `<!-- @comment${commentJson} -->valid credentials`,
+      ),
+    );
+
+    await openFixture(page);
+
+    // The reply should render with author but WITHOUT "Invalid Date".
+    await expect(page.getByText('Yes, "active" is more precise.')).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText('Invalid Date')).not.toBeVisible();
   });
 });

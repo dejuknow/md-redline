@@ -647,6 +647,64 @@ export function removeReply(rawMarkdown: string, commentId: string, replyId: str
   });
 }
 
+/**
+ * Diff two parsed comment lists and return the IDs of replies that exist in
+ * `newComments` but not in `oldComments`. Handles replies on existing comments
+ * AND replies on brand-new comments. Used to identify which reply timestamps
+ * an external editor (typically an LLM agent) just added so we can override
+ * them.
+ */
+export function findNewReplyIds(
+  oldComments: MdComment[],
+  newComments: MdComment[],
+): Set<string> {
+  const newReplyIds = new Set<string>();
+  const oldById = new Map(oldComments.map((c) => [c.id, c]));
+  for (const newC of newComments) {
+    const oldC = oldById.get(newC.id);
+    const oldReplyIds = new Set((oldC?.replies ?? []).map((r) => r.id));
+    for (const reply of newC.replies ?? []) {
+      if (!oldReplyIds.has(reply.id)) {
+        newReplyIds.add(reply.id);
+      }
+    }
+  }
+  return newReplyIds;
+}
+
+/**
+ * Rewrite the `timestamp` field on every reply whose ID appears in `forceIds`,
+ * setting it to `fallbackIso`. Used to override agent-supplied timestamps with
+ * the file's mtime, since LLM agents can't reliably know "now" and tend to
+ * hallucinate plausible-but-wrong values. Returns the original string if no
+ * matching replies were found, so callers can detect a no-op.
+ */
+export function backfillReplyTimestamps(
+  rawMarkdown: string,
+  forceIds: ReadonlySet<string>,
+  fallbackIso: string,
+): string {
+  if (forceIds.size === 0) return rawMarkdown;
+  let mutated = false;
+  const next = transformCommentMarkers(rawMarkdown, (comment) => {
+    if (!comment?.replies?.length) return { type: 'keep' };
+
+    let changed = false;
+    const nextReplies = comment.replies.map((reply) => {
+      if (forceIds.has(reply.id)) {
+        changed = true;
+        return { ...reply, timestamp: fallbackIso };
+      }
+      return reply;
+    });
+
+    if (!changed) return { type: 'keep' };
+    mutated = true;
+    return { type: 'replace', comment: { ...comment, replies: nextReplies } };
+  });
+  return mutated ? next : rawMarkdown;
+}
+
 export function removeAllComments(rawMarkdown: string): string {
   return transformCommentMarkers(rawMarkdown, () => ({ type: 'remove' }));
 }

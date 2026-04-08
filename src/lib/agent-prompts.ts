@@ -52,7 +52,7 @@ You MUST edit the files at the exact paths listed above. Do NOT copy them to a d
 2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question
 ${
   enableResolve
-    ? `3. For every comment you address, add a reply to the \`replies\` array: \`"replies":[{"id":"<unique-id>","text":"your answer or description of the change","author":"<your tool name>","timestamp":"<ISO-8601>"}]\` (append to any existing replies)
+    ? `3. For every comment you address, add a reply to the \`replies\` array: \`"replies":[{"id":"<unique-id>","text":"your answer or description of the change","author":"<your tool name>"}]\` (append to any existing replies). Do NOT include a \`timestamp\` field in your reply; md-redline will fill it in automatically when it reads your edit.
 4. ${afterAction}
 5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it`
     : `3. ${afterAction}

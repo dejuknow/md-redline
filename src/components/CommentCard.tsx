@@ -13,6 +13,7 @@ import { getAuthorColor } from '../hooks/useAuthor';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
 import type { CommentCardEditorState } from '../lib/comment-editor-state';
+import { timeAgo } from '../lib/time-ago';
 import { ActionButton } from './ActionButton';
 
 interface Props {
@@ -64,7 +65,7 @@ export const CommentCard = memo(function CommentCard({
   const resolveEnabled = settings.enableResolve;
   const status = getEffectiveStatus(comment);
   const isResolved = resolveEnabled && status === 'resolved';
-  const timeAgo = getTimeAgo(comment.timestamp);
+  const commentTimeAgo = timeAgo(comment.timestamp);
   const [editText, setEditText] = useState(comment.text);
   const [replyText, setReplyText] = useState('');
   const [editReplyText, setEditReplyText] = useState('');
@@ -310,7 +311,8 @@ export const CommentCard = memo(function CommentCard({
             style={{ backgroundColor: getAuthorColor(comment.author).text }}
             title={comment.author}
           />
-          {comment.author} &middot; {timeAgo}
+          {comment.author}
+          {commentTimeAgo && <> &middot; {commentTimeAgo}</>}
         </span>
 
         {!isEditing && !isEditingReply && (
@@ -373,89 +375,98 @@ export const CommentCard = memo(function CommentCard({
       {/* Replies thread */}
       {replies.length > 0 && (
         <div className="mx-3 mb-2 border-l-2 border-border-subtle pl-3 space-y-2">
-          {replies.map((reply) => (
-            <div key={reply.id} className="group/reply text-xs" data-reply-id={reply.id}>
-              {editingReplyId === reply.id ? (
-                <div className="flex flex-col-reverse gap-1.5" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex justify-end gap-1.5">
-                    <ActionButton size="sm" onClick={handleReplyEditCancel}>
-                      Cancel
-                    </ActionButton>
-                    <ActionButton
-                      intent="submit"
-                      size="sm"
-                      onClick={handleReplyEditSave}
-                      disabled={!editReplyText.trim() || editReplyText.length > COMMENT_MAX_LENGTH}
-                    >
-                      Save
-                    </ActionButton>
-                  </div>
-                  {editReplyText.length > COMMENT_MAX_LENGTH * 0.8 && (
-                    <p
-                      className={`text-right text-xs ${
-                        editReplyText.length >= COMMENT_MAX_LENGTH
-                          ? 'text-danger font-medium'
-                          : 'text-content-muted'
-                      }`}
-                    >
-                      {editReplyText.length}/{COMMENT_MAX_LENGTH}
-                    </p>
-                  )}
-                  <textarea
-                    ref={editReplyRef}
-                    value={editReplyText}
-                    onChange={(e) => setEditReplyText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        handleReplyEditSave();
-                      }
-                      if (e.key === 'Escape') {
-                        handleReplyEditCancel();
-                      }
-                    }}
-                    maxLength={COMMENT_MAX_LENGTH}
-                    className="w-full text-sm border border-border-subtle rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
-                    rows={1}
-                  />
-                </div>
-              ) : (
-                <>
-                  <p className="text-content-secondary leading-relaxed whitespace-pre-wrap">
-                    {reply.text}
-                  </p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <span className="min-w-0 flex flex-1 items-center gap-1 text-content-muted">
-                      <span
-                        className="inline-block w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: getAuthorColor(reply.author).text }}
-                      />
-                      {reply.author} &middot; {getTimeAgo(reply.timestamp)}
-                    </span>
-                    {!isResolved && (
-                      <div
-                        className="invisible flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:visible group-hover/reply:opacity-100 group-focus-within/reply:visible group-focus-within/reply:opacity-100"
-                        onClick={(e) => e.stopPropagation()}
+          {replies.map((reply) => {
+            const replyTimeAgo = timeAgo(reply.timestamp);
+            return (
+              <div key={reply.id} className="group/reply text-xs" data-reply-id={reply.id}>
+                {editingReplyId === reply.id ? (
+                  <div
+                    className="flex flex-col-reverse gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex justify-end gap-1.5">
+                      <ActionButton size="sm" onClick={handleReplyEditCancel}>
+                        Cancel
+                      </ActionButton>
+                      <ActionButton
+                        intent="submit"
+                        size="sm"
+                        onClick={handleReplyEditSave}
+                        disabled={
+                          !editReplyText.trim() || editReplyText.length > COMMENT_MAX_LENGTH
+                        }
                       >
-                        <ActionButton
-                          onClick={() => {
-                            onRequestReplyEdit(comment.id, reply.id);
-                          }}
-                        >
-                          Edit
-                        </ActionButton>
-                        <DeleteIconButton
-                          onClick={() => {
-                            onDeleteReply(comment.id, reply.id);
-                          }}
-                        />
-                      </div>
+                        Save
+                      </ActionButton>
+                    </div>
+                    {editReplyText.length > COMMENT_MAX_LENGTH * 0.8 && (
+                      <p
+                        className={`text-right text-xs ${
+                          editReplyText.length >= COMMENT_MAX_LENGTH
+                            ? 'text-danger font-medium'
+                            : 'text-content-muted'
+                        }`}
+                      >
+                        {editReplyText.length}/{COMMENT_MAX_LENGTH}
+                      </p>
                     )}
+                    <textarea
+                      ref={editReplyRef}
+                      value={editReplyText}
+                      onChange={(e) => setEditReplyText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault();
+                          handleReplyEditSave();
+                        }
+                        if (e.key === 'Escape') {
+                          handleReplyEditCancel();
+                        }
+                      }}
+                      maxLength={COMMENT_MAX_LENGTH}
+                      className="w-full text-sm border border-border-subtle rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-hidden bg-surface text-content"
+                      rows={1}
+                    />
                   </div>
-                </>
-              )}
-            </div>
-          ))}
+                ) : (
+                  <>
+                    <p className="text-content-secondary leading-relaxed whitespace-pre-wrap">
+                      {reply.text}
+                    </p>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="min-w-0 flex flex-1 items-center gap-1 text-content-muted">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: getAuthorColor(reply.author).text }}
+                        />
+                        {reply.author}
+                        {replyTimeAgo && <> &middot; {replyTimeAgo}</>}
+                      </span>
+                      {!isResolved && (
+                        <div
+                          className="invisible flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:visible group-hover/reply:opacity-100 group-focus-within/reply:visible group-focus-within/reply:opacity-100"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ActionButton
+                            onClick={() => {
+                              onRequestReplyEdit(comment.id, reply.id);
+                            }}
+                          >
+                            Edit
+                          </ActionButton>
+                          <DeleteIconButton
+                            onClick={() => {
+                              onDeleteReply(comment.id, reply.id);
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -514,21 +525,6 @@ export const CommentCard = memo(function CommentCard({
     </div>
   );
 });
-
-function getTimeAgo(timestamp: string): string {
-  const now = Date.now();
-  const then = new Date(timestamp).getTime();
-  const diffMs = now - then;
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMs / 3600000);
-  const diffDay = Math.floor(diffMs / 86400000);
-
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
 
 function DeleteIconButton({ onClick }: { onClick: MouseEventHandler<HTMLButtonElement> }) {
   return (

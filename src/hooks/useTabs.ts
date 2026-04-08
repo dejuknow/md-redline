@@ -466,14 +466,13 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     [activeFilePath, updateTab],
   );
 
-  const saveFile = useCallback(
-    (content: string) => {
-      if (!activeFilePath) return;
+  const saveFileAt = useCallback(
+    (path: string, content: string) => {
       // Queue saves so rapid edits don't race: each save waits for the
       // previous one to finish. Reading mtime from tabDataRef at execution time
       // is correct because the queue serializes saves, so save1's returned mtime
-      // is already written to the ref before save2 runs.
-      const path = activeFilePath;
+      // is already written to the ref before save2 runs. Saves to different
+      // files share the same queue, which is fine — they don't race anyway.
       saveQueueRef.current = saveQueueRef.current.then(async () => {
         const currentMtime = tabDataRef.current.get(path)?.mtime;
         try {
@@ -510,8 +509,20 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         }
       });
     },
-    [activeFilePath, updateTab, onSaveError],
+    [updateTab, onSaveError],
   );
+
+  const saveFile = useCallback(
+    (content: string) => {
+      if (!activeFilePath) return;
+      saveFileAt(activeFilePath, content);
+    },
+    [activeFilePath, saveFileAt],
+  );
+
+  const getTabSnapshot = useCallback((path: string): TabState | undefined => {
+    return tabDataRef.current.get(path);
+  }, []);
 
   const reloadFile = useCallback(async () => {
     if (!activeFilePath) return;
@@ -556,6 +567,8 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     closeTabsToRight,
     switchTab,
     saveFile,
+    saveFileAt,
+    getTabSnapshot,
     reloadFile,
   };
 }
