@@ -175,32 +175,46 @@ test.describe('Comment markers in raw view', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Copy clean button
+// 4. Copy button (split icon button: copy raw + copy without comments)
 // ---------------------------------------------------------------------------
 
-test.describe('Copy clean button', () => {
-  test('copy clean button is visible in raw view', async ({ page }) => {
+test.describe('Copy button', () => {
+  test('copy button is visible in raw view', async ({ page }) => {
     await openFixture(page);
     await switchToRaw(page);
 
-    await expect(page.locator('.raw-copy-clean-btn')).toBeVisible();
-    await expect(page.locator('.raw-copy-clean-btn')).toContainText('Copy clean');
+    const copyBtn = page.getByTestId('raw-copy-button');
+    await expect(copyBtn).toBeVisible();
+    await expect(copyBtn).toHaveAttribute('title', 'Copy document');
   });
 
-  test('copy clean button shows "Copied" feedback after click', async ({ page }) => {
+  test('copy button shows "Copied!" feedback after click', async ({ page }) => {
     await openFixture(page);
     await switchToRaw(page);
 
     // Grant clipboard permissions
     await page.context().grantPermissions(['clipboard-write']);
 
-    await page.locator('.raw-copy-clean-btn').click();
-    await expect(page.locator('.raw-copy-clean-btn')).toContainText('Copied');
+    const copyBtn = page.getByTestId('raw-copy-button');
+    await copyBtn.click();
+    await expect(copyBtn).toHaveAttribute('title', 'Copied!');
 
     // Feedback should disappear after ~2 seconds
-    await expect(page.locator('.raw-copy-clean-btn')).toContainText('Copy clean', {
-      timeout: 5000,
-    });
+    await expect(copyBtn).toHaveAttribute('title', 'Copy document', { timeout: 5000 });
+  });
+
+  test('copy button copies raw markdown including comment markers', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Keep me');
+    await switchToRaw(page);
+
+    await page.context().grantPermissions(['clipboard-write', 'clipboard-read']);
+    await page.getByTestId('raw-copy-button').click();
+    await expect(page.getByTestId('raw-copy-button')).toHaveAttribute('title', 'Copied!');
+
+    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText).toContain('@comment');
+    expect(clipboardText).toContain('valid credentials');
   });
 });
 
@@ -229,10 +243,10 @@ test.describe('Sidebar to raw view linking', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Copy clean button does not include markers
+// 6. "Copy without comments" dropdown action strips markers
 // ---------------------------------------------------------------------------
 
-test.describe('Copy clean strips markers', () => {
+test.describe('Copy without comments strips markers', () => {
   test('clipboard content has no comment markers', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Strip me');
@@ -240,13 +254,80 @@ test.describe('Copy clean strips markers', () => {
     await switchToRaw(page);
 
     await page.context().grantPermissions(['clipboard-write', 'clipboard-read']);
-    await page.locator('.raw-copy-clean-btn').click();
-    await expect(page.locator('.raw-copy-clean-btn')).toContainText('Copied');
+
+    // Open the dropdown via the chevron, then click "Copy without comments"
+    await page.getByTestId('raw-copy-button-chevron').click();
+    await page.getByRole('button', { name: 'Copy without comments' }).click();
+
+    await expect(page.getByTestId('raw-copy-button')).toHaveAttribute('title', 'Copied!');
 
     // Read clipboard
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).not.toContain('@comment');
     expect(clipboardText).toContain('valid credentials');
     expect(clipboardText).toContain('# Test Document');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Toolbar stays pinned when raw view scrolls
+// ---------------------------------------------------------------------------
+//
+// Regression: in v0.1.2 the raw view container collapsed from a flex-column
+// (toolbar + inner scroll wrapper) into a single overflow-y-auto div, causing
+// the toolbar to scroll along with the content. Pinning is enforced purely by
+// the layout: .raw-view is flex-col h-full, the toolbar is a fixed-height
+// sibling, and an inner div takes flex-1 with overflow-y-auto.
+
+test.describe('Toolbar pinning', () => {
+  test('toolbar stays in place when content scrolls', async ({ page }) => {
+    // Small viewport guarantees overflow even for the short fixture, since
+    // .raw-view's inner wrapper has pb-[50vh] padding.
+    await page.setViewportSize({ width: 1024, height: 500 });
+
+    await openFixture(page);
+    await switchToRaw(page);
+
+    const toolbar = page.locator('.raw-toolbar');
+    await expect(toolbar).toBeVisible();
+
+    const initialBox = await toolbar.boundingBox();
+    expect(initialBox).not.toBeNull();
+
+    // Structural check: the scroll container must be an INNER element of
+    // .raw-view, not .raw-view itself. The regression in v0.1.2 collapsed
+    // these into a single overflow-y-auto div, which caused the toolbar to
+    // scroll along with the content.
+    //
+    // We also scroll the inner container and confirm the toolbar's bounding
+    // box doesn't move. Use scrollTo({ behavior: 'instant' }) because
+    // .overflow-y-auto has scroll-behavior: smooth set globally in index.css,
+    // which makes a plain scrollTop assignment animate (and read back as 0
+    // before the animation starts).
+    const scrollResult = await page.evaluate(() => {
+      const view = document.querySelector('.raw-view') as HTMLElement | null;
+      if (!view) return { ok: false as const, reason: 'no-view' };
+      if (view.scrollHeight > view.clientHeight + 1) {
+        return { ok: false as const, reason: 'view-is-scroller' };
+      }
+      const inner = view.querySelector('.overflow-y-auto') as HTMLElement | null;
+      if (!inner) return { ok: false as const, reason: 'no-inner-scroller' };
+      if (inner === view) return { ok: false as const, reason: 'inner-is-view' };
+      if (inner.scrollHeight <= inner.clientHeight + 1) {
+        return { ok: false as const, reason: 'inner-not-scrollable' };
+      }
+      inner.scrollTo({ top: 250, behavior: 'instant' as ScrollBehavior });
+      return { ok: true as const, scrollTop: inner.scrollTop };
+    });
+
+    expect(scrollResult.ok, `scroll setup failed: ${JSON.stringify(scrollResult)}`).toBe(true);
+    if (scrollResult.ok) {
+      expect(scrollResult.scrollTop).toBeGreaterThan(0);
+    }
+
+    // Toolbar position must be unchanged after scrolling.
+    const afterBox = await toolbar.boundingBox();
+    expect(afterBox).not.toBeNull();
+    expect(afterBox!.y).toBeCloseTo(initialBox!.y, 0);
   });
 });

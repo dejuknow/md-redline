@@ -91,7 +91,7 @@ test.describe('Table of Contents', () => {
     await switchToRaw(page);
 
     const scrollBefore = await page.evaluate(() => {
-      const scrollEl = document.querySelector('.raw-view')?.closest('.overflow-y-auto');
+      const scrollEl = document.querySelector('.raw-view')?.querySelector('.overflow-y-auto');
       return scrollEl ? scrollEl.scrollTop : 0;
     });
 
@@ -99,7 +99,7 @@ test.describe('Table of Contents', () => {
     await page.waitForTimeout(600);
 
     const scrollAfter = await page.evaluate(() => {
-      const scrollEl = document.querySelector('.raw-view')?.closest('.overflow-y-auto');
+      const scrollEl = document.querySelector('.raw-view')?.querySelector('.overflow-y-auto');
       return scrollEl ? scrollEl.scrollTop : 0;
     });
     expect(scrollAfter).toBeGreaterThan(scrollBefore);
