@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { fetchPreferences, savePreferencesToDisk } from '../lib/preferences-client';
 
-const STORAGE_KEY = 'md-redline-recent-files';
 const MAX_RECENT = 10;
 
 export interface RecentFile {
@@ -11,58 +10,17 @@ export interface RecentFile {
   openedAt: string; // ISO-8601
 }
 
-export function mergeRecentFiles(primary: RecentFile[], secondary: RecentFile[]): RecentFile[] {
-  const byPath = new Map<string, RecentFile>();
-
-  for (const file of [...primary, ...secondary]) {
-    const existing = byPath.get(file.path);
-    if (!existing || file.openedAt > existing.openedAt) {
-      byPath.set(file.path, file);
-    }
-  }
-
-  return Array.from(byPath.values())
-    .sort((a, b) => b.openedAt.localeCompare(a.openedAt))
-    .slice(0, MAX_RECENT);
-}
-
-export function loadFromStorage(): RecentFile[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveToStorage(files: RecentFile[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(files));
-  } catch {
-    /* Storage unavailable */
-  }
-  savePreferencesToDisk({ recentFiles: files });
-}
-
 export function useRecentFiles() {
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>(loadFromStorage);
+  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const hasLocalMutationRef = useRef(false);
 
-  // Hydrate from disk on mount
+  // Hydrate from disk on mount. Disk is the source of truth.
   useEffect(() => {
     let cancelled = false;
     fetchPreferences().then((prefs) => {
       if (cancelled || hasLocalMutationRef.current) return;
-      if (prefs.recentFiles && Array.isArray(prefs.recentFiles) && prefs.recentFiles.length > 0) {
-        setRecentFiles((prev) => {
-          const next = mergeRecentFiles(prev, prefs.recentFiles as RecentFile[]);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-          } catch {
-            /* storage unavailable */
-          }
-          return next;
-        });
+      if (prefs.recentFiles && Array.isArray(prefs.recentFiles)) {
+        setRecentFiles(prefs.recentFiles as RecentFile[]);
       }
     });
     return () => {
@@ -79,7 +37,7 @@ export function useRecentFiles() {
         0,
         MAX_RECENT,
       );
-      saveToStorage(next);
+      void savePreferencesToDisk({ recentFiles: next });
       return next;
     });
   }, []);
@@ -87,12 +45,7 @@ export function useRecentFiles() {
   const clearRecentFiles = useCallback(() => {
     hasLocalMutationRef.current = true;
     setRecentFiles([]);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* storage unavailable */
-    }
-    savePreferencesToDisk({ recentFiles: [] });
+    void savePreferencesToDisk({ recentFiles: [] });
   }, []);
 
   return { recentFiles, addRecentFile, clearRecentFiles };

@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { fetchPreferences, savePreferencesToDisk } from '../lib/preferences-client';
 
-const STORAGE_KEY = 'md-redline-author';
 const DEFAULT_AUTHOR = 'User';
 
 // 8 maximally distinct hues for author color coding
@@ -33,36 +32,25 @@ export function useAuthor() {
   const [author, setAuthorState] = useState(DEFAULT_AUTHOR);
   const hasLocalMutationRef = useRef(false);
 
-  // Hydrate from disk on mount
+  // Hydrate from disk on mount. Disk is the source of truth.
   useEffect(() => {
     let cancelled = false;
     fetchPreferences().then((prefs) => {
       if (cancelled || hasLocalMutationRef.current) return;
-      if (typeof prefs.author === 'string' && prefs.author.trim() && prefs.author !== author) {
+      if (typeof prefs.author === 'string' && prefs.author.trim()) {
         setAuthorState(prefs.author);
-        try {
-          localStorage.setItem(STORAGE_KEY, prefs.author);
-        } catch {
-          /* storage unavailable */
-        }
       }
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setAuthor = useCallback((name: string) => {
     const trimmed = name.trim() || DEFAULT_AUTHOR;
     hasLocalMutationRef.current = true;
     setAuthorState(trimmed);
-    try {
-      localStorage.setItem(STORAGE_KEY, trimmed);
-    } catch {
-      // Storage unavailable
-    }
-    savePreferencesToDisk({ author: trimmed });
+    void savePreferencesToDisk({ author: trimmed });
   }, []);
 
   return { author, setAuthor };

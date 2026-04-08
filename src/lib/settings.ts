@@ -32,56 +32,42 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quickComment: false,
 };
 
-const STORAGE_KEY = 'md-redline-settings';
-
-export function loadSettings(): AppSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw);
-    const validTemplates = Array.isArray(parsed.templates)
-      ? parsed.templates.filter(
-          (t: unknown) =>
-            typeof t === 'object' &&
-            t !== null &&
-            typeof (t as Record<string, unknown>).label === 'string' &&
-            typeof (t as Record<string, unknown>).text === 'string',
-        )
-      : DEFAULT_SETTINGS.templates;
-    return {
-      templates: validTemplates,
-      commentMaxLength:
-        typeof parsed.commentMaxLength === 'number' && parsed.commentMaxLength > 0
-          ? parsed.commentMaxLength
-          : DEFAULT_SETTINGS.commentMaxLength,
-      showTemplatesByDefault:
-        typeof parsed.showTemplatesByDefault === 'boolean'
-          ? parsed.showTemplatesByDefault
-          : DEFAULT_SETTINGS.showTemplatesByDefault,
-      enableResolve:
-        typeof parsed.enableResolve === 'boolean'
-          ? parsed.enableResolve
-          : DEFAULT_SETTINGS.enableResolve,
-      quickComment:
-        typeof parsed.quickComment === 'boolean'
-          ? parsed.quickComment
-          : DEFAULT_SETTINGS.quickComment,
-    };
-  } catch {
+/**
+ * Parse and validate settings from an arbitrary input (e.g. the server's
+ * preferences response). Falls back to DEFAULT_SETTINGS for any field that
+ * is missing or invalidly typed. Pure function — no I/O.
+ */
+export function parseSettings(input: unknown): AppSettings {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     return DEFAULT_SETTINGS;
   }
-}
-
-export function saveSettings(settings: AppSettings): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // Storage unavailable
-  }
-  // Dual-write to disk (fire-and-forget)
-  import('./preferences-client')
-    .then(({ savePreferencesToDisk }) => {
-      savePreferencesToDisk({ settings: settings as unknown as Record<string, unknown> });
-    })
-    .catch(() => {});
+  const parsed = input as Record<string, unknown>;
+  const validTemplates = Array.isArray(parsed.templates)
+    ? parsed.templates.filter(
+        (t: unknown) =>
+          typeof t === 'object' &&
+          t !== null &&
+          typeof (t as Record<string, unknown>).label === 'string' &&
+          typeof (t as Record<string, unknown>).text === 'string',
+      )
+    : DEFAULT_SETTINGS.templates;
+  return {
+    templates: validTemplates as CommentTemplate[],
+    commentMaxLength:
+      typeof parsed.commentMaxLength === 'number' && parsed.commentMaxLength > 0
+        ? parsed.commentMaxLength
+        : DEFAULT_SETTINGS.commentMaxLength,
+    showTemplatesByDefault:
+      typeof parsed.showTemplatesByDefault === 'boolean'
+        ? parsed.showTemplatesByDefault
+        : DEFAULT_SETTINGS.showTemplatesByDefault,
+    enableResolve:
+      typeof parsed.enableResolve === 'boolean'
+        ? parsed.enableResolve
+        : DEFAULT_SETTINGS.enableResolve,
+    quickComment:
+      typeof parsed.quickComment === 'boolean'
+        ? parsed.quickComment
+        : DEFAULT_SETTINGS.quickComment,
+  };
 }

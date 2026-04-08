@@ -12,10 +12,9 @@ import {
   type CommentTemplate,
   DEFAULT_SETTINGS,
   DEFAULT_TEMPLATES,
-  loadSettings,
-  saveSettings,
+  parseSettings,
 } from '../lib/settings';
-import { fetchPreferences } from '../lib/preferences-client';
+import { fetchPreferences, savePreferencesToDisk } from '../lib/preferences-client';
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -30,22 +29,23 @@ interface SettingsContextValue {
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
+function persist(settings: AppSettings) {
+  void savePreferencesToDisk({
+    settings: settings as unknown as Record<string, unknown>,
+  });
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const hasLocalMutationRef = useRef(false);
 
-  // Hydrate from disk on mount — disk overrides localStorage
+  // Hydrate from disk on mount. Disk is the source of truth.
   useEffect(() => {
     let cancelled = false;
     fetchPreferences().then((prefs) => {
       if (cancelled || hasLocalMutationRef.current) return;
       if (prefs.settings && typeof prefs.settings === 'object') {
-        const diskSettings = prefs.settings as Partial<AppSettings>;
-        setSettings((prev) => {
-          const merged = { ...prev, ...diskSettings };
-          saveSettings(merged);
-          return merged;
-        });
+        setSettings(parseSettings(prefs.settings));
       }
     });
     return () => {
@@ -57,7 +57,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     hasLocalMutationRef.current = true;
     setSettings((prev) => {
       const next = { ...prev, ...patch };
-      saveSettings(next);
+      persist(next);
       return next;
     });
   }, []);
@@ -92,7 +92,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const resetAll = useCallback(() => {
     hasLocalMutationRef.current = true;
     setSettings(DEFAULT_SETTINGS);
-    saveSettings(DEFAULT_SETTINGS);
+    persist(DEFAULT_SETTINGS);
   }, []);
 
   return (
