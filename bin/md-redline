@@ -166,14 +166,14 @@ function killPort(port) {
   }
 }
 
-async function stopServer() {
+async function stopServer(quiet = false) {
   const serverPort = await findServerPort();
   if (!serverPort) {
-    console.log('mdr is not running.');
+    if (!quiet) console.log('mdr is not running.');
     return;
   }
 
-  console.log('Stopping mdr...');
+  if (!quiet) console.log('Stopping mdr...');
   killPort(serverPort);
 
   // Also kill the Vite client if running (only kill ports that respond)
@@ -185,7 +185,7 @@ async function stopServer() {
   // Clean up port file
   try { await unlink(PORT_FILE); } catch {}
 
-  console.log('mdr stopped.');
+  if (!quiet) console.log('mdr stopped.');
 }
 
 async function enableRestrictedMode() {
@@ -219,6 +219,26 @@ async function getServerVersion(port) {
   return null;
 }
 
+async function gracefulShutdown(port) {
+  try {
+    const response = await fetch(`http://localhost:${port}/api/shutdown`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) return false;
+  } catch {
+    return false;
+  }
+
+  // Wait for the server to actually stop (up to 3 seconds)
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (!(await checkServer(port))) return true;
+    await delay(250);
+  }
+  return false;
+}
+
 function isProductionMode() {
   try {
     statSync(DIST_SERVER);
@@ -233,8 +253,9 @@ async function ensureServerRunning() {
   if (existing) {
     const serverVersion = await getServerVersion(existing);
     if (serverVersion && serverVersion !== CLI_VERSION) {
-      console.log(`Updating mdr (${serverVersion} → ${CLI_VERSION})...`);
-      await stopServer();
+      console.log(`Upgrading mdr ${serverVersion} → ${CLI_VERSION}...`);
+      const stopped = await gracefulShutdown(existing);
+      if (!stopped) await stopServer(true);
     } else {
       return;
     }
@@ -249,7 +270,7 @@ async function ensureServerRunning() {
     console.log('Run `mdr --restrict` to opt out. See https://github.com/dejuknow/md-redline#permissions for details.');
   }
 
-  console.log('Starting mdr...');
+  if (!existing) console.log('Starting mdr...');
   let childExited = false;
   let child;
   if (isProductionMode()) {
@@ -281,19 +302,19 @@ async function ensureServerRunning() {
   }
   if (isProductionMode()) {
     // In production, server serves everything — no Vite client to wait for
-    console.log('mdr is running.');
+    console.log('mdr is ready.');
     return;
   }
   // Also wait for Vite client to be ready
   while (Date.now() < deadline) {
     if (await findClientPort()) {
-      console.log('mdr is running.');
+      console.log('mdr is ready.');
       return;
     }
     await delay(POLL_INTERVAL_MS);
   }
   // Server is up but client may still be starting — proceed anyway
-  console.log('mdr server is running (client may still be starting).');
+  console.log('mdr is ready.');
 }
 
 async function buildUrl(file, dir) {

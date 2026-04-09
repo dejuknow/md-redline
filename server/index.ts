@@ -336,6 +336,11 @@ export function createApp(options: CreateAppOptions = {}) {
     return c.json({ version: APP_VERSION });
   });
 
+  app.post('/api/shutdown', (c) => {
+    setImmediate(() => process.exit(0));
+    return c.json({ ok: true });
+  });
+
   app.post('/api/grant-access', async (c) => {
     let body: { path?: string };
     try {
