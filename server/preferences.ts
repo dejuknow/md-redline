@@ -35,6 +35,79 @@ function prefsPath(homeDir: string): string {
   return join(homeDir, PREFS_FILENAME);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sanitizeRecentFile(value: unknown): RecentFile | null {
+  if (!isPlainObject(value)) return null;
+  if (
+    typeof value.path !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.openedAt !== 'string'
+  ) {
+    return null;
+  }
+  return { path: value.path, name: value.name, openedAt: value.openedAt };
+}
+
+function sanitizeTemplate(value: unknown): { label: string; text: string } | null {
+  if (!isPlainObject(value)) return null;
+  if (typeof value.label !== 'string' || typeof value.text !== 'string') return null;
+  return { label: value.label, text: value.text };
+}
+
+function sanitizeSettings(value: unknown): AppSettings | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const out: AppSettings = {};
+  if (Array.isArray(value.templates)) {
+    out.templates = value.templates
+      .map(sanitizeTemplate)
+      .filter((t): t is { label: string; text: string } => t !== null);
+  }
+  if (typeof value.commentMaxLength === 'number' && Number.isFinite(value.commentMaxLength)) {
+    out.commentMaxLength = value.commentMaxLength;
+  }
+  if (typeof value.showTemplatesByDefault === 'boolean') {
+    out.showTemplatesByDefault = value.showTemplatesByDefault;
+  }
+  if (typeof value.enableResolve === 'boolean') out.enableResolve = value.enableResolve;
+  if (typeof value.quickComment === 'boolean') out.quickComment = value.quickComment;
+  return out;
+}
+
+/**
+ * Whitelist-validate a Preferences patch coming from an untrusted source
+ * (HTTP body, on-disk file). Unknown top-level keys are dropped, wrong-typed
+ * fields are dropped, and well-known nested shapes are sanitized field by
+ * field. The goal is that anything coming out of this function can be safely
+ * spread into the on-disk Preferences object without risk of garbage shapes
+ * propagating to consumers that trust the type via `as Preferences`.
+ *
+ * Note: prototype-pollution via `__proto__` is not a concern with object
+ * spread (ES spec; spread copies own enumerable properties, not the
+ * `__proto__` setter), but this also rejects any such key for clarity.
+ */
+export function sanitizePreferencesPatch(input: unknown): Partial<Preferences> {
+  if (!isPlainObject(input)) return {};
+  const out: Partial<Preferences> = {};
+  if (typeof input.author === 'string') out.author = input.author;
+  if (typeof input.theme === 'string') out.theme = input.theme;
+  if (Array.isArray(input.recentFiles)) {
+    out.recentFiles = input.recentFiles
+      .map(sanitizeRecentFile)
+      .filter((f): f is RecentFile => f !== null);
+  }
+  if (Array.isArray(input.trustedRoots)) {
+    out.trustedRoots = input.trustedRoots.filter((p): p is string => typeof p === 'string');
+  }
+  if ('settings' in input) {
+    const settings = sanitizeSettings(input.settings);
+    if (settings) out.settings = settings;
+  }
+  return out;
+}
+
 function corruptQuarantinePath(filePath: string): string {
   // Use a high-resolution timestamp + random suffix so back-to-back
   // quarantines never collide.
@@ -47,8 +120,7 @@ export async function readPreferences(homeDir: string): Promise<Preferences> {
   try {
     const raw = await readFile(prefsPath(homeDir), 'utf-8');
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    return parsed as Preferences;
+    return sanitizePreferencesPatch(parsed) as Preferences;
   } catch {
     return {};
   }
@@ -58,8 +130,7 @@ export function readPreferencesSync(homeDir: string): Preferences {
   try {
     const raw = readFileSync(prefsPath(homeDir), 'utf-8');
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    return parsed as Preferences;
+    return sanitizePreferencesPatch(parsed) as Preferences;
   } catch {
     return {};
   }
@@ -135,12 +206,15 @@ async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences
   }
   try {
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (!isPlainObject(parsed)) {
       // Structurally wrong (array / null / scalar). Quarantine and start fresh.
       await rename(filePath, corruptQuarantinePath(filePath)).catch(() => {});
       return {};
     }
-    return parsed as Preferences;
+    // Strip unknown keys / wrong-typed fields before merging. The cast is
+    // safe because sanitizePreferencesPatch only emits keys that match the
+    // Preferences type.
+    return sanitizePreferencesPatch(parsed) as Preferences;
   } catch {
     // Unparseable. Quarantine before the next write overwrites it.
     await rename(filePath, corruptQuarantinePath(filePath)).catch(() => {});
@@ -152,9 +226,17 @@ async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences
 // cross-process file lock above handles concurrent processes.
 let writeLock: Promise<void> = Promise.resolve();
 
+export type PreferencesPatch =
+  | Partial<Preferences>
+  // The HTTP layer hands us un-validated request bodies; sanitization is
+  // applied before merge so unknown shapes are dropped, not persisted.
+  | Record<string, unknown>;
+
+export type PreferencesPatchFn = (current: Preferences) => Partial<Preferences>;
+
 export async function writePreferences(
   homeDir: string,
-  patchOrFn: Partial<Preferences> | ((current: Preferences) => Partial<Preferences>),
+  patchOrFn: PreferencesPatch | PreferencesPatchFn,
 ): Promise<Preferences> {
   const result = await new Promise<Preferences>((resolve, reject) => {
     writeLock = writeLock.then(async () => {
@@ -162,7 +244,12 @@ export async function writePreferences(
       const releaseLock = await acquireFileLock(filePath);
       try {
         const existing = await readAndQuarantineIfCorrupt(filePath);
-        const patch = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
+        const rawPatch: unknown =
+          typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
+        // Sanitize the patch even when it comes from a function callback,
+        // because the callback can be passed untrusted data via writePreferences
+        // call sites that forward HTTP request bodies.
+        const patch = sanitizePreferencesPatch(rawPatch);
         const merged = { ...existing, ...patch };
         const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
         const fd = await open(tmpPath, 'wx');

@@ -91,8 +91,14 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
       ) {
         parsedComment = data;
       }
-    } catch {
-      // Malformed markers are still considered removable outside code blocks.
+    } catch (err) {
+      // Malformed markers are still considered removable outside code blocks,
+      // but surface the parse failure so users notice when comment data is
+      // being silently dropped (e.g. after a hand-edit corrupted the JSON).
+      console.warn(
+        '[comment-parser] failed to parse comment marker JSON; marker will be treated as anonymous',
+        err,
+      );
     }
 
     const markerEnd = match.index + match[0].length;

@@ -28,7 +28,7 @@ interface Props {
   onCopyAgentPrompt: (filePaths: string[]) => void;
   /**
    * When true, the button renders in a disabled state with an explanatory
-   * tooltip rather than being hidden. Used when no comments exist yet — the
+   * tooltip rather than being hidden. Used when no comments exist yet. The
    * primary CTA stays visible so users discover the feature, and the tooltip
    * tells them what to do to enable it.
    */
@@ -67,7 +67,7 @@ export function HandOffButton({
           text={
             disabled
               ? 'Add comments first to hand off to an agent'
-              : 'Hand off to agent — copy instructions for this file'
+              : 'Hand off to agent. Copies instructions for this file.'
           }
         >
           <IconButton
@@ -77,7 +77,7 @@ export function HandOffButton({
             title={
               disabled
                 ? 'Add comments first to hand off to an agent'
-                : 'Hand off to agent — copy instructions for this file'
+                : 'Hand off to agent. Copies instructions for this file.'
             }
             data-testid="handoff-button"
           >
@@ -111,7 +111,7 @@ export function HandOffButton({
       <SplitIconButton
         icon={handOffIcon}
         onClick={() => onCopyAgentPrompt([activeFilePath])}
-        title="Hand off to agent — copy instructions for this file"
+        title="Hand off to agent. Copies instructions for this file."
         testId="handoff-button"
         chevronTestId="handoff-chevron"
         chevronTitle="Hand off multiple files"

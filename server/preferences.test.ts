@@ -6,6 +6,7 @@ import {
   addTrustedRoot,
   readPreferences,
   readPreferencesSync,
+  sanitizePreferencesPatch,
   writePreferences,
 } from './preferences';
 
@@ -296,6 +297,57 @@ describe('cross-process file lock', () => {
     // Lock file is gone after the write completes.
     const entries = await readdir(testDir);
     expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
+  });
+
+  it('drops unknown top-level keys from PUT bodies', async () => {
+    // Mimic an HTTP body with a mix of known and unknown fields. The sanitizer
+    // should silently drop the junk and persist only what matches the schema.
+    const result = await writePreferences(testDir, {
+      author: 'Alice',
+      maliciousKey: { foo: 'bar' },
+      __proto__: { polluted: true },
+    } as Record<string, unknown>);
+    expect(result).toEqual({ author: 'Alice' });
+    expect((result as Record<string, unknown>).maliciousKey).toBeUndefined();
+    // Confirm Object.prototype was not polluted (object spread does not
+    // trigger __proto__ setters per ES spec, but verify regardless).
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('drops wrong-typed fields per key', async () => {
+    const result = await writePreferences(testDir, {
+      author: 12345, // wrong type
+      theme: 'dark', // valid
+      trustedRoots: ['/a', 7, '/b'], // mixed
+    } as Record<string, unknown>);
+    expect(result).toEqual({ theme: 'dark', trustedRoots: ['/a', '/b'] });
+  });
+
+  it('sanitizes nested settings.templates entries', async () => {
+    const result = await writePreferences(testDir, {
+      settings: {
+        templates: [
+          { label: 'good', text: 'ok' },
+          { label: 'bad', text: 999 },
+          'string-not-object',
+          null,
+        ],
+        commentMaxLength: 'not-a-number',
+        enableResolve: true,
+        unknownSetting: 'drop me',
+      },
+    } as Record<string, unknown>);
+    expect(result.settings).toEqual({
+      templates: [{ label: 'good', text: 'ok' }],
+      enableResolve: true,
+    });
+  });
+
+  it('sanitizePreferencesPatch returns {} for non-object input', () => {
+    expect(sanitizePreferencesPatch(null)).toEqual({});
+    expect(sanitizePreferencesPatch('hello')).toEqual({});
+    expect(sanitizePreferencesPatch([1, 2, 3])).toEqual({});
+    expect(sanitizePreferencesPatch(undefined)).toEqual({});
   });
 
   it('steals an abandoned (stale) lock file', async () => {

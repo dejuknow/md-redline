@@ -1635,7 +1635,13 @@ export default function App() {
                 >
                   <div className="max-w-3xl mx-auto">
                     {diffEnabled && currentSnapshot && diffLines ? (
+                      // key on activeFilePath forces a remount when the user
+                      // switches files while the diff overlay is on, so the
+                      // mount-time auto-scroll-to-first-chunk fires for each
+                      // file's diff. Without this, the [] effect in
+                      // RenderedDiffView only runs for the first file viewed.
                       <RenderedDiffView
+                        key={activeFilePath ?? ''}
                         ref={renderedDiffRef}
                         rawMarkdown={rawMarkdown}
                         diffSnapshot={currentSnapshot}

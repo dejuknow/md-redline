@@ -39,6 +39,11 @@ function buildCleanToRawLineMap(rawText: string, cleanText: string): number[] {
   let r = 0;
   for (let c = 0; c < cleanLines.length; c++) {
     while (r < rawLines.length && rawLines[r] !== cleanLines[c]) r++;
+    // Defensive clamp: parseComments only ever drops raw lines, so every
+    // clean line MUST appear in raw and the walker should always find a
+    // match. If invariants ever break (e.g. a future parser change emits a
+    // synthesized clean line) we'd rather pin to the last raw row than
+    // throw at render time and crash the panel.
     map.push(r < rawLines.length ? r : rawLines.length - 1);
     r++;
   }
