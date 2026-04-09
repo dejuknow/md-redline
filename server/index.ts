@@ -99,6 +99,12 @@ const sseEncoder = new TextEncoder();
 
 const MAX_ALLOWED_ROOTS = 50;
 const MAX_WRITTEN_CACHE = 100;
+// Hard cap on file sizes the server is willing to load fully into memory.
+// Markdown files in real review workflows are far below this; the cap
+// exists to keep a runaway file (gigabyte log accidentally renamed to .md,
+// adversarial trusted-root content) from OOMing the server on /api/file
+// or repeated watcher reads.
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 export function createApp(options: CreateAppOptions = {}) {
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
@@ -140,6 +146,32 @@ export function createApp(options: CreateAppOptions = {}) {
     }),
   );
   app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 }));
+  // Host header allowlist — closes DNS rebinding. The server only binds to
+  // 127.0.0.1, so any request reaching us either came from a localhost-
+  // bound caller (curl, Vite proxy, the SPA itself) OR from a browser whose
+  // DNS resolver returned 127.0.0.1 for an attacker-controlled hostname.
+  // The CORS allowlist blocks cross-origin JS reads but does NOT prevent
+  // simple GETs from triggering server side effects, and does NOT prevent
+  // a rebinding attack where the attacker site IS the active origin.
+  // Verifying the Host header is loopback closes that gap.
+  app.use('*', async (c, next) => {
+    const host = c.req.header('host');
+    // A missing Host header can only come from an internal in-process
+    // caller (test harness, programmatic app.fetch) — never from a real
+    // browser, which always sets Host. Allow it through. The threat model
+    // here is browser-driven DNS rebinding; an in-process caller already
+    // has full code execution and there's nothing to defend against.
+    if (host) {
+      // Strip an optional port. IPv6 hosts arrive as `[::1]:3001`.
+      const hostname = host.startsWith('[')
+        ? host.slice(1, host.indexOf(']'))
+        : host.split(':')[0];
+      if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1') {
+        return c.json({ error: 'Invalid Host header' }, 400);
+      }
+    }
+    await next();
+  });
   // Enforce application/json Content-Type on POST/PUT to block CSRF via text/plain forms
   app.use('*', async (c, next) => {
     if (c.req.method === 'POST' || c.req.method === 'PUT') {
@@ -377,10 +409,16 @@ export function createApp(options: CreateAppOptions = {}) {
       // between readFile and stat yields mismatched content/mtime.
       const fd = await open(resolved, 'r');
       try {
-        const [content, fileStat] = await Promise.all([
-          fd.readFile('utf-8'),
-          fd.stat(),
-        ]);
+        const fileStat = await fd.stat();
+        if (fileStat.size > MAX_FILE_BYTES) {
+          return c.json(
+            {
+              error: `File too large to open (${fileStat.size} bytes; limit ${MAX_FILE_BYTES})`,
+            },
+            413,
+          );
+        }
+        const content = await fd.readFile('utf-8');
         return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
       } finally {
         await fd.close();
@@ -489,6 +527,13 @@ export function createApp(options: CreateAppOptions = {}) {
       const ext = extname(resolved).toLowerCase();
       if (!IMAGE_EXTENSIONS.has(ext)) {
         return c.json({ error: 'Unsupported asset type' }, 400);
+      }
+      const assetStat = await stat(resolved);
+      if (assetStat.size > MAX_FILE_BYTES) {
+        return c.json(
+          { error: `Asset too large (${assetStat.size} bytes; limit ${MAX_FILE_BYTES})` },
+          413,
+        );
       }
       const headers: Record<string, string> = {
         'Content-Type': IMAGE_MIME_TYPES[ext],
@@ -824,6 +869,22 @@ export function createApp(options: CreateAppOptions = {}) {
 
         const broadcastChange = async () => {
           try {
+            const watchStat = await stat(resolved);
+            if (watchStat.size > MAX_FILE_BYTES) {
+              // Don't load gigabyte-scale files into memory on every fs
+              // event. Surface the same "file_gone" channel so the client
+              // shows an error rather than silently stalling.
+              const frame = sseFrame(
+                'error',
+                JSON.stringify({ path: resolved, reason: 'too_large' }),
+              );
+              for (const client of clients) {
+                client.write(frame).catch(() => {
+                  clients.delete(client);
+                });
+              }
+              return;
+            }
             const content = await readFile(resolved, 'utf-8');
             if (lastWrittenContent.get(resolved) === content) return;
             if (content === lastBroadcast) return;

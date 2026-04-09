@@ -29,7 +29,7 @@ import {
   parseComments,
   addReply,
   resolveComment,
-  COMMENT_MARKER_RE,
+  createCommentMarkerRegex,
 } from '../src/lib/comment-parser';
 import { getEffectiveStatus } from '../src/types';
 
@@ -131,10 +131,10 @@ export function makeReply(commentText: string, index: number): string {
  * Exported for unit testing.
  */
 export function indexOfOutsideMarkers(haystack: string, needle: string): number {
-  COMMENT_MARKER_RE.lastIndex = 0;
+  const re = createCommentMarkerRegex();
   const ranges: Array<[number, number]> = [];
   let m: RegExpExecArray | null;
-  while ((m = COMMENT_MARKER_RE.exec(haystack)) !== null) {
+  while ((m = re.exec(haystack)) !== null) {
     ranges.push([m.index, m.index + m[0].length]);
   }
   let from = 0;

@@ -292,7 +292,12 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         });
         finishLoadRequest(path, requestId);
       } finally {
-        abortControllersRef.current.delete(path);
+        // Compare-and-delete: only clear the slot if it still holds OUR
+        // controller. A racing openTab(samePath) may have already installed
+        // a fresh controller — deleting it here would orphan that load.
+        if (abortControllersRef.current.get(path) === controller) {
+          abortControllersRef.current.delete(path);
+        }
       }
     },
     [
@@ -359,7 +364,9 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         });
         finishLoadRequest(path, requestId);
       } finally {
-        abortControllersRef.current.delete(path);
+        if (abortControllersRef.current.get(path) === controller) {
+          abortControllersRef.current.delete(path);
+        }
       }
     },
     [
@@ -485,9 +492,14 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
 
   const setRawMarkdown = useCallback(
     (content: string) => {
-      if (activeFilePath) updateTab(activeFilePath, { rawMarkdown: content, dirty: true });
+      // Read the active file path from a ref so this callback always sees
+      // the current tab — not the tab that was active when the callback
+      // was last memoized. Without this, Cmd-Tabbing while typing can
+      // route an edit into the previously-active tab.
+      const current = activeFilePathRef.current;
+      if (current) updateTab(current, { rawMarkdown: content, dirty: true });
     },
-    [activeFilePath, updateTab],
+    [updateTab],
   );
 
   const saveFileAt = useCallback(
@@ -611,7 +623,9 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         });
         finishLoadRequest(path, requestId);
       } finally {
-        abortControllersRef.current.delete(path);
+        if (abortControllersRef.current.get(path) === controller) {
+          abortControllersRef.current.delete(path);
+        }
       }
     }
   }, [

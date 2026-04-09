@@ -78,6 +78,168 @@ export function countChunks(segments: DiffSegment[]): number {
   return max + 1;
 }
 
+interface FenceRange {
+  /** 1-indexed line number of the opening fence line. */
+  start: number;
+  /** 1-indexed line number of the closing fence line (inclusive). */
+  end: number;
+}
+
+/**
+ * Find fenced-code regions in a markdown source. Returns 1-indexed inclusive
+ * line ranges. Recognizes ``` and ~~~ fences (with leading indent up to 3
+ * spaces, per CommonMark). An unclosed fence extends to EOF.
+ *
+ * Exported for unit testing.
+ */
+export function findFenceRanges(text: string): FenceRange[] {
+  const lines = text.split('\n');
+  const ranges: FenceRange[] = [];
+  let openLine = -1;
+  let openMarkerChar = '';
+  let openMarkerLen = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i]);
+    if (!m) continue;
+    const marker = m[1];
+    if (openLine === -1) {
+      openLine = i;
+      openMarkerChar = marker[0];
+      openMarkerLen = marker.length;
+    } else if (marker[0] === openMarkerChar && marker.length >= openMarkerLen) {
+      ranges.push({ start: openLine + 1, end: i + 1 });
+      openLine = -1;
+    }
+  }
+  if (openLine !== -1) {
+    ranges.push({ start: openLine + 1, end: lines.length });
+  }
+  return ranges;
+}
+
+function fenceContaining(
+  line: number | undefined,
+  ranges: FenceRange[],
+): FenceRange | null {
+  if (line == null) return null;
+  for (const r of ranges) {
+    if (line >= r.start && line <= r.end) return r;
+  }
+  return null;
+}
+
+function assignChunkIndices(segments: DiffSegment[]): void {
+  let chunkIdx = -1;
+  let lastWasChange = false;
+  for (const s of segments) {
+    if (s.type === 'same') {
+      lastWasChange = false;
+      continue;
+    }
+    if (!lastWasChange) chunkIdx++;
+    s.chunkIndex = chunkIdx;
+    lastWasChange = true;
+  }
+}
+
+/**
+ * Fence-aware segmenter. Like segmentDiff, but never splits a code fence
+ * across segments. When any line inside a fenced block is added or removed,
+ * the entire fence is emitted as a single removed segment (full old fence)
+ * + a single added segment (full new fence). Without this, per-segment
+ * markdown rendering produces nonsense for fences whose body changes —
+ * the opening ``` line, the changed line, and the closing ``` end up as
+ * three separate markdown documents and the fence never opens.
+ *
+ * Exported for unit testing.
+ */
+export function segmentDiffFenceAware(
+  diffLines: DiffLine[],
+  oldText: string,
+  newText: string,
+): DiffSegment[] {
+  const oldFences = findFenceRanges(oldText);
+  const newFences = findFenceRanges(newText);
+  if (oldFences.length === 0 && newFences.length === 0) {
+    return segmentDiff(diffLines);
+  }
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+
+  const segments: DiffSegment[] = [];
+  let buf: string[] = [];
+  let bufType: DiffSegmentType | null = null;
+  const flush = () => {
+    if (bufType === null) return;
+    segments.push({ type: bufType, text: buf.join('\n') });
+    buf = [];
+    bufType = null;
+  };
+
+  let i = 0;
+  while (i < diffLines.length) {
+    const dl = diffLines[i];
+    const oldFence = fenceContaining(dl.oldLineNo, oldFences);
+    const newFence = fenceContaining(dl.newLineNo, newFences);
+
+    if (oldFence || newFence) {
+      flush();
+      // Walk forward, consuming any subsequent diff lines that still belong
+      // to the same old or new fence we just entered. This captures the
+      // full extent of the fence in diff-line space, including interleaved
+      // removed/added/same lines.
+      let j = i + 1;
+      while (j < diffLines.length) {
+        const next = diffLines[j];
+        const nextOld = fenceContaining(next.oldLineNo, oldFences);
+        const nextNew = fenceContaining(next.newLineNo, newFences);
+        const matchesOld = oldFence != null && nextOld != null && nextOld.start === oldFence.start;
+        const matchesNew = newFence != null && nextNew != null && nextNew.start === newFence.start;
+        if (matchesOld || matchesNew) {
+          j++;
+        } else {
+          break;
+        }
+      }
+
+      // Reconstruct each fence's full text from the source files. This is
+      // the key insight: we ignore the per-line diff annotations within the
+      // fence and re-render both the old and new fences in their entirety,
+      // so the markdown pipeline always sees a balanced ```...``` block.
+      const oldFenceText = oldFence
+        ? oldLines.slice(oldFence.start - 1, oldFence.end).join('\n')
+        : '';
+      const newFenceText = newFence
+        ? newLines.slice(newFence.start - 1, newFence.end).join('\n')
+        : '';
+
+      if (oldFence && newFence && oldFenceText === newFenceText) {
+        // Fence touched by the diff but content is identical (e.g. only
+        // surrounding lines moved). Emit as a single 'same' segment so the
+        // chunk count doesn't include a phantom change.
+        segments.push({ type: 'same', text: oldFenceText });
+      } else {
+        if (oldFenceText) segments.push({ type: 'removed', text: oldFenceText });
+        if (newFenceText) segments.push({ type: 'added', text: newFenceText });
+      }
+      i = j;
+      continue;
+    }
+
+    // Normal line — same accumulator behavior as segmentDiff.
+    if (bufType === null || dl.type !== bufType) {
+      flush();
+      bufType = dl.type;
+    }
+    buf.push(dl.text);
+    i++;
+  }
+  flush();
+
+  assignChunkIndices(segments);
+  return segments;
+}
+
 export interface RenderedDiffViewHandle {
   next: () => void;
   prev: () => void;
@@ -103,8 +265,12 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
     const [activeChunk, setActiveChunk] = useState(0);
 
     const segments = useMemo<DiffSegment[]>(
-      () => segmentDiff(diffLines),
-      [diffLines],
+      // Fence-aware so a one-line edit inside a code fence doesn't shred
+      // the fence into three malformed markdown documents (open, body,
+      // close). The fence-aware path falls back to the original segmenter
+      // when neither side has any fences.
+      () => segmentDiffFenceAware(diffLines, diffSnapshot, rawMarkdown),
+      [diffLines, diffSnapshot, rawMarkdown],
     );
 
     const chunkCount = useMemo(() => countChunks(segments), [segments]);

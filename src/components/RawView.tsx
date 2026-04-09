@@ -14,7 +14,7 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
-import { COMMENT_MARKER_RE } from '../lib/comment-parser';
+import { createCommentMarkerRegex } from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
 import { type DiffLine } from '../lib/diff';
 
@@ -24,9 +24,11 @@ interface SyntaxRule {
   className: string;
 }
 
+// Comment markers are handled separately via createCommentMarkerRegex() so
+// they get a fresh /g regex per call (no shared lastIndex). The other
+// patterns below have no overlap risk because each rule iterates and resets
+// independently within the same function scope.
 const SYNTAX_RULES: SyntaxRule[] = [
-  // Comment markers — highest priority
-  { pattern: COMMENT_MARKER_RE, className: 'raw-comment-marker' },
   // Fenced code blocks (``` or ~~~)
   { pattern: /^(`{3,}|~{3,}).*$(?:\n[\s\S]*?)?^(\1)/gm, className: 'raw-code-block' },
   // Inline code
@@ -139,8 +141,7 @@ function extractNodeText(node: MarkdownAstNode): string {
 }
 
 export function extractRawHeadings(rawMarkdown: string): RawHeading[] {
-  COMMENT_MARKER_RE.lastIndex = 0;
-  const cleanRaw = rawMarkdown.replace(COMMENT_MARKER_RE, '');
+  const cleanRaw = rawMarkdown.replace(createCommentMarkerRegex(), '');
   const tree = rawHeadingProcessor.parse(cleanRaw) as MarkdownAstNode;
   const headings: Array<{ text: string; level: number; lineIndex: number }> = [];
 
@@ -174,9 +175,9 @@ export function extractRawHeadings(rawMarkdown: string): RawHeading[] {
 export function buildHighlightedHtml(raw: string): string {
   // Step 1: Collect comment marker matches first (they have absolute priority)
   const commentRegions: Region[] = [];
-  COMMENT_MARKER_RE.lastIndex = 0;
+  const commentRe = createCommentMarkerRegex();
   let cm: RegExpExecArray | null;
-  while ((cm = COMMENT_MARKER_RE.exec(raw)) !== null) {
+  while ((cm = commentRe.exec(raw)) !== null) {
     const region: Region = {
       start: cm.index,
       end: cm.index + cm[0].length,
@@ -192,10 +193,12 @@ export function buildHighlightedHtml(raw: string): string {
     commentRegions.push(region);
   }
 
-  // Step 2: Collect other syntax matches, skipping any that overlap comment markers
+  // Step 2: Collect other syntax matches, skipping any that overlap comment markers.
+  // SYNTAX_RULES holds module-scoped /g regexes; resetting lastIndex is essential
+  // because buildHighlightedHtml is called repeatedly (every keystroke). Cloning
+  // would also work but is more allocation-heavy.
   const otherRegions: Region[] = [];
   for (const rule of SYNTAX_RULES) {
-    if (rule.className === 'raw-comment-marker') continue;
     rule.pattern.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = rule.pattern.exec(raw)) !== null) {

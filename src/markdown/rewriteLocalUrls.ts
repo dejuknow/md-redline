@@ -82,6 +82,17 @@ export function classifyUrl(url: string): ClassifiedUrl {
   const { path: noQuery } = splitQuery(path);
   const decoded = safeDecode(noQuery);
 
+  // Re-check for a scheme on the decoded path. A markdown link like
+  // `[x](javascript%3aalert%281%29)` is not detected as having a scheme by
+  // the pre-decode regex above (because `:` is encoded as `%3a`), but the
+  // browser will decode it on click. Treat anything that decodes to a
+  // scheme-prefixed string as external so the rewriter does not stamp our
+  // own data attrs onto it. The HTML sanitizer's URL allowlist will then
+  // strip the dangerous href on its way out.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded)) {
+    return { kind: 'external' };
+  }
+
   if (decoded.startsWith('/')) {
     return { kind: 'absolute', path: decoded, fragment };
   }

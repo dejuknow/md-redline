@@ -270,23 +270,20 @@ function printPublishRecovery(stage, version) {
     case 'version':
       console.error(`'npm version' failed. No state changed. Safe to retry.`);
       break;
-    case 'publish':
-      console.error(`'npm publish' failed AFTER 'npm version' created a local commit and tag.`);
-      console.error(`To roll back:`);
+    case 'push':
+      console.error(`'git push --follow-tags --atomic' failed AFTER 'npm version' created a local commit and tag.`);
+      console.error(`Nothing was published. To roll back the local commit and tag:`);
       console.error(`  git reset --hard HEAD~1`);
       console.error(`  git tag -d v${version}`);
+      console.error(`Or fix the push problem (auth, protected branch) and retry:`);
+      console.error(`  git push --follow-tags --atomic`);
+      console.error(`  npm publish`);
       break;
-    case 'push':
-      console.error(`'git push' failed AFTER 'npm publish' succeeded.`);
-      console.error(`The package is on npm but main has not been pushed.`);
-      console.error(`To recover:`);
-      console.error(`  git push && git push --tags`);
-      break;
-    case 'push-tags':
-      console.error(`'git push --tags' failed AFTER 'git push' succeeded.`);
-      console.error(`Commit is pushed but the tag is not.`);
-      console.error(`To recover:`);
-      console.error(`  git push --tags`);
+    case 'publish':
+      console.error(`'npm publish' failed AFTER the commit and tag were pushed to git.`);
+      console.error(`The git tag v${version} EXISTS upstream but the package is NOT on npm.`);
+      console.error(`To recover, rerun publish (it is idempotent for new versions):`);
+      console.error(`  npm publish`);
       break;
   }
   console.error('─────────────────────────────────────');
@@ -310,25 +307,39 @@ async function main() {
   // which exits non-zero, our run() throws, finally cleans up. No extra
   // handling needed there. Throwing from a SIGINT handler does NOT propagate
   // to awaited code, which is why we use the AbortController pattern.
+  //
+  // Use process.on (NOT .once): a second Ctrl+C during the publish window
+  // would otherwise hit the default SIGINT handler and terminate the
+  // process before our finally blocks run, leaving an orphaned tag and
+  // possibly an unpublished release. Subsequent SIGINTs after the first
+  // are no-ops (the AbortController is already aborted), but the handler
+  // staying bound prevents the default kill.
   const ac = new AbortController();
   const onSigint = () => ac.abort();
-  process.once('SIGINT', onSigint);
+  process.on('SIGINT', onSigint);
 
   let preserveNotes = false;
   try {
     await confirmOrEdit(notesPath, nextVersion, ac.signal);
 
     // Point of no return.
+    //
+    // Order: bump → push commit+tag atomically → publish to npm → create
+    // GitHub release. The PUSH-BEFORE-PUBLISH order is critical: if we
+    // publish to npm first and then push fails, the npm registry has a
+    // version with no corresponding git tag, which cannot be retracted.
+    // Pushing first means the worst failure mode is "git tag exists but
+    // npm doesn't" — recoverable by re-running `npm publish`.
     let publishStage;
     try {
       publishStage = 'version';
       run('npm', ['version', type]);
+      publishStage = 'push';
+      // --follow-tags pushes annotated tags reachable from pushed commits;
+      // --atomic ensures the commit and the tag land together or not at all.
+      run('git', ['push', '--follow-tags', '--atomic']);
       publishStage = 'publish';
       run('npm', ['publish']);
-      publishStage = 'push';
-      run('git', ['push']);
-      publishStage = 'push-tags';
-      run('git', ['push', '--tags']);
     } catch (e) {
       printPublishRecovery(publishStage, nextVersion);
       throw e;

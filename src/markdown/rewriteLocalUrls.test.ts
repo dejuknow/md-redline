@@ -61,6 +61,20 @@ describe('classifyUrl', () => {
     expect(classifyUrl('tel:555')).toEqual({ kind: 'external' });
   });
 
+  it('classifies a percent-encoded scheme as external (XSS regression)', () => {
+    // [x](javascript%3aalert%281%29) — the colon is encoded so the literal
+    // scheme regex misses it. The rewriter MUST still classify this as
+    // external, otherwise it returns kind:'relative' and the rewriter
+    // leaves the original href alone, which the browser then decodes on
+    // click → script execution.
+    expect(classifyUrl('javascript%3aalert%281%29')).toEqual({ kind: 'external' });
+    expect(classifyUrl('JAVASCRIPT%3Aalert(1)')).toEqual({ kind: 'external' });
+    expect(classifyUrl('data%3Atext/html,<script>alert(1)</script>')).toEqual({
+      kind: 'external',
+    });
+    expect(classifyUrl('vbscript%3Amsgbox(1)')).toEqual({ kind: 'external' });
+  });
+
   it('classifies a pure fragment as fragment', () => {
     expect(classifyUrl('#section')).toEqual({ kind: 'fragment' });
   });

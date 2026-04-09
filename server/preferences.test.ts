@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile, readFile } from 'fs/promises';
+import { mkdtemp, rm, writeFile, readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -20,16 +20,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  // Clean up the prefs file between tests
-  try {
-    await rm(join(testDir, '.md-redline.json'));
-  } catch {
-    /* doesn't exist */
-  }
-  try {
-    await rm(join(testDir, '.md-redline.json.tmp'));
-  } catch {
-    /* doesn't exist */
+  // Clean up the prefs file and any quarantined / lock siblings between tests
+  const entries = await readdir(testDir).catch(() => [] as string[]);
+  for (const entry of entries) {
+    if (entry.startsWith('.md-redline.json')) {
+      await rm(join(testDir, entry), { force: true }).catch(() => {});
+    }
   }
 });
 
@@ -213,5 +209,104 @@ describe('addTrustedRoot', () => {
     expect(prefs.author).toBe('Alice');
     expect(prefs.theme).toBe('dark');
     expect(prefs.trustedRoots).toEqual(['/x']);
+  });
+});
+
+describe('corrupted prefs quarantine', () => {
+  it('moves an unparseable prefs file aside instead of overwriting it', async () => {
+    // Seed a corrupt file directly
+    const prefsFile = join(testDir, '.md-redline.json');
+    await writeFile(prefsFile, '{ this is not json');
+
+    // The next write must NOT silently obliterate the corrupt content. The
+    // implementation moves the corrupt file to a `.corrupt-<ts>` sibling.
+    await writePreferences(testDir, { author: 'Recovered' });
+
+    const entries = await readdir(testDir);
+    const quarantined = entries.find(
+      (e) => e.startsWith('.md-redline.json.corrupt-') && !e.endsWith('.tmp'),
+    );
+    expect(quarantined).toBeDefined();
+
+    // The quarantined file still has the original (broken) bytes.
+    const recovered = await readFile(join(testDir, quarantined!), 'utf-8');
+    expect(recovered).toBe('{ this is not json');
+
+    // And the new prefs file is a valid JSON object containing only the patch.
+    const fresh = await readPreferences(testDir);
+    expect(fresh).toEqual({ author: 'Recovered' });
+  });
+
+  it('quarantines a structurally-wrong prefs file (array)', async () => {
+    const prefsFile = join(testDir, '.md-redline.json');
+    await writeFile(prefsFile, '["not", "an", "object"]');
+
+    await writePreferences(testDir, { theme: 'dark' });
+
+    const entries = await readdir(testDir);
+    expect(
+      entries.some(
+        (e) => e.startsWith('.md-redline.json.corrupt-') && !e.endsWith('.tmp'),
+      ),
+    ).toBe(true);
+
+    const fresh = await readPreferences(testDir);
+    expect(fresh).toEqual({ theme: 'dark' });
+  });
+
+  it('does not quarantine a healthy prefs file', async () => {
+    await writePreferences(testDir, { author: 'Healthy' });
+    await writePreferences(testDir, { theme: 'dark' });
+
+    const entries = await readdir(testDir);
+    expect(entries.some((e) => e.includes('.corrupt-'))).toBe(false);
+
+    const final = await readPreferences(testDir);
+    expect(final).toEqual({ author: 'Healthy', theme: 'dark' });
+  });
+});
+
+describe('cross-process file lock', () => {
+  it('blocks a second writer until the first releases the lock', async () => {
+    // Simulate another process holding the lock by manually creating the
+    // lockfile. The next writePreferences call should block until we
+    // remove it (or until the stale-lock timeout fires, but the test
+    // releases the lock well before then).
+    const lockPath = join(testDir, '.md-redline.json.lock');
+    await writeFile(lockPath, 'fake-pid');
+
+    let completed = false;
+    const writePromise = writePreferences(testDir, { author: 'Locked' }).then(
+      (result) => {
+        completed = true;
+        return result;
+      },
+    );
+
+    // Give the writer a chance to attempt the lock and back off.
+    await new Promise((res) => setTimeout(res, 100));
+    expect(completed).toBe(false);
+
+    // Release the foreign lock; the writer should now succeed.
+    await rm(lockPath);
+    const result = await writePromise;
+    expect(completed).toBe(true);
+    expect(result).toEqual({ author: 'Locked' });
+
+    // Lock file is gone after the write completes.
+    const entries = await readdir(testDir);
+    expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
+  });
+
+  it('steals an abandoned (stale) lock file', async () => {
+    const lockPath = join(testDir, '.md-redline.json.lock');
+    await writeFile(lockPath, 'crashed-pid');
+    // Backdate the lock so it looks abandoned (older than LOCK_STALE_MS=30s).
+    const ancient = Date.now() / 1000 - 60;
+    const { utimes } = await import('fs/promises');
+    await utimes(lockPath, ancient, ancient);
+
+    const result = await writePreferences(testDir, { author: 'Steal' });
+    expect(result).toEqual({ author: 'Steal' });
   });
 });

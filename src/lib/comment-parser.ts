@@ -4,8 +4,16 @@ import { getEffectiveStatus, type MdComment, type ParseResult, type CommentReply
 // newlines in string values is matched correctly.
 const COMMENT_PATTERN = /<!-- @comment(\{.*?\}) -->/gs;
 
-/** Shared regex for matching comment markers (without capture group). Reset lastIndex before use. */
-export const COMMENT_MARKER_RE = /<!-- @comment\{.*?\} -->/gs;
+/**
+ * Factory for a fresh comment-marker regex. Returns a NEW RegExp every call
+ * so concurrent users (multiple components, recursive parses, code paths
+ * that interleave) cannot clobber each other's `lastIndex`. Always prefer
+ * this over keeping a module-scoped instance — sharing a stateful /g regex
+ * is a footgun, even when each caller dutifully resets `lastIndex`.
+ */
+export function createCommentMarkerRegex(): RegExp {
+  return /<!-- @comment\{.*?\} -->/gs;
+}
 
 interface CodeBlockRange {
   start: number;

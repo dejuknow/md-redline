@@ -1074,6 +1074,87 @@ describe('/api/pick-folder', () => {
   });
 });
 
+describe('Host header allowlist (DNS rebinding defense)', () => {
+  it('rejects requests with a non-loopback Host header', async () => {
+    const response = await app.request(`http://localhost/api/config`, {
+      headers: { Host: 'attacker.example.com' },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Invalid Host header' });
+  });
+
+  it('rejects rebinding attempts with subdomains and ports', async () => {
+    const response = await app.request(`http://localhost/api/config`, {
+      headers: { Host: 'evil.localhost.attacker.com:3001' },
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('allows requests with localhost host (with and without port)', async () => {
+    const r1 = await app.request(`http://localhost/api/config`, {
+      headers: { Host: 'localhost' },
+    });
+    expect(r1.status).toBe(200);
+    const r2 = await app.request(`http://localhost/api/config`, {
+      headers: { Host: 'localhost:3001' },
+    });
+    expect(r2.status).toBe(200);
+  });
+
+  it('allows requests with 127.0.0.1 host', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { Host: '127.0.0.1:3001' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('allows requests with IPv6 [::1] host', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { Host: '[::1]:3001' },
+    });
+    expect(r.status).toBe(200);
+  });
+});
+
+describe('file size limit (memory DoS defense)', () => {
+  it('rejects /api/file when the file exceeds MAX_FILE_BYTES', async () => {
+    // Create a 26 MB markdown file (over the 25 MB limit).
+    const bigFile = join(docsDir, 'huge.md');
+    const oneMb = 'x'.repeat(1024 * 1024);
+    await writeFile(bigFile, '# Big\n' + oneMb.repeat(26));
+
+    const response = await app.request(
+      `http://localhost/api/file?path=${encodeURIComponent(bigFile)}`,
+    );
+    expect(response.status).toBe(413);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/too large/i);
+
+    await rm(bigFile);
+  });
+
+  it('allows /api/file under the size limit', async () => {
+    const response = await app.request(
+      `http://localhost/api/file?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it('rejects /api/asset when the asset exceeds MAX_FILE_BYTES', async () => {
+    const bigAsset = join(docsDir, 'huge.png');
+    // 26 MB of garbage with PNG extension — the size check fires before
+    // anything tries to parse it as a real image.
+    await writeFile(bigAsset, Buffer.alloc(26 * 1024 * 1024));
+
+    const response = await app.request(
+      `http://localhost/api/asset?path=${encodeURIComponent(bigAsset)}`,
+    );
+    expect(response.status).toBe(413);
+
+    await rm(bigAsset);
+  });
+});
+
 describe('Content-Type enforcement', () => {
   it('rejects POST requests without application/json Content-Type', async () => {
     const response = await app.request('/api/reveal', {

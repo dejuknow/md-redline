@@ -18,7 +18,7 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import {
   backfillReplyTimestamps,
-  COMMENT_MARKER_RE,
+  createCommentMarkerRegex,
   findNewReplyIds,
   parseComments,
 } from './lib/comment-parser';
@@ -414,8 +414,7 @@ export default function App() {
     [],
   );
   const handleCopyDocument = useCallback(() => {
-    COMMENT_MARKER_RE.lastIndex = 0;
-    const clean = rawMarkdownRef.current.replace(COMMENT_MARKER_RE, '');
+    const clean = rawMarkdownRef.current.replace(createCommentMarkerRegex(), '');
     navigator.clipboard.writeText(clean).then(
       () => {
         setCopyFeedback(true);
