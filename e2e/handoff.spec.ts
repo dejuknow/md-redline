@@ -34,28 +34,51 @@ async function openFixture(page: Page, fixture: string = FIXTURE_1) {
 // ---------------------------------------------------------------------------
 
 test.describe('Hand-off button', () => {
-  test('is not visible when there are no comments', async ({ page }) => {
+  test('is visible-but-disabled when there are no comments', async ({ page }) => {
     await openFixture(page);
-    await expect(page.getByTestId('handoff-group')).not.toBeVisible();
+    // Stays visible (so the feature is discoverable) but disabled until at
+    // least one comment exists. Tooltip explains how to enable.
+    const btn = page.getByTestId('handoff-button');
+    await expect(btn).toBeVisible();
+    await expect(btn).toBeDisabled();
+    await expect(btn).toHaveAttribute('title', /add comments/i);
   });
 
-  test('appears when a comment is added', async ({ page }) => {
+  test('becomes enabled when a comment is added', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'authentication system', 'Needs more detail');
-    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+    const btn = page.getByTestId('handoff-button');
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await expect(btn).toBeEnabled();
   });
 
-  test('disappears when all comments are deleted', async ({ page }) => {
+  test('becomes disabled again when all comments are deleted', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'authentication system', 'Needs more detail');
-    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
+    const btn = page.getByTestId('handoff-button');
+    await expect(btn).toBeEnabled({ timeout: 10_000 });
 
     // Delete all comments via command palette
     await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('Delete all');
     await page.getByText('Delete all comments').click();
 
-    await expect(page.getByTestId('handoff-group')).not.toBeVisible();
+    await expect(btn).toBeVisible();
+    await expect(btn).toBeDisabled();
+  });
+
+  test('hovering the disabled handoff button reveals the explanatory tooltip', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    // Hover the wrapping span (Tooltip wrapper). Disabled buttons don't fire
+    // mouseenter natively, so the wrapper has to do it — that's the whole
+    // point of the span-based Tooltip.
+    const group = page.getByTestId('handoff-group');
+    await group.hover();
+    // Wait long enough for the slow first-reveal delay (~600ms).
+    const tooltip = page.getByRole('tooltip', { name: /add comments first/i });
+    await expect(tooltip).toBeVisible({ timeout: 2_000 });
   });
 });
 
@@ -361,7 +384,10 @@ test.describe('Handoff + snapshot', () => {
     await clearBtn.click();
     await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
 
-    // Diff toggle should be gone now
-    await expect(page.locator('button[title*="diff"]')).not.toBeVisible();
+    // Diff toggle stays visible but flips to disabled with the
+    // "take a snapshot first" tooltip after the snapshot is cleared.
+    const disabledDiff = page.locator('button[title*="hand off to take a snapshot"]');
+    await expect(disabledDiff).toBeVisible();
+    await expect(disabledDiff).toBeDisabled();
   });
 });

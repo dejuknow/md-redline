@@ -91,28 +91,10 @@ test.describe('Diff overlay', () => {
     await expect(page.getByText('No changes yet')).toBeVisible();
   });
 
-  test('comments toggle hides and shows comment markers', async ({ page, context }) => {
-    await openFixture(page);
-    await takeSnapshotViaHandoff(page, context);
-    await switchToRaw(page);
-
-    const commentsBtn = toggleBtn(page, 'comment marker');
-    // Comments are hidden by default when diff is auto-enabled
-    await expectInactive(commentsBtn);
-    await expect(page.locator('.raw-view-comments-hidden')).toBeVisible();
-
-    // Show comments
-    await commentsBtn.click();
-    await expectActive(commentsBtn);
-    await expect(page.locator('.raw-view-comments-hidden')).not.toBeVisible();
-
-    // Hide comments again
-    await commentsBtn.click();
-    await expectInactive(commentsBtn);
-    await expect(page.locator('.raw-view-comments-hidden')).toBeVisible();
-  });
-
-  test('external edit shows toast with View diff action', async ({ page, context }) => {
+  test('external edit shows toast with View diff action that stays in current view', async ({
+    page,
+    context,
+  }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await page.waitForTimeout(1500);
@@ -129,13 +111,15 @@ test.describe('Diff overlay', () => {
     const viewDiffBtn = page.getByRole('button', { name: 'View diff' });
     await expect(viewDiffBtn).toBeVisible({ timeout: 15_000 });
 
-    // Click the action — should switch to raw view with diff enabled
+    // Click the action — should enable the overlay WITHOUT changing view mode.
+    // (Diff used to be raw-only, so we'd switch to raw; now both views render
+    // the overlay so we stay where the user already is — usually rendered.)
     await viewDiffBtn.click();
-    await expect(page.locator('.raw-view')).toBeVisible();
+    await expect(page.locator('.raw-view')).not.toBeVisible();
     await expectActive(toggleBtn(page, 'diff'));
   });
 
-  test('raw button shows pending badge after external change', async ({ page, context }) => {
+  test('diff button shows pending badge after external change', async ({ page, context }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await page.waitForTimeout(1500);
@@ -147,8 +131,10 @@ test.describe('Diff overlay', () => {
       timeout: 15_000,
     });
 
-    const rawBtn = page.locator('button[title="View raw markdown"]');
-    const badge = rawBtn.locator('.animate-pulse');
+    // The pending pulse now lives on the diff button (since the diff overlay
+    // works in any view) — the view-mode toggle no longer carries the dot.
+    const diffBtn = toggleBtn(page, 'diff');
+    const badge = diffBtn.locator('.animate-pulse');
     await expect(badge).toBeVisible();
   });
 
@@ -170,25 +156,33 @@ test.describe('Diff overlay', () => {
     await expect(page.getByText('No changes yet')).not.toBeVisible();
   });
 
-  test('clear snapshot button removes diff toggle', async ({ page, context }) => {
+  test('clear snapshot button disables diff toggle', async ({ page, context }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
     const diffBtn = toggleBtn(page, 'diff');
     await expect(diffBtn).toBeVisible();
+    await expect(diffBtn).toBeEnabled();
 
     await toolbarBtn(page, 'Clear snapshot').click();
     await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
 
-    await expect(diffBtn).not.toBeVisible();
+    // Diff toggle stays visible (so users discover the feature) but becomes
+    // disabled with an explanatory tooltip after the snapshot is cleared.
+    await expect(diffBtn).toBeVisible();
+    await expect(diffBtn).toBeDisabled();
+    await expect(diffBtn).toHaveAttribute('title', /snapshot/i);
   });
 
-  test('diff toggle is not available before taking a snapshot', async ({ page }) => {
+  test('diff toggle is visible-but-disabled before taking a snapshot', async ({ page }) => {
     await openFixture(page);
     await switchToRaw(page);
 
-    await expect(toggleBtn(page, 'diff')).not.toBeVisible();
+    const diffBtn = toggleBtn(page, 'diff');
+    await expect(diffBtn).toBeVisible();
+    await expect(diffBtn).toBeDisabled();
+    await expect(diffBtn).toHaveAttribute('title', /hand off/i);
   });
 
   test('chunk count badge is visible even when diff overlay is toggled off', async ({
@@ -275,5 +269,153 @@ test.describe('Diff overlay', () => {
     await expectInactive(diffBtn);
     await expect(countBadge).toBeVisible();
     await expect(countBadge).not.toHaveText(firstCount!);
+  });
+
+  test('raw + diff overlay still shows comment marker rows alongside diff highlights', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+
+    // Modify the body so the diff has at least one chunk to render. Use
+    // FIXTURE_ORIGINAL as the search target so the replace lands on the
+    // unmodified body text (the file now has a comment marker injected near
+    // "Section One" but the heading line is untouched).
+    await switchToRaw(page);
+    const original = readFileSync(FIXTURE, 'utf-8');
+    const edited = original.replace(
+      'Rate limiting prevents brute force attacks.',
+      'Rate limiting prevents brute force attacks and stops scraping bots.',
+    );
+    writeFileSync(FIXTURE, edited);
+
+    // Wait for the diff to register the new chunk via the panel toolbar badge.
+    const diffBtn = toggleBtn(page, 'diff');
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    await expectActive(diffBtn);
+
+    // Marker rows must remain visible in the diff overlay — they were
+    // accidentally stripped earlier because the diff was computed on
+    // cleanMarkdown. They should re-interleave as unchanged context rows.
+    await expect(page.locator('.raw-comment-marker').first()).toBeVisible();
+
+    // The diff highlight on the body should also be there.
+    await expect(page.locator('.raw-line-diff-added').first()).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rendered diff tests — diff toggle lives in the rendered view's pinned
+// secondary toolbar (mirrors the raw view structure).
+// ---------------------------------------------------------------------------
+
+/** Diff toggle button inside the rendered view's secondary toolbar. */
+function renderedDiffBtn(page: Page): Locator {
+  return page
+    .locator('.raw-toolbar button[title*="diff since snapshot"], .raw-toolbar button[title*="Hide diff overlay"]')
+    .first();
+}
+
+test.describe('Rendered diff overlay', () => {
+  test('rendered toolbar diff button appears after snapshot', async ({ page, context }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+
+    // Should still be in rendered view after handoff
+    await expect(page.locator('.prose')).toBeVisible();
+    await expect(renderedDiffBtn(page)).toBeVisible();
+  });
+
+  test('toggling diff in rendered view stays in rendered view and shows added/removed blocks', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(500);
+
+    // Modify the file externally so the diff has something to show
+    const modified = FIXTURE_ORIGINAL.replace(
+      'Rate limiting prevents brute force attacks.',
+      'Rate limiting prevents brute force attacks and stops scraping bots.',
+    );
+    writeFileSync(FIXTURE, modified);
+
+    // Wait for the file watcher to pick up the change
+    await expect(page.getByText(/stops scraping bots/)).toBeVisible({ timeout: 15_000 });
+
+    // Toggle diff on
+    await renderedDiffBtn(page).click();
+
+    // Should still be in rendered (prose) view, not raw
+    await expect(page.locator('.raw-view')).not.toBeVisible();
+
+    // Both removed and added blocks should be visible inline
+    await expect(page.locator('.rendered-diff-removed')).toBeVisible();
+    await expect(page.locator('.rendered-diff-added')).toBeVisible();
+  });
+
+  test('toggling diff off in rendered view restores plain rendered view', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(500);
+
+    const modified = FIXTURE_ORIGINAL.replace('The authentication system', 'The auth system');
+    writeFileSync(FIXTURE, modified);
+    await expect(page.getByText(/The auth system/)).toBeVisible({ timeout: 15_000 });
+
+    const diffBtn = renderedDiffBtn(page);
+    await diffBtn.click();
+    await expect(page.locator('.rendered-diff-added')).toBeVisible();
+
+    // Toggle off
+    await diffBtn.click();
+    await expect(page.locator('.rendered-diff-added')).not.toBeVisible();
+    await expect(page.locator('.rendered-diff-removed')).not.toBeVisible();
+    await expect(page.locator('.prose')).toBeVisible();
+  });
+
+  test('switching from raw to rendered preserves diff state', async ({ page, context }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(500);
+
+    const modified = FIXTURE_ORIGINAL.replace('Section Three', 'Section 3');
+    writeFileSync(FIXTURE, modified);
+    await expect(page.getByRole('heading', { name: 'Section 3' })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Enter raw view (diff auto-enables)
+    await switchToRaw(page);
+    await expectActive(toggleBtn(page, 'diff'));
+
+    // Switch back to rendered — diff should still be enabled and visible
+    await page.locator('button[title="Switch to rendered view"]').click();
+    await expect(page.locator('.prose')).toBeVisible();
+    await expect(page.locator('.rendered-diff-added').first()).toBeVisible();
+    await expect(page.locator('.rendered-diff-removed').first()).toBeVisible();
+  });
+
+  test('clear snapshot disables the rendered toolbar diff button', async ({ page, context }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await expect(renderedDiffBtn(page)).toBeVisible();
+
+    // Clear snapshot from the panel toolbar's Clear snapshot text button.
+    await page.locator('.raw-toolbar button', { hasText: 'Clear snapshot' }).first().click();
+    await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
+
+    // Diff button stays visible (so users discover the feature) but flips
+    // to disabled with the "take a snapshot first" tooltip.
+    const disabledDiff = page
+      .locator('.raw-toolbar button[title*="hand off to take a snapshot"]')
+      .first();
+    await expect(disabledDiff).toBeVisible();
+    await expect(disabledDiff).toBeDisabled();
   });
 });

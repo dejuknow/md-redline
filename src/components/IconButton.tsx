@@ -12,7 +12,7 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className
 }
 
 const baseClasses =
-  'p-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+  'p-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent';
 
 export function IconButton({
   variant = 'neutral',

@@ -7,16 +7,16 @@ import {
   useCallback,
   useMemo,
   useState,
+  type RefObject,
 } from 'react';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
-import { COMMENT_MARKER_RE, parseComments } from '../lib/comment-parser';
+import { COMMENT_MARKER_RE } from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
-import { computeDiff, type DiffLine } from '../lib/diff';
-import { SplitIconButton } from './SplitIconButton';
+import { type DiffLine } from '../lib/diff';
 
 // Markdown syntax highlighting patterns (order matters — first match wins per region)
 interface SyntaxRule {
@@ -56,6 +56,8 @@ const SYNTAX_RULES: SyntaxRule[] = [
 export interface RawViewHandle {
   scrollToComment: (commentId: string) => void;
   scrollToHeading: (headingId: string) => void;
+  diffPrev: () => void;
+  diffNext: () => void;
 }
 
 interface Props {
@@ -66,8 +68,28 @@ interface Props {
   activeCommentId: string | null;
   diffSnapshot?: string | null;
   diffEnabled?: boolean;
-  onDiffToggle?: () => void;
-  onClearSnapshot?: () => void;
+  /**
+   * Pre-computed diff lines from the App-level useDiffLines hook. RawView
+   * no longer recomputes; this guarantees raw and rendered views see the
+   * same change set and lets the panel toolbar show the chunk badge before
+   * the user enters diff mode.
+   */
+  diffLines?: DiffLine[] | null;
+  /**
+   * Maps a 1-indexed clean line number (from a DiffLine's oldLineNo /
+   * newLineNo, since the diff is computed on cleanMarkdown) back to a
+   * 0-indexed raw line index. Without this, an edit on the body line
+   * directly below a comment marker would render the marker row as the
+   * changed row in raw view.
+   */
+  oldCleanToRawLine?: number[];
+  newCleanToRawLine?: number[];
+  /**
+   * Ref attached to the inner scroll container. Lifted out so App-level
+   * scroll-bound hooks (heading tracking, drag handles, selection) bind to
+   * the actual scrolling element rather than a non-scrolling outer wrapper.
+   */
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }
 
 interface DisplayRow {
@@ -297,22 +319,19 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     activeCommentId,
     diffSnapshot,
     diffEnabled,
-    onDiffToggle,
-    onClearSnapshot,
+    diffLines: diffLinesProp,
+    oldCleanToRawLine,
+    newCleanToRawLine,
+    scrollContainerRef,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const internalScrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = scrollContainerRef ?? internalScrollRef;
   const tableRef = useRef<HTMLDivElement>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
-  const [copyFeedback, setCopyFeedback] = useState(false);
-  const [showComments, setShowComments] = useState(true);
   const [activeDiffChunk, setActiveDiffChunk] = useState(0);
-
-  // Hide comment markers when entering diff mode so user sees only diffs
-  useEffect(() => {
-    if (diffEnabled) setShowComments(false);
-  }, [diffEnabled]);
 
   // Clean up flash timer on unmount
   useEffect(() => {
@@ -333,16 +352,9 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     [rawMarkdown, highlightedHtml],
   );
 
-  // Diff computation — compare clean markdown (without comment markers) so that
-  // marker additions/removals don't appear as content changes.
-  // Computed whenever a snapshot exists (not gated on diffEnabled) so the
-  // chunk count badge can be shown even when the visual overlay is off.
-  const diffLines = useMemo<DiffLine[] | null>(() => {
-    if (!diffSnapshot) return null;
-    const { cleanMarkdown: oldClean } = parseComments(diffSnapshot);
-    const { cleanMarkdown: newClean } = parseComments(rawMarkdown);
-    return computeDiff(oldClean, newClean);
-  }, [diffSnapshot, rawMarkdown]);
+  // Diff lines come from the App-level useDiffLines hook so the raw and
+  // rendered views are guaranteed to render the same change set.
+  const diffLines = diffLinesProp ?? null;
 
   const oldHighlightedHtml = useMemo(
     () => (diffEnabled && diffSnapshot ? buildHighlightedHtml(diffSnapshot) : ''),
@@ -367,39 +379,80 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
         sourceLineIndex: i,
       }));
     }
-    return diffLines.map((dl) => {
-      if (dl.type === 'removed') {
-        const oldIdx = (dl.oldLineNo ?? 1) - 1;
-        return {
-          type: 'removed' as const,
-          html: oldLineHtmls[oldIdx] ?? '',
-          lineNo: dl.oldLineNo,
-          sourceLineIndex: undefined,
-        };
+    // The diff is computed on cleanMarkdown (markers stripped), so dl.oldLineNo
+    // and dl.newLineNo are clean line numbers. Map them back to raw line
+    // indices via the per-snapshot maps before indexing into the raw line HTML
+    // arrays — otherwise an edit on a body line just below a comment marker
+    // would surface the marker row in the diff overlay.
+    //
+    // We also re-interleave the new file's marker lines as unchanged context
+    // rows so the raw view actually shows what's in the file. Markers stay
+    // visible (with their normal highlight) but aren't tracked as diff
+    // chunks — comment metadata changes are surfaced in the comments
+    // sidebar, not the diff overlay.
+    const contentRawIdxSet = new Set<number>(newCleanToRawLine ?? []);
+    const totalRawLines = lineHtmls.length;
+    const rows: DisplayRow[] = [];
+    let nextRawIdx = 0;
+
+    const emitMarkersUpTo = (limitRawIdx: number) => {
+      while (nextRawIdx < limitRawIdx && nextRawIdx < totalRawLines) {
+        if (!contentRawIdxSet.has(nextRawIdx)) {
+          rows.push({
+            type: 'same',
+            html: lineHtmls[nextRawIdx] ?? '',
+            lineNo: nextRawIdx + 1,
+            sourceLineIndex: nextRawIdx,
+          });
+        }
+        nextRawIdx++;
       }
-      const newIdx = (dl.newLineNo ?? 1) - 1;
-      return {
+    };
+
+    for (const dl of diffLines) {
+      if (dl.type === 'removed') {
+        const cleanIdx = (dl.oldLineNo ?? 1) - 1;
+        const oldIdx = oldCleanToRawLine?.[cleanIdx] ?? cleanIdx;
+        rows.push({
+          type: 'removed',
+          html: oldLineHtmls[oldIdx] ?? '',
+          lineNo: oldIdx + 1,
+          sourceLineIndex: undefined,
+        });
+        // removed lines live in old line space, so don't advance the new-file cursor
+        continue;
+      }
+      const cleanIdx = (dl.newLineNo ?? 1) - 1;
+      const newIdx = newCleanToRawLine?.[cleanIdx] ?? cleanIdx;
+      // Emit any marker lines that sit between the previous content line and
+      // this one in the new raw markdown.
+      emitMarkersUpTo(newIdx);
+      rows.push({
         type: dl.type,
         html: lineHtmls[newIdx] ?? '',
-        lineNo: dl.newLineNo,
+        lineNo: newIdx + 1,
         sourceLineIndex: newIdx,
-      };
-    });
-  }, [diffEnabled, diffLines, lineHtmls, oldLineHtmls]);
+      });
+      nextRawIdx = newIdx + 1;
+    }
 
-  // Diff chunks: contiguous groups of changed (added/removed) rows.
-  // Computed from diffLines directly (not displayRows) so the chunk count
-  // is available even when the overlay is off. When the overlay is on,
-  // displayRows has the same length and ordering as diffLines, so the
-  // resulting indices still address the rendered rows correctly for
-  // prev/next navigation and scroll-to-chunk.
+    // Trailing marker lines after the last content row.
+    emitMarkersUpTo(totalRawLines);
+
+    return rows;
+  }, [diffEnabled, diffLines, lineHtmls, oldLineHtmls, oldCleanToRawLine, newCleanToRawLine]);
+
+  // Diff chunks: contiguous groups of changed (added/removed) rows. Computed
+  // from displayRows (not diffLines) because we now interleave unchanged
+  // marker rows into the display, so the row indices used by prev/next
+  // navigation and scroll-to-chunk must reflect the rendered row positions,
+  // not the position of changes within the original diff line list.
   const diffChunks = useMemo(() => {
-    if (!diffLines) return [];
     const chunks: { startRow: number; endRow: number }[] = [];
     let inChunk = false;
     let start = 0;
-    for (let i = 0; i < diffLines.length; i++) {
-      const changed = diffLines[i].type !== 'same';
+    for (let i = 0; i < displayRows.length; i++) {
+      const changed = displayRows[i].type !== 'same';
       if (changed && !inChunk) {
         inChunk = true;
         start = i;
@@ -408,22 +461,50 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
         chunks.push({ startRow: start, endRow: i - 1 });
       }
     }
-    if (inChunk) chunks.push({ startRow: start, endRow: diffLines.length - 1 });
+    if (inChunk) chunks.push({ startRow: start, endRow: displayRows.length - 1 });
     return chunks;
-  }, [diffLines]);
+  }, [displayRows]);
 
   // Reset active chunk when diff changes
   useEffect(() => {
     setActiveDiffChunk(0);
   }, [diffChunks.length]);
 
+  // When the user enables the diff overlay, jump to the first change so they
+  // land where the action is instead of having to hunt for it. Two RAFs let
+  // the new diff rows render before we measure for scroll. We track both RAF
+  // handles in a single ref so the effect cleanup can cancel either one.
+  useEffect(() => {
+    if (!diffEnabled || diffChunks.length === 0) return;
+    let outerHandle = 0;
+    let innerHandle = 0;
+    outerHandle = requestAnimationFrame(() => {
+      innerHandle = requestAnimationFrame(() => {
+        const chunk = diffChunks[0];
+        if (!chunk || !tableRef.current || !scrollRef.current) return;
+        const rows = tableRef.current.querySelectorAll('.raw-line');
+        const targetRow = rows[chunk.startRow];
+        if (!targetRow) return;
+        const rowRect = targetRow.getBoundingClientRect();
+        const parentRect = scrollRef.current.getBoundingClientRect();
+        scrollRef.current.scrollTo({
+          top: scrollRef.current.scrollTop + rowRect.top - parentRect.top - 40,
+          behavior: 'smooth',
+        });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outerHandle);
+      cancelAnimationFrame(innerHandle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diffEnabled, diffChunks.length]);
+
   const scrollToDiffChunk = useCallback(
     (index: number) => {
       const chunk = diffChunks[index];
       if (!chunk || !tableRef.current) return;
-      const scrollParent =
-        containerRef.current?.querySelector('.overflow-y-auto') ??
-        containerRef.current?.closest('.overflow-y-auto');
+      const scrollParent = scrollRef.current;
       if (!scrollParent) return;
       const rows = tableRef.current.querySelectorAll('.raw-line');
       const targetRow = rows[chunk.startRow];
@@ -435,7 +516,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
         behavior: 'smooth',
       });
     },
-    [diffChunks],
+    [diffChunks, scrollRef],
   );
 
   const handleDiffPrev = useCallback(() => {
@@ -510,24 +591,14 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     }
   }, [activeCommentId, displayRows]);
 
-  /** Find the scrollable container (descendant or ancestor). */
-  const getScrollParent = useCallback((): Element | null => {
-    if (!containerRef.current) return null;
-    // The scroll container is a descendant (flex-1 overflow-y-auto) in pinned toolbar layout
-    return (
-      containerRef.current.querySelector('.overflow-y-auto') ??
-      containerRef.current.closest('.overflow-y-auto')
-    );
-  }, []);
+  /** The inner scroll container (sibling of the toolbar in pinned-toolbar layout). */
+  const getScrollParent = useCallback((): Element | null => scrollRef.current, [scrollRef]);
 
   const scrollToComment = useCallback(
     (commentId: string) => {
       if (!tableRef.current || !containerRef.current) return;
 
-      // Re-enable comment markers if hidden so the marker is visible
-      setShowComments(true);
-
-      // Defer scroll to next frame so display:none is removed first
+      // Defer scroll to next frame so layout is settled
       requestAnimationFrame(() => {
         if (!tableRef.current) return;
         const marker = tableRef.current.querySelector(
@@ -584,200 +655,76 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     [getScrollParent],
   );
 
-  useImperativeHandle(ref, () => ({ scrollToComment, scrollToHeading }), [
-    scrollToComment,
-    scrollToHeading,
-  ]);
-
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    };
-  }, []);
-
-  const showCopyFeedback = useCallback(() => {
-    setCopyFeedback(true);
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
-  }, []);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(rawMarkdown).then(showCopyFeedback, () => {});
-  }, [rawMarkdown, showCopyFeedback]);
-
-  const handleCopyWithoutComments = useCallback(() => {
-    COMMENT_MARKER_RE.lastIndex = 0;
-    const clean = rawMarkdown.replace(COMMENT_MARKER_RE, '');
-    navigator.clipboard.writeText(clean).then(showCopyFeedback, () => {});
-  }, [rawMarkdown, showCopyFeedback]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToComment,
+      scrollToHeading,
+      diffPrev: handleDiffPrev,
+      diffNext: handleDiffNext,
+    }),
+    [scrollToComment, scrollToHeading, handleDiffPrev, handleDiffNext],
+  );
 
   const hasChanges = diffLines ? diffLines.some((l) => l.type !== 'same') : true;
-  const hasDiffSnapshot = diffSnapshot != null;
+  const onlyCommentsChanged =
+    diffEnabled && diffLines && !hasChanges && diffSnapshot !== rawMarkdown;
 
-  const toggleClass = (active: boolean) =>
-    `p-1 rounded transition-colors ${
-      active
-        ? 'text-primary-text bg-primary-bg'
-        : 'text-content-muted hover:text-content-secondary hover:bg-tint'
-    }`;
+  // flex-1 min-h-0 (not h-full): RawView is now a flex sibling of the panel
+  // toolbar, so it must shrink to fill the remaining space rather than claim
+  // the full parent height — otherwise the bottom of the scroll container
+  // overflows by exactly the toolbar's height and bleeds into the footer.
+  const outerClass = 'raw-view flex flex-col flex-1 min-h-0';
+  const scrollClass = 'flex-1 overflow-y-auto px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16';
 
-  const actionClass =
-    'text-[11px] rounded px-2 py-0.5 transition-colors text-content-secondary hover:text-content hover:bg-tint';
-
-  const toolbar = (
-    <div className="raw-toolbar">
-      <div className="raw-toolbar-left">
-        <button
-          className={toggleClass(showComments)}
-          onClick={() => setShowComments((v) => !v)}
-          title={showComments ? 'Hide comment markers' : 'Show comment markers'}
-        >
-          <svg
-            className="w-3.5 h-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
-            />
-          </svg>
-        </button>
-        {hasDiffSnapshot && onDiffToggle && (
-          <button
-            className={`${toggleClass(!!diffEnabled)} flex items-center gap-1`}
-            onClick={onDiffToggle}
-            title={diffEnabled ? 'Hide diff overlay' : 'Show diff since snapshot'}
-          >
+  if (diffEnabled && diffLines && !hasChanges) {
+    return (
+      <div ref={containerRef} className={outerClass}>
+        <div ref={scrollRef} className={scrollClass}>
+          <div className="flex flex-col items-center justify-center text-content-muted py-16">
             <svg
-              className="w-3.5 h-3.5"
+              className="w-12 h-12 mb-3 text-content-faint"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
-              strokeWidth={2}
+              strokeWidth={1.5}
             >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
+                d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            {diffChunks.length > 0 && (
-              <span className="text-[10px] tabular-nums">{diffChunks.length}</span>
-            )}
-          </button>
-        )}
-        {diffEnabled && diffChunks.length > 0 && (
-          <div className="flex items-center gap-0.5 ml-1">
-            <button
-              className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
-              onClick={handleDiffPrev}
-              title="Previous change"
-            >
-              <svg
-                className="w-3 h-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-              </svg>
-            </button>
-            <button
-              className="p-0.5 rounded text-content-muted hover:text-content-secondary hover:bg-tint transition-colors"
-              onClick={handleDiffNext}
-              title="Next change"
-            >
-              <svg
-                className="w-3 h-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-                />
-              </svg>
-            </button>
-          </div>
-        )}
-        {hasDiffSnapshot && onClearSnapshot && (
-          <button className={actionClass} onClick={onClearSnapshot} title="Clear snapshot">
-            Clear snapshot
-          </button>
-        )}
-      </div>
-      <div className="raw-toolbar-right">
-        <SplitIconButton
-          testId="raw-copy-button"
-          icon={
-            copyFeedback ? (
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
+            {onlyCommentsChanged ? (
+              <>
+                <p className="text-sm font-medium text-content-secondary mb-1">
+                  No content changes
+                </p>
+                <p className="text-xs text-center leading-relaxed max-w-xs">
+                  Comment threads were updated since your snapshot.
+                  <br />
+                  Open the comments sidebar to review.
+                </p>
+              </>
             ) : (
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"
-                />
-              </svg>
-            )
-          }
-          onClick={handleCopy}
-          title={copyFeedback ? 'Copied!' : 'Copy document'}
-          chevronTitle="Copy options"
-          menu={[{ label: 'Copy without comments', onClick: handleCopyWithoutComments }]}
-        />
-      </div>
-    </div>
-  );
-
-  const containerClass = `raw-view flex flex-col h-full${showComments ? '' : ' raw-view-comments-hidden'}`;
-
-  if (diffEnabled && diffLines && !hasChanges) {
-    return (
-      <div ref={containerRef} className={containerClass}>
-        {toolbar}
-        <div className="flex flex-col items-center justify-center flex-1 text-content-muted px-6">
-          <svg
-            className="w-12 h-12 mb-3 text-content-faint"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
-          <p className="text-xs text-center leading-relaxed max-w-xs">
-            This view updates automatically when the file is modified.
-            <br />
-            Hand off to an agent and changes will appear here.
-          </p>
+              <>
+                <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
+                <p className="text-xs text-center leading-relaxed max-w-xs">
+                  This view updates automatically when the file is modified.
+                  <br />
+                  Hand off to an agent and changes will appear here.
+                </p>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className={containerClass}>
-      {toolbar}
-
-      <div className="flex-1 overflow-y-auto px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16">
+    <div ref={containerRef} className={outerClass}>
+      <div ref={scrollRef} className={scrollClass}>
         <div className="max-w-3xl mx-auto">
           <div ref={tableRef} className="raw-view-table">
             {displayRows.map((row, i) => {

@@ -175,7 +175,7 @@ test.describe('Comment markers in raw view', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Copy button (split icon button: copy raw + copy without comments)
+// 4. Copy button — clean markdown only (no markers), available in both views
 // ---------------------------------------------------------------------------
 
 test.describe('Copy button', () => {
@@ -183,9 +183,17 @@ test.describe('Copy button', () => {
     await openFixture(page);
     await switchToRaw(page);
 
-    const copyBtn = page.getByTestId('raw-copy-button');
+    const copyBtn = page.getByTestId('copy-button');
     await expect(copyBtn).toBeVisible();
-    await expect(copyBtn).toHaveAttribute('title', 'Copy document');
+    await expect(copyBtn).toHaveAttribute('title', 'Copy document (comment markers stripped)');
+  });
+
+  test('copy button is also visible in rendered view', async ({ page }) => {
+    await openFixture(page);
+
+    const copyBtn = page.getByTestId('copy-button');
+    await expect(copyBtn).toBeVisible();
+    await expect(copyBtn).toHaveAttribute('title', 'Copy document (comment markers stripped)');
   });
 
   test('copy button shows "Copied!" feedback after click', async ({ page }) => {
@@ -195,26 +203,16 @@ test.describe('Copy button', () => {
     // Grant clipboard permissions
     await page.context().grantPermissions(['clipboard-write']);
 
-    const copyBtn = page.getByTestId('raw-copy-button');
+    const copyBtn = page.getByTestId('copy-button');
     await copyBtn.click();
     await expect(copyBtn).toHaveAttribute('title', 'Copied!');
 
     // Feedback should disappear after ~2 seconds
-    await expect(copyBtn).toHaveAttribute('title', 'Copy document', { timeout: 5000 });
-  });
-
-  test('copy button copies raw markdown including comment markers', async ({ page }) => {
-    await openFixture(page);
-    await addComment(page, 'valid credentials', 'Keep me');
-    await switchToRaw(page);
-
-    await page.context().grantPermissions(['clipboard-write', 'clipboard-read']);
-    await page.getByTestId('raw-copy-button').click();
-    await expect(page.getByTestId('raw-copy-button')).toHaveAttribute('title', 'Copied!');
-
-    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboardText).toContain('@comment');
-    expect(clipboardText).toContain('valid credentials');
+    await expect(copyBtn).toHaveAttribute(
+      'title',
+      'Copy document (comment markers stripped)',
+      { timeout: 5000 },
+    );
   });
 });
 
@@ -243,10 +241,10 @@ test.describe('Sidebar to raw view linking', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. "Copy without comments" dropdown action strips markers
+// 6. Copy strips comment markers by default (no "with markers" path)
 // ---------------------------------------------------------------------------
 
-test.describe('Copy without comments strips markers', () => {
+test.describe('Copy strips comment markers', () => {
   test('clipboard content has no comment markers', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Strip me');
@@ -255,13 +253,9 @@ test.describe('Copy without comments strips markers', () => {
 
     await page.context().grantPermissions(['clipboard-write', 'clipboard-read']);
 
-    // Open the dropdown via the chevron, then click "Copy without comments"
-    await page.getByTestId('raw-copy-button-chevron').click();
-    await page.getByRole('button', { name: 'Copy without comments' }).click();
+    await page.getByTestId('copy-button').click();
+    await expect(page.getByTestId('copy-button')).toHaveAttribute('title', 'Copied!');
 
-    await expect(page.getByTestId('raw-copy-button')).toHaveAttribute('title', 'Copied!');
-
-    // Read clipboard
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).not.toContain('@comment');
     expect(clipboardText).toContain('valid credentials');

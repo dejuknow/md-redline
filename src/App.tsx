@@ -18,6 +18,7 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import {
   backfillReplyTimestamps,
+  COMMENT_MARKER_RE,
   findNewReplyIds,
   parseComments,
 } from './lib/comment-parser';
@@ -32,6 +33,12 @@ import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { RawView, type RawViewHandle } from './components/RawView';
+import {
+  RenderedDiffView,
+  type RenderedDiffViewHandle,
+} from './components/RenderedDiffView';
+import { useDiffLines } from './hooks/useDiffLines';
+import { PanelToolbar } from './components/PanelToolbar';
 import { Toast } from './components/Toast';
 
 import { CommandPalette, type Command } from './components/CommandPalette';
@@ -359,6 +366,7 @@ export default function App() {
 
   const viewerRef = useRef<MarkdownViewerHandle>(null);
   const rawViewRef = useRef<RawViewHandle>(null);
+  const renderedDiffRef = useRef<RenderedDiffViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
@@ -383,6 +391,40 @@ export default function App() {
 
   // Track whether the diff has unseen external changes (badge indicator on diff button)
   const [diffPending, setDiffPending] = useState(false);
+
+  // Single source of truth for diff state — both views and the panel
+  // toolbar badge read from this so they always agree, and the badge can
+  // appear immediately on snapshot+content-change without entering diff mode.
+  const {
+    diffLines,
+    chunkCount: diffChunkCount,
+    oldCleanToRawLine,
+    newCleanToRawLine,
+  } = useDiffLines(rawMarkdown, currentSnapshot);
+
+  // Copy document — strips comment markers so reviewers paste clean prose,
+  // not the agent metadata. Lives at App level so the panel toolbar can call
+  // it from either view.
+  const [copyFeedback, setCopyFeedback] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
+  const handleCopyDocument = useCallback(() => {
+    COMMENT_MARKER_RE.lastIndex = 0;
+    const clean = rawMarkdownRef.current.replace(COMMENT_MARKER_RE, '');
+    navigator.clipboard.writeText(clean).then(
+      () => {
+        setCopyFeedback(true);
+        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
+      },
+      () => {},
+    );
+  }, []);
 
   const { selection, clearSelection, lockSelection } = useSelection(
     containerRef as RefObject<HTMLElement | null>,
@@ -456,13 +498,12 @@ export default function App() {
 
   const handleDiffToggle = useCallback(() => {
     if (!diffEnabled) {
-      if (viewMode !== 'raw') setViewMode('raw');
       setDiffEnabled(true);
       setDiffPending(false);
     } else {
       setDiffEnabled(false);
     }
-  }, [diffEnabled, viewMode, setViewMode, setDiffEnabled]);
+  }, [diffEnabled, setDiffEnabled]);
 
   const viewerNeedsTheme = useMemo(() => hasMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
 
@@ -568,8 +609,9 @@ export default function App() {
             cleanContentChanged && currentSnapshotRef.current
               ? {
                   label: 'View diff',
+                  // Stay in whatever view the user is in — diff overlay
+                  // works in both raw and rendered now.
                   onClick: () => {
-                    setViewMode('raw');
                     setDiffEnabled(true);
                     setDiffPending(false);
                   },
@@ -613,7 +655,6 @@ export default function App() {
       correctReplyTimestamps,
       saveFile,
       setDiffEnabled,
-      setViewMode,
       settings.enableResolve,
       showToast,
       updateTab,
@@ -1402,31 +1443,6 @@ export default function App() {
         onCloseTab={closeTab}
         onOpenFile={openFilePicker}
         onTabContextMenu={handleTabContextMenu}
-        viewMode={viewMode}
-        diffPending={diffPending}
-        commentCount={commentCount}
-        enableResolve={settings.enableResolve}
-        onViewModeChange={(mode) => {
-          setViewMode(mode);
-          if (mode === 'raw') {
-            clearSelection();
-            if (currentSnapshot) {
-              setDiffEnabled(true);
-              setDiffPending(false);
-            }
-          }
-          if (mode === 'rendered') setDiffEnabled(false);
-        }}
-        onSearch={() => {
-          if (showSearch) {
-            handleSearchClose();
-          } else {
-            setActiveModal('search');
-            setSearchFocusTrigger((t) => t + 1);
-          }
-        }}
-        searchActive={showSearch}
-        onCopyAgentPrompt={handleHandoff}
       />
 
       <>
@@ -1555,10 +1571,53 @@ export default function App() {
                 focusTrigger={searchFocusTrigger}
               />
             )}
-            {viewMode === 'raw' ? (
-              <div ref={containerRef} className="h-full relative flex flex-col">
+            <div className="h-full flex flex-col">
+              <PanelToolbar
+                viewMode={viewMode}
+                onViewModeChange={(mode) => {
+                  setViewMode(mode);
+                  if (mode === 'raw') {
+                    clearSelection();
+                    if (currentSnapshot) {
+                      setDiffEnabled(true);
+                      setDiffPending(false);
+                    }
+                  }
+                }}
+                searchActive={showSearch}
+                onSearch={() => {
+                  if (showSearch) {
+                    handleSearchClose();
+                  } else {
+                    setActiveModal('search');
+                    setSearchFocusTrigger((t) => t + 1);
+                  }
+                }}
+                commentCount={commentCount}
+                commentCounts={commentCounts}
+                activeFilePath={activeFilePath}
+                onCopyAgentPrompt={handleHandoff}
+                hasDiffSnapshot={currentSnapshot != null}
+                diffEnabled={diffEnabled}
+                diffPending={diffPending}
+                diffChunkCount={diffChunkCount}
+                onDiffToggle={handleDiffToggle}
+                onDiffPrev={() => {
+                  if (viewMode === 'raw') rawViewRef.current?.diffPrev();
+                  else renderedDiffRef.current?.prev();
+                }}
+                onDiffNext={() => {
+                  if (viewMode === 'raw') rawViewRef.current?.diffNext();
+                  else renderedDiffRef.current?.next();
+                }}
+                onClearSnapshot={handleClearSnapshot}
+                onCopyDocument={handleCopyDocument}
+                copyFeedback={copyFeedback}
+              />
+              {viewMode === 'raw' ? (
                 <RawView
                   ref={rawViewRef}
+                  scrollContainerRef={containerRef}
                   rawMarkdown={rawMarkdown}
                   searchQuery={showSearch ? searchQuery : undefined}
                   searchActiveIndex={activeSearchIndex}
@@ -1566,63 +1625,75 @@ export default function App() {
                   activeCommentId={activeCommentId}
                   diffSnapshot={currentSnapshot}
                   diffEnabled={diffEnabled}
-                  onDiffToggle={handleDiffToggle}
-                  onClearSnapshot={handleClearSnapshot}
+                  diffLines={diffLines}
+                  oldCleanToRawLine={oldCleanToRawLine}
+                  newCleanToRawLine={newCleanToRawLine}
                 />
-              </div>
-            ) : (
-              <div
-                ref={containerRef}
-                className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
-              >
-                <div className="max-w-3xl mx-auto">
-                  {viewerNeedsTheme ? (
-                    <ThemedMarkdownViewer
-                      ref={viewerRef}
-                      html={html}
-                      cleanMarkdown={cleanMarkdown}
-                      comments={comments}
-                      activeCommentId={activeCommentId}
-                      selectionText={selection?.text ?? null}
-                      selectionOffset={selection?.offset ?? null}
-                      onHighlightClick={handleHighlightClick}
-                      // Fragment arg is intentionally ignored in v1; openTab
-                      // takes only the path. See spec §3 non-goals.
-                      onLocalLinkClick={openTab}
-                      onContextMenu={handleViewerContextMenu}
-                      enableResolve={settings.enableResolve}
-                      searchQuery={showSearch ? searchQuery : undefined}
-                      searchActiveIndex={activeSearchIndex}
-                      onSearchCount={handleSearchCount}
-                    />
-                  ) : (
-                    <MarkdownViewer
-                      ref={viewerRef}
-                      html={html}
-                      cleanMarkdown={cleanMarkdown}
-                      comments={comments}
-                      activeCommentId={activeCommentId}
-                      selectionText={selection?.text ?? null}
-                      selectionOffset={selection?.offset ?? null}
-                      onHighlightClick={handleHighlightClick}
-                      // Fragment arg is intentionally ignored in v1; openTab
-                      // takes only the path. See spec §3 non-goals.
-                      onLocalLinkClick={openTab}
-                      onContextMenu={handleViewerContextMenu}
-                      enableResolve={settings.enableResolve}
-                      searchQuery={showSearch ? searchQuery : undefined}
-                      searchActiveIndex={activeSearchIndex}
-                      onSearchCount={handleSearchCount}
-                    />
-                  )}
-                  <DragHandles
-                    startPos={handlePositions?.start ?? null}
-                    endPos={handlePositions?.end ?? null}
-                    onMouseDown={onHandleMouseDown}
-                  />
+              ) : (
+                <div
+                  ref={containerRef}
+                  className="flex-1 overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
+                >
+                  <div className="max-w-3xl mx-auto">
+                    {diffEnabled && currentSnapshot && diffLines ? (
+                      <RenderedDiffView
+                        ref={renderedDiffRef}
+                        rawMarkdown={rawMarkdown}
+                        diffSnapshot={currentSnapshot}
+                        diffLines={diffLines}
+                      />
+                    ) : (
+                      <>
+                        {viewerNeedsTheme ? (
+                          <ThemedMarkdownViewer
+                            ref={viewerRef}
+                            html={html}
+                            cleanMarkdown={cleanMarkdown}
+                            comments={comments}
+                            activeCommentId={activeCommentId}
+                            selectionText={selection?.text ?? null}
+                            selectionOffset={selection?.offset ?? null}
+                            onHighlightClick={handleHighlightClick}
+                            // Fragment arg is intentionally ignored in v1; openTab
+                            // takes only the path. See spec §3 non-goals.
+                            onLocalLinkClick={openTab}
+                            onContextMenu={handleViewerContextMenu}
+                            enableResolve={settings.enableResolve}
+                            searchQuery={showSearch ? searchQuery : undefined}
+                            searchActiveIndex={activeSearchIndex}
+                            onSearchCount={handleSearchCount}
+                          />
+                        ) : (
+                          <MarkdownViewer
+                            ref={viewerRef}
+                            html={html}
+                            cleanMarkdown={cleanMarkdown}
+                            comments={comments}
+                            activeCommentId={activeCommentId}
+                            selectionText={selection?.text ?? null}
+                            selectionOffset={selection?.offset ?? null}
+                            onHighlightClick={handleHighlightClick}
+                            // Fragment arg is intentionally ignored in v1; openTab
+                            // takes only the path. See spec §3 non-goals.
+                            onLocalLinkClick={openTab}
+                            onContextMenu={handleViewerContextMenu}
+                            enableResolve={settings.enableResolve}
+                            searchQuery={showSearch ? searchQuery : undefined}
+                            searchActiveIndex={activeSearchIndex}
+                            onSearchCount={handleSearchCount}
+                          />
+                        )}
+                        <DragHandles
+                          startPos={handlePositions?.start ?? null}
+                          endPos={handlePositions?.end ?? null}
+                          onMouseDown={onHandleMouseDown}
+                        />
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Comment sidebar */}

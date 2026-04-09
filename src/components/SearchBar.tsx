@@ -43,7 +43,7 @@ export function SearchBar({
   return (
     <div
       data-testid="search-bar"
-      className="absolute top-2 right-4 z-20 flex items-center gap-1.5 bg-surface-raised border border-border rounded-lg shadow-lg px-3 py-1.5"
+      className="absolute top-12 right-4 z-20 flex items-center gap-1.5 bg-surface-raised border border-border rounded-lg shadow-lg px-3 py-1.5"
     >
       <svg
         className="w-3.5 h-3.5 text-content-muted shrink-0"

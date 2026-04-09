@@ -943,6 +943,40 @@ body {
   text-decoration: line-through;
 }
 
+/* Diff overlay in rendered view — block-level wrapper around prose segments.
+   Avoid line-through on prose (it reads poorly across paragraphs); use a
+   left border + tinted background to mark the region instead. */
+.prose .rendered-diff-added,
+.prose .rendered-diff-removed {
+  margin-left: -0.75rem;
+  margin-right: -0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-left: 3px solid transparent;
+  border-radius: 2px;
+}
+
+.prose .rendered-diff-added {
+  background-color: var(--color-diff-added-bg);
+  border-left-color: var(--color-diff-added-text);
+}
+
+.prose .rendered-diff-removed {
+  background-color: var(--color-diff-removed-bg);
+  border-left-color: var(--color-diff-removed-text);
+  opacity: 0.75;
+}
+
+/* Strip the first/last child top/bottom margins so the wrapper hugs its content */
+.prose .rendered-diff-added > :first-child,
+.prose .rendered-diff-removed > :first-child {
+  margin-top: 0;
+}
+
+.prose .rendered-diff-added > :last-child,
+.prose .rendered-diff-removed > :last-child {
+  margin-bottom: 0;
+}
+
 /* Raw view toolbar — matches panel headers (h-10 = 2.5rem) */
 .raw-toolbar {
   display: flex;
@@ -961,11 +995,6 @@ body {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-}
-
-/* Comment markers hidden when toggle is off */
-.raw-view-comments-hidden .raw-comment-marker {
-  display: none;
 }
 
 /* --- Syntax highlighting --- */
