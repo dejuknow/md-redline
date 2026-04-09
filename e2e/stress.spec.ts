@@ -163,6 +163,9 @@ test.describe('Large markdown and Mermaid coverage', () => {
       timeout: 20_000,
     });
 
+    // Let mermaid layout stabilization finish (deferred callbacks up to 200ms)
+    await page.waitForTimeout(300);
+
     await page.locator('.prose').getByText(WEIRD_ANCHOR).scrollIntoViewIfNeeded();
     await addComment(
       page,

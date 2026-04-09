@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -165,6 +165,33 @@ describe('/api/config', () => {
     // The fake homeDir for `app` is fakeHome. /api/config should expose it
     // so the frontend can render trust prompts with ~/path-style display.
     expect(body.homeDir).toBe(fakeHome);
+  });
+});
+
+describe('/api/shutdown', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns { ok: true } and schedules process.exit(0)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+
+    const { response, body } = await requestJson(app, '/api/shutdown', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+
+    // setImmediate defers the exit; flush it
+    await new Promise((r) => setImmediate(r));
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('rejects non-POST methods', async () => {
+    const response = await app.request('http://localhost/api/shutdown');
+    expect(response.status).toBe(404);
   });
 });
 
