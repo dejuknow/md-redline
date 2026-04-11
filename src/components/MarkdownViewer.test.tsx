@@ -2,8 +2,61 @@
 
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MarkdownViewer } from './MarkdownViewer';
+import { MarkdownViewer, isInsideSvgTextContent } from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
+
+describe('isInsideSvgTextContent', () => {
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  it('returns true for text nodes inside an SVG <text> element', () => {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    const textEl = document.createElementNS(SVG_NS, 'text');
+    const tn = document.createTextNode('POST /auth/login');
+    textEl.appendChild(tn);
+    svg.appendChild(textEl);
+    document.body.appendChild(svg);
+    expect(isInsideSvgTextContent(tn)).toBe(true);
+    svg.remove();
+  });
+
+  it('returns true for text nodes inside an SVG <tspan>', () => {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    const textEl = document.createElementNS(SVG_NS, 'text');
+    const tspan = document.createElementNS(SVG_NS, 'tspan');
+    const tn = document.createTextNode('auth');
+    tspan.appendChild(tn);
+    textEl.appendChild(tspan);
+    svg.appendChild(textEl);
+    document.body.appendChild(svg);
+    expect(isInsideSvgTextContent(tn)).toBe(true);
+    svg.remove();
+  });
+
+  it('returns false for HTML text nodes inside an SVG <foreignObject>', () => {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    const fo = document.createElementNS(SVG_NS, 'foreignObject');
+    const div = document.createElement('div');
+    const span = document.createElement('span');
+    span.className = 'nodeLabel';
+    const tn = document.createTextNode('auth');
+    span.appendChild(tn);
+    div.appendChild(span);
+    fo.appendChild(div);
+    svg.appendChild(fo);
+    document.body.appendChild(svg);
+    expect(isInsideSvgTextContent(tn)).toBe(false);
+    svg.remove();
+  });
+
+  it('returns false for plain HTML text nodes', () => {
+    const p = document.createElement('p');
+    const tn = document.createTextNode('auth in prose');
+    p.appendChild(tn);
+    document.body.appendChild(p);
+    expect(isInsideSvgTextContent(tn)).toBe(false);
+    p.remove();
+  });
+});
 
 describe('MarkdownViewer selection highlights', () => {
   it('does not leave behind an empty inline code element when selection starts with inline code', async () => {

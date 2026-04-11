@@ -20,7 +20,11 @@ async function getMermaid() {
       startOnLoad: false,
       securityLevel: 'strict',
       theme: 'default',
-      htmlLabels: true,
+      // Flowchart labels render as plain SVG <text> (not HTML inside
+      // foreignObject) so they survive DOMPurify's strict SVG profile, which
+      // strips foreignObject for XSS reasons. SVG <text> labels are styled
+      // for comment highlights via applyMermaidSvgTextHighlight.
+      htmlLabels: false,
       flowchart: FLOWCHART_CONFIG,
     });
     initTheme = 'default';
@@ -67,7 +71,7 @@ export async function renderMermaidBlock(
               startOnLoad: false,
               securityLevel: 'strict',
               theme: mermaidTheme as Parameters<typeof mermaid.initialize>[0]['theme'],
-              htmlLabels: true,
+              htmlLabels: false,
               flowchart: FLOWCHART_CONFIG,
             });
             initTheme = mermaidTheme;

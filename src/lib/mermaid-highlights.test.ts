@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyMermaidHighlightStyles,
+  applyMermaidSvgTextHighlight,
   formatPathCommands,
   formatTranslateTransform,
   getMermaidHighlightTheme,
@@ -513,5 +514,114 @@ describe('applyMermaidHighlightStyles', () => {
     applyMermaidHighlightStyles(el, theme, false);
 
     expect(el.style.boxDecorationBreak).toBe('clone');
+  });
+});
+
+describe('applyMermaidSvgTextHighlight', () => {
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const theme = {
+    background: '#fff3cd',
+    activeBackground: '#ffeaa7',
+    color: '#212529',
+    underline: '#f0ad4e',
+    activeUnderline: '#e08e0b',
+    ring: '#fd7e14',
+  };
+
+  // jsdom doesn't implement SVG layout APIs, so we stub the minimum surface
+  // our helper depends on: getBBox, getNumberOfChars, getExtentOfChar.
+  function makeSvgText(content: string): SVGElement {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    const textEl = document.createElementNS(SVG_NS, 'text') as SVGElement;
+    const tn = document.createTextNode(content);
+    textEl.appendChild(tn);
+    svg.appendChild(textEl);
+    document.body.appendChild(svg);
+
+    // Pretend each char is 10 wide, line is 20 tall, positioned at (0, 0).
+    const charWidth = 10;
+    const lineHeight = 20;
+    const stub = textEl as unknown as SVGTextContentElement & SVGGraphicsElement;
+    stub.getBBox = () =>
+      ({
+        x: 0,
+        y: 0,
+        width: content.length * charWidth,
+        height: lineHeight,
+      }) as DOMRect;
+    stub.getNumberOfChars = () => content.length;
+    stub.getExtentOfChar = (i: number) =>
+      ({
+        x: i * charWidth,
+        y: 0,
+        width: charWidth,
+        height: lineHeight,
+      }) as DOMRect;
+
+    return textEl;
+  }
+
+  it('inserts a sibling <rect> sized to the matched character range', () => {
+    const textEl = makeSvgText('POST /auth/login');
+    const authStart = 6;
+    const authEnd = 10;
+
+    applyMermaidSvgTextHighlight(textEl, theme, false, authStart, authEnd);
+
+    const rect = textEl.parentNode?.querySelector('rect.mermaid-svg-text-highlight-bg');
+    expect(rect).not.toBeNull();
+    // With charWidth=10 and padX=3: x = 60 - 3 = 57, width = 40 + 6 = 46
+    expect(Number(rect!.getAttribute('x'))).toBe(57);
+    expect(Number(rect!.getAttribute('width'))).toBe(46);
+    // No stroke on non-active
+    expect(rect!.getAttribute('stroke')).toBeNull();
+    // Accent color with reduced opacity
+    expect(rect!.getAttribute('fill')).toBe('#f0ad4e');
+    expect(rect!.getAttribute('fill-opacity')).toBe('0.28');
+  });
+
+  it('uses brighter fill + stroke for active state', () => {
+    const textEl = makeSvgText('POST /auth/login');
+    applyMermaidSvgTextHighlight(textEl, theme, true, 6, 10);
+
+    const rect = textEl.parentNode?.querySelector('rect.mermaid-svg-text-highlight-bg');
+    expect(rect).not.toBeNull();
+    expect(rect!.getAttribute('fill')).toBe('#e08e0b'); // activeUnderline
+    expect(rect!.getAttribute('fill-opacity')).toBe('0.45');
+    expect(rect!.getAttribute('stroke')).toBe('#fd7e14'); // ring
+  });
+
+  it('does not set whole-element text styles that would conflict with the substring rect', () => {
+    // Styles that can only apply to the whole <text> (text-decoration,
+    // font-weight, fill) would contradict the per-character highlight rect
+    // when the anchor is a substring. Only cursor: pointer is set on the
+    // element itself.
+    const textEl = makeSvgText('POST /auth/login');
+    applyMermaidSvgTextHighlight(textEl, theme, true, 6, 10);
+
+    expect(textEl.style.cursor).toBe('pointer');
+    expect(textEl.style.textDecoration).toBe('');
+    expect(textEl.style.fontWeight).toBe('');
+  });
+
+  it('falls back to full element bbox when no range is supplied', () => {
+    const textEl = makeSvgText('Authenticated');
+    applyMermaidSvgTextHighlight(textEl, theme, false);
+
+    const rect = textEl.parentNode?.querySelector('rect.mermaid-svg-text-highlight-bg');
+    expect(rect).not.toBeNull();
+    // Full width: 13 chars * 10 = 130, padded by 3 each side → x=-3, width=136
+    expect(Number(rect!.getAttribute('x'))).toBe(-3);
+    expect(Number(rect!.getAttribute('width'))).toBe(136);
+  });
+
+  it('replaces a stale highlight rect on re-application', () => {
+    const textEl = makeSvgText('POST /auth/login');
+    applyMermaidSvgTextHighlight(textEl, theme, false, 6, 10);
+    applyMermaidSvgTextHighlight(textEl, theme, true, 6, 10);
+
+    const rects = textEl.parentNode?.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
+    expect(rects?.length).toBe(1);
+    expect(rects![0].getAttribute('fill-opacity')).toBe('0.45');
   });
 });

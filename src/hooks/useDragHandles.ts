@@ -45,12 +45,26 @@ function caretFromPoint(x: number, y: number): { node: Node; offset: number } | 
   return null;
 }
 
+const SVG_NS_DRAG = 'http://www.w3.org/2000/svg';
+
+/** Drag-to-resize doesn't work on SVG <text> marks: the drag logic re-wraps
+ *  portions of the anchor in an HTML <mark> via range.surroundContents, but
+ *  SVG <text> can't render HTML children, so the wrapped text disappears.
+ *  The semantics also don't really fit — you can't "extend" a mermaid label
+ *  past its rendered characters. Skip handles for these marks entirely. */
+export function isSvgTextMark(markEl: Element): boolean {
+  return markEl.namespaceURI === SVG_NS_DRAG && markEl.tagName.toLowerCase() === 'text';
+}
+
 function computePositions(
-  markEls: HTMLElement[],
+  markEls: Element[],
   scrollContainer: HTMLElement,
 ): HandlePositions | null {
+  const draggable = markEls.filter((el) => !isSvgTextMark(el));
+  if (draggable.length === 0) return null;
+
   const allRects: DOMRect[] = [];
-  for (const markEl of markEls) {
+  for (const markEl of draggable) {
     const rects = markEl.getClientRects();
     for (let i = 0; i < rects.length; i++) {
       allRects.push(rects[i]);

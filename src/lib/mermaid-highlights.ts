@@ -102,6 +102,131 @@ export function applyMermaidHighlightStyles(
   el.style.setProperty('-webkit-box-decoration-break', 'clone');
 }
 
+const SVG_NS_HIGHLIGHT = 'http://www.w3.org/2000/svg';
+const MERMAID_SVG_HIGHLIGHT_BG_CLASS = 'mermaid-svg-text-highlight-bg';
+
+interface BBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Compute the bbox of characters [start, end) within an SVG text element
+ *  using SVGTextContentElement APIs. Returns null if the range is invalid
+ *  or the browser can't resolve character extents (e.g. offscreen). */
+function getSvgCharRangeBBox(
+  el: SVGElement,
+  start: number,
+  end: number,
+): BBox | null {
+  const text = el as unknown as SVGTextContentElement;
+  if (typeof text.getNumberOfChars !== 'function') return null;
+  let nChars: number;
+  try {
+    nChars = text.getNumberOfChars();
+  } catch {
+    return null;
+  }
+  const clampedStart = Math.max(0, Math.min(start, nChars));
+  const clampedEnd = Math.max(clampedStart, Math.min(end, nChars));
+  if (clampedEnd <= clampedStart) return null;
+
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  try {
+    for (let i = clampedStart; i < clampedEnd; i++) {
+      const ext = text.getExtentOfChar(i);
+      if (!Number.isFinite(ext.x) || !Number.isFinite(ext.width)) continue;
+      x1 = Math.min(x1, ext.x);
+      y1 = Math.min(y1, ext.y);
+      x2 = Math.max(x2, ext.x + ext.width);
+      y2 = Math.max(y2, ext.y + ext.height);
+    }
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(x1) || !Number.isFinite(x2) || x2 <= x1) return null;
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+}
+
+/** Style an SVG <text> element as commented and draw a highlight rect over
+ *  a specific character range (or the whole element if no range is supplied).
+ *
+ *  SVG <text> can't contain HTML <mark> children, and it has no box model, so
+ *  a "background highlight" is drawn as a sibling <rect> inserted immediately
+ *  before the <text> element. The rect shares the text's coordinate space
+ *  (same parent <g>) and is sized via getExtentOfChar for precision. */
+export function applyMermaidSvgTextHighlight(
+  el: SVGElement,
+  theme: MermaidHighlightTheme,
+  active: boolean,
+  matchStart?: number,
+  matchEnd?: number,
+) {
+  // Styles that live on the <text> element itself can only apply to the
+  // whole element — they'd be inconsistent with the per-character highlight
+  // rect when the anchor is a substring. Keep only click affordance here;
+  // the visual highlight is entirely carried by the sibling <rect>.
+  el.style.cursor = 'pointer';
+
+  const parent = el.parentNode as SVGElement | null;
+  if (!parent || !('getBBox' in el)) return;
+
+  // Belt-and-suspenders: remove any stale highlight rect from a previous pass
+  // in the same render (e.g. if the same text element is hit twice).
+  const textId =
+    el.getAttribute('data-mdr-highlight-id') || `mdr-hl-${Math.random().toString(36).slice(2)}`;
+  el.setAttribute('data-mdr-highlight-id', textId);
+  const stale = parent.querySelector(
+    `rect.${MERMAID_SVG_HIGHLIGHT_BG_CLASS}[data-mdr-highlight-for="${textId}"]`,
+  );
+  if (stale) stale.remove();
+
+  // Prefer a precise character-range bbox; fall back to the full element bbox
+  // if range info isn't supplied or the API isn't available.
+  let bbox: BBox | null = null;
+  if (matchStart != null && matchEnd != null) {
+    bbox = getSvgCharRangeBBox(el, matchStart, matchEnd);
+  }
+  if (!bbox) {
+    try {
+      const full = (el as unknown as SVGGraphicsElement).getBBox();
+      bbox = { x: full.x, y: full.y, width: full.width, height: full.height };
+    } catch {
+      return;
+    }
+  }
+  if (!bbox.width || !bbox.height) return;
+
+  const padX = 3;
+  const padY = 2;
+  const rect = document.createElementNS(SVG_NS_HIGHLIGHT, 'rect');
+  rect.classList.add(MERMAID_SVG_HIGHLIGHT_BG_CLASS);
+  rect.setAttribute('data-mdr-highlight-for', textId);
+  rect.setAttribute('x', String(bbox.x - padX));
+  rect.setAttribute('y', String(bbox.y - padY));
+  rect.setAttribute('width', String(bbox.width + padX * 2));
+  rect.setAttribute('height', String(bbox.height + padY * 2));
+  rect.setAttribute('rx', '2');
+  rect.setAttribute('ry', '2');
+  // The theme's opaque comment backgrounds assume a lighter prose page behind
+  // them. Inside the mermaid SVG the diagram's own background can be just as
+  // dark, which kills contrast. Use the theme's accent color with fill-opacity
+  // so the highlight pops regardless of what's behind it.
+  const accent = active ? theme.activeUnderline : theme.underline;
+  rect.setAttribute('fill', accent);
+  rect.setAttribute('fill-opacity', active ? '0.45' : '0.28');
+  if (active) {
+    rect.setAttribute('stroke', theme.ring || accent);
+    rect.setAttribute('stroke-width', '1.5');
+  }
+  rect.setAttribute('pointer-events', 'none');
+  parent.insertBefore(rect, el);
+}
+
 function getRenderedLabelHeight(contentRoot: HTMLElement) {
   const rootRect = contentRoot.getBoundingClientRect();
   let height = Math.max(rootRect.height, contentRoot.scrollHeight, contentRoot.offsetHeight);

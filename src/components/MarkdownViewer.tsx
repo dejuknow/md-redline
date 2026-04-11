@@ -8,6 +8,7 @@ import { useMermaidRenderer } from '../hooks/useMermaidRenderer';
 import { collectVisibleTextNodes } from '../lib/visible-text';
 import {
   applyMermaidHighlightStyles,
+  applyMermaidSvgTextHighlight,
   getMermaidHighlightTheme,
   scheduleMermaidLayoutStabilization,
 } from '../lib/mermaid-highlights';
@@ -203,6 +204,8 @@ export const MarkdownViewer = memo(
         highlightGroups.set(key, group);
       }
 
+      const mermaidTheme = getMermaidHighlightTheme(getComputedStyle(document.documentElement));
+
       for (const {
         anchor,
         ids,
@@ -210,19 +213,34 @@ export const MarkdownViewer = memo(
         contextBefore,
         contextAfter,
       } of highlightGroups.values()) {
+        const isActive = ids.includes(activeCommentId || '');
         wrapText(
           container,
           anchor,
           (mark) => {
             mark.className = 'comment-highlight';
             mark.dataset.commentIds = ids.join(',');
-            if (ids.includes(activeCommentId || '')) {
+            if (isActive) {
               mark.classList.add('comment-highlight-active');
             }
           },
           plainOffset,
           contextBefore,
           contextAfter,
+          // SVG <text> cannot hold HTML <mark> children, so when the anchor
+          // lands inside a sequence-diagram label we decorate the <text>
+          // element and draw a precise highlight rect over just the matched
+          // character range. Click + scroll handlers already key off
+          // `.mermaid-comment-highlight` + `dataset.commentIds`.
+          (textEl, matchStart, matchEnd) => {
+            if (!textEl.closest('.mermaid-block')) return;
+            textEl.classList.add('mermaid-comment-highlight');
+            if (isActive) {
+              textEl.classList.add('mermaid-comment-highlight-active');
+            }
+            textEl.dataset.commentIds = ids.join(',');
+            applyMermaidSvgTextHighlight(textEl, mermaidTheme, isActive, matchStart, matchEnd);
+          },
         );
       }
 
@@ -233,7 +251,6 @@ export const MarkdownViewer = memo(
       // 3. CSS background shorthand (e.g. linear-gradient) also prevents wrapping.
       // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
       // Solution: keep the <mark> but swap class styles for inline styles.
-      const mermaidTheme = getMermaidHighlightTheme(getComputedStyle(document.documentElement));
       for (const mark of container.querySelectorAll(
         '.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-active',
       )) {
@@ -256,6 +273,14 @@ export const MarkdownViewer = memo(
             mark.className = 'selection-highlight';
           },
           selectionOffset ?? undefined,
+          undefined,
+          undefined,
+          // Mirror the comment-highlight treatment so the pending selection
+          // stays visible on sequence-diagram labels while the composer is open.
+          (textEl, matchStart, matchEnd) => {
+            if (!textEl.closest('.mermaid-block')) return;
+            applyMermaidSvgTextHighlight(textEl, mermaidTheme, true, matchStart, matchEnd);
+          },
         );
       }
 
@@ -365,6 +390,7 @@ function wrapText(
   hintOffset?: number,
   contextBefore?: string,
   contextAfter?: string,
+  onSvgText?: (textEl: SVGElement, matchStart: number, matchEnd: number) => void,
 ) {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const allTextNodes = collectVisibleTextNodes(container);
@@ -482,10 +508,42 @@ function wrapText(
   if (wraps.length === 0) return;
 
   // Filter out whitespace-only portions
-  const visibleWraps = wraps.filter(({ node: tn, start, end }) => {
+  const nonEmptyWraps = wraps.filter(({ node: tn, start, end }) => {
     const slice = tn.textContent?.slice(start, end) || '';
     return slice.trim().length > 0;
   });
+
+  // SVG <text>/<tspan> cannot render HTML children; wrapping a text portion
+  // in an HTML <mark> there produces a zero-size mark and the wrapped text
+  // disappears. Redirect those wraps to a callback that styles the parent
+  // <text> element directly; other wraps proceed as HTML marks.
+  // (foreignObject contents are HTML and wrap normally.)
+  const visibleWraps: typeof nonEmptyWraps = [];
+  // Key: SVG <text> element, value: min/max char offsets within its textContent.
+  // Multi-wrap groups (e.g. tspan-split text) get unioned into a single range.
+  const svgTextRanges = new Map<SVGElement, { start: number; end: number }>();
+  for (const w of nonEmptyWraps) {
+    const svgTextParent = findSvgTextAncestor(w.node);
+    if (svgTextParent) {
+      // Compute char offset of this wrap within the <text> element's own textContent.
+      const offset = textNodeOffsetWithin(svgTextParent, w.node);
+      if (offset < 0) continue;
+      const matchStart = offset + w.start;
+      const matchEnd = offset + w.end;
+      const existing = svgTextRanges.get(svgTextParent);
+      if (existing) {
+        existing.start = Math.min(existing.start, matchStart);
+        existing.end = Math.max(existing.end, matchEnd);
+      } else {
+        svgTextRanges.set(svgTextParent, { start: matchStart, end: matchEnd });
+      }
+    } else {
+      visibleWraps.push(w);
+    }
+  }
+  if (onSvgText) {
+    for (const [el, range] of svgTextRanges) onSvgText(el, range.start, range.end);
+  }
   if (visibleWraps.length === 0) return;
 
   // Group wraps by block parent so we merge wraps within the same block
@@ -581,6 +639,46 @@ function getBlockParent(node: Node): Element | null {
     el = el.parentElement;
   }
   return null;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Walk up from a text node; return the outermost SVG <text> ancestor, or null
+ *  if not inside SVG text content (or if a <foreignObject> switches the context
+ *  back to HTML before reaching an SVG text element). Used to redirect wraps
+ *  away from SVG <text>/<tspan>/<textPath>, which cannot render HTML children. */
+export function findSvgTextAncestor(node: Node): SVGElement | null {
+  let el: Element | null = node.parentElement;
+  let svgText: SVGElement | null = null;
+  while (el) {
+    if (el.namespaceURI === SVG_NS) {
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'foreignobject') return svgText;
+      if (tag === 'text') svgText = el as unknown as SVGElement;
+      else if (tag === 'tspan' || tag === 'textpath') {
+        if (!svgText) svgText = el as unknown as SVGElement;
+      }
+    }
+    el = el.parentElement;
+  }
+  return svgText;
+}
+
+export function isInsideSvgTextContent(node: Node): boolean {
+  return findSvgTextAncestor(node) !== null;
+}
+
+/** Depth-first char offset of a text node within an ancestor element's full
+ *  textContent. Returns -1 if `target` is not a descendant of `ancestor`. */
+function textNodeOffsetWithin(ancestor: Element, target: Text): number {
+  const walker = document.createTreeWalker(ancestor, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node === target) return offset;
+    offset += node.textContent?.length || 0;
+  }
+  return -1;
 }
 
 /**
