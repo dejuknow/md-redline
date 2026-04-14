@@ -23,8 +23,20 @@ test.afterAll(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Helper: create a review session via the API and return the sessionId.
+// Helpers
 // ---------------------------------------------------------------------------
+
+/** Abort every open session so retries don't see stale sessions from a prior run. */
+async function abortAllSessions(baseURL: string, request: import('@playwright/test').APIRequestContext) {
+  const res = await request.get(`${baseURL}/api/review-sessions`);
+  if (!res.ok()) return;
+  const { sessions } = (await res.json()) as { sessions: { id: string; status: string }[] };
+  for (const s of sessions.filter((s) => s.status === 'open')) {
+    await request.post(`${baseURL}/api/review-sessions/${s.id}/abort`, {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+}
 
 async function createSession(baseURL: string, request: import('@playwright/test').APIRequestContext): Promise<string> {
   const res = await request.post(`${baseURL}/api/review-sessions`, {
@@ -40,6 +52,11 @@ async function createSession(baseURL: string, request: import('@playwright/test'
 // ---------------------------------------------------------------------------
 
 test.describe('Review session banner', () => {
+  // Clean up stale sessions from prior runs/retries so each test starts with a single session.
+  test.beforeEach(async ({ request, baseURL }) => {
+    await abortAllSessions(baseURL!, request);
+  });
+
   test('happy path: banner appears and Send & finish hands off the session', async ({
     page,
     request,
@@ -119,8 +136,9 @@ test.describe('Review session banner', () => {
     // In E2E, the /wait endpoint itself calls waitForSession. Start a new /wait.
     const waitPromise2 = request.get(`${baseURL}/api/review-sessions/${sessionId}/wait`);
 
-    // Now click "Send & finish"
-    const finishButton = banner.getByRole('button', { name: /send & finish/i });
+    // After the batch sends the only comment, the optimistic sentCommentIds update
+    // makes unsentIds empty, so the button text becomes "Finish review" (not "Send & finish").
+    const finishButton = banner.getByRole('button', { name: /finish/i });
     await finishButton.click();
 
     const finishResponse = await waitPromise2;

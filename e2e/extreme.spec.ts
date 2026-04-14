@@ -1,13 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = resolve(__dirname, 'fixtures/extreme-mermaid-stress.md');
+const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
 const SECTION_COUNT = 220;
 const EXTREME_ANCHOR = 'POST /api/reviews?file=~/docs/specs/extreme-v2.md&mode=diff#tail';
+let fixturePath = '';
 
 function buildFixture() {
   return [
@@ -100,21 +101,32 @@ const FIXTURE_CONTENT = buildFixture();
 
 test.describe.configure({ timeout: 120_000 });
 
-test.beforeAll(() => {
-  writeFileSync(FIXTURE, FIXTURE_CONTENT);
-});
-
-test.beforeEach(async ({ page }) => {
-  writeFileSync(FIXTURE, FIXTURE_CONTENT);
+test.beforeEach(async ({ page }, testInfo) => {
+  mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
+  fixturePath = resolve(TEMP_FIXTURE_DIR, `extreme-mermaid-stress-${process.pid}-${testInfo.retry}-${Date.now()}.md`);
+  writeFileSync(fixturePath, FIXTURE_CONTENT);
   await resetTestAppState(page);
 });
 
-test.afterAll(() => {
-  if (existsSync(FIXTURE)) rmSync(FIXTURE);
+test.afterEach(() => {
+  if (fixturePath && existsSync(fixturePath)) rmSync(fixturePath);
 });
 
 async function openFixture(page: Page) {
-  await page.goto(`/?file=${FIXTURE}`);
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get('/api/version');
+        return response.ok();
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+
+  await page.goto(`/?file=${fixturePath}`);
+  await expect(page.getByText('Backend unavailable. Start the md-redline server.')).toHaveCount(0, {
+    timeout: 15_000,
+  });
   await expect(page.getByRole('heading', { name: 'Extreme Mermaid Stress Doc' })).toBeVisible({
     timeout: 15_000,
   });
@@ -151,6 +163,26 @@ async function selectText(page: Page, text: string) {
   }, text);
 }
 
+async function scrollTextIntoView(page: Page, text: string) {
+  await page.evaluate((targetText) => {
+    const walker = document.createTreeWalker(
+      document.querySelector('.prose') || document.body,
+      NodeFilter.SHOW_TEXT,
+    );
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      if (!(node.textContent || '').includes(targetText)) continue;
+
+      const parent = node.parentElement;
+      if (!parent) break;
+      parent.scrollIntoView({ block: 'center', inline: 'nearest' });
+      return;
+    }
+
+    throw new Error(`Text "${targetText}" not found in rendered markdown`);
+  }, text);
+}
+
 async function addComment(page: Page, anchorText: string, commentText: string) {
   await selectText(page, anchorText);
   const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
@@ -170,17 +202,31 @@ test('renders and comments through an extreme markdown document', async ({ page 
   });
   await expect(page.locator('.mermaid-error')).toHaveCount(0);
 
-  await page.getByRole('heading', { name: 'Tail Appendix' }).scrollIntoViewIfNeeded();
-  await page.locator('.prose').getByText(EXTREME_ANCHOR).scrollIntoViewIfNeeded();
+  // Mermaid hydration can replace large DOM regions while the test is navigating.
+  // Find and scroll fresh text nodes inside the page on each retry instead of
+  // holding a Playwright locator to a node that may detach mid-action.
+  await expect(async () => {
+    await scrollTextIntoView(page, 'Tail Appendix');
+  }).toPass({ timeout: 15_000 });
+  await expect(async () => {
+    await scrollTextIntoView(page, EXTREME_ANCHOR);
+  }).toPass({ timeout: 15_000 });
   await addComment(
     page,
     EXTREME_ANCHOR,
     'Tail anchor still works even after hundreds of Mermaid sections and mixed markdown blocks.',
   );
 
-  await page.waitForTimeout(750);
-  const saved = readFileSync(FIXTURE, 'utf-8');
-  expect(saved).toContain('@comment');
+  await expect
+    .poll(
+      () => {
+        if (!fixturePath || !existsSync(fixturePath)) return null;
+        return readFileSync(fixturePath, 'utf-8');
+      },
+      { timeout: 15_000 },
+    )
+    .toContain('@comment');
+  const saved = readFileSync(fixturePath, 'utf-8');
   expect(saved).toContain(EXTREME_ANCHOR);
   expect(saved.match(/^```mermaid$/gm)).toHaveLength(SECTION_COUNT);
 });
