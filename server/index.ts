@@ -1083,7 +1083,7 @@ export function createApp(options: CreateAppOptions = {}) {
         return new Response('Not Found', { status: 404 });
       }
       const CSP_HTML =
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'";
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'";
       try {
         const content = await readFile(filePath);
         const ext = extname(filePath);
