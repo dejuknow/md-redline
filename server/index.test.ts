@@ -1605,6 +1605,28 @@ describe('review sessions API', () => {
     });
   });
 
+  it('POST /api/review-sessions returns existing open session for same files (dedup)', async () => {
+    // Use rootFile to avoid interference from other tests that use docsFile
+    const first = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [rootFile], enableResolve: false }),
+    });
+    expect(first.response.status).toBe(201);
+    const firstBody = first.body as { sessionId: string; created: boolean };
+    expect(firstBody.created).toBe(true);
+
+    const second = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [rootFile], enableResolve: false }),
+    });
+    expect(second.response.status).toBe(200);
+    const secondBody = second.body as { sessionId: string; created: boolean };
+    expect(secondBody.sessionId).toBe(firstBody.sessionId);
+    expect(secondBody.created).toBe(false);
+  });
+
   it('POST /api/review-sessions rejects empty filePaths', async () => {
     const { response, body } = await requestJson(app, '/api/review-sessions', {
       method: 'POST',

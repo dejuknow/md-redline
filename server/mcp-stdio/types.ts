@@ -15,6 +15,8 @@ export type ValidationResult<T> =
 export interface CreateSessionResult {
   sessionId: string;
   url: string;
+  /** False when the server returned an existing open session for the same files. */
+  created?: boolean;
 }
 
 export type WaitResult =

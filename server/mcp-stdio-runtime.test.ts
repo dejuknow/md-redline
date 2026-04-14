@@ -317,6 +317,23 @@ describe('handleRequestReviewToolCall', () => {
     expect(result.content[0].text).toContain('cancelled');
   });
 
+  it('skips openInBrowser when createSession returns created: false (dedup)', async () => {
+    const client = {
+      grantAccess: vi.fn().mockResolvedValue(undefined),
+      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
+      waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'X' }),
+      abortSession: vi.fn(),
+    };
+    const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+    await handleRequestReviewToolCall(
+      { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+      { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+    );
+
+    expect(openInBrowser).not.toHaveBeenCalled();
+  });
+
   it('calls abortSession immediately if the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();

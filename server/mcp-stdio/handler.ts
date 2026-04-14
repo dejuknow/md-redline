@@ -61,9 +61,13 @@ export async function handleRequestReviewToolCall(
   });
 
   const fullUrl = `${ctx.baseUrl.replace(/\/$/, '')}${session.url}`;
-  await ctx.openInBrowser(fullUrl).catch(() => {
-    // Browser open failures are non-fatal — the user can copy the URL.
-  });
+  // Skip opening the browser when the server returned an existing session
+  // for the same files — the tab is already open from the first call.
+  if (session.created !== false) {
+    await ctx.openInBrowser(fullUrl).catch(() => {
+      // Browser open failures are non-fatal — the user can copy the URL.
+    });
+  }
 
   // Immediate "waiting" status so the client sees something right away.
   ctx.sendProgress?.(`mdr: waiting for your review at ${fullUrl}`);

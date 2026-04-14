@@ -49,6 +49,21 @@ export function registerReviewSessionRoutes(
       }
     }
 
+    // Deduplicate: if an open session for the same files already exists,
+    // return it instead of creating a new one. This prevents double browser
+    // tabs when the tool is called twice for the same files.
+    const existing = reviewSessions.findOpenSession(resolved);
+    if (existing) {
+      console.log(
+        `[review-session] reusing ${existing.id} for ${resolved.length} file(s): ${resolved.join(', ')}`,
+      );
+      return c.json({
+        sessionId: existing.id,
+        url: `/?review=${encodeURIComponent(existing.id)}`,
+        created: false,
+      });
+    }
+
     const session = reviewSessions.createSession({
       filePaths: resolved,
       enableResolve: enableResolve === true,
@@ -62,6 +77,7 @@ export function registerReviewSessionRoutes(
       {
         sessionId: session.id,
         url: `/?review=${encodeURIComponent(session.id)}`,
+        created: true,
       },
       201,
     );

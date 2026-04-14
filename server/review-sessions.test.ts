@@ -283,4 +283,36 @@ describe('ReviewSessionStore', () => {
     vi.advanceTimersByTime(2 * 60_000);
     expect(store.getSession(session.id)).toBeUndefined();
   });
+
+  describe('findOpenSession', () => {
+    it('returns an open session with matching file paths', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
+      const found = store.findOpenSession(['/tmp/a.md', '/tmp/b.md']);
+      expect(found?.id).toBe(session.id);
+    });
+
+    it('matches regardless of file path order', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
+      const found = store.findOpenSession(['/tmp/b.md', '/tmp/a.md']);
+      expect(found?.id).toBe(session.id);
+    });
+
+    it('returns undefined when no open session matches', () => {
+      store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      expect(store.findOpenSession(['/tmp/other.md'])).toBeUndefined();
+    });
+
+    it('ignores aborted sessions', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.abort(session.id, 'user_cancelled');
+      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+    });
+
+    it('ignores done sessions', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.waitForSession(session.id);
+      store.finish(session.id);
+      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+    });
+  });
 });

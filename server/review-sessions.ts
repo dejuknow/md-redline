@@ -91,6 +91,26 @@ export class ReviewSessionStore {
   }
 
   /**
+   * Find an existing open session whose file paths match the given set
+   * (order-independent). Used to deduplicate when the tool is called twice
+   * for the same files.
+   */
+  findOpenSession(filePaths: string[]): ReviewSession | undefined {
+    const sorted = [...filePaths].sort();
+    for (const s of this.sessions.values()) {
+      if (s.status !== 'open') continue;
+      const existing = [...s.filePaths].sort();
+      if (
+        sorted.length === existing.length &&
+        sorted.every((p, i) => p === existing[i])
+      ) {
+        return this.toPublic(s);
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Returns the session's resolution promise. Throws if the session does not
    * exist — callers should check existence first (the HTTP layer already does).
    */
