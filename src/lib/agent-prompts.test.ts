@@ -32,6 +32,32 @@ describe('buildAddressCommentsPrompt', () => {
     expect(prompt).toContain('add a reply to the `replies` array');
   });
 
+  it('scopes to specific comment IDs when commentIds is provided', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 5]]),
+      enableResolve: false,
+      commentIds: ['c1', 'c2', 'c3'],
+    });
+
+    expect(prompt).toContain('c1');
+    expect(prompt).toContain('c2');
+    expect(prompt).toContain('c3');
+    expect(prompt).toContain('ONLY');
+    expect(prompt).toContain('Leave any other comment markers');
+  });
+
+  it('addresses all comments when commentIds is absent (backward compat)', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 2]]),
+      enableResolve: false,
+    });
+
+    expect(prompt).toContain('find all');
+    expect(prompt).not.toContain('ONLY');
+  });
+
   it('does not ask the agent to fill in a timestamp (md-redline assigns it)', () => {
     const prompt = buildAddressCommentsPrompt({
       filePaths: ['/tmp/spec.md'],

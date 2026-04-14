@@ -37,6 +37,7 @@ interface Props {
   requestedEditor?: SidebarCommentEditorState;
   requestedFocus?: SidebarCommentFocusRequest | null;
   onFocusHandled?: () => void;
+  sentCommentIds?: string[];
 }
 
 type FilterMode = 'all' | 'open' | 'resolved';
@@ -60,6 +61,7 @@ export function CommentSidebar({
   requestedEditor,
   requestedFocus,
   onFocusHandled,
+  sentCommentIds,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
   const commentRefs = useRef(new Map<string, HTMLDivElement>());
@@ -274,6 +276,7 @@ export function CommentSidebar({
               comment={comment}
               isActive={comment.id === activeCommentId}
               anchorMissing={missingAnchors.has(comment.id)}
+              sent={sentCommentIds?.includes(comment.id) ?? false}
               onActivate={onActivate}
               onResolve={resolveEnabled ? onResolve : undefined}
               onUnresolve={resolveEnabled ? onUnresolve : undefined}
@@ -323,6 +326,7 @@ export function CommentSidebar({
               comment={comment}
               isActive={comment.id === activeCommentId}
               anchorMissing={missingAnchors.has(comment.id)}
+              sent={sentCommentIds?.includes(comment.id) ?? false}
               onActivate={onActivate}
               onResolve={resolveEnabled ? onResolve : undefined}
               onUnresolve={resolveEnabled ? onUnresolve : undefined}

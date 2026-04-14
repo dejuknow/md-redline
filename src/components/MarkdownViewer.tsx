@@ -34,6 +34,7 @@ interface Props {
   onLocalLinkClick?: (path: string, fragment?: string) => void;
   onContextMenu?: (info: ViewerContextMenuInfo) => void;
   enableResolve?: boolean;
+  sentCommentIds?: string[];
   searchQuery?: string;
   searchActiveIndex?: number;
   onSearchCount?: (count: number) => void;
@@ -70,6 +71,7 @@ export const MarkdownViewer = memo(
       onLocalLinkClick,
       onContextMenu: onCtxMenu,
       enableResolve,
+      sentCommentIds,
       searchQuery,
       searchActiveIndex,
       onSearchCount,
@@ -98,7 +100,7 @@ export const MarkdownViewer = memo(
       scrollToComment: (commentId: string) => {
         if (!containerRef.current) return;
         const marks = containerRef.current.querySelectorAll(
-          '.comment-highlight, .mermaid-comment-highlight',
+          '.comment-highlight, .comment-highlight-sent, .mermaid-comment-highlight',
         );
         const mark = Array.from(marks).find((m) =>
           (m as HTMLElement).dataset.commentIds?.split(',').includes(commentId),
@@ -214,11 +216,13 @@ export const MarkdownViewer = memo(
         contextAfter,
       } of highlightGroups.values()) {
         const isActive = ids.includes(activeCommentId || '');
+        const allSent =
+          sentCommentIds && sentCommentIds.length > 0 && ids.every((id) => sentCommentIds.includes(id));
         wrapText(
           container,
           anchor,
           (mark) => {
-            mark.className = 'comment-highlight';
+            mark.className = allSent ? 'comment-highlight-sent' : 'comment-highlight';
             mark.dataset.commentIds = ids.join(',');
             if (isActive) {
               mark.classList.add('comment-highlight-active');
@@ -252,11 +256,11 @@ export const MarkdownViewer = memo(
       // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
       // Solution: keep the <mark> but swap class styles for inline styles.
       for (const mark of container.querySelectorAll(
-        '.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-active',
+        '.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-sent, .mermaid-block mark.comment-highlight-active',
       )) {
         const el = mark as HTMLElement;
         const isActive = el.classList.contains('comment-highlight-active');
-        el.classList.remove('comment-highlight', 'comment-highlight-active');
+        el.classList.remove('comment-highlight', 'comment-highlight-sent', 'comment-highlight-active');
         el.classList.add('mermaid-comment-highlight');
         if (isActive) {
           el.classList.add('mermaid-comment-highlight-active');
@@ -306,6 +310,7 @@ export const MarkdownViewer = memo(
       selectionOffset,
       toPlainOffset,
       enableResolve,
+      sentCommentIds,
       searchQuery,
       searchActiveIndex,
       mermaidSvgMap,
@@ -325,7 +330,7 @@ export const MarkdownViewer = memo(
       }
 
       const mark = (e.target as HTMLElement).closest(
-        '.comment-highlight, .mermaid-comment-highlight',
+        '.comment-highlight, .comment-highlight-sent, .mermaid-comment-highlight',
       ) as HTMLElement | null;
       if (mark?.dataset.commentIds) {
         const ids = mark.dataset.commentIds.split(',');
@@ -338,7 +343,7 @@ export const MarkdownViewer = memo(
 
       // Check if right-click is on a comment highlight
       const mark = (e.target as HTMLElement).closest(
-        '.comment-highlight, .mermaid-comment-highlight',
+        '.comment-highlight, .comment-highlight-sent, .mermaid-comment-highlight',
       ) as HTMLElement | null;
       if (mark?.dataset.commentIds) {
         e.preventDefault();

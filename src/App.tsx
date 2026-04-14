@@ -66,6 +66,9 @@ import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
+import { useReviewSession } from './hooks/useReviewSession';
+import { ReviewBanner } from './components/ReviewBanner';
+import { stripReviewParamFromUrl } from './lib/review-url';
 import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -407,6 +410,7 @@ export default function App() {
   // it from either view.
   const [copyFeedback, setCopyFeedback] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backfillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
@@ -443,6 +447,7 @@ export default function App() {
     missingAnchors,
     commentCounts,
     resolvedCommentCounts,
+    allCommentIds,
     commentCount,
     handleAddComment,
     handleResolve,
@@ -494,6 +499,31 @@ export default function App() {
     },
     [handleSnapshot, handleCopyAgentPrompt, activeFilePath, tabs],
   );
+
+  const { sessions: reviewSessions, refresh: refreshReviewSessions } = useReviewSession();
+
+  // Mirrors the snapshot logic in handleHandoff so multi-file review sessions
+  // get diff baselines for every involved tab, not just the active one.
+  const handleReviewHandoffSuccess = useCallback(
+    (session: { filePaths: string[] }) => {
+      const extra = new Map<string, string>();
+      for (const p of session.filePaths) {
+        if (p === activeFilePath) continue;
+        const tab = tabs.find((t) => t.filePath === p);
+        if (tab) extra.set(p, tab.rawMarkdown);
+      }
+      handleSnapshot(extra.size > 0 ? extra : undefined);
+    },
+    [tabs, activeFilePath, handleSnapshot],
+  );
+
+  // Strip `?review=<id>` from the address bar once a review resolves, so
+  // a page reload doesn't re-open the tabs of a completed review and so
+  // bookmarks don't carry a stale session ID.
+  const handleReviewResolved = useCallback(() => {
+    refreshReviewSessions();
+    stripReviewParamFromUrl();
+  }, [refreshReviewSessions]);
 
   const handleDiffToggle = useCallback(() => {
     if (!diffEnabled) {
@@ -638,10 +668,29 @@ export default function App() {
       }
 
       // Persist the corrected timestamps back to disk so reloads see the right
-      // values. Uses the SSE-delivered mtime as expectedMtime, so this save
-      // races cleanly against the next external edit (no false conflicts).
+      // values. Debounced to avoid a write-watch-write bounce when an agent
+      // makes rapid edits: each agent write triggers an SSE event → backfill →
+      // save → SSE event, which changes the file under the agent's feet and
+      // causes "Error editing file" on its next edit. A 2s debounce lets the
+      // agent finish its batch of edits before we write the timestamps.
+      //
+      // Uses a direct fetch instead of saveFile() because the save queue shows
+      // a "Save failed" toast on 409 CONFLICT. Since the agent modifies the
+      // file between the SSE event and the debounced save, 409s are expected
+      // and benign — the next SSE event will re-trigger the backfill.
       if (nextContent !== content && activeFilePath) {
-        saveFile(nextContent);
+        if (backfillTimerRef.current) clearTimeout(backfillTimerRef.current);
+        const pathToSave = activeFilePath;
+        const contentToSave = nextContent;
+        const mtimeToSave = mtime;
+        backfillTimerRef.current = setTimeout(() => {
+          backfillTimerRef.current = null;
+          fetch('/api/file', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: pathToSave, content: contentToSave, expectedMtime: mtimeToSave }),
+          }).catch(() => {});
+        }, 2000);
       }
 
       // Flag the diff button when content changed and a snapshot exists
@@ -652,7 +701,6 @@ export default function App() {
     [
       activeFilePath,
       correctReplyTimestamps,
-      saveFile,
       setDiffEnabled,
       settings.enableResolve,
       showToast,
@@ -771,6 +819,32 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // Open files referenced by ?review=<sessionId> in URL on first load.
+  // The session itself is discovered via useReviewSession's poll; this
+  // effect just makes sure the relevant tabs are open.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reviewId = params.get('review');
+    if (!reviewId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/review-sessions/${reviewId}`);
+        if (!res.ok) return;
+        const session = (await res.json()) as { filePaths: string[] };
+        if (cancelled) return;
+        for (const p of session.filePaths) {
+          openTabInBackground(p);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [openTabInBackground]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
@@ -1416,8 +1490,43 @@ export default function App() {
         })()
       : null;
 
+  // Optimistic sent IDs: updated immediately when a batch is sent, before
+  // the server round-trip completes. Merged with the server's sentCommentIds
+  // so the "Sent" badges appear instantly on click.
+  const [optimisticSentIds, setOptimisticSentIds] = useState<string[]>([]);
+  const handleBatchSent = useCallback(
+    (ids: string[]) => {
+      setOptimisticSentIds((prev) => [...prev, ...ids]);
+      refreshReviewSessions();
+    },
+    [refreshReviewSessions],
+  );
+
+  const sentCommentIds = useMemo(() => {
+    const serverIds = reviewSessions[0]?.sentCommentIds ?? [];
+    if (optimisticSentIds.length === 0) return serverIds;
+    return [...new Set([...serverIds, ...optimisticSentIds])];
+  }, [reviewSessions, optimisticSentIds]);
+
+  // Clear optimistic IDs when the review session ends
+  useEffect(() => {
+    if (reviewSessions.length === 0 && optimisticSentIds.length > 0) {
+      setOptimisticSentIds([]);
+    }
+  }, [reviewSessions, optimisticSentIds]);
+
   return (
     <div className="h-screen flex flex-col bg-surface">
+      <ReviewBanner
+        sessions={reviewSessions}
+        commentCounts={commentCounts}
+        enableResolve={settings.enableResolve}
+        onHandoffSuccess={handleReviewHandoffSuccess}
+        onResolved={handleReviewResolved}
+        onBatchSent={handleBatchSent}
+        showToast={showToast}
+        commentIds={allCommentIds}
+      />
       <Toolbar
         error={error}
         errorKind={errorKind}
@@ -1667,6 +1776,7 @@ export default function App() {
                             searchQuery={showSearch ? searchQuery : undefined}
                             searchActiveIndex={activeSearchIndex}
                             onSearchCount={handleSearchCount}
+                            sentCommentIds={sentCommentIds}
                           />
                         ) : (
                           <MarkdownViewer
@@ -1686,6 +1796,7 @@ export default function App() {
                             searchQuery={showSearch ? searchQuery : undefined}
                             searchActiveIndex={activeSearchIndex}
                             onSearchCount={handleSearchCount}
+                            sentCommentIds={sentCommentIds}
                           />
                         )}
                         <DragHandles
@@ -1773,6 +1884,7 @@ export default function App() {
                   requestedEditor={requestedEditor}
                   requestedFocus={requestedCommentFocus}
                   onFocusHandled={() => setRequestedCommentFocus(null)}
+                  sentCommentIds={sentCommentIds}
                 />
               </div>
             </div>

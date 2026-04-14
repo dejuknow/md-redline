@@ -20,6 +20,7 @@ interface Props {
   comment: MdComment;
   isActive: boolean;
   anchorMissing?: boolean;
+  sent?: boolean;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
@@ -45,6 +46,7 @@ export const CommentCard = memo(function CommentCard({
   comment,
   isActive,
   anchorMissing,
+  sent,
   onActivate,
   onResolve,
   onUnresolve,
@@ -193,7 +195,7 @@ export const CommentCard = memo(function CommentCard({
           : isResolved
             ? 'border-border bg-surface-secondary opacity-60'
             : 'border-border-subtle bg-surface hover:border-content-faint hover:shadow-sm'
-      }`}
+      }${sent ? ' opacity-50' : ''}`}
       onClick={() => onActivate(comment.id)}
       onContextMenu={(e) => {
         if (onCtxMenu) {
@@ -214,6 +216,14 @@ export const CommentCard = memo(function CommentCard({
           &ldquo;{comment.anchor}&rdquo;
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {sent && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-primary-bg-strong text-primary-text"
+              title="This comment has been sent to the reviewing agent"
+            >
+              Sent
+            </span>
+          )}
           {anchorMissing && (
             <span
               className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-danger-bg text-danger-text"

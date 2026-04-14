@@ -2,14 +2,20 @@ export interface BuildAddressCommentsPromptOptions {
   filePaths: string[];
   commentCounts: Map<string, number>;
   enableResolve: boolean;
+  commentIds?: string[];
 }
 
 export function buildAddressCommentsPrompt({
   filePaths,
   commentCounts,
   enableResolve,
+  commentIds,
 }: BuildAddressCommentsPromptOptions): string {
   if (filePaths.length === 0) return '';
+
+  const scopeInstruction = commentIds
+    ? `Address ONLY the comments with the following IDs: ${commentIds.map((id) => `\`${id}\``).join(', ')}. Leave any other comment markers in the file untouched.`
+    : null;
 
   const afterAction = enableResolve
     ? 'After addressing a comment that required a document edit, resolve it by setting `"status":"resolved"` and `"resolved":true` in the marker JSON. If a comment only needed a reply (e.g. answering a question), leave it open.'
@@ -47,8 +53,8 @@ Whenever you add a reply to a comment's \`replies\` array, set the \`"author"\` 
 You MUST edit the files at the exact paths listed above. Do NOT copy them to a different location, do NOT create new files. If you cannot access a file at its given path (e.g. workspace restrictions), stop and tell me immediately instead of working around it.
 
 ## What to do
-
-1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} find all \`<!-- @comment{...} -->\` markers
+${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
+1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${commentIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
 2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question
 ${
   enableResolve

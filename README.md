@@ -14,21 +14,6 @@ Markdown has become a common working format for specs, prompts, and design docs 
 
 https://github.com/user-attachments/assets/855a9d02-b0fd-4dec-b0a5-742871e8c181
 
-## Review workflow
-
-### Default: comments as agent instructions
-
-1. Open a markdown file in `mdr`.
-2. Highlight text and leave inline comments.
-3. Copy the hand-off prompt.
-4. Paste the prompt into your AI agent.
-5. The agent edits the file, addresses the feedback, and removes the comment markers it handled.
-6. Review the result in diff view.
-
-### Optional: resolve workflow
-
-Enable resolve mode in Settings for human review with explicit `open` and `resolved` states.
-
 ## Quick start
 
 Prerequisite: Node 20 or newer.
@@ -49,6 +34,74 @@ mdr --stop                   # Stop the running server
 ```
 
 `md-redline` also works as an alias for `mdr`.
+
+## Review workflow
+
+### Default: comments as agent instructions
+
+1. Open a markdown file in `mdr`.
+2. Highlight text and leave inline comments.
+3. Copy the hand-off prompt.
+4. Paste the prompt into your AI agent.
+5. The agent edits the file, addresses the feedback, and removes the comment markers it handled.
+6. Review the result in diff view.
+
+### Optional: resolve workflow
+
+Enable resolve mode in Settings for human review with explicit `open` and `resolved` states.
+
+### MCP integration: hand off without copy-paste
+
+md-redline ships an MCP (Model Context Protocol) server so any MCP-compatible CLI agent can request a review and pause until you click **Send review** in the banner. When the user clicks Send, the agent receives the same hand-off prompt the clipboard button generates and starts addressing your comments. The MCP path is opt-in per request. Ask for review only when you want it.
+
+**Verified working:** [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli). Any other MCP client that supports stdio servers (Cursor, Zed, Windsurf, etc.) should work the same way.
+
+#### Claude Code or Claude Desktop
+
+```bash
+mdr mcp install                   # register with both clients (default)
+mdr mcp install --claude-code     # just Claude Code (via `claude mcp add`)
+mdr mcp install --claude-desktop  # just Claude Desktop (JSON config file)
+```
+
+#### Codex CLI
+
+```bash
+codex mcp add md-redline -- mdr mcp
+```
+
+#### Gemini CLI
+
+```bash
+gemini mcp add --scope user md-redline mdr mcp
+```
+
+The `--scope user` flag is important. Gemini defaults to per-project scope, which only registers mdr for the current directory.
+
+#### Other MCP clients (manual)
+
+Add this server entry to your client's MCP config file. The exact location varies by client. Check your client's docs for "MCP servers" or "custom stdio server."
+
+```json
+{
+  "mcpServers": {
+    "md-redline": {
+      "command": "mdr",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Some clients use TOML or a different wrapper key, but the `command`/`args` pair is standard. Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
+
+#### Using it
+
+Once registered, ask the agent to call `mdr_request_review` with the file paths you want to review:
+
+> "Let me review docs/specs/feature-x.md in mdr before you continue."
+
+The agent calls the tool, mdr opens, you review and click **Send review**, and the agent receives the instruction prompt and starts addressing your comments.
 
 ## Who this is for
 

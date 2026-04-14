@@ -45,7 +45,15 @@ export function ThemePersistenceProvider({ children }: { children: ReactNode }) 
   const { theme, setTheme: setThemeNextThemes } = useTheme();
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  const setThemeRef = useRef(setThemeNextThemes);
+  setThemeRef.current = setThemeNextThemes;
 
+  // Load server-persisted theme on mount. Runs once — subsequent changes are
+  // handled by setThemePersistent below, not by this effect. Using a ref for
+  // setTheme prevents re-runs when next-themes gives a new function reference
+  // on theme change, which caused cross-tab ping-pong: tab A changes theme →
+  // localStorage sync → tab B re-renders → effect re-fires with stale cached
+  // prefs → bounces theme back → tab A detects → flicker loop.
   useEffect(() => {
     let cancelled = false;
     const versionAtMount = themeWriteVersion;
@@ -53,14 +61,14 @@ export function ThemePersistenceProvider({ children }: { children: ReactNode }) 
     loadPreferencesOnce().then((prefs) => {
       if (cancelled || versionAtMount !== themeWriteVersion) return;
       if (prefs.theme && prefs.theme !== themeRef.current) {
-        setThemeNextThemes(prefs.theme);
+        setThemeRef.current(prefs.theme);
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [setThemeNextThemes]);
+  }, []);
 
   const setThemePersistent = useCallback(
     (newTheme: string) => {
