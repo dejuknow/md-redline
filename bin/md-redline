@@ -435,7 +435,7 @@ async function installForClaudeCode() {
 
   // Check whether md-redline is already registered.
   const listOutput = await new Promise((resolve) => {
-    const child = spawn('claude', ['mcp', 'list'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn('claude', ['mcp', 'list', '--scope', 'user'], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     child.stdout.on('data', (chunk) => {
       out += chunk.toString('utf8');
@@ -449,7 +449,7 @@ async function installForClaudeCode() {
   }
 
   const addResult = await new Promise((resolve) => {
-    const child = spawn('claude', ['mcp', 'add', 'md-redline', 'mdr', 'mcp'], {
+    const child = spawn('claude', ['mcp', 'add', '--scope', 'user', 'md-redline', '--', 'mdr', 'mcp'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stderr = '';
