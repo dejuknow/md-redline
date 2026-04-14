@@ -1411,6 +1411,8 @@ describe('persisted trustedRoots hydration', () => {
     );
     expect(ghost.response.status).toBe(403);
 
+    // Allow fire-and-forget writePreferences to flush before removing the temp dir.
+    await new Promise((r) => setTimeout(r, 50));
     await rm(realHome, { recursive: true, force: true });
   });
 
