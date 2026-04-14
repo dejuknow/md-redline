@@ -17,6 +17,8 @@ import {
   writePreferences,
 } from './preferences';
 import { injectSvgDimensions } from './svg-dimensions';
+import { ReviewSessionStore } from './review-sessions';
+import { registerReviewSessionRoutes } from './routes/review-sessions';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION } = require('../package.json') as { version: string };
@@ -327,6 +329,11 @@ export function createApp(options: CreateAppOptions = {}) {
       cleanup: () => void;
     }
   >();
+
+  const reviewSessions = new ReviewSessionStore();
+  reviewSessions.startSweep(10_000);
+
+  registerReviewSessionRoutes(app, reviewSessions, resolveAndValidate);
 
   app.get('/api/config', (c) => {
     return c.json({ initialFile, initialDir, homeDir });

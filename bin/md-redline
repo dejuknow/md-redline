@@ -2,11 +2,11 @@
 
 import { execSync, spawn } from 'child_process';
 import { statSync } from 'fs';
-import { readFile, stat, unlink, writeFile } from 'fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import process from 'process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
 
@@ -38,6 +38,12 @@ function printHelp() {
   console.log('  --restrict      Disable the default home-directory trust');
   console.log('  -v, --version   Show version number');
   console.log('  -h, --help      Show this help message');
+  console.log('');
+  console.log('Subcommands:');
+  console.log('  mcp             Run the MCP server (called by the MCP client)');
+  console.log('  mcp install     Register md-redline with Claude Code and Claude Desktop');
+  console.log('                    --claude-code     just Claude Code (via `claude mcp add`)');
+  console.log('                    --claude-desktop  just Claude Desktop (JSON config file)');
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -276,7 +282,11 @@ async function ensureServerRunning() {
   if (isProductionMode()) {
     const serverArgs = [DIST_SERVER];
     const userArg = process.argv[2];
-    if (userArg && !userArg.startsWith('-')) {
+    // Don't forward the `mcp` subcommand as a positional file arg. When
+    // Claude Code spawns `mdr mcp`, argv[2] is 'mcp', which would otherwise
+    // resolve against Claude Code's cwd and get passed to the server as an
+    // initial path — triggering a bogus trusted-roots permission dialog.
+    if (userArg && !userArg.startsWith('-') && userArg !== 'mcp') {
       serverArgs.push(resolve(userArg));
     }
     child = await spawnDetached(process.execPath, serverArgs, { cwd: process.cwd() });
@@ -343,6 +353,174 @@ async function openInBrowser(url) {
   console.log(`Open in your browser: ${url}`);
 }
 
+function getClaudeDesktopConfigPath() {
+  const isWin = process.platform === 'win32';
+  if (isWin) {
+    return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
+  }
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+  }
+  return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json');
+}
+
+/**
+ * Write the md-redline MCP entry to Claude Desktop's JSON config file.
+ * Idempotent: reports "already configured" on second run. Migrates any
+ * legacy `mdr` key from an earlier version of this helper to `md-redline`.
+ */
+async function installForClaudeDesktop() {
+  const configPath = getClaudeDesktopConfigPath();
+
+  let config = {};
+  try {
+    const existing = await readFile(configPath, 'utf8');
+    config = JSON.parse(existing);
+  } catch {
+    // File missing or invalid — start fresh
+  }
+
+  if (typeof config !== 'object' || config === null) config = {};
+  const mcpServers = config.mcpServers && typeof config.mcpServers === 'object'
+    ? config.mcpServers
+    : {};
+
+  const hadLegacyKey = Boolean(mcpServers.mdr) && !mcpServers['md-redline'];
+  if (hadLegacyKey) {
+    mcpServers['md-redline'] = mcpServers.mdr;
+    delete mcpServers.mdr;
+  }
+
+  if (mcpServers['md-redline'] && !hadLegacyKey) {
+    console.log(`[Claude Desktop] md-redline already configured in ${configPath}`);
+    return { ok: true, changed: false };
+  }
+
+  if (!mcpServers['md-redline']) {
+    mcpServers['md-redline'] = { command: 'mdr', args: ['mcp'] };
+  }
+  config.mcpServers = mcpServers;
+
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  console.log(
+    hadLegacyKey
+      ? `[Claude Desktop] Renamed legacy mdr entry to md-redline in ${configPath}`
+      : `[Claude Desktop] Wrote md-redline MCP server entry to ${configPath}`,
+  );
+  return { ok: true, changed: true };
+}
+
+/**
+ * Register md-redline with Claude Code by invoking `claude mcp add`.
+ * Claude Code manages its MCP config via its CLI rather than a plain JSON
+ * file, so spawning the CLI is the supported integration point.
+ */
+async function installForClaudeCode() {
+  // Check whether the claude CLI is on PATH.
+  const claudeCheck = await new Promise((resolve) => {
+    const child = spawn('claude', ['--version'], { stdio: 'ignore' });
+    child.once('error', () => resolve(false));
+    child.once('exit', (code) => resolve(code === 0));
+  });
+  if (!claudeCheck) {
+    console.log('[Claude Code] claude CLI not found on PATH — skipping. Install Claude Code or run `claude mcp add md-redline mdr mcp` manually.');
+    return { ok: false, changed: false };
+  }
+
+  // Check whether md-redline is already registered.
+  const listOutput = await new Promise((resolve) => {
+    const child = spawn('claude', ['mcp', 'list'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    child.stdout.on('data', (chunk) => {
+      out += chunk.toString('utf8');
+    });
+    child.once('error', () => resolve(''));
+    child.once('exit', () => resolve(out));
+  });
+  if (/^\s*md-redline\b/m.test(listOutput)) {
+    console.log('[Claude Code] md-redline already registered.');
+    return { ok: true, changed: false };
+  }
+
+  const addResult = await new Promise((resolve) => {
+    const child = spawn('claude', ['mcp', 'add', 'md-redline', 'mdr', 'mcp'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.once('error', (err) => resolve({ ok: false, error: err.message }));
+    child.once('exit', (code) => resolve({ ok: code === 0, error: code === 0 ? null : stderr.trim() || `exited with code ${code}` }));
+  });
+
+  if (!addResult.ok) {
+    console.log(`[Claude Code] failed to register md-redline: ${addResult.error}`);
+    return { ok: false, changed: false };
+  }
+  console.log('[Claude Code] Registered md-redline via `claude mcp add`.');
+  return { ok: true, changed: true };
+}
+
+async function installMcpConfig(target) {
+  const results = [];
+  if (target === 'claude-desktop' || target === 'all') {
+    try {
+      results.push({ name: 'Claude Desktop', ...(await installForClaudeDesktop()) });
+    } catch (err) {
+      results.push({ name: 'Claude Desktop', ok: false, error: err instanceof Error ? err.message : 'unknown error' });
+    }
+  }
+  if (target === 'claude-code' || target === 'all') {
+    try {
+      results.push({ name: 'Claude Code', ...(await installForClaudeCode()) });
+    } catch (err) {
+      results.push({ name: 'Claude Code', ok: false, error: err instanceof Error ? err.message : 'unknown error' });
+    }
+  }
+
+  const anyChanged = results.some((r) => r.changed);
+  if (anyChanged) {
+    console.log('');
+    console.log('Restart the affected client(s) to pick up the change.');
+  }
+  if (results.every((r) => !r.ok)) {
+    process.exitCode = 1;
+  }
+}
+
+async function runMcpStdio() {
+  const distMcp = join(APP_DIR, 'dist', 'mcp-stdio.js');
+  if (!isProductionMode()) {
+    throw new Error(
+      'mdr mcp requires the production build. Run `npm run build` first, then re-link or reinstall mdr.',
+    );
+  }
+  try {
+    statSync(distMcp);
+  } catch {
+    throw new Error(`mdr mcp bundle missing at ${distMcp}. Run \`npm run build\`.`);
+  }
+
+  // Dynamic import so the SDK is only loaded when the mcp subcommand is invoked
+  const mod = await import(pathToFileURL(distMcp).href);
+
+  // Bin owns the baseUrl state so there's no module-level mutable in the
+  // mcp-stdio module. runMcpServer reads it via getBaseUrl() on every tool
+  // call, after ensureServerRunning() has had a chance to refresh it.
+  let currentBaseUrl = `http://localhost:${DEFAULT_CLIENT_PORT}`;
+  await mod.runMcpServer({
+    getBaseUrl: () => currentBaseUrl,
+    openInBrowser,
+    ensureServerRunning: async () => {
+      await ensureServerRunning();
+      const port = (await findClientPort()) ?? (await findServerPort()) ?? DEFAULT_CLIENT_PORT;
+      currentBaseUrl = `http://localhost:${port}`;
+    },
+  });
+}
+
 async function main() {
   if (process.argv[2] === '-h' || process.argv[2] === '--help') {
     printHelp();
@@ -361,6 +539,33 @@ async function main() {
 
   if (process.argv[2] === '--restrict') {
     await enableRestrictedMode();
+    return;
+  }
+
+  if (process.argv[2] === 'mcp') {
+    if (process.argv[3] === 'install') {
+      // mdr mcp install              → both Claude Code and Claude Desktop
+      // mdr mcp install --claude-code → just Claude Code (via `claude mcp add`)
+      // mdr mcp install --claude-desktop → just Claude Desktop (JSON config)
+      const flag = process.argv[4];
+      let target = 'all';
+      if (flag === '--claude-code') target = 'claude-code';
+      else if (flag === '--claude-desktop') target = 'claude-desktop';
+      else if (flag && flag.startsWith('-')) {
+        console.error(`Unknown flag for 'mcp install': ${flag}`);
+        console.error('Supported: --claude-code, --claude-desktop, or omit to install both.');
+        process.exitCode = 1;
+        return;
+      }
+      await installMcpConfig(target);
+      return;
+    }
+    try {
+      await runMcpStdio();
+    } catch (error) {
+      console.error(`mdr mcp failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      process.exitCode = 1;
+    }
     return;
   }
 

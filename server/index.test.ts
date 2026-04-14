@@ -1587,3 +1587,306 @@ describe('persisted trustedRoots hydration', () => {
     await rm(realHome, { recursive: true, force: true });
   });
 });
+
+describe('review sessions API', () => {
+  it('POST /api/review-sessions creates a session for files inside allowed roots', async () => {
+    const { response, body } = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(body).toMatchObject({
+      sessionId: expect.stringMatching(/^rev_/),
+      url: expect.stringContaining('review='),
+    });
+  });
+
+  it('POST /api/review-sessions rejects empty filePaths', async () => {
+    const { response, body } = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [], enableResolve: false }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({ error: expect.stringContaining('filePaths') });
+  });
+
+  it('POST /api/review-sessions rejects paths outside allowed roots', async () => {
+    const { response } = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [externalFile], enableResolve: false }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('GET /api/review-sessions returns the list of open sessions', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const { response, body } = await requestJson(app, '/api/review-sessions');
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      sessions: expect.arrayContaining([
+        expect.objectContaining({ id: sessionId, status: 'open' }),
+      ]),
+    });
+  });
+
+  it('GET /api/review-sessions/:id returns the session', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const { response, body } = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ id: sessionId, status: 'open' });
+  });
+
+  it('GET /api/review-sessions/:id returns 404 for unknown session', async () => {
+    const { response } = await requestJson(app, '/api/review-sessions/rev_nope');
+    expect(response.status).toBe(404);
+  });
+
+  it('POST .../batch sends a batch and keeps the session open', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const batch = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Address these', commentIds: ['c1', 'c2'] }),
+    });
+    expect(batch.response.status).toBe(200);
+
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ status: 'open', sentCommentIds: ['c1', 'c2'] });
+  });
+
+  it('POST .../batch with empty commentIds returns 400', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const batch = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'x', commentIds: [] }),
+    });
+    expect(batch.response.status).toBe(400);
+  });
+
+  it('POST .../batch while waitingForAgent returns 409', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    // First batch succeeds
+    await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'batch1', commentIds: ['c1'] }),
+    });
+
+    // Second batch while agent hasn't picked up
+    const second = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'batch2', commentIds: ['c2'] }),
+    });
+    expect(second.response.status).toBe(409);
+  });
+
+  it('POST .../finish with prompt marks session done', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const finish = await requestJson(app, `/api/review-sessions/${sessionId}/finish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'final', commentIds: ['c1'] }),
+    });
+    expect(finish.response.status).toBe(200);
+
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ status: 'done' });
+  });
+
+  it('POST .../finish without prompt marks session done', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const finish = await requestJson(app, `/api/review-sessions/${sessionId}/finish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(finish.response.status).toBe(200);
+
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ status: 'done' });
+  });
+
+  it('POST .../handoff returns 404 (removed)', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const response = await app.request(
+      `http://localhost/api/review-sessions/${sessionId}/handoff`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'x' }),
+      },
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('POST .../abort marks session aborted', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const abort = await requestJson(app, `/api/review-sessions/${sessionId}/abort`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(abort.response.status).toBe(200);
+
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ status: 'aborted' });
+  });
+
+  it('POST .../heartbeat updates lastHeartbeatAt', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const hb = await requestJson(app, `/api/review-sessions/${sessionId}/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(hb.response.status).toBe(200);
+  });
+
+  it('abort/heartbeat on unknown session return 404', async () => {
+    const abort = await requestJson(app, '/api/review-sessions/rev_nope/abort', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(abort.response.status).toBe(404);
+
+    const hb = await requestJson(app, '/api/review-sessions/rev_nope/heartbeat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(hb.response.status).toBe(404);
+  });
+
+  it('heartbeat without content-type: application/json is rejected by the CSRF middleware', async () => {
+    // Regression guard: the frontend hook sends content-type on every
+    // heartbeat. If that's ever dropped, the server MUST reject the POST
+    // with 415 (not silently accept it as a bare POST) so the bug is caught
+    // at the client layer rather than silently letting sessions abort.
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const response = await app.request(
+      `http://localhost/api/review-sessions/${sessionId}/heartbeat`,
+      { method: 'POST', body: '{}' },
+    );
+    expect(response.status).toBe(415);
+  });
+
+  it('GET .../wait resolves with done after finish', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const waitPromise = requestJson(app, `/api/review-sessions/${sessionId}/wait`);
+
+    setTimeout(() => {
+      void requestJson(app, `/api/review-sessions/${sessionId}/finish`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'PROMPT_BODY' }),
+      });
+    }, 10);
+
+    const { response, body } = await waitPromise;
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: 'done', prompt: 'PROMPT_BODY' });
+  });
+
+  it('GET .../wait resolves with aborted after abort', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+
+    const waitPromise = requestJson(app, `/api/review-sessions/${sessionId}/wait`);
+
+    setTimeout(() => {
+      void requestJson(app, `/api/review-sessions/${sessionId}/abort`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+    }, 10);
+
+    const { response, body } = await waitPromise;
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: 'aborted', reason: 'user_cancelled' });
+  });
+
+  it('GET .../wait returns 404 for unknown session immediately', async () => {
+    const { response } = await requestJson(app, '/api/review-sessions/rev_nope/wait');
+    expect(response.status).toBe(404);
+  });
+});

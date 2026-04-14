@@ -37,7 +37,7 @@
     "dev:server": "tsx server/index.ts",
     "dev:client": "vite",
     "build": "tsc -b && vite build && npm run build:server",
-    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:hono --external:@hono/node-server",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:hono --external:@hono/node-server && esbuild server/mcp-stdio.ts --bundle --platform=node --format=esm --outfile=dist/mcp-stdio.js --external:@modelcontextprotocol/sdk",
     "prepublishOnly": "npm run build",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dompurify": "^3.3.3",
     "hono": "^4.12.8",
     "mermaid": "^11.13.0",
