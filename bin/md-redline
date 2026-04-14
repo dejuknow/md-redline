@@ -598,6 +598,7 @@ async function main() {
 
     try {
       await openInBrowser(url);
+      console.log(`Opened in browser: ${url}`);
     } catch {
       console.log(`Open in your browser: ${url}`);
     }
