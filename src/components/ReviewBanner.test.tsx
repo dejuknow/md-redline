@@ -31,10 +31,9 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIds={['c1', 'c2']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']], ['/tmp/spec-b.md', []]])}
       />,
     );
 
@@ -48,10 +47,9 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[]}
         commentCounts={new Map()}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIds={[]}
+        commentIdsByFile={new Map()}
       />,
     );
     expect(container.firstChild).toBeNull();
@@ -67,11 +65,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 1]])}
-        enableResolve={false}
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={['c1', 'c2', 'c3']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']], ['/tmp/spec-b.md', ['c3']]])}
       />,
     );
 
@@ -114,10 +111,9 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[sessionAllSent]}
         commentCounts={new Map([['/tmp/spec-a.md', 0], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
-        commentIds={['c1', 'c2']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', ['c2']]])}
       />,
     );
 
@@ -147,10 +143,9 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[waitingSession]}
         commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIds={['c1']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
       />,
     );
 
@@ -168,10 +163,9 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[sessionAllSent]}
         commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 1]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIds={['c1', 'c2']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', ['c2']]])}
       />,
     );
 
@@ -189,11 +183,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 1]])}
-        enableResolve={false}
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={['c1', 'c2']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', ['c2']]])}
       />,
     );
 
@@ -230,11 +223,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map()}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={[]}
+        commentIdsByFile={new Map()}
       />,
     );
 
@@ -258,10 +250,9 @@ describe('ReviewBanner', () => {
         sessions={[session]}
         // spec-a is known, spec-b is still loading
         commentCounts={new Map([['/tmp/spec-a.md', 2]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIds={['c1']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']]])}
       />,
     );
 
@@ -285,11 +276,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={['c1']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
       />,
     );
 
@@ -316,11 +306,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={['c1']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
       />,
     );
 
@@ -350,11 +339,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map()}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={[]}
+        commentIdsByFile={new Map()}
       />,
     );
 
@@ -375,11 +363,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 1]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
         onBatchSent={onBatchSent}
-        commentIds={['c1', 'c2', 'c3']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']], ['/tmp/spec-b.md', ['c3']]])}
       />,
     );
 
@@ -403,11 +390,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[session]}
         commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={['c1']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
       />,
     );
 
@@ -434,11 +420,10 @@ describe('ReviewBanner', () => {
       <ReviewBanner
         sessions={[sessionAllSent]}
         commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
-        enableResolve={false}
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
         showToast={showToast}
-        commentIds={['c1']}
+        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
       />,
     );
 
@@ -459,5 +444,38 @@ describe('ReviewBanner', () => {
       expect(showToast).toHaveBeenCalled();
     });
     expect(showToast.mock.calls[0][0]).toContain('Review finished');
+  });
+
+  it('only includes comment IDs from session files, not other open tabs', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const onBatchSent = vi.fn();
+
+    // Session only covers spec-a, but spec-b and spec-c are also open
+    const singleFileSession: ReviewSession = {
+      ...session,
+      filePaths: ['/tmp/spec-a.md'],
+    };
+
+    render(
+      <ReviewBanner
+        sessions={[singleFileSession]}
+        commentCounts={new Map([['/tmp/spec-a.md', 1]])}
+        onHandoffSuccess={() => {}}
+        onResolved={() => {}}
+        onBatchSent={onBatchSent}
+        commentIdsByFile={new Map([
+          ['/tmp/spec-a.md', ['c1']],
+          ['/tmp/spec-b.md', ['c2', 'c3']],
+          ['/tmp/spec-c.md', ['c4']],
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /send batch/i }));
+
+    await waitFor(() => {
+      // Only c1 from spec-a should be sent, not c2/c3/c4 from other files
+      expect(onBatchSent).toHaveBeenCalledWith(['c1']);
+    });
   });
 });

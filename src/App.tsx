@@ -447,7 +447,7 @@ export default function App() {
     missingAnchors,
     commentCounts,
     resolvedCommentCounts,
-    allCommentIds,
+    commentIdsByFile,
     commentCount,
     handleAddComment,
     handleResolve,
@@ -1503,7 +1503,7 @@ export default function App() {
   );
 
   const sentCommentIds = useMemo(() => {
-    const serverIds = reviewSessions[0]?.sentCommentIds ?? [];
+    const serverIds = reviewSessions.flatMap((s) => s.sentCommentIds);
     if (optimisticSentIds.length === 0) return serverIds;
     return [...new Set([...serverIds, ...optimisticSentIds])];
   }, [reviewSessions, optimisticSentIds]);
@@ -1520,12 +1520,11 @@ export default function App() {
       <ReviewBanner
         sessions={reviewSessions}
         commentCounts={commentCounts}
-        enableResolve={settings.enableResolve}
         onHandoffSuccess={handleReviewHandoffSuccess}
         onResolved={handleReviewResolved}
         onBatchSent={handleBatchSent}
         showToast={showToast}
-        commentIds={allCommentIds}
+        commentIdsByFile={commentIdsByFile}
       />
       <Toolbar
         error={error}

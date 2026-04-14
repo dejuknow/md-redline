@@ -376,8 +376,13 @@ async function installForClaudeDesktop() {
   try {
     const existing = await readFile(configPath, 'utf8');
     config = JSON.parse(existing);
-  } catch {
-    // File missing or invalid — start fresh
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      throw new Error(
+        `Cannot parse ${configPath}: ${err.message}\nPlease fix the JSON syntax and retry.`,
+      );
+    }
+    // File missing — start fresh
   }
 
   if (typeof config !== 'object' || config === null) config = {};

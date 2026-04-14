@@ -6,7 +6,6 @@ import type { ReviewSession } from '../hooks/useReviewSession';
 interface ReviewBannerProps {
   sessions: ReviewSession[];
   commentCounts: Map<string, number>;
-  enableResolve: boolean;
   /** Called after a successful handoff so the parent can capture diff snapshots for the session's files. */
   onHandoffSuccess: (session: ReviewSession) => void;
   onResolved: () => void;
@@ -14,8 +13,8 @@ interface ReviewBannerProps {
   onBatchSent?: (sentIds: string[]) => void;
   /** Optional toast callback for brief confirmation and error messages. */
   showToast?: (message: string) => void;
-  /** All comment IDs currently in the files. */
-  commentIds: string[];
+  /** Comment IDs grouped by file path. */
+  commentIdsByFile: Map<string, string[]>;
 }
 
 // A session is ready to send only when we have an authoritative comment count
@@ -42,12 +41,11 @@ async function readErrorMessage(res: Response): Promise<string> {
 export function ReviewBanner({
   sessions,
   commentCounts,
-  enableResolve,
   onHandoffSuccess,
   onResolved,
   onBatchSent,
   showToast,
-  commentIds,
+  commentIdsByFile,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -64,16 +62,17 @@ export function ReviewBanner({
       return buildAddressCommentsPrompt({
         filePaths: s.filePaths,
         commentCounts,
-        enableResolve: s.enableResolve || enableResolve,
+        enableResolve: s.enableResolve,
         commentIds: ids,
       });
     },
-    [commentCounts, enableResolve],
+    [commentCounts],
   );
 
   const handleSendBatch = useCallback(
     async (s: ReviewSession) => {
-      const unsentIds = commentIds.filter((id) => !s.sentCommentIds.includes(id));
+      const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
+      const unsentIds = sessionIds.filter((id) => !s.sentCommentIds.includes(id));
       if (unsentIds.length === 0) return;
       setBusyId(s.id);
       try {
@@ -102,14 +101,15 @@ export function ReviewBanner({
         setBusyId(null);
       }
     },
-    [buildPromptForSession, commentIds, onHandoffSuccess, onBatchSent, showToast],
+    [buildPromptForSession, commentIdsByFile, onHandoffSuccess, onBatchSent, showToast],
   );
 
   const handleSendAndFinish = useCallback(
     async (s: ReviewSession) => {
       setBusyId(s.id);
       try {
-        const unsentIds = commentIds.filter((id) => !s.sentCommentIds.includes(id));
+        const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
+        const unsentIds = sessionIds.filter((id) => !s.sentCommentIds.includes(id));
         let res: Response;
         try {
           if (unsentIds.length > 0) {
@@ -142,7 +142,7 @@ export function ReviewBanner({
         setBusyId(null);
       }
     },
-    [buildPromptForSession, commentIds, onHandoffSuccess, onResolved, showToast],
+    [buildPromptForSession, commentIdsByFile, onHandoffSuccess, onResolved, showToast],
   );
 
   const handleCancel = useCallback(
@@ -185,7 +185,8 @@ export function ReviewBanner({
     >
       {sessions.map((s) => {
         const ready = sessionIsReady(s, commentCounts);
-        const unsentIds = commentIds.filter((id) => !s.sentCommentIds.includes(id));
+        const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
+        const unsentIds = sessionIds.filter((id) => !s.sentCommentIds.includes(id));
         const disabled = busyId === s.id || !ready;
         return (
           <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">

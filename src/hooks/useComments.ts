@@ -88,18 +88,18 @@ export function useComments(params: UseCommentsParams) {
     [cleanMarkdown, comments],
   );
 
-  // Comment counts per tab (for badges) + all comment IDs across tabs
-  const { commentCounts, resolvedCommentCounts, allCommentIds } = useMemo(() => {
+  // Comment counts per tab (for badges) + comment IDs grouped by file path
+  const { commentCounts, resolvedCommentCounts, commentIdsByFile } = useMemo(() => {
     const counts = new Map<string, number>();
     const resolvedCounts = new Map<string, number>();
-    const ids: string[] = [];
+    const idsByFile = new Map<string, string[]>();
     for (const tab of tabs) {
       if (tab.filePath === activeFilePath) {
         const count = enableResolve
           ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
           : comments.length;
         counts.set(tab.filePath, count);
-        ids.push(...comments.map((c) => c.id));
+        idsByFile.set(tab.filePath, comments.map((c) => c.id));
         if (enableResolve) {
           resolvedCounts.set(
             tab.filePath,
@@ -113,7 +113,7 @@ export function useComments(params: UseCommentsParams) {
             ? tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
             : tabComments.length;
           counts.set(tab.filePath, count);
-          ids.push(...tabComments.map((c) => c.id));
+          idsByFile.set(tab.filePath, tabComments.map((c) => c.id));
           if (enableResolve) {
             resolvedCounts.set(
               tab.filePath,
@@ -125,7 +125,7 @@ export function useComments(params: UseCommentsParams) {
         }
       }
     }
-    return { commentCounts: counts, resolvedCommentCounts: resolvedCounts, allCommentIds: ids };
+    return { commentCounts: counts, resolvedCommentCounts: resolvedCounts, commentIdsByFile: idsByFile };
   }, [tabs, activeFilePath, comments, enableResolve]);
 
   const commentCount = enableResolve
@@ -315,7 +315,7 @@ export function useComments(params: UseCommentsParams) {
     missingAnchors,
     commentCounts,
     resolvedCommentCounts,
-    allCommentIds,
+    commentIdsByFile,
     commentCount,
     updateAndSave,
     handleAddComment,
