@@ -265,7 +265,7 @@ export default function App() {
     if (sessionRestoredRef.current) return;
     sessionRestoredRef.current = true;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('file') || params.get('dir')) return;
+    if (params.get('file') || params.get('dir') || params.get('review')) return;
     if (savedSession && savedSession.openTabs.length > 0) {
       // Open inactive tabs in background first, then the active tab last
       // (openTab sets it active, avoiding the setTimeout race)
@@ -834,8 +834,12 @@ export default function App() {
         if (!res.ok) return;
         const session = (await res.json()) as { filePaths: string[] };
         if (cancelled) return;
-        for (const p of session.filePaths) {
-          openTabInBackground(p);
+        for (let i = 0; i < session.filePaths.length; i++) {
+          if (i === 0) {
+            openTab(session.filePaths[i]);
+          } else {
+            openTabInBackground(session.filePaths[i]);
+          }
         }
       } catch {
         /* ignore */
@@ -844,7 +848,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [openTabInBackground]);
+  }, [openTab, openTabInBackground]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   useEffect(() => {
