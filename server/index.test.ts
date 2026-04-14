@@ -1890,3 +1890,48 @@ describe('review sessions API', () => {
     expect(response.status).toBe(404);
   });
 });
+
+describe('static file serving CSP (img-src https: for remote images)', () => {
+  let staticApp: AppInstance;
+  let staticDir: string;
+
+  beforeAll(async () => {
+    staticDir = await mkdtemp(join(tmpdir(), 'md-redline-static-'));
+    staticDir = await realpath(staticDir);
+    await writeFile(join(staticDir, 'index.html'), '<html><body>mdr</body></html>');
+    await writeFile(join(staticDir, 'app.js'), 'console.log("hi")');
+    staticApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      staticDir,
+      platformName: 'linux',
+    });
+  });
+
+  afterAll(async () => {
+    await rm(staticDir, { recursive: true, force: true });
+  });
+
+  it('sets CSP with https: in img-src on HTML responses', async () => {
+    const response = await staticApp.request('http://localhost/');
+    expect(response.status).toBe(200);
+    const csp = response.headers.get('content-security-policy');
+    expect(csp).toBeTruthy();
+    expect(csp).toContain("img-src 'self' data: blob: https:");
+  });
+
+  it('sets CSP with https: in img-src on SPA fallback', async () => {
+    const response = await staticApp.request('http://localhost/nonexistent-route');
+    expect(response.status).toBe(200);
+    const csp = response.headers.get('content-security-policy');
+    expect(csp).toBeTruthy();
+    expect(csp).toContain("img-src 'self' data: blob: https:");
+  });
+
+  it('does not set CSP on non-HTML static assets', async () => {
+    const response = await staticApp.request('http://localhost/app.js');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-security-policy')).toBeNull();
+    expect(response.headers.get('cache-control')).toContain('immutable');
+  });
+});
