@@ -2,17 +2,19 @@
 
 [![npm version](https://img.shields.io/npm/v/md-redline)](https://www.npmjs.com/package/md-redline)
 
-Review rendered markdown with inline comments that live in the file.
+Inline review comments for markdown specs, prompts, and design docs.
 
-`mdr` is a local review tool for markdown files in human + AI agent workflows. Highlight text in the rendered document, leave feedback, then hand the same file to an agent. Comments are stored inline in the `.md` file itself, so agents can read and address them directly. No sidecar files, no database, no external service. The markdown file stays the source of truth.
+Highlight text in a rendered document, leave comments, and your AI agent can read and address them directly. Comments are stored as invisible HTML markers in the `.md` file itself. No sidecar files, no database, no external service. The markdown file stays the source of truth.
 
-Markdown has become a common working format for specs, prompts, and design docs between humans and agents. `mdr` gives that workflow review tooling closer to code review: rendered context, inline comments, and a clean diff after changes are made. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. You write and review the spec, agents write the code.
+With the built-in MCP server, your agent can request a review mid-task and pause until you click **Send review**. You leave your feedback, the agent picks up where it left off. No copy-paste, no context switching.
 
 ![md-redline screenshot](https://raw.githubusercontent.com/dejuknow/md-redline/main/public/screenshot.png)
 
 **See the full review workflow in 30 seconds:**
 
 https://github.com/user-attachments/assets/855a9d02-b0fd-4dec-b0a5-742871e8c181
+
+Works with [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and any other MCP client that supports stdio servers. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. `mdr` gives that workflow review tooling closer to code review.
 
 ## Quick start
 
@@ -35,28 +37,11 @@ mdr --stop                   # Stop the running server
 
 `md-redline` also works as an alias for `mdr`.
 
-## Review workflow
+## MCP setup
 
-### Default: comments as agent instructions
+Register the MCP server with your agent so it can request reviews mid-task.
 
-1. Open a markdown file in `mdr`.
-2. Highlight text and leave inline comments.
-3. Copy the hand-off prompt.
-4. Paste the prompt into your AI agent.
-5. The agent edits the file, addresses the feedback, and removes the comment markers it handled.
-6. Review the result in diff view.
-
-### Optional: resolve workflow
-
-Enable resolve mode in Settings for human review with explicit `open` and `resolved` states.
-
-### MCP integration: hand off without copy-paste
-
-md-redline ships an MCP (Model Context Protocol) server so any MCP-compatible CLI agent can request a review and pause until you click **Send review** in the banner. When the user clicks Send, the agent receives the same hand-off prompt the clipboard button generates and starts addressing your comments. The MCP path is opt-in per request. Ask for review only when you want it.
-
-**Verified working:** [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli). Any other MCP client that supports stdio servers (Cursor, Zed, Windsurf, etc.) should work the same way.
-
-#### Claude Code or Claude Desktop
+### Claude Code or Claude Desktop
 
 ```bash
 mdr mcp install                   # register with both clients (default)
@@ -64,13 +49,13 @@ mdr mcp install --claude-code     # just Claude Code (via `claude mcp add`)
 mdr mcp install --claude-desktop  # just Claude Desktop (JSON config file)
 ```
 
-#### Codex CLI
+### Codex CLI
 
 ```bash
 codex mcp add md-redline -- mdr mcp
 ```
 
-#### Gemini CLI
+### Gemini CLI
 
 ```bash
 gemini mcp add --scope user md-redline mdr mcp
@@ -78,9 +63,9 @@ gemini mcp add --scope user md-redline mdr mcp
 
 The `--scope user` flag is important. Gemini defaults to per-project scope, which only registers mdr for the current directory.
 
-#### Other MCP clients (manual)
+### Other MCP clients
 
-Add this server entry to your client's MCP config file. The exact location varies by client. Check your client's docs for "MCP servers" or "custom stdio server."
+Add this server entry to your client's MCP config file:
 
 ```json
 {
@@ -93,15 +78,30 @@ Add this server entry to your client's MCP config file. The exact location varie
 }
 ```
 
-Some clients use TOML or a different wrapper key, but the `command`/`args` pair is standard. Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
+Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
 
-#### Using it
+## Review workflow
 
-Once registered, ask the agent to call `mdr_request_review` with the file paths you want to review:
+### With MCP (recommended)
+
+Once registered, ask your agent to request a review:
 
 > "Let me review docs/specs/feature-x.md in mdr before you continue."
 
-The agent calls the tool, mdr opens, you review and click **Send review**, and the agent receives the instruction prompt and starts addressing your comments.
+The agent calls `mdr_request_review`, mdr opens the file, you highlight text and leave comments, then click **Send review**. The agent receives your feedback as a structured prompt and starts addressing your comments. The review is opt-in per request. The agent only pauses when you ask for it.
+
+### Without MCP
+
+1. Open a markdown file with `mdr /path/to/spec.md`.
+2. Highlight text and leave inline comments.
+3. Copy the hand-off prompt.
+4. Paste the prompt into your AI agent.
+5. The agent edits the file, addresses the feedback, and removes the comment markers it handled.
+6. Review the result in diff view.
+
+### Optional: resolve workflow
+
+Enable resolve mode in Settings for human review with explicit `open` and `resolved` states.
 
 ## Who this is for
 

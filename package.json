@@ -1,6 +1,6 @@
 {
   "name": "md-redline",
-  "description": "Local inline review for markdown files with agent-friendly comment markers.",
+  "description": "Inline review comments for markdown specs. Built-in MCP server hands feedback directly to your AI agent.",
   "version": "0.2.0",
   "license": "MIT",
   "type": "module",
@@ -13,11 +13,14 @@
     "url": "https://github.com/dejuknow/md-redline/issues"
   },
   "keywords": [
+    "mcp",
+    "mcp-server",
     "markdown",
     "review",
     "comments",
-    "documentation",
-    "agents"
+    "ai-agents",
+    "claude-code",
+    "specs"
   ],
   "engines": {
     "node": ">=20"
