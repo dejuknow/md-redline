@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync, renameSync } from 'fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, renameSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -8,13 +8,13 @@ import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baseli
 import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
-const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
+const TEMP_FIXTURE_ROOT = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
 const FIXTURE_1_ORIGINAL = TEST_DOC_BASELINE;
 const FIXTURE_2_ORIGINAL = TEST_DOC_2_BASELINE;
-const OVERFLOW_FIXTURES = Array.from({ length: 6 }, (_, index) =>
-  resolve(__dirname, `fixtures/overflow-tab-${index + 1}.md`),
-);
+let fixtureDir = '';
+let FIXTURE_1 = '';
+let FIXTURE_2 = '';
+let OVERFLOW_FIXTURES: string[] = [];
 
 function resetOverflowFixtures() {
   OVERFLOW_FIXTURES.forEach((fixture, index) => {
@@ -25,17 +25,26 @@ function resetOverflowFixtures() {
   });
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  mkdirSync(TEMP_FIXTURE_ROOT, { recursive: true });
+  fixtureDir = resolve(
+    TEMP_FIXTURE_ROOT,
+    `advanced-${process.pid}-${testInfo.retry}-${Date.now()}`,
+  );
+  mkdirSync(fixtureDir, { recursive: true });
+  FIXTURE_1 = resolve(fixtureDir, 'test-doc.md');
+  FIXTURE_2 = resolve(fixtureDir, 'test-doc-2.md');
+  OVERFLOW_FIXTURES = Array.from({ length: 6 }, (_, index) =>
+    resolve(fixtureDir, `overflow-tab-${index + 1}.md`),
+  );
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
   resetOverflowFixtures();
   await resetTestAppState(page);
 });
 
-test.afterAll(() => {
-  writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
-  writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
-  resetOverflowFixtures();
+test.afterEach(() => {
+  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
 async function openFixture(page: Page, fixture: string = FIXTURE_1) {

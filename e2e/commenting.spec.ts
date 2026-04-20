@@ -1,27 +1,33 @@
-import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'fs';
+import { test, expect, type Locator, type Page } from '@playwright/test';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
+const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
 const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
+let fixtureDir = '';
+let fixturePath = '';
 
 // Restore the fixture file before each test so tests are independent
-test.beforeEach(async ({ page }) => {
-  writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
+test.beforeEach(async ({ page }, testInfo) => {
+  mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
+  fixtureDir = resolve(TEMP_FIXTURE_DIR, `commenting-${process.pid}-${testInfo.retry}-${Date.now()}`);
+  mkdirSync(fixtureDir, { recursive: true });
+  fixturePath = resolve(fixtureDir, 'test-doc.md');
+  writeFileSync(fixturePath, FIXTURE_ORIGINAL);
   await resetTestAppState(page);
 });
 
-test.afterAll(async () => {
-  writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
+test.afterEach(async () => {
+  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
 /** Open the test fixture file and wait for it to render */
 async function openFixture(page: Page) {
-  await page.goto(`/?file=${FIXTURE}`);
+  await page.goto(`/?file=${fixturePath}`);
   await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
     timeout: 10_000,
   });
@@ -120,6 +126,12 @@ async function clickCardAction(page: Page, commentText: string, actionName: stri
   await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
+async function clickReplyAction(reply: Locator, actionName: string) {
+  await expect(reply).toBeVisible();
+  await reply.hover();
+  await reply.getByRole('button', { name: actionName, exact: true }).click({ force: true });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -136,7 +148,7 @@ test.describe('File opening', () => {
   test('opens a file via the file opener dialog', async ({ page }) => {
     await page.goto('/');
     await page.locator('button[title="Open file"]').click();
-    await page.getByPlaceholder('File path or name...').fill(FIXTURE);
+    await page.getByPlaceholder('File path or name...').fill(fixturePath);
     await page.getByPlaceholder('File path or name...').press('Enter');
     await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
       timeout: 10_000,
@@ -163,9 +175,10 @@ test.describe('Adding comments', () => {
     await openFixture(page);
     await addComment(page, 'brute force attacks', 'Clarify the rate limit window.');
 
-    // Wait for the save to flush
-    await page.waitForTimeout(500);
-    const content = readFileSync(FIXTURE, 'utf-8');
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('@comment');
+    const content = readFileSync(fixturePath, 'utf-8');
     expect(content).toContain('@comment');
     expect(content).toContain('Clarify the rate limit window.');
   });
@@ -279,8 +292,7 @@ test.describe('Comment editing and replies', () => {
     const reply = card.locator('[data-reply-id]').first();
     await expect(reply).toContainText('Initial reply text');
 
-    await reply.hover();
-    await reply.getByRole('button', { name: 'Edit' }).click();
+    await clickReplyAction(reply, 'Edit');
     const replyEditArea = reply.getByRole('textbox');
     await expect(replyEditArea).toBeVisible();
     await replyEditArea.fill('Updated reply text');
@@ -289,8 +301,7 @@ test.describe('Comment editing and replies', () => {
     await expect(reply).toContainText('Updated reply text');
     await expect(reply).not.toContainText('Initial reply text');
 
-    await reply.hover();
-    await reply.getByRole('button', { name: 'Delete' }).click();
+    await clickReplyAction(reply, 'Delete');
     await expect(card.locator('[data-reply-id]')).toHaveCount(0);
   });
 
@@ -309,8 +320,8 @@ test.describe('Comment editing and replies', () => {
     await expect(firstCard.locator('textarea')).toHaveCount(1);
 
     const secondReply = secondCard.locator('[data-reply-id]').first();
-    await secondReply.hover();
-    await secondReply.getByRole('button', { name: 'Edit' }).click();
+    await expect(secondCard.locator('[data-reply-id]')).toHaveCount(1);
+    await clickReplyAction(secondReply, 'Edit');
 
     await expect(firstCard.locator('textarea')).toHaveCount(0);
     await expect(secondReply.getByRole('textbox')).toBeVisible();
@@ -331,7 +342,9 @@ test.describe('Sidebar filtering', () => {
     await page.getByPlaceholder('Search comments...').fill('rate');
 
     await expect(page.getByText('Improve rate limiting')).toBeVisible();
-    await expect(getCard(page, 'Fix authentication flow')).not.toBeVisible();
+    await expect
+      .poll(async () => getCard(page, 'Fix authentication flow').isVisible(), { timeout: 10_000 })
+      .toBe(false);
   });
 });
 
