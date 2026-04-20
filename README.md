@@ -12,7 +12,7 @@ With the built-in MCP server, your agent can request a review mid-task and pause
 
 **See the full review workflow in 30 seconds:**
 
-https://github.com/user-attachments/assets/855a9d02-b0fd-4dec-b0a5-742871e8c181
+https://github.com/user-attachments/assets/47a90c14-9a10-4854-8069-bb81ae90a7f1
 
 Works with [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and any other MCP client that supports stdio servers. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. `mdr` gives that workflow review tooling closer to code review.
 
