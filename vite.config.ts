@@ -38,8 +38,8 @@ export default defineConfig({
   test: {
     // Exclude .worktrees/** so vitest doesn't pick up nested e2e specs from
     // sibling git worktrees (e.g. .worktrees/<feature>/e2e/foo.spec.ts) and
-    // try to run them as unit tests.
-    exclude: ['e2e/**', 'node_modules/**', '.worktrees/**'],
+    // try to run them as unit tests. demo/ contains a Playwright spec too.
+    exclude: ['e2e/**', 'demo/**', 'node_modules/**', '.worktrees/**'],
   },
   server: {
     port: serverPort,

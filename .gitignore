@@ -43,6 +43,7 @@ eval/results/
 *.png
 !public/**/*.png
 !e2e/fixtures/**/*.png
+!demo/assets/**/*.png
 
 # Claude Code
 .claude/
@@ -55,3 +56,10 @@ CLAUDE.md
 
 # Release notes temp file (created by scripts/release.mjs)
 .release-notes-v*.md
+
+# Demo video pipeline
+demo/clips/
+demo/frames/
+demo/output/
+demo-sample.md
+demo/review-frames/

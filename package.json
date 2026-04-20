@@ -56,7 +56,8 @@
     "eval:dry": "tsx eval/runner.ts --dry-run",
     "release": "node scripts/release.mjs patch",
     "release:minor": "node scripts/release.mjs minor",
-    "release:major": "node scripts/release.mjs major"
+    "release:major": "node scripts/release.mjs major",
+    "demo:record": "bash demo/record.sh"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",
