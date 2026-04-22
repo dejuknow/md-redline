@@ -147,6 +147,26 @@ test.describe('Review session banner', () => {
     expect(finishBody.status).toBe('done');
   });
 
+  test('review session navigates the Explorer to the file\'s parent directory', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    const sessionId = await createSession(baseURL!, request);
+    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+
+    // Wait for the review banner so we know the review flow has executed.
+    await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
+
+    // The Explorer is visible by default and should have navigated to the
+    // fixture's parent directory, listing the fixture file as a sibling entry.
+    // Scope to the Explorer's file-row styling to disambiguate from the tab
+    // button, which also uses the file path as its title.
+    await expect(
+      page.locator(`button.w-full.text-left[title="${FIXTURE_PATH}"]`),
+    ).toBeVisible({ timeout: 5_000 });
+  });
+
   test('no banner without an active session', async ({ page }) => {
     // Navigate to the app with no review param and no active session.
     await page.goto('/');

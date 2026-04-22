@@ -841,6 +841,13 @@ export default function App() {
             openTabInBackground(session.filePaths[i]);
           }
         }
+        const firstFile = session.filePaths[0];
+        if (firstFile) {
+          const lastSlash = firstFile.lastIndexOf('/');
+          if (lastSlash > 0) {
+            setExplorerDir(firstFile.slice(0, lastSlash));
+          }
+        }
       } catch {
         /* ignore */
       }
