@@ -38,7 +38,7 @@ async function switchToRaw(page: Page) {
 async function ensureLeftPanelOpen(page: Page) {
   const panel = page.locator('button[title="Document outline"]');
   if (!(await panel.isVisible())) {
-    await page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`).click();
+    await page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`).click();
     await page.waitForTimeout(300);
   }
 }

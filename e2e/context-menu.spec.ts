@@ -122,7 +122,7 @@ test.describe('Context menu on tab', () => {
     await openFixture(page);
 
     // Close the explorer so tab area is fully unobscured
-    const explorerBtn = page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
+    const explorerBtn = page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
     const cls = (await explorerBtn.getAttribute('class')) ?? '';
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
@@ -138,11 +138,37 @@ test.describe('Context menu on tab', () => {
     await expect(menu.getByText('Copy File Name')).toBeVisible();
   });
 
+  test('Reveal in Explorer Sidebar opens the Explorer at the file\'s parent dir', async ({ page }) => {
+    await openFixture(page);
+
+    // Start with the Explorer closed so we can verify the action opens it.
+    const explorerBtn = page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
+    const initialCls = (await explorerBtn.getAttribute('class')) ?? '';
+    if (initialCls.includes('bg-primary-bg')) await explorerBtn.click();
+    await page.waitForTimeout(300);
+
+    const tab = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    await tab.click({ button: 'right' });
+
+    const menu = page.locator('.context-menu-enter');
+    await expect(menu).toBeVisible();
+    await menu.getByText('Reveal in Explorer Sidebar').click();
+
+    // Explorer toolbar button should now show the active (bg-primary-bg) state.
+    await expect(explorerBtn).toHaveClass(/bg-primary-bg/);
+
+    // Explorer should be navigated to the fixture's parent dir — the fixture
+    // file row (w-full text-left, titled with its full path) should be listed.
+    await expect(
+      page.locator(`button.w-full.text-left[title="${FIXTURE_1}"]`),
+    ).toBeVisible({ timeout: 5_000 });
+  });
+
   test('Close Others closes all except the right-clicked tab', async ({ page }) => {
     await openFixture(page);
     await openSecondFile(page);
 
-    const explorerBtn = page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
+    const explorerBtn = page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
     const cls = (await explorerBtn.getAttribute('class')) ?? '';
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
@@ -164,7 +190,7 @@ test.describe('Context menu on sidebar comment', () => {
     await openFixture(page);
 
     // Close the explorer to give sidebar more room
-    await page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`).click();
+    await page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`).click();
     await page.waitForTimeout(300);
 
     await addComment(page, 'valid credentials', 'Sidebar ctx test');

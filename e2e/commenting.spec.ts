@@ -447,7 +447,7 @@ test.describe('Sidebar toggle', () => {
   test('sidebar toggle button hides and shows sidebar', async ({ page }) => {
     await openFixture(page);
 
-    const toggleBtn = page.locator('button[title*="Toggle comments sidebar"]');
+    const toggleBtn = page.locator('button[title*="Toggle comment sidebar"]');
 
     // Sidebar is open: toggle button has active state
     let cls = (await toggleBtn.getAttribute('class')) ?? '';

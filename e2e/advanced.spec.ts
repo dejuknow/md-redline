@@ -381,7 +381,7 @@ test.describe('Session persistence', () => {
     await expect(page.locator('h2', { hasText: 'Comments' })).toBeVisible();
 
     // Use the toolbar button instead of keyboard shortcut (unreliable in headless)
-    const toggleBtn = page.locator('button[title*="Toggle comments sidebar"]');
+    const toggleBtn = page.locator('button[title*="Toggle comment sidebar"]');
     await toggleBtn.click();
     let cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
@@ -392,7 +392,7 @@ test.describe('Session persistence', () => {
 
     // Sidebar should still be hidden after reload (toggle not active)
     cls =
-      (await page.locator('button[title*="Toggle comments sidebar"]').getAttribute('class')) ?? '';
+      (await page.locator('button[title*="Toggle comment sidebar"]').getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
   });
 

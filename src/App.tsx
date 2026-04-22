@@ -350,8 +350,8 @@ export default function App() {
       })
       .then((data) => {
         const platform = data?.platform;
-        if (platform === 'darwin') setRevealLabel('Reveal in Finder');
-        else if (platform === 'win32') setRevealLabel('Show in Explorer');
+        if (platform === 'darwin') setRevealLabel('Show in Finder');
+        else if (platform === 'win32') setRevealLabel('Show in File Explorer');
         else setRevealLabel('Show in File Manager');
       })
       .catch(() => {});
@@ -858,7 +858,10 @@ export default function App() {
   }, [openTab, openTabInBackground]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
+  const initialLoadRef = useRef(false);
   useEffect(() => {
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
     const params = new URLSearchParams(window.location.search);
     const urlFile = params.get('file');
     const urlDir = params.get('dir');
@@ -1267,7 +1270,7 @@ export default function App() {
     const cmds: Command[] = [
       {
         id: 'toggle-sidebar',
-        label: 'Toggle sidebar',
+        label: 'Toggle comment sidebar',
         shortcut: `${modKey}+\\`,
         section: 'View',
         onExecute: () => setSidebarVisible((p) => !p),
@@ -1286,7 +1289,7 @@ export default function App() {
       },
       {
         id: 'toggle-explorer',
-        label: 'Toggle file explorer',
+        label: 'Toggle file explorer sidebar',
         shortcut: `${modKey}+B`,
         section: 'View',
         onExecute: () => {
@@ -1300,7 +1303,7 @@ export default function App() {
       },
       {
         id: 'toggle-outline',
-        label: 'Toggle document outline',
+        label: 'Toggle document outline sidebar',
         shortcut: `${modKey}+Shift+O`,
         section: 'View',
         onExecute: () => {

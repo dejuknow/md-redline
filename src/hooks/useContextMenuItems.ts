@@ -292,6 +292,8 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       const hasTabsToRight = tabIndex >= 0 && tabIndex < tabs.length - 1;
       const hasOtherTabs = tabs.length > 1;
       const fileName = getPathBasename(info.filePath) || info.filePath;
+      const lastSlash = info.filePath.lastIndexOf('/');
+      const parentDir = lastSlash > 0 ? info.filePath.slice(0, lastSlash) : null;
 
       const items: ContextMenuEntry[] = [
         { label: 'Close', onClick: () => closeTab(info.filePath) },
@@ -307,6 +309,15 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         },
         { label: 'Close All', onClick: () => closeAllTabs() },
         { type: 'divider' as const },
+        {
+          label: 'Reveal in Explorer Sidebar',
+          disabled: parentDir === null,
+          onClick: () => {
+            if (parentDir === null) return;
+            setExplorerDir(parentDir);
+            setExplorerVisible(true);
+          },
+        },
         { label: revealLabel, onClick: () => revealInFinder(info.filePath) },
         { label: 'Copy Path', onClick: () => navigator.clipboard.writeText(info.filePath) },
         { label: 'Copy File Name', onClick: () => navigator.clipboard.writeText(fileName) },
@@ -322,6 +333,8 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       closeTabsToRight,
       revealInFinder,
       revealLabel,
+      setExplorerDir,
+      setExplorerVisible,
       viewerCtxMenu,
       explorerCtxMenu,
       tabCtxMenu,

@@ -69,7 +69,7 @@ export function Toolbar({
         active={showExplorer}
         size="md"
         onClick={onToggleExplorer}
-        title={`Toggle file explorer (${modLabel}+B)`}
+        title={`Toggle file explorer sidebar (${modLabel}+B)`}
       >
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path
@@ -176,7 +176,7 @@ export function Toolbar({
         active={sidebarVisible}
         size="md"
         onClick={onToggleSidebar}
-        title={`Toggle comments sidebar (${modLabel}+\\)`}
+        title={`Toggle comment sidebar (${modLabel}+\\)`}
       >
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path

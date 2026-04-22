@@ -90,8 +90,7 @@ test.describe('Command palette', () => {
     await openPalette(page);
 
     const input = page.getByPlaceholder('Type a command...');
-    // Search for "toggle sidebar" — a command that should toggle sidebar visibility
-    await input.fill('toggle sidebar');
+    await input.fill('toggle comment sidebar');
     await page.waitForTimeout(100);
 
     const selectedItem = page.locator('button[data-selected="true"]').first();

@@ -30,7 +30,7 @@ async function openFixture(page: Page) {
 
 /** Toggle explorer via the toolbar button. */
 const explorerToggle = (page: Page) =>
-  page.locator(`button[title="Toggle file explorer (${MOD_LABEL}+B)"]`);
+  page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
 
 async function toggleExplorer(page: Page) {
   await explorerToggle(page).click();
