@@ -24,6 +24,8 @@ Optional line about how to get started (install command, config step).
 
 For patch releases, skip the lead paragraph. Just use the bullets.
 
+When a release has several bug fixes alongside improvements, split "Also in this release" into subsections with `#### Improvements` and `#### Bug fixes` subheads. Skip the split when there are only a few bullets or when everything is the same kind of change. Don't prefix individual bullets with labels like "Fix:" or "Improvement:".
+
 ## How to gather context
 
 1. Find the previous release tag: `git describe --tags --abbrev=0`
