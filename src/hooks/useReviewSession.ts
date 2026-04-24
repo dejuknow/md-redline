@@ -12,6 +12,31 @@ export interface ReviewSession {
 const POLL_INTERVAL_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
+function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.status !== y.status ||
+      x.enableResolve !== y.enableResolve ||
+      x.waitingForAgent !== y.waitingForAgent ||
+      x.filePaths.length !== y.filePaths.length ||
+      x.sentCommentIds.length !== y.sentCommentIds.length
+    ) {
+      return false;
+    }
+    for (let j = 0; j < x.filePaths.length; j++) {
+      if (x.filePaths[j] !== y.filePaths[j]) return false;
+    }
+    for (let j = 0; j < x.sentCommentIds.length; j++) {
+      if (x.sentCommentIds[j] !== y.sentCommentIds[j]) return false;
+    }
+  }
+  return true;
+}
+
 export function useReviewSession() {
   const [sessions, setSessions] = useState<ReviewSession[]>([]);
 
@@ -20,7 +45,11 @@ export function useReviewSession() {
       const res = await fetch('/api/review-sessions', { cache: 'no-store' });
       if (!res.ok) return;
       const data = (await res.json()) as { sessions: ReviewSession[] };
-      setSessions(data.sessions.filter((s) => s.status === 'open'));
+      const open = data.sessions.filter((s) => s.status === 'open');
+      // Preserve reference identity when nothing changed so downstream
+      // consumers (MarkdownViewer's useLayoutEffect, sentCommentIds useMemo)
+      // don't re-run and blow away in-progress text selections mid-drag.
+      setSessions((prev) => (sessionsEqual(prev, open) ? prev : open));
     } catch {
       /* ignore — next poll will retry */
     }
