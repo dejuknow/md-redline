@@ -38,6 +38,9 @@ interface Props {
   requestedFocus?: SidebarCommentFocusRequest | null;
   onFocusHandled?: () => void;
   sentCommentIds?: string[];
+  selectionText?: string | null;
+  selectionOffset?: number | null;
+  onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
 }
 
 type FilterMode = 'all' | 'open' | 'resolved';
@@ -62,6 +65,9 @@ export function CommentSidebar({
   requestedFocus,
   onFocusHandled,
   sentCommentIds,
+  selectionText,
+  selectionOffset,
+  onReanchorToSelection,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
   const commentRefs = useRef(new Map<string, HTMLDivElement>());
@@ -172,9 +178,15 @@ export function CommentSidebar({
   });
 
   // Sort: open first, then resolved (only when resolve enabled)
-  const activeComments = resolveEnabled
+  const activeCommentsAll = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
     : filtered;
+  const orphanActiveComments = activeCommentsAll.filter((c) =>
+    missingAnchors.has(c.id),
+  );
+  const activeComments = activeCommentsAll.filter(
+    (c) => !missingAnchors.has(c.id),
+  );
   const resolvedComments = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved')
     : [];
@@ -256,6 +268,66 @@ export function CommentSidebar({
 
       {/* Comment list */}
       <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
+        {orphanActiveComments.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 pb-1">
+              <div className="h-px flex-1 bg-border-subtle" />
+              <span
+                className="text-xs font-semibold text-danger-text"
+                title="Comments whose anchor text can no longer be found in the document"
+              >
+                Needs re-anchoring ({orphanActiveComments.length})
+              </span>
+              <div className="h-px flex-1 bg-border-subtle" />
+            </div>
+            {orphanActiveComments.map((comment) => (
+              <div
+                key={comment.id}
+                ref={(node) => {
+                  if (node) {
+                    commentRefs.current.set(comment.id, node);
+                  } else {
+                    commentRefs.current.delete(comment.id);
+                  }
+                  if (comment.id === activeCommentId) {
+                    activeRef.current = node;
+                  }
+                }}
+                tabIndex={-1}
+                data-comment-card-id={comment.id}
+                data-orphan="true"
+              >
+                <CommentCard
+                  comment={comment}
+                  isActive={comment.id === activeCommentId}
+                  anchorMissing
+                  showAnchorContext
+                  selectionText={selectionText ?? null}
+                  selectionOffset={selectionOffset ?? null}
+                  onReanchorToSelection={onReanchorToSelection}
+                  sent={sentCommentIds?.includes(comment.id) ?? false}
+                  onActivate={onActivate}
+                  onResolve={resolveEnabled ? onResolve : undefined}
+                  onUnresolve={resolveEnabled ? onUnresolve : undefined}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                  onReply={onReply}
+                  onEditReply={onEditReply}
+                  onDeleteReply={onDeleteReply}
+                  editor={activeEditor?.commentId === comment.id ? activeEditor : null}
+                  onRequestCommentEdit={openCommentEdit}
+                  onRequestReplyCompose={openReplyCompose}
+                  onRequestReplyEdit={openReplyEdit}
+                  onCloseEditor={closeEditor}
+                  onContextMenu={
+                    onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
+                  }
+                />
+              </div>
+            ))}
+            <div className="h-2" />
+          </>
+        )}
         {activeComments.map((comment) => (
           <div
             key={comment.id}

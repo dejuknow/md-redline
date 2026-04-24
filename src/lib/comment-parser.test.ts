@@ -19,8 +19,11 @@ import {
   removeResolvedComments,
   backfillReplyTimestamps,
   findNewReplyIds,
+  moveComment,
+  transformCommentMarkers,
 } from './comment-parser';
 import type { MdComment } from '../types';
+import { getEffectiveStatus } from '../types';
 
 // Helper to make a comment marker
 function marker(overrides: Partial<MdComment> = {}): string {
@@ -2145,5 +2148,122 @@ describe('cleanToRawOffset multi-marker', () => {
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.cleanMarkdown).toBe('Some text at the end');
     expect(parsed.comments[0].cleanOffset).toBe(17); // "Some text at the " = 17
+  });
+});
+
+describe('moveComment', () => {
+  it('relocates a comment marker to the new anchor while preserving id, author, timestamp, and replies', () => {
+    const raw = insertComment(
+      'before old phrase after, then new phrase here',
+      'old phrase',
+      'note',
+      'Dennis',
+    );
+    const { comments: before } = parseComments(raw);
+    const commentId = before[0].id;
+    const originalTimestamp = before[0].timestamp;
+
+    const withReply = addReply(raw, commentId, 'first reply', 'Claude');
+
+    const moved = moveComment(withReply, commentId, 'new phrase');
+
+    const { comments: after, cleanMarkdown } = parseComments(moved);
+    expect(after).toHaveLength(1);
+    const c = after[0];
+    expect(c.id).toBe(commentId);
+    expect(c.anchor).toBe('new phrase');
+    expect(c.author).toBe('Dennis');
+    expect(c.timestamp).toBe(originalTimestamp);
+    expect(c.text).toBe('note');
+    expect(c.replies).toHaveLength(1);
+    expect(c.replies![0].text).toBe('first reply');
+
+    expect(cleanMarkdown.indexOf('new phrase')).toBe(c.cleanOffset);
+    expect(cleanMarkdown).toContain('old phrase');
+  });
+
+  it('refreshes contextBefore and contextAfter from the new surroundings', () => {
+    const raw = insertComment(
+      'AAAAA old phrase BBBBB and later CCCCC new phrase DDDDD',
+      'old phrase',
+      'note',
+      'Dennis',
+      'AAAAA ',
+      ' BBBBB',
+    );
+    const { comments: before } = parseComments(raw);
+    const commentId = before[0].id;
+
+    const moved = moveComment(raw, commentId, 'new phrase');
+
+    const { comments: after } = parseComments(moved);
+    expect(after[0].contextBefore).toContain('CCCCC');
+    expect(after[0].contextAfter).toContain('DDDDD');
+    expect(after[0].contextBefore).not.toContain('AAAAA');
+  });
+
+  it('preserves resolved status across the move', () => {
+    const raw = insertComment('before old after, and new here', 'old', 'note');
+    const { comments: before } = parseComments(raw);
+    const commentId = before[0].id;
+    const resolved = resolveComment(raw, commentId);
+
+    const moved = moveComment(resolved, commentId, 'new');
+    const { comments: after } = parseComments(moved);
+    expect(after[0].status).toBe('resolved');
+  });
+
+  it('is a no-op when the comment id is not found', () => {
+    const raw = insertComment('before old after', 'old', 'note');
+    const moved = moveComment(raw, 'nonexistent-id', 'old');
+    expect(moved).toBe(raw);
+  });
+
+  it('is a no-op when the new anchor is not present in the markdown', () => {
+    const raw = insertComment('before old after', 'old', 'note');
+    const { comments } = parseComments(raw);
+    const commentId = comments[0].id;
+    const moved = moveComment(raw, commentId, 'phrase that does not exist');
+    expect(moved).toBe(raw);
+  });
+
+  it('preserves the legacy resolved boolean when status field is absent', () => {
+    // Build a raw comment by hand that has `resolved: true` but no `status` —
+    // simulates legacy data written before the status field existed.
+    const raw = insertComment('before old after, and new here', 'old', 'note');
+    const { comments } = parseComments(raw);
+    const commentId = comments[0].id;
+
+    // Manually patch the comment to the legacy shape via transformCommentMarkers.
+    const legacy = transformCommentMarkers(raw, (c) => {
+      if (c?.id !== commentId) return { type: 'keep' };
+      const { status, ...rest } = c;
+      void status;
+      return { type: 'replace', comment: { ...rest, resolved: true } };
+    });
+
+    const moved = moveComment(legacy, commentId, 'new');
+    const { comments: after } = parseComments(moved);
+    expect(after[0].resolved).toBe(true);
+    expect(getEffectiveStatus(after[0])).toBe('resolved');
+  });
+
+  it('uses hintOffset to disambiguate duplicate anchor occurrences', () => {
+    const raw = insertComment(
+      'first foo then second foo in doc',
+      'first foo',
+      'note',
+    );
+    const { comments } = parseComments(raw);
+    const commentId = comments[0].id;
+
+    // Move to "foo" with a hintOffset near the second occurrence.
+    // "first foo then second " is 22 chars, so second "foo" starts at offset 22.
+    const moved = moveComment(raw, commentId, 'foo', 22);
+
+    const { comments: after } = parseComments(moved);
+    expect(after[0].anchor).toBe('foo');
+    // The marker should now be near the second occurrence, not the first.
+    expect(after[0].cleanOffset).toBeGreaterThan(10);
   });
 });

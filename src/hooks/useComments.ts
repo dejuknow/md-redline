@@ -2,6 +2,7 @@ import {
   useState,
   useMemo,
   useCallback,
+  useRef,
   type RefObject,
   type Dispatch,
   type SetStateAction,
@@ -13,6 +14,7 @@ import {
   editComment,
   editReply,
   updateCommentAnchor,
+  moveComment,
   resolveComment,
   unresolveComment,
   addReply,
@@ -87,6 +89,24 @@ export function useComments(params: UseCommentsParams) {
     () => detectMissingAnchors(cleanMarkdown, comments),
     [cleanMarkdown, comments],
   );
+
+  // Transition signal — ids that became orphaned since the previous render.
+  // Uses a during-render ref-compare pattern so newOrphanIds has stable
+  // identity when missingAnchors identity is unchanged, preventing downstream
+  // effects (e.g. debounced orphan toast) from re-running on unrelated renders.
+  const prevMissingRef = useRef<Set<string>>(missingAnchors);
+  const newOrphanIdsRef = useRef<Set<string>>(new Set());
+
+  if (missingAnchors !== prevMissingRef.current) {
+    const next = new Set<string>();
+    for (const id of missingAnchors) {
+      if (!prevMissingRef.current.has(id)) next.add(id);
+    }
+    newOrphanIdsRef.current = next;
+    prevMissingRef.current = missingAnchors;
+  }
+
+  const newOrphanIds = newOrphanIdsRef.current;
 
   // Comment counts per tab (for badges) + comment IDs grouped by file path
   const { commentCounts, resolvedCommentCounts, commentIdsByFile } = useMemo(() => {
@@ -278,6 +298,19 @@ export function useComments(params: UseCommentsParams) {
     [updateAndSave, rawMarkdownRef],
   );
 
+  const handleReanchorToSelection = useCallback(
+    (commentId: string, newAnchor: string, hintOffset?: number) => {
+      const next = moveComment(
+        rawMarkdownRef.current ?? '',
+        commentId,
+        newAnchor,
+        hintOffset,
+      );
+      updateAndSave(next);
+    },
+    [updateAndSave, rawMarkdownRef],
+  );
+
   const handleJumpToNext = useCallback(() => {
     const navigable = enableResolve
       ? comments.filter((c) => getEffectiveStatus(c) === 'open')
@@ -313,6 +346,7 @@ export function useComments(params: UseCommentsParams) {
     cleanMarkdown,
     html,
     missingAnchors,
+    newOrphanIds,
     commentCounts,
     resolvedCommentCounts,
     commentIdsByFile,
@@ -333,6 +367,7 @@ export function useComments(params: UseCommentsParams) {
     handleHighlightClick,
     handleSidebarActivate,
     handleAnchorChange,
+    handleReanchorToSelection,
     handleJumpToNext,
     handleJumpToPrev,
   };

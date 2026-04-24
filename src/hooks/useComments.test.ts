@@ -564,6 +564,42 @@ describe('useComments', () => {
   });
 
   // -----------------------------------------------------------------------
+  // 13. newOrphanIds — transition signal for ids that became orphaned
+  // -----------------------------------------------------------------------
+  describe('newOrphanIds', () => {
+    it('is empty on first render', () => {
+      const raw = `Real ${makeComment({ id: 'gone', anchor: 'absent', status: 'open' })}tail`;
+      const params = defaultParams({ rawMarkdown: raw });
+      const { result } = renderHook(() => useComments(params));
+      expect(Array.from(result.current.newOrphanIds)).toEqual([]);
+    });
+
+    it('reflects the last missingAnchors transition and keeps identity stable across unchanged re-renders', () => {
+      // Start: anchor present (no orphans).
+      const rawOk = `Hello ${makeComment({ id: 'c1', anchor: 'Hello' })}world`;
+      const params = defaultParams({ rawMarkdown: rawOk });
+      const { result, rerender } = renderHook(
+        (p: UseCommentsParams) => useComments(p),
+        { initialProps: params },
+      );
+      expect(Array.from(result.current.newOrphanIds)).toEqual([]);
+      const initialRef = result.current.newOrphanIds;
+
+      // Rewrite removes the anchor — transition.
+      const rawGone = `Greetings ${makeComment({ id: 'c1', anchor: 'Hello' })}world`;
+      rerender(defaultParams({ rawMarkdown: rawGone }));
+      expect(Array.from(result.current.newOrphanIds)).toEqual(['c1']);
+      const afterTransitionRef = result.current.newOrphanIds;
+      expect(afterTransitionRef).not.toBe(initialRef);
+
+      // Re-render with the same content — reference must be preserved so downstream
+      // effects (e.g. a debounced toast) don't re-run and cancel their timers.
+      rerender(defaultParams({ rawMarkdown: rawGone }));
+      expect(result.current.newOrphanIds).toBe(afterTransitionRef);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Additional CRUD operations
   // -----------------------------------------------------------------------
   describe('handleEdit', () => {
@@ -768,6 +804,52 @@ describe('useComments', () => {
 
       act(() => result.current.handleJumpToPrev());
       expect(result.current.activeCommentId).toBeNull();
+    });
+  });
+
+  describe('handleReanchorToSelection', () => {
+    it('calls moveComment and writes the updated raw markdown', () => {
+      const setRawMarkdown = vi.fn();
+      const saveFile = vi.fn();
+      const raw =
+        `Hello ${makeComment({ id: 'c1', anchor: 'missing text', status: 'open' })}new anchor here`;
+      const rawMarkdownRef = { current: raw };
+      const params = defaultParams({
+        rawMarkdown: raw,
+        rawMarkdownRef: rawMarkdownRef as unknown as UseCommentsParams['rawMarkdownRef'],
+        setRawMarkdown,
+        saveFile,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      act(() =>
+        result.current.handleReanchorToSelection('c1', 'new anchor', undefined),
+      );
+
+      expect(setRawMarkdown).toHaveBeenCalledTimes(1);
+      const saved = setRawMarkdown.mock.calls[0][0] as string;
+      expect(saved).toContain('"anchor":"new anchor"');
+    });
+
+    it('is a no-op when the new anchor is not present', () => {
+      const setRawMarkdown = vi.fn();
+      const saveFile = vi.fn();
+      const raw = `Hello ${makeComment({ id: 'c1', anchor: 'missing', status: 'open' })}world`;
+      const rawMarkdownRef = { current: raw };
+      const params = defaultParams({
+        rawMarkdown: raw,
+        rawMarkdownRef: rawMarkdownRef as unknown as UseCommentsParams['rawMarkdownRef'],
+        setRawMarkdown,
+        saveFile,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      act(() =>
+        result.current.handleReanchorToSelection('c1', 'not in doc', undefined),
+      );
+
+      const saved = setRawMarkdown.mock.calls[0][0] as string;
+      expect(saved).toContain('"anchor":"missing"');
     });
   });
 });

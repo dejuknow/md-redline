@@ -445,6 +445,7 @@ export default function App() {
     cleanMarkdown,
     html,
     missingAnchors,
+    newOrphanIds,
     commentCounts,
     resolvedCommentCounts,
     commentIdsByFile,
@@ -464,6 +465,7 @@ export default function App() {
     handleHighlightClick,
     handleSidebarActivate,
     handleAnchorChange,
+    handleReanchorToSelection,
     handleJumpToNext,
     handleJumpToPrev,
   } = useComments({
@@ -482,6 +484,21 @@ export default function App() {
     setAutoExpandForm,
     requestCommentFocus,
   });
+
+  // Toast when an agent rewrite (or any edit) orphans comments. Debounce so
+  // rapid successive edits collapse into one notification.
+  useEffect(() => {
+    if (newOrphanIds.size === 0) return;
+    const count = newOrphanIds.size;
+    const handle = setTimeout(() => {
+      showToast(
+        count === 1
+          ? '1 comment lost its anchor. See "Needs re-anchoring" in the sidebar.'
+          : `${count} comments lost their anchor. See "Needs re-anchoring" in the sidebar.`,
+      );
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [newOrphanIds, showToast]);
 
   // Combined handoff: snapshot + copy agent prompt
   const handleHandoff = useCallback(
@@ -1882,6 +1899,9 @@ export default function App() {
                   comments={comments}
                   activeCommentId={activeCommentId}
                   missingAnchors={missingAnchors}
+                  selectionText={selection?.text ?? null}
+                  selectionOffset={selection?.offset ?? null}
+                  onReanchorToSelection={handleReanchorToSelection}
                   onActivate={handleSidebarActivate}
                   onResolve={handleResolve}
                   onUnresolve={handleUnresolve}

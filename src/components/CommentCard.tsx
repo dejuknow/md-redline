@@ -35,6 +35,10 @@ interface Props {
   onRequestReplyEdit: (commentId: string, replyId: string) => void;
   onCloseEditor: () => void;
   onContextMenu?: (id: string, x: number, y: number) => void;
+  showAnchorContext?: boolean;
+  selectionText?: string | null;
+  selectionOffset?: number | null;
+  onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
 }
 
 const STATUS_CONFIG: Record<CommentStatus, { label: string; className: string }> = {
@@ -61,6 +65,10 @@ export const CommentCard = memo(function CommentCard({
   onRequestReplyEdit,
   onCloseEditor,
   onContextMenu: onCtxMenu,
+  showAnchorContext,
+  selectionText,
+  selectionOffset,
+  onReanchorToSelection,
 }: Props) {
   const { settings } = useSettings();
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
@@ -224,7 +232,7 @@ export const CommentCard = memo(function CommentCard({
               Sent
             </span>
           )}
-          {anchorMissing && (
+          {anchorMissing && !showAnchorContext && (
             <span
               className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-danger-bg text-danger-text"
               title="Anchor text was modified or removed"
@@ -241,6 +249,21 @@ export const CommentCard = memo(function CommentCard({
           )}
         </div>
       </div>
+
+      {showAnchorContext && (comment.contextBefore || comment.contextAfter) && (
+        <div className="px-3 pt-1 pb-2 text-[11px] text-content-muted leading-snug">
+          <span className="block font-medium text-content-secondary mb-0.5">
+            Was anchored here:
+          </span>
+          <span className="block font-mono whitespace-pre-wrap break-words">
+            <span className="opacity-60">{comment.contextBefore ?? ''}</span>
+            <span className="bg-comment-anchor-bg text-comment-anchor-text border border-comment-anchor-border rounded px-0.5">
+              {comment.anchor}
+            </span>
+            <span className="opacity-60">{comment.contextAfter ?? ''}</span>
+          </span>
+        </div>
+      )}
 
       {/* Comment text */}
       <div className="px-3 py-2">
@@ -372,6 +395,18 @@ export const CommentCard = memo(function CommentCard({
                     Resolve
                   </ActionButton>
                 )}
+            {showAnchorContext && isActive && selectionText && selectionText.trim().length > 0 && onReanchorToSelection && (
+              <ActionButton
+                intent="primary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReanchorToSelection(comment.id, selectionText, selectionOffset ?? undefined);
+                }}
+                title="Bind this comment to the currently selected text"
+              >
+                Re-anchor to selection
+              </ActionButton>
+            )}
             <DeleteIconButton
               onClick={(e) => {
                 e.stopPropagation();

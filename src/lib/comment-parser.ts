@@ -151,7 +151,7 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
   return regions;
 }
 
-function transformCommentMarkers(
+export function transformCommentMarkers(
   rawMarkdown: string,
   transform: (comment: MdComment | null) => CommentTransform,
 ): string {
@@ -654,6 +654,69 @@ export function updateCommentAnchor(
     }
     return { type: 'keep' };
   });
+}
+
+/**
+ * Move a comment marker to a new anchor location in the raw markdown.
+ *
+ * Preserves id, author, timestamp, text, replies, and status (including the
+ * legacy `resolved` boolean). Recomputes contextBefore / contextAfter from
+ * the new surroundings.
+ *
+ * Returns the raw markdown unchanged when:
+ *   - the comment id is not found
+ *   - `hintOffset` is undefined and `newAnchor` is not present in the clean
+ *     markdown (callers should validate first)
+ *   - `insertComment` cannot place the marker
+ *
+ * @param hintOffset optional plain-text offset to disambiguate duplicate
+ *   occurrences of the anchor. When provided, the anchor-presence guard is
+ *   skipped and `insertComment` resolves placement using the offset.
+ */
+export function moveComment(
+  rawMarkdown: string,
+  commentId: string,
+  newAnchor: string,
+  hintOffset?: number,
+): string {
+  const { cleanMarkdown, comments } = parseComments(rawMarkdown);
+  const existing = comments.find((c) => c.id === commentId);
+  if (!existing) return rawMarkdown;
+
+  if (hintOffset === undefined && !cleanMarkdown.includes(newAnchor)) {
+    return rawMarkdown;
+  }
+
+  const withoutOld = removeComment(rawMarkdown, commentId);
+
+  const reinserted = insertComment(
+    withoutOld,
+    newAnchor,
+    existing.text,
+    existing.author,
+    undefined,
+    undefined,
+    hintOffset,
+    commentId,
+  );
+
+  if (reinserted === withoutOld) return rawMarkdown;
+
+  const patched = transformCommentMarkers(reinserted, (c) => {
+    if (c?.id !== commentId) return { type: 'keep' };
+    return {
+      type: 'replace',
+      comment: {
+        ...c,
+        timestamp: existing.timestamp,
+        ...(existing.replies ? { replies: existing.replies } : {}),
+        ...(existing.status !== undefined ? { status: existing.status } : {}),
+        ...(existing.resolved !== undefined ? { resolved: existing.resolved } : {}),
+      },
+    };
+  });
+
+  return updateCommentAnchor(patched, commentId, newAnchor);
 }
 
 export function addReply(
