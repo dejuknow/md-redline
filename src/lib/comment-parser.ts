@@ -129,10 +129,12 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
         parsedComment = data;
       }
     } catch (err) {
-      // Inside inline code, a `<!-- @comment{...} -->` pattern is almost always
-      // documentation about the format (e.g. README snippets), not a real marker
-      // someone hand-edited. Leave it as literal text and don't warn.
-      if (insideInlineCode) continue;
+      // Inside inline code, a literal `{...}` placeholder is documentation
+      // about the format (e.g. README snippets), not a real marker someone
+      // hand-edited. Leave it as literal text and don't warn. Corrupted real
+      // markers inside inline code (any other malformed JSON) still fall
+      // through so parser-based cleanup can strip them.
+      if (insideInlineCode && /^\{\s*\.+\s*\}$/.test(match[1].trim())) continue;
       // Malformed markers outside code blocks are still considered removable,
       // but surface the parse failure so users notice when comment data is
       // being silently dropped (e.g. after a hand-edit corrupted the JSON).

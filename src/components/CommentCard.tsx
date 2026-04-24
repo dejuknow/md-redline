@@ -395,7 +395,7 @@ export const CommentCard = memo(function CommentCard({
                     Resolve
                   </ActionButton>
                 )}
-            {showAnchorContext && isActive && selectionText && selectionText.trim().length > 0 && onReanchorToSelection && (
+            {showAnchorContext && selectionText && selectionText.trim().length > 0 && onReanchorToSelection && (
               <span data-preserve-selection>
                 <ActionButton
                   intent="primary"

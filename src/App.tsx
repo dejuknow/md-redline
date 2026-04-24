@@ -486,19 +486,34 @@ export default function App() {
   });
 
   // Toast when an agent rewrite (or any edit) orphans comments. Debounce so
-  // rapid successive edits collapse into one notification.
+  // rapid successive edits collapse into one notification. Use refs — not
+  // effect-cleanup — to hold the pending timer, so unrelated re-renders that
+  // transition newOrphanIds to an empty Set don't cancel the in-flight toast.
+  const orphanToastTimerRef = useRef<number | null>(null);
+  const orphanToastCountRef = useRef(0);
   useEffect(() => {
     if (newOrphanIds.size === 0) return;
-    const count = newOrphanIds.size;
-    const handle = setTimeout(() => {
+    orphanToastCountRef.current += newOrphanIds.size;
+    if (orphanToastTimerRef.current !== null) return;
+    orphanToastTimerRef.current = window.setTimeout(() => {
+      const count = orphanToastCountRef.current;
+      orphanToastTimerRef.current = null;
+      orphanToastCountRef.current = 0;
       showToast(
         count === 1
           ? '1 comment lost its anchor. See "Needs re-anchoring" in the sidebar.'
           : `${count} comments lost their anchor. See "Needs re-anchoring" in the sidebar.`,
       );
     }, 500);
-    return () => clearTimeout(handle);
   }, [newOrphanIds, showToast]);
+  useEffect(
+    () => () => {
+      if (orphanToastTimerRef.current !== null) {
+        window.clearTimeout(orphanToastTimerRef.current);
+      }
+    },
+    [],
+  );
 
   // Combined handoff: snapshot + copy agent prompt
   const handleHandoff = useCallback(

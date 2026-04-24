@@ -140,18 +140,12 @@ test('Re-anchor to selection binds the orphan comment to new text', async ({ pag
   );
   await expect(page.getByText('Needs re-anchoring (1)')).toBeVisible({ timeout: 5000 });
 
-  // Click the CommentCard inside the orphan wrapper to activate it.
-  // The ring-1 active class lives on the inner .group div, not the data-orphan wrapper.
-  await page.locator('[data-orphan="true"] .group').first().click();
-  await expect(
-    page.locator('[data-orphan="true"] .group').first(),
-  ).toHaveClass(/ring-1/, { timeout: 2000 });
-
-  // Select the new landing text.
+  // The natural flow: select replacement text first, then click Re-anchor.
+  // The button must be reachable without first activating the orphan card
+  // (activating would require a click outside the viewer, which collapses
+  // the selection before the user could pick new text).
   await selectText(page, 'fresh landing spot');
 
-  // Real user click: onMouseDown preventDefault on the button preserves the
-  // text selection through the mousedown → mouseup → click sequence.
   const reanchorBtn = page.getByRole('button', { name: 'Re-anchor to selection' });
   await expect(reanchorBtn).toBeVisible({ timeout: 2000 });
   await reanchorBtn.click();
@@ -188,13 +182,8 @@ First landing spot sits here. Second landing spot sits farther down for selectio
   );
   await expect(page.getByText('Needs re-anchoring (1)')).toBeVisible({ timeout: 5000 });
 
-  // Activate the orphan card.
-  await page.locator('[data-orphan="true"] .group').first().click();
-  await expect(
-    page.locator('[data-orphan="true"] .group').first(),
-  ).toHaveClass(/ring-1/, { timeout: 2000 });
-
-  // Select the SECOND occurrence of "landing spot" (occurrence index 1).
+  // Select the SECOND occurrence of "landing spot" (occurrence index 1)
+  // without first activating the card.
   await selectText(page, 'landing spot', 1);
 
   const reanchorBtn = page.getByRole('button', { name: 'Re-anchor to selection' });
