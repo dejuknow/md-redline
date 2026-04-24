@@ -50,6 +50,20 @@ export function CommandPalette({ commands, open, onClose }: Props) {
     }
   }, [open]);
 
+  // Close on Escape even if focus has not settled on the input yet.
+  useEffect(() => {
+    if (!open) return;
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    };
+
+    document.addEventListener('keydown', handleDocumentKeyDown);
+    return () => document.removeEventListener('keydown', handleDocumentKeyDown);
+  }, [open, onClose]);
+
   // Clamp selected index
   useEffect(() => {
     if (selectedIndex >= flatList.length) {
@@ -89,6 +103,7 @@ export function CommandPalette({ commands, open, onClose }: Props) {
       }
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       onClose();
     }
   };
