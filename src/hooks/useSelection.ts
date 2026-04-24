@@ -21,6 +21,7 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
       if (lockedRef.current) return;
       if ((e.target as Element)?.closest?.('[data-comment-form]')) return;
       if ((e.target as Element)?.closest?.('[data-drag-handle]')) return;
+      if ((e.target as Element)?.closest?.('[data-preserve-selection]')) return;
       if (document.body.classList.contains('anchor-dragging')) return;
       if (!containerRef.current) return;
 

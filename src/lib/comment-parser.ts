@@ -62,8 +62,11 @@ function isInsideCodeBlock(offset: number, codeBlockRanges: CodeBlockRange[]): b
 }
 
 // Inline code spans (`...`, ``...``, etc.) — opener and closer must be runs of
-// equal length, per CommonMark. Markers inside these are documentation about
-// the format, not real markers, and must be left alone.
+// equal length, per CommonMark. A marker-shaped pattern inside a span whose
+// JSON fails to parse (e.g. `<!-- @comment{...} -->`) is treated as a
+// documentation placeholder and left as literal text. Real markers with
+// valid JSON still parse — insertComment places them inside the span when
+// the user anchors on code text.
 function getInlineCodeRanges(
   rawMarkdown: string,
   fencedRanges: CodeBlockRange[],

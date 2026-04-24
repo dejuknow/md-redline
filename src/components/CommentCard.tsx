@@ -396,16 +396,19 @@ export const CommentCard = memo(function CommentCard({
                   </ActionButton>
                 )}
             {showAnchorContext && isActive && selectionText && selectionText.trim().length > 0 && onReanchorToSelection && (
-              <ActionButton
-                intent="primary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReanchorToSelection(comment.id, selectionText, selectionOffset ?? undefined);
-                }}
-                title="Bind this comment to the currently selected text"
-              >
-                Re-anchor to selection
-              </ActionButton>
+              <span data-preserve-selection>
+                <ActionButton
+                  intent="primary"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReanchorToSelection(comment.id, selectionText, selectionOffset ?? undefined);
+                  }}
+                  title="Bind this comment to the currently selected text"
+                >
+                  Re-anchor to selection
+                </ActionButton>
+              </span>
             )}
             <DeleteIconButton
               onClick={(e) => {

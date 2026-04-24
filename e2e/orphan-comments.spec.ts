@@ -150,21 +150,11 @@ test('Re-anchor to selection binds the orphan comment to new text', async ({ pag
   // Select the new landing text.
   await selectText(page, 'fresh landing spot');
 
+  // Real user click: onMouseDown preventDefault on the button preserves the
+  // text selection through the mousedown → mouseup → click sequence.
   const reanchorBtn = page.getByRole('button', { name: 'Re-anchor to selection' });
   await expect(reanchorBtn).toBeVisible({ timeout: 2000 });
-
-  // Use a programmatic click to avoid the mousedown/mouseup sequence that
-  // clears the browser text selection before React's onClick fires.  A normal
-  // Playwright click dispatches mousedown first, which causes the browser to
-  // collapse the text selection; by the time the React onClick handler reads
-  // selectionText from props, a re-render triggered by the document mouseup
-  // listener (useSelection) has already set selection to null.
-  await page.evaluate(() => {
-    const btn = [...document.querySelectorAll('button')].find((b) =>
-      b.textContent?.includes('Re-anchor to selection'),
-    );
-    btn?.click();
-  });
+  await reanchorBtn.click();
 
   await expect(page.getByText('Needs re-anchoring')).not.toBeVisible({ timeout: 5000 });
 
@@ -209,13 +199,7 @@ First landing spot sits here. Second landing spot sits farther down for selectio
 
   const reanchorBtn = page.getByRole('button', { name: 'Re-anchor to selection' });
   await expect(reanchorBtn).toBeVisible({ timeout: 2000 });
-  // Click programmatically to avoid mousedown clearing the selection.
-  await page.evaluate(() => {
-    const btn = Array.from(document.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'Re-anchor to selection',
-    ) as HTMLButtonElement | undefined;
-    btn?.click();
-  });
+  await reanchorBtn.click();
 
   await expect(page.getByText('Needs re-anchoring')).not.toBeVisible({ timeout: 3000 });
 
