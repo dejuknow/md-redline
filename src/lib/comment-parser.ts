@@ -61,6 +61,38 @@ function isInsideCodeBlock(offset: number, codeBlockRanges: CodeBlockRange[]): b
   return false;
 }
 
+// Inline code spans (`...`, ``...``, etc.) — opener and closer must be runs of
+// equal length, per CommonMark. Markers inside these are documentation about
+// the format, not real markers, and must be left alone.
+function getInlineCodeRanges(
+  rawMarkdown: string,
+  fencedRanges: CodeBlockRange[],
+): CodeBlockRange[] {
+  const tickRegex = /`+/g;
+  const runs: { start: number; len: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = tickRegex.exec(rawMarkdown)) !== null) {
+    if (isInsideCodeBlock(m.index, fencedRanges)) continue;
+    runs.push({ start: m.index, len: m[0].length });
+  }
+
+  const ranges: CodeBlockRange[] = [];
+  const consumed = new Set<number>();
+  for (let i = 0; i < runs.length; i++) {
+    if (consumed.has(i)) continue;
+    for (let j = i + 1; j < runs.length; j++) {
+      if (consumed.has(j)) continue;
+      if (runs[j].len === runs[i].len) {
+        ranges.push({ start: runs[i].start, end: runs[j].start + runs[j].len });
+        consumed.add(i);
+        consumed.add(j);
+        break;
+      }
+    }
+  }
+  return ranges;
+}
+
 function getStandaloneStripEnd(
   rawMarkdown: string,
   markerStart: number,
@@ -71,13 +103,15 @@ function getStandaloneStripEnd(
 }
 
 function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
-  const codeBlockRanges = getCodeBlockRanges(rawMarkdown);
+  const fencedRanges = getCodeBlockRanges(rawMarkdown);
+  const inlineRanges = getInlineCodeRanges(rawMarkdown, fencedRanges);
   const regions: CommentMarkerRegion[] = [];
   const regex = new RegExp(COMMENT_PATTERN);
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(rawMarkdown)) !== null) {
-    if (isInsideCodeBlock(match.index, codeBlockRanges)) continue;
+    if (isInsideCodeBlock(match.index, fencedRanges)) continue;
+    const insideInlineCode = isInsideCodeBlock(match.index, inlineRanges);
 
     let parsedComment: MdComment | null = null;
     try {
@@ -92,7 +126,11 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
         parsedComment = data;
       }
     } catch (err) {
-      // Malformed markers are still considered removable outside code blocks,
+      // Inside inline code, a `<!-- @comment{...} -->` pattern is almost always
+      // documentation about the format (e.g. README snippets), not a real marker
+      // someone hand-edited. Leave it as literal text and don't warn.
+      if (insideInlineCode) continue;
+      // Malformed markers outside code blocks are still considered removable,
       // but surface the parse failure so users notice when comment data is
       // being silently dropped (e.g. after a hand-edit corrupted the JSON).
       console.warn(

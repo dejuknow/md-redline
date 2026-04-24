@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   parseComments,
   insertComment,
@@ -73,6 +73,24 @@ describe('parseComments', () => {
     const result = parseComments(raw);
     expect(result.comments).toHaveLength(0);
     expect(result.cleanMarkdown).toBe('Some text');
+  });
+
+  it('ignores placeholder markers inside inline code spans', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = 'Docs: `<!-- @comment{...} -->` explains the format.';
+    const result = parseComments(raw);
+    expect(result.comments).toHaveLength(0);
+    expect(result.cleanMarkdown).toBe(raw);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('still parses real markers alongside inline-code placeholder markers', () => {
+    const m = marker({ id: 'real', anchor: 'world' });
+    const raw = `The format is \`<!-- @comment{...} -->\`. ${m}world`;
+    const result = parseComments(raw);
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].id).toBe('real');
   });
 
   it('handles empty markdown', () => {
