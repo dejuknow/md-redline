@@ -276,6 +276,17 @@ async function setupDemoPage(page: Page) {
           transform: translate(-80px, -120px);
         }
 
+        /* Nord's native selection is rgba(136, 192, 208, 0.3) — 30% alpha
+           on a dark background reads as invisible once JPEG-compressed at
+           demo resolution. Boost alpha so the drag-to-select highlight is
+           clearly visible in the video. Scoped to .prose so the comment
+           form input's own selection stays theme-default. */
+        .prose ::selection,
+        .prose::selection {
+          background-color: rgba(136, 192, 208, 0.55) !important;
+          color: inherit;
+        }
+
 
         /* Fake cursor (Playwright video doesn't capture system cursor).
            Attached to <html>, not <body>, so body's zoom transform doesn't
