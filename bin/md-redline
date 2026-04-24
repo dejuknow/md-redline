@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { statSync } from 'fs';
 import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
@@ -9,6 +9,8 @@ import process from 'process';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
+
+import { checkServer, gracefulShutdown, killPort } from './server-control.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -84,17 +86,6 @@ async function resolveTarget(arg) {
   throw new Error(`not a file or directory: ${arg}`);
 }
 
-async function checkServer(port) {
-  try {
-    const response = await fetch(`http://localhost:${port}/api/config`, {
-      signal: AbortSignal.timeout(1_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function findServerPort() {
   // Try the port file first (fast path)
   try {
@@ -152,26 +143,6 @@ function spawnDetached(command, args, options = {}) {
   });
 }
 
-function killPort(port) {
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return false;
-  try {
-    if (process.platform === 'win32') {
-      const output = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8' });
-      const pids = new Set(output.trim().split('\n').map(line => line.trim().split(/\s+/).pop()));
-      for (const pid of pids) {
-        if (pid && pid !== '0') {
-          try { execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }); } catch { /* process may have already exited */ }
-        }
-      }
-    } else {
-      execSync(`lsof -ti:${port} | xargs kill 2>/dev/null`, { stdio: 'ignore' });
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function stopServer(quiet = false) {
   const serverPort = await findServerPort();
   if (!serverPort) {
@@ -223,26 +194,6 @@ async function getServerVersion(port) {
     }
   } catch {}
   return null;
-}
-
-async function gracefulShutdown(port) {
-  try {
-    const response = await fetch(`http://localhost:${port}/api/shutdown`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!response.ok) return false;
-  } catch {
-    return false;
-  }
-
-  // Wait for the server to actually stop (up to 3 seconds)
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    if (!(await checkServer(port))) return true;
-    await delay(250);
-  }
-  return false;
 }
 
 function isProductionMode() {

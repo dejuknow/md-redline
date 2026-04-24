@@ -193,6 +193,15 @@ describe('/api/shutdown', () => {
     const response = await app.request('http://localhost/api/shutdown');
     expect(response.status).toBe(404);
   });
+
+  it('rejects POSTs without application/json Content-Type with 415', async () => {
+    // Regression: the CLI's gracefulShutdown must send this header, otherwise
+    // the JSON-only CSRF middleware returns 415 and upgrade falls back to killPort.
+    const response = await app.request('http://localhost/api/shutdown', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(415);
+  });
 });
 
 describe('/api/preferences', () => {
