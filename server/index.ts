@@ -1031,7 +1031,7 @@ export function createApp(options: CreateAppOptions = {}) {
             'osascript',
             [
               '-e', 'on run argv',
-              '-e', 'tell application "Finder" to reveal POSIX file (item 1 of argv)',
+              '-e', 'tell application "Finder" to reveal (POSIX file (item 1 of argv) as alias)',
               '-e', 'tell application "Finder" to activate',
               '-e', 'end run',
               resolved,

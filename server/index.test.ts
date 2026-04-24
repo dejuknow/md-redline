@@ -1246,6 +1246,9 @@ describe('/api/reveal', () => {
     expect(calls[0].args).toContain('end run');
     expect(calls[0].args).toContain(docsFile);
     expect(calls[0].args.join(' ')).toContain('item 1 of argv');
+    // Must coerce to alias — Finder's `reveal` can't consume `POSIX file <var>`
+    // directly when the value is bound from argv (fails with -1728).
+    expect(calls[0].args.join(' ')).toContain('POSIX file (item 1 of argv) as alias');
     expect(calls[0].args.join(' ')).toContain('tell application "Finder" to activate');
   });
 
