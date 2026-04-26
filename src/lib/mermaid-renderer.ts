@@ -88,8 +88,17 @@ export async function renderMermaidBlock(
 
       const id = `mermaid-svg-${++renderCounter}`;
       const { svg } = await mermaid.render(id, source.trim());
-      const cleanSvg = DOMPurify.sanitize(svg, {
+      // Mermaid emits sequence-diagram actor labels with `alignment-baseline`
+      // on <text>, but per SVG spec that attribute only applies to <tspan>
+      // and friends. Chrome ignores it on <text>, so the labels render below
+      // the geometric centre of their boxes. Replace with `dominant-baseline`
+      // (which Chrome honours on <text>) so labels are vertically centred.
+      const baselineFixed = svg.replace(/\salignment-baseline=/g, ' dominant-baseline=');
+      const cleanSvg = DOMPurify.sanitize(baselineFixed, {
         USE_PROFILES: { html: true, svg: true, svgFilters: true },
+        // DOMPurify's SVG profile strips dominant-baseline by default; we need
+        // it to vertically centre actor labels in sequence diagrams.
+        ADD_ATTR: ['dominant-baseline'],
       });
       return { svg: cleanSvg };
     } catch (e) {

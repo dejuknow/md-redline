@@ -5,21 +5,25 @@ const STORAGE_KEY = 'md-redline-panel-widths';
 interface PanelWidths {
   explorer: number;
   sidebar: number;
+  mermaidPanel: number;
 }
 
 const DEFAULTS: PanelWidths = {
   explorer: 224, // w-56
   sidebar: 320, // w-80
+  mermaidPanel: 320,
 };
 
 const MIN_WIDTHS: PanelWidths = {
   explorer: 160,
   sidebar: 240,
+  mermaidPanel: 240,
 };
 
 const MAX_WIDTHS: PanelWidths = {
   explorer: 480,
   sidebar: 560,
+  mermaidPanel: 560,
 };
 
 export function loadWidths(): PanelWidths {
@@ -34,6 +38,11 @@ export function loadWidths(): PanelWidths {
         MAX_WIDTHS.explorer,
       ),
       sidebar: clamp(parsed.sidebar ?? DEFAULTS.sidebar, MIN_WIDTHS.sidebar, MAX_WIDTHS.sidebar),
+      mermaidPanel: clamp(
+        parsed.mermaidPanel ?? DEFAULTS.mermaidPanel,
+        MIN_WIDTHS.mermaidPanel,
+        MAX_WIDTHS.mermaidPanel,
+      ),
     };
   } catch {
     return DEFAULTS;
@@ -47,7 +56,7 @@ export function clamp(value: number, min: number, max: number) {
 export function useResizablePanel() {
   const [widths, setWidths] = useState<PanelWidths>(loadWidths);
   const [isDragging, setIsDragging] = useState(false);
-  const dragging = useRef<'explorer' | 'sidebar' | null>(null);
+  const dragging = useRef<'explorer' | 'sidebar' | 'mermaidPanel' | null>(null);
   const startX = useRef(0);
   const startWidth = useRef(0);
 
@@ -60,7 +69,7 @@ export function useResizablePanel() {
   }, []);
 
   const onMouseDown = useCallback(
-    (panel: 'explorer' | 'sidebar', e: React.MouseEvent) => {
+    (panel: 'explorer' | 'sidebar' | 'mermaidPanel', e: React.MouseEvent) => {
       e.preventDefault();
       dragging.current = panel;
       setIsDragging(true);
@@ -77,7 +86,10 @@ export function useResizablePanel() {
       const panel = dragging.current;
       if (!panel) return;
 
-      const delta = panel === 'explorer' ? e.clientX - startX.current : startX.current - e.clientX; // sidebar drags leftward to grow
+      // Right-edge panels (sidebar, mermaidPanel) grow when dragged leftward;
+      // left-edge panels (explorer) grow when dragged rightward.
+      const delta =
+        panel === 'explorer' ? e.clientX - startX.current : startX.current - e.clientX;
 
       const newWidth = clamp(startWidth.current + delta, MIN_WIDTHS[panel], MAX_WIDTHS[panel]);
 
@@ -112,6 +124,7 @@ export function useResizablePanel() {
   return {
     explorerWidth: widths.explorer,
     sidebarWidth: widths.sidebar,
+    mermaidPanelWidth: widths.mermaidPanel,
     onResizeStart: onMouseDown,
     isDragging,
   };

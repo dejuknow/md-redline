@@ -1146,25 +1146,46 @@ function partsAppearContiguously(text: string, parts: string[]): boolean {
  * anchors that span adjacent node labels (e.g. "Add Admin" across two nodes).
  * This is intentional — rendered SVG text flows continuously.
  */
-function extractMermaidText(cleanMarkdown: string): string {
+export function extractMermaidText(cleanMarkdown: string): string {
   if (!/^```mermaid\s*$/m.test(cleanMarkdown)) return '';
   const mermaidRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
   const labels: string[] = [];
   let match;
   while ((match = mermaidRegex.exec(cleanMarkdown)) !== null) {
     const source = match[1];
-    // Node labels: text inside [...], (...), {...}
+    // Flowchart node labels: text inside [...], (...), {...}
     // eslint-disable-next-line no-useless-escape
     const nodeRegex = /[\[({]([^\])}]+)[\])}]/g;
     let nodeMatch;
     while ((nodeMatch = nodeRegex.exec(source)) !== null) {
       labels.push(nodeMatch[1].trim());
     }
-    // Edge labels: |text|
+    // Flowchart edge labels: |text|
     const edgeRegex = /\|([^|]+)\|/g;
     let edgeMatch;
     while ((edgeMatch = edgeRegex.exec(source)) !== null) {
       labels.push(edgeMatch[1].trim());
+    }
+    // Sequence diagram: `participant X as Label` / `actor X as Label` use the
+    // alias as the visible label; bare `participant X` falls back to X itself.
+    const participantRegex = /^\s*(?:participant|actor)\s+([^\s]+)(?:\s+as\s+(.+))?\s*$/gm;
+    let pMatch;
+    while ((pMatch = participantRegex.exec(source)) !== null) {
+      labels.push((pMatch[2] ?? pMatch[1]).trim());
+    }
+    // Sequence diagram messages: `A -> B : Some text`, `A ->> B : ...`, etc.
+    // Captures the text after the colon. Arrow tokens supported: -> --> ->> -->>
+    // -x --x -) --) and the "-)" / "-x" variants used for async signals.
+    const messageRegex = /^\s*\S+\s*(?:-{1,2}>{1,2}|-{1,2}[x)])\s*\S+\s*:\s*(.+?)\s*$/gm;
+    let mMatch;
+    while ((mMatch = messageRegex.exec(source)) !== null) {
+      labels.push(mMatch[1].trim());
+    }
+    // Sequence diagram notes: `Note over A,B: text` / `Note left of A: text` / `Note right of A: text`
+    const noteRegex = /^\s*Note\s+(?:over|left of|right of)\s+[^\n:]+:\s*(.+?)\s*$/gim;
+    let nMatch;
+    while ((nMatch = noteRegex.exec(source)) !== null) {
+      labels.push(nMatch[1].trim());
     }
   }
   return labels.join(' ');

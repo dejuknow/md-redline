@@ -165,6 +165,14 @@ export function applyMermaidSvgTextHighlight(
   active: boolean,
   matchStart?: number,
   matchEnd?: number,
+  /**
+   * Disambiguator for the rects this call inserts. When multiple comments
+   * target distinct substrings of the SAME `<text>` element (e.g. "POST" and
+   * "/checkout" inside "POST /checkout"), each call must use a unique key so
+   * later calls don't wipe the earlier rects. Defaults to undefined, which
+   * keeps the legacy single-highlight-per-element behaviour.
+   */
+  highlightKey?: string,
 ) {
   // Styles that live on the <text> element itself can only apply to the
   // whole element — they'd be inconsistent with the per-character highlight
@@ -175,15 +183,17 @@ export function applyMermaidSvgTextHighlight(
   const parent = el.parentNode as SVGElement | null;
   if (!parent || !('getBBox' in el)) return;
 
-  // Belt-and-suspenders: remove any stale highlight rect from a previous pass
-  // in the same render (e.g. if the same text element is hit twice).
+  // Belt-and-suspenders: remove any stale highlight from a previous pass
+  // in the same render (e.g. if the same text element is hit twice). When a
+  // highlightKey is supplied we only clear rects with that exact suffix so
+  // sibling highlights on the same element survive.
   const textId =
     el.getAttribute('data-mdr-highlight-id') || `mdr-hl-${Math.random().toString(36).slice(2)}`;
   el.setAttribute('data-mdr-highlight-id', textId);
-  const stale = parent.querySelector(
-    `rect.${MERMAID_SVG_HIGHLIGHT_BG_CLASS}[data-mdr-highlight-for="${textId}"]`,
-  );
-  if (stale) stale.remove();
+  const tag = highlightKey ? `${textId}-${highlightKey}` : textId;
+  parent
+    .querySelectorAll(`.${MERMAID_SVG_HIGHLIGHT_BG_CLASS}[data-mdr-highlight-for="${tag}"]`)
+    .forEach((stale) => stale.remove());
 
   // Prefer a precise character-range bbox; fall back to the full element bbox
   // if range info isn't supplied or the API isn't available.
@@ -201,30 +211,49 @@ export function applyMermaidSvgTextHighlight(
   }
   if (!bbox.width || !bbox.height) return;
 
+  // Mirror the inline `<mark>` look: a soft background tint plus an underline.
+  // SVG can't use text-decoration the way HTML can, so we draw two sibling
+  // rects — a subtle background behind the text, and a thin bar at the
+  // baseline that plays the role of the underline.
   const padX = 3;
-  const padY = 2;
-  const rect = document.createElementNS(SVG_NS_HIGHLIGHT, 'rect');
-  rect.classList.add(MERMAID_SVG_HIGHLIGHT_BG_CLASS);
-  rect.setAttribute('data-mdr-highlight-for', textId);
-  rect.setAttribute('x', String(bbox.x - padX));
-  rect.setAttribute('y', String(bbox.y - padY));
-  rect.setAttribute('width', String(bbox.width + padX * 2));
-  rect.setAttribute('height', String(bbox.height + padY * 2));
-  rect.setAttribute('rx', '2');
-  rect.setAttribute('ry', '2');
-  // The theme's opaque comment backgrounds assume a lighter prose page behind
-  // them. Inside the mermaid SVG the diagram's own background can be just as
-  // dark, which kills contrast. Use the theme's accent color with fill-opacity
-  // so the highlight pops regardless of what's behind it.
+  const padY = 1;
   const accent = active ? theme.activeUnderline : theme.underline;
-  rect.setAttribute('fill', accent);
-  rect.setAttribute('fill-opacity', active ? '0.45' : '0.28');
-  if (active) {
-    rect.setAttribute('stroke', theme.ring || accent);
-    rect.setAttribute('stroke-width', '1.5');
-  }
-  rect.setAttribute('pointer-events', 'none');
-  parent.insertBefore(rect, el);
+
+  // Mermaid injects its own CSS that styles `rect` elements (theme node fills).
+  // Those rules win over our SVG `fill` attribute, which would silently reset
+  // our highlights to the diagram's node fill colour. Use inline `style="fill"`
+  // — inline styles beat CSS rules at the same specificity level — and an
+  // !important guard so future theme changes don't accidentally win again.
+  const bg = document.createElementNS(SVG_NS_HIGHLIGHT, 'rect');
+  bg.classList.add(MERMAID_SVG_HIGHLIGHT_BG_CLASS);
+  bg.setAttribute('data-mdr-highlight-for', tag);
+  bg.setAttribute('x', String(bbox.x - padX));
+  bg.setAttribute('y', String(bbox.y - padY));
+  bg.setAttribute('width', String(bbox.width + padX * 2));
+  bg.setAttribute('height', String(bbox.height + padY * 2));
+  bg.setAttribute('rx', '2');
+  bg.setAttribute('ry', '2');
+  bg.setAttribute('pointer-events', 'none');
+  bg.setAttribute(
+    'style',
+    `fill: ${accent} !important; fill-opacity: ${active ? 0.2 : 0.12} !important; stroke: none !important;`,
+  );
+  parent.insertBefore(bg, el);
+
+  const underlineThickness = active ? 2.5 : 2;
+  const underline = document.createElementNS(SVG_NS_HIGHLIGHT, 'rect');
+  underline.classList.add(MERMAID_SVG_HIGHLIGHT_BG_CLASS);
+  underline.setAttribute('data-mdr-highlight-for', tag);
+  underline.setAttribute('x', String(bbox.x - padX));
+  underline.setAttribute('y', String(bbox.y + bbox.height + padY));
+  underline.setAttribute('width', String(bbox.width + padX * 2));
+  underline.setAttribute('height', String(underlineThickness));
+  underline.setAttribute('pointer-events', 'none');
+  underline.setAttribute(
+    'style',
+    `fill: ${accent} !important; fill-opacity: 1 !important; stroke: none !important;`,
+  );
+  parent.insertBefore(underline, el);
 }
 
 function getRenderedLabelHeight(contentRoot: HTMLElement) {

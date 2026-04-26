@@ -65,6 +65,7 @@
     "dompurify": "^3.3.3",
     "hono": "^4.12.8",
     "mermaid": "^11.13.0",
+    "panzoom": "^9.4.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "rehype-raw": "^7.0.0",

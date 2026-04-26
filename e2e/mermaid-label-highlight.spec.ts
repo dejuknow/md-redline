@@ -194,11 +194,13 @@ for (const diag of DIAGRAMS) {
       const highlightRect = page.locator('.mermaid-block rect.mermaid-svg-text-highlight-bg');
       await expect(highlightRect.first()).toBeAttached();
 
-      // Click the comment card → active class + stroke on the rect
+      // Click the comment card → active class + stronger fill-opacity on the
+      // background rect (the highlight uses an inline style for color so it
+      // wins against Mermaid's own rect-fill CSS).
       await page.getByText(commentText, { exact: true }).click();
       await expect(svgText).toHaveClass(/mermaid-comment-highlight-active/);
       const activeRect = page.locator(
-        '.mermaid-block rect.mermaid-svg-text-highlight-bg[stroke]',
+        '.mermaid-block rect.mermaid-svg-text-highlight-bg[style*="fill-opacity: 0.2"]',
       );
       await expect(activeRect).toBeAttached();
     });

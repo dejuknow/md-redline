@@ -21,6 +21,7 @@ export interface AppSettings {
   showTemplatesByDefault?: boolean;
   enableResolve?: boolean;
   quickComment?: boolean;
+  mermaidFullscreenPanelCollapsed?: boolean;
 }
 
 export interface Preferences {
@@ -73,6 +74,9 @@ function sanitizeSettings(value: unknown): AppSettings | undefined {
   }
   if (typeof value.enableResolve === 'boolean') out.enableResolve = value.enableResolve;
   if (typeof value.quickComment === 'boolean') out.quickComment = value.quickComment;
+  if (typeof value.mermaidFullscreenPanelCollapsed === 'boolean') {
+    out.mermaidFullscreenPanelCollapsed = value.mermaidFullscreenPanelCollapsed;
+  }
   return out;
 }
 

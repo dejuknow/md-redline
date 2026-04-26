@@ -872,6 +872,39 @@ body {
   overflow: visible;
 }
 
+.mermaid-block-expand {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity 120ms, background-color 120ms, color 120ms;
+  background: var(--theme-bg-secondary, rgba(255, 255, 255, 0.85));
+  border: 1px solid var(--theme-border, #e3e3e3);
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  cursor: pointer;
+  color: var(--theme-text-muted, #94a3b8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.mermaid-block-expand svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mermaid-block:hover .mermaid-block-expand,
+.mermaid-block-expand:focus-visible { opacity: 1; }
+
+.mermaid-block-expand:hover {
+  background: var(--theme-bg-inset, #f1f5f9);
+  color: var(--theme-text, #1e293b);
+}
+
 .mermaid-error {
   padding: 1rem;
   color: var(--theme-danger-text);

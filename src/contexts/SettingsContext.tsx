@@ -24,6 +24,7 @@ interface SettingsContextValue {
   updateShowTemplatesByDefault: (show: boolean) => void;
   updateEnableResolve: (enable: boolean) => void;
   updateQuickComment: (quick: boolean) => void;
+  updateMermaidFullscreenPanelCollapsed: (collapsed: boolean) => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -110,6 +111,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
+  const updateMermaidFullscreenPanelCollapsed = useCallback(
+    (mermaidFullscreenPanelCollapsed: boolean) => update({ mermaidFullscreenPanelCollapsed }),
+    [update],
+  );
+
   const resetTemplates = useCallback(() => update({ templates: DEFAULT_TEMPLATES }), [update]);
 
   const resetAll = useCallback(() => {
@@ -132,6 +138,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateShowTemplatesByDefault,
         updateEnableResolve,
         updateQuickComment,
+        updateMermaidFullscreenPanelCollapsed,
         resetTemplates,
         resetAll,
       }}

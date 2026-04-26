@@ -1,6 +1,13 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 
-export type ModalId = 'commandPalette' | 'fileOpener' | 'settings' | 'shortcuts' | 'search' | null;
+export type ModalId =
+  | 'commandPalette'
+  | 'fileOpener'
+  | 'settings'
+  | 'shortcuts'
+  | 'search'
+  | 'mermaidFullscreen'
+  | null;
 
 export function useModalState(): {
   activeModal: ModalId;

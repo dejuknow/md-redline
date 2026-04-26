@@ -561,34 +561,42 @@ describe('applyMermaidSvgTextHighlight', () => {
     return textEl;
   }
 
-  it('inserts a sibling <rect> sized to the matched character range', () => {
+  it('inserts a soft background rect + an underline rect for the matched range', () => {
     const textEl = makeSvgText('POST /auth/login');
     const authStart = 6;
     const authEnd = 10;
 
     applyMermaidSvgTextHighlight(textEl, theme, false, authStart, authEnd);
 
-    const rect = textEl.parentNode?.querySelector('rect.mermaid-svg-text-highlight-bg');
-    expect(rect).not.toBeNull();
-    // With charWidth=10 and padX=3: x = 60 - 3 = 57, width = 40 + 6 = 46
-    expect(Number(rect!.getAttribute('x'))).toBe(57);
-    expect(Number(rect!.getAttribute('width'))).toBe(46);
-    // No stroke on non-active
-    expect(rect!.getAttribute('stroke')).toBeNull();
-    // Accent color with reduced opacity
-    expect(rect!.getAttribute('fill')).toBe('#f0ad4e');
-    expect(rect!.getAttribute('fill-opacity')).toBe('0.28');
+    const rects = textEl.parentNode!.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
+    expect(rects.length).toBe(2);
+    // First rect = soft background tint, sized to the matched range with padding.
+    const bg = rects[0];
+    expect(Number(bg.getAttribute('x'))).toBe(57);
+    expect(Number(bg.getAttribute('width'))).toBe(46);
+    // Color is applied via inline style (which beats Mermaid's CSS).
+    expect(bg.getAttribute('style')).toContain('fill: #f0ad4e');
+    expect(bg.getAttribute('style')).toContain('fill-opacity: 0.12');
+    expect(bg.getAttribute('style')).toContain('stroke: none');
+    // Second rect = thin underline at the baseline.
+    const underline = rects[1];
+    expect(underline.getAttribute('style')).toContain('fill: #f0ad4e');
+    expect(underline.getAttribute('style')).toContain('fill-opacity: 1');
+    expect(Number(underline.getAttribute('height'))).toBeLessThan(5);
   });
 
-  it('uses brighter fill + stroke for active state', () => {
+  it('uses the active accent + slightly thicker underline for active state', () => {
     const textEl = makeSvgText('POST /auth/login');
     applyMermaidSvgTextHighlight(textEl, theme, true, 6, 10);
 
-    const rect = textEl.parentNode?.querySelector('rect.mermaid-svg-text-highlight-bg');
-    expect(rect).not.toBeNull();
-    expect(rect!.getAttribute('fill')).toBe('#e08e0b'); // activeUnderline
-    expect(rect!.getAttribute('fill-opacity')).toBe('0.45');
-    expect(rect!.getAttribute('stroke')).toBe('#fd7e14'); // ring
+    const rects = textEl.parentNode!.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
+    expect(rects.length).toBe(2);
+    const bg = rects[0];
+    expect(bg.getAttribute('style')).toContain('fill: #e08e0b'); // activeUnderline
+    expect(bg.getAttribute('style')).toContain('fill-opacity: 0.2');
+    const underline = rects[1];
+    expect(underline.getAttribute('style')).toContain('fill: #e08e0b');
+    expect(Number(underline.getAttribute('height'))).toBeGreaterThan(2);
   });
 
   it('does not set whole-element text styles that would conflict with the substring rect', () => {
@@ -615,13 +623,33 @@ describe('applyMermaidSvgTextHighlight', () => {
     expect(Number(rect!.getAttribute('width'))).toBe(136);
   });
 
-  it('replaces a stale highlight rect on re-application', () => {
+  it('replaces stale highlight rects on re-application', () => {
     const textEl = makeSvgText('POST /auth/login');
     applyMermaidSvgTextHighlight(textEl, theme, false, 6, 10);
     applyMermaidSvgTextHighlight(textEl, theme, true, 6, 10);
 
-    const rects = textEl.parentNode?.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
-    expect(rects?.length).toBe(1);
-    expect(rects![0].getAttribute('fill-opacity')).toBe('0.45');
+    const rects = textEl.parentNode!.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
+    // Two rects per highlight (bg + underline), one highlight at a time.
+    expect(rects.length).toBe(2);
+    expect(rects[0].getAttribute('style')).toContain('fill-opacity: 0.2');
+  });
+
+  it('keeps independent rects when distinct highlightKeys are used on the same element', () => {
+    // Simulates the fullscreen modal drawing two different comments anchored
+    // to non-overlapping substrings of the same `<text>` element ("POST" and
+    // "/auth/login" inside "POST /auth/login"). Without per-comment keys, the
+    // second call would clear the first's rects.
+    const textEl = makeSvgText('POST /auth/login');
+    applyMermaidSvgTextHighlight(textEl, theme, false, 0, 4, 'comment-a');
+    applyMermaidSvgTextHighlight(textEl, theme, true, 5, 16, 'comment-b');
+
+    const rects = textEl.parentNode!.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
+    // Two rects per highlight (bg + underline) × two highlights = 4 rects total.
+    expect(rects.length).toBe(4);
+    // Re-applying the first comment's highlight should only replace its own
+    // rects, leaving the second comment's rects intact.
+    applyMermaidSvgTextHighlight(textEl, theme, true, 0, 4, 'comment-a');
+    const after = textEl.parentNode!.querySelectorAll('rect.mermaid-svg-text-highlight-bg');
+    expect(after.length).toBe(4);
   });
 });

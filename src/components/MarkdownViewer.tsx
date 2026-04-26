@@ -1,10 +1,10 @@
-import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
+import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react';
 import DOMPurify from 'dompurify';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 import { assignHeadingIds } from '../lib/heading-slugs';
-import { useMermaidRenderer } from '../hooks/useMermaidRenderer';
+import { useMermaidRenderer, type MermaidResult } from '../hooks/useMermaidRenderer';
 import { collectVisibleTextNodes } from '../lib/visible-text';
 import {
   applyMermaidHighlightStyles,
@@ -39,6 +39,8 @@ interface Props {
   searchActiveIndex?: number;
   onSearchCount?: (count: number) => void;
   theme?: string;
+  mermaidSvgMap?: Map<string, MermaidResult>;
+  onOpenMermaidFullscreen?: (source: string, blockIndex: number) => void;
 }
 
 export interface TocHeading {
@@ -76,6 +78,8 @@ export const MarkdownViewer = memo(
       searchActiveIndex,
       onSearchCount,
       theme,
+      mermaidSvgMap: mermaidSvgMapProp,
+      onOpenMermaidFullscreen,
     },
     ref,
   ) {
@@ -84,8 +88,16 @@ export const MarkdownViewer = memo(
     const searchCountCb = useRef(onSearchCount);
     searchCountCb.current = onSearchCount;
 
-    // Mermaid rendering
-    const mermaidSvgMap = useMermaidRenderer(cleanMarkdown, theme || 'light');
+    // Mermaid rendering. When App hoists useMermaidRenderer and passes the map
+    // as a prop, we use that (so both the viewer and fullscreen modal share the
+    // same pre-rendered SVGs). Otherwise fall back to a local hook call so that
+    // direct-render usages (e.g. unit tests) continue to work without App wiring.
+    // Empty-string source -> hasMermaidBlocks returns false -> the hook is a no-op.
+    const localSvgMap = useMermaidRenderer(
+      mermaidSvgMapProp ? '' : cleanMarkdown,
+      theme || 'light',
+    );
+    const mermaidSvgMap = mermaidSvgMapProp ?? localSvgMap;
 
     // Build a mapping from clean markdown offsets to rendered/plain text offsets.
     // cleanOffset lives in clean-markdown space (with ** ## etc), but DOM text is
@@ -129,6 +141,22 @@ export const MarkdownViewer = memo(
       },
     }));
 
+    // Delegate clicks on .mermaid-block-expand buttons to open the fullscreen modal.
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      const onClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        const btn = target.closest<HTMLButtonElement>('.mermaid-block-expand');
+        if (!btn) return;
+        const source = btn.dataset.mermaidSource;
+        const blockIndex = Number(btn.dataset.mermaidBlockIndex ?? '0');
+        if (source && onOpenMermaidFullscreen) onOpenMermaidFullscreen(source, blockIndex);
+      };
+      container.addEventListener('click', onClick);
+      return () => container.removeEventListener('click', onClick);
+    }, [onOpenMermaidFullscreen]);
+
     // Set innerHTML and apply highlights after React commits.
     // We manage innerHTML ourselves (no dangerouslySetInnerHTML) so React's
     // reconciliation never interferes with our DOM modifications.
@@ -150,9 +178,17 @@ export const MarkdownViewer = memo(
 
       // --- Mermaid blocks ---
       const mermaidPres = container.querySelectorAll('pre');
+      let mermaidBlockIndex = 0;
       for (const pre of mermaidPres) {
         const code = pre.querySelector('code.language-mermaid');
         if (!code) continue;
+
+        // Capture (and increment) this block's source-order index BEFORE we
+        // bail on empty/error/loading sources — the scanners in App and in
+        // commentsForDiagram count every fenced Mermaid block, so any skip
+        // here would desync indexes for downstream blocks.
+        const blockIndexForSource = mermaidBlockIndex;
+        mermaidBlockIndex++;
 
         const source = (code.textContent || '').trim();
         if (!source) continue;
@@ -166,6 +202,16 @@ export const MarkdownViewer = memo(
           // SVG is already sanitized via DOMPurify in mermaid-renderer.ts
           svgDiv.innerHTML = result.svg;
           wrapper.appendChild(svgDiv);
+          const expandBtn = document.createElement('button');
+          expandBtn.className = 'mermaid-block-expand';
+          expandBtn.type = 'button';
+          expandBtn.setAttribute('aria-label', 'Open in fullscreen');
+          expandBtn.title = 'Open in fullscreen';
+          expandBtn.dataset.mermaidSource = source;
+          expandBtn.dataset.mermaidBlockIndex = String(blockIndexForSource);
+          // Heroicons "arrows-pointing-out" — matches the rest of the app's icon style.
+          expandBtn.innerHTML = `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/></svg>`;
+          wrapper.appendChild(expandBtn);
           pre.replaceWith(wrapper);
         } else if (result?.error) {
           const errDiv = document.createElement('div');
@@ -242,8 +288,26 @@ export const MarkdownViewer = memo(
             if (isActive) {
               textEl.classList.add('mermaid-comment-highlight-active');
             }
-            textEl.dataset.commentIds = ids.join(',');
-            applyMermaidSvgTextHighlight(textEl, mermaidTheme, isActive, matchStart, matchEnd);
+            // Append (not replace) so two highlight groups on the same
+            // <text> element both register their ids — the click handler
+            // reads this list to decide which thread to activate.
+            const existing = textEl.dataset.commentIds
+              ? textEl.dataset.commentIds.split(',')
+              : [];
+            for (const id of ids) {
+              if (!existing.includes(id)) existing.push(id);
+            }
+            textEl.dataset.commentIds = existing.join(',');
+            // Distinct highlightKey per group so a second pass on the same
+            // element doesn't wipe the first group's rects.
+            applyMermaidSvgTextHighlight(
+              textEl,
+              mermaidTheme,
+              isActive,
+              matchStart,
+              matchEnd,
+              ids.join('-'),
+            );
           },
         );
       }

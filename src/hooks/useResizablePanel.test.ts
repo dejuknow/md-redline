@@ -49,7 +49,7 @@ describe('clamp', () => {
 });
 
 describe('loadWidths', () => {
-  const DEFAULTS = { explorer: 224, sidebar: 320 };
+  const DEFAULTS = { explorer: 224, sidebar: 320, mermaidPanel: 320 };
 
   it('returns defaults when localStorage is empty', () => {
     expect(loadWidths()).toEqual(DEFAULTS);
@@ -72,9 +72,19 @@ describe('loadWidths', () => {
     expect(result.sidebar).toBe(560); // MAX_WIDTHS.sidebar
   });
 
+  it('clamps mermaidPanel width to bounds', () => {
+    store['md-redline-panel-widths'] = JSON.stringify({ mermaidPanel: 9999 });
+    const result = loadWidths();
+    expect(result.mermaidPanel).toBe(560);
+  });
+
   it('preserves valid widths', () => {
-    store['md-redline-panel-widths'] = JSON.stringify({ explorer: 300, sidebar: 400 });
-    expect(loadWidths()).toEqual({ explorer: 300, sidebar: 400 });
+    store['md-redline-panel-widths'] = JSON.stringify({
+      explorer: 300,
+      sidebar: 400,
+      mermaidPanel: 380,
+    });
+    expect(loadWidths()).toEqual({ explorer: 300, sidebar: 400, mermaidPanel: 380 });
   });
 
   it('handles missing fields gracefully', () => {

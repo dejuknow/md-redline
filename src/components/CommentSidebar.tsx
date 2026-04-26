@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
-import { CommentCard } from './CommentCard';
+import { ThreadCard } from './ThreadCard';
 import { useSettings } from '../contexts/SettingsContext';
 import { ActionButton } from './ActionButton';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -281,9 +281,11 @@ export function CommentSidebar({
               <div className="h-px flex-1 bg-border-subtle" />
             </div>
             {orphanActiveComments.map((comment) => (
-              <div
+              <ThreadCard
                 key={comment.id}
-                ref={(node) => {
+                thread={comment}
+                active={comment.id === activeCommentId}
+                divRef={(node) => {
                   if (node) {
                     commentRefs.current.set(comment.id, node);
                   } else {
@@ -293,45 +295,39 @@ export function CommentSidebar({
                     activeRef.current = node;
                   }
                 }}
-                tabIndex={-1}
-                data-comment-card-id={comment.id}
-                data-orphan="true"
-              >
-                <CommentCard
-                  comment={comment}
-                  isActive={comment.id === activeCommentId}
-                  anchorMissing
-                  showAnchorContext
-                  selectionText={selectionText ?? null}
-                  selectionOffset={selectionOffset ?? null}
-                  onReanchorToSelection={onReanchorToSelection}
-                  sent={sentCommentIds?.includes(comment.id) ?? false}
-                  onActivate={onActivate}
-                  onResolve={resolveEnabled ? onResolve : undefined}
-                  onUnresolve={resolveEnabled ? onUnresolve : undefined}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                  onReply={onReply}
-                  onEditReply={onEditReply}
-                  onDeleteReply={onDeleteReply}
-                  editor={activeEditor?.commentId === comment.id ? activeEditor : null}
-                  onRequestCommentEdit={openCommentEdit}
-                  onRequestReplyCompose={openReplyCompose}
-                  onRequestReplyEdit={openReplyEdit}
-                  onCloseEditor={closeEditor}
-                  onContextMenu={
-                    onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
-                  }
-                />
-              </div>
+                anchorMissing
+                showAnchorContext
+                selectionText={selectionText ?? null}
+                selectionOffset={selectionOffset ?? null}
+                onReanchorToSelection={onReanchorToSelection}
+                sent={sentCommentIds?.includes(comment.id) ?? false}
+                onSelect={onActivate}
+                onResolve={resolveEnabled ? onResolve : undefined}
+                onUnresolve={resolveEnabled ? onUnresolve : undefined}
+                onDelete={onDelete}
+                onEdit={onEdit}
+                onReply={onReply}
+                onEditReply={onEditReply}
+                onDeleteReply={onDeleteReply}
+                editor={activeEditor}
+                onRequestCommentEdit={openCommentEdit}
+                onRequestReplyCompose={openReplyCompose}
+                onRequestReplyEdit={openReplyEdit}
+                onCloseEditor={closeEditor}
+                onContextMenu={
+                  onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
+                }
+              />
             ))}
             <div className="h-2" />
           </>
         )}
         {activeComments.map((comment) => (
-          <div
+          <ThreadCard
             key={comment.id}
-            ref={(node) => {
+            thread={comment}
+            active={comment.id === activeCommentId}
+            divRef={(node) => {
               if (node) {
                 commentRefs.current.set(comment.id, node);
               } else {
@@ -341,32 +337,25 @@ export function CommentSidebar({
                 activeRef.current = node;
               }
             }}
-            tabIndex={-1}
-            data-comment-card-id={comment.id}
-          >
-            <CommentCard
-              comment={comment}
-              isActive={comment.id === activeCommentId}
-              anchorMissing={missingAnchors.has(comment.id)}
-              sent={sentCommentIds?.includes(comment.id) ?? false}
-              onActivate={onActivate}
-              onResolve={resolveEnabled ? onResolve : undefined}
-              onUnresolve={resolveEnabled ? onUnresolve : undefined}
-              onDelete={onDelete}
-              onEdit={onEdit}
-              onReply={onReply}
-              onEditReply={onEditReply}
-              onDeleteReply={onDeleteReply}
-              editor={activeEditor?.commentId === comment.id ? activeEditor : null}
-              onRequestCommentEdit={openCommentEdit}
-              onRequestReplyCompose={openReplyCompose}
-              onRequestReplyEdit={openReplyEdit}
-              onCloseEditor={closeEditor}
-              onContextMenu={
-                onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
-              }
-            />
-          </div>
+            anchorMissing={missingAnchors.has(comment.id)}
+            sent={sentCommentIds?.includes(comment.id) ?? false}
+            onSelect={onActivate}
+            onResolve={resolveEnabled ? onResolve : undefined}
+            onUnresolve={resolveEnabled ? onUnresolve : undefined}
+            onDelete={onDelete}
+            onEdit={onEdit}
+            onReply={onReply}
+            onEditReply={onEditReply}
+            onDeleteReply={onDeleteReply}
+            editor={activeEditor}
+            onRequestCommentEdit={openCommentEdit}
+            onRequestReplyCompose={openReplyCompose}
+            onRequestReplyEdit={openReplyEdit}
+            onCloseEditor={closeEditor}
+            onContextMenu={
+              onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
+            }
+          />
         ))}
 
         {resolveEnabled && resolvedComments.length > 0 && filter !== 'resolved' && (
@@ -379,9 +368,11 @@ export function CommentSidebar({
           </div>
         )}
         {resolvedComments.map((comment) => (
-          <div
+          <ThreadCard
             key={comment.id}
-            ref={(node) => {
+            thread={comment}
+            active={comment.id === activeCommentId}
+            divRef={(node) => {
               if (node) {
                 commentRefs.current.set(comment.id, node);
               } else {
@@ -391,32 +382,25 @@ export function CommentSidebar({
                 activeRef.current = node;
               }
             }}
-            tabIndex={-1}
-            data-comment-card-id={comment.id}
-          >
-            <CommentCard
-              comment={comment}
-              isActive={comment.id === activeCommentId}
-              anchorMissing={missingAnchors.has(comment.id)}
-              sent={sentCommentIds?.includes(comment.id) ?? false}
-              onActivate={onActivate}
-              onResolve={resolveEnabled ? onResolve : undefined}
-              onUnresolve={resolveEnabled ? onUnresolve : undefined}
-              onDelete={onDelete}
-              onEdit={onEdit}
-              onReply={onReply}
-              onEditReply={onEditReply}
-              onDeleteReply={onDeleteReply}
-              editor={activeEditor?.commentId === comment.id ? activeEditor : null}
-              onRequestCommentEdit={openCommentEdit}
-              onRequestReplyCompose={openReplyCompose}
-              onRequestReplyEdit={openReplyEdit}
-              onCloseEditor={closeEditor}
-              onContextMenu={
-                onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
-              }
-            />
-          </div>
+            anchorMissing={missingAnchors.has(comment.id)}
+            sent={sentCommentIds?.includes(comment.id) ?? false}
+            onSelect={onActivate}
+            onResolve={resolveEnabled ? onResolve : undefined}
+            onUnresolve={resolveEnabled ? onUnresolve : undefined}
+            onDelete={onDelete}
+            onEdit={onEdit}
+            onReply={onReply}
+            onEditReply={onEditReply}
+            onDeleteReply={onDeleteReply}
+            editor={activeEditor}
+            onRequestCommentEdit={openCommentEdit}
+            onRequestReplyCompose={openReplyCompose}
+            onRequestReplyEdit={openReplyEdit}
+            onCloseEditor={closeEditor}
+            onContextMenu={
+              onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
+            }
+          />
         ))}
 
         {filtered.length === 0 && (

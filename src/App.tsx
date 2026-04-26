@@ -21,6 +21,7 @@ import {
   createCommentMarkerRegex,
   findNewReplyIds,
   parseComments,
+  stripInlineFormatting,
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
@@ -56,6 +57,9 @@ import { migrateLocalStorageToDisk } from './lib/preferences-client';
 import { readJsonResponse } from './lib/http';
 import { ALL_THEMES } from './lib/themes';
 import { hasMermaidBlocks } from './lib/mermaid-renderer';
+import { useMermaidRenderer } from './hooks/useMermaidRenderer';
+import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
+import { MermaidFullscreenModal } from './components/MermaidFullscreenModal';
 import { usePaneLayout } from './hooks/usePaneLayout';
 import { useToast } from './hooks/useToast';
 import { useModalState } from './hooks/useModalState';
@@ -230,7 +234,8 @@ export default function App() {
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
   const setTheme = useSetPersistedTheme();
-  const { explorerWidth, sidebarWidth, onResizeStart, isDragging } = useResizablePanel();
+  const { explorerWidth, sidebarWidth, mermaidPanelWidth, onResizeStart, isDragging } =
+    useResizablePanel();
   const pageVisible = usePageVisible();
   const {
     explorerVisible,
@@ -567,6 +572,67 @@ export default function App() {
   }, [diffEnabled, setDiffEnabled]);
 
   const viewerNeedsTheme = useMemo(() => hasMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
+
+  // Mermaid rendering — hoisted here so both MarkdownViewer and the fullscreen modal
+  // can share the same pre-rendered SVG map without double-rendering.
+  const persistedTheme = usePersistedTheme();
+  const mermaidSvgMap = useMermaidRenderer(cleanMarkdown, persistedTheme || 'light');
+
+  // Fullscreen modal state
+  const mermaidFullscreen = useMermaidFullscreen();
+
+  // Bridge useMermaidFullscreen into the modal-state machine so Escape / palette
+  // guards that key on activeModal also work for the fullscreen modal.
+  useEffect(() => {
+    if (mermaidFullscreen.isOpen) setActiveModal('mermaidFullscreen');
+    else if (activeModal === 'mermaidFullscreen') setActiveModal(null);
+    // activeModal is intentionally excluded: including it would re-fire on every
+    // modal change and stomp newly-opened modals back to null.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mermaidFullscreen.isOpen]);
+
+  // Look up the SVG for the active source.
+  const activeMermaidSvg = useMemo(() => {
+    if (!mermaidFullscreen.activeSource) return null;
+    return mermaidSvgMap.get(mermaidFullscreen.activeSource)?.svg ?? null;
+  }, [mermaidFullscreen.activeSource, mermaidSvgMap]);
+
+  // Auto-close the fullscreen modal and show a toast when the active diagram
+  // source is removed from the markdown.
+  useEffect(() => {
+    if (!mermaidFullscreen.isOpen) return;
+    if (!mermaidFullscreen.activeSource) return;
+    // Verify the (activeBlockIndex+1)-th Mermaid block still contains this
+    // source. Searching the whole document (not just fenced Mermaid blocks)
+    // would falsely keep the modal open when the same source string also
+    // appears outside a Mermaid fence — the modal could silently retarget
+    // to a surviving copy after the active one is removed.
+    const src = mermaidFullscreen.activeSource.trim();
+    const targetIndex = mermaidFullscreen.activeBlockIndex ?? 0;
+    const blockRanges: { start: number; end: number }[] = [];
+    const blockRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = blockRegex.exec(cleanMarkdown)) !== null) {
+      blockRanges.push({ start: m.index, end: m.index + m[0].length });
+    }
+    const block = blockRanges[targetIndex];
+    const stillThere =
+      !!block && cleanMarkdown.indexOf(src, block.start) >= 0 &&
+      cleanMarkdown.indexOf(src, block.start) + src.length <= block.end;
+    if (!stillThere) {
+      mermaidFullscreen.close();
+      showToast('Diagram was removed from the document.');
+    }
+    // mermaidFullscreen is a new object each render; individual fields are listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    cleanMarkdown,
+    mermaidFullscreen.isOpen,
+    mermaidFullscreen.activeSource,
+    mermaidFullscreen.activeBlockIndex,
+    mermaidFullscreen.close,
+    showToast,
+  ]);
 
   // Heading tracking / table of contents
   const { tocHeadings, activeHeadingId, setActiveHeadingId, spyDisabledRef, scrollSpyRafRef } =
@@ -1040,6 +1106,13 @@ export default function App() {
       const isInput =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 
+      // While the Mermaid fullscreen modal is open, the modal owns the
+      // keyboard. Even Cmd+K / Cmd+, would otherwise open the palette /
+      // settings *behind* the fullscreen overlay (lower z-index), leaving
+      // hidden modal state active and disabling the fullscreen guard for
+      // subsequent shortcuts.
+      if (activeModal === 'mermaidFullscreen') return;
+
       // Cmd+K : Open command palette (works even in inputs)
       if (mod && e.key === 'k') {
         e.preventDefault();
@@ -1132,7 +1205,8 @@ export default function App() {
         }
       }
 
-      // Keys below only work outside inputs and when command palette is closed
+      // Keys below only work outside inputs and when the command palette is
+      // closed. (The Mermaid fullscreen modal already short-circuited above.)
       if (isInput || activeModal === 'commandPalette') return;
 
       // ? : Toggle keyboard shortcuts help
@@ -1356,6 +1430,32 @@ export default function App() {
         onExecute: handleDiffToggle,
       });
     }
+    cmds.push({
+      id: 'open-diagram-fullscreen',
+      label: 'Open diagram in fullscreen',
+      section: 'View',
+      onExecute: () => {
+        const blocks = document.querySelectorAll<HTMLElement>('.mermaid-block');
+        if (blocks.length === 0) return;
+        const center = window.innerHeight / 2;
+        let best: HTMLElement | null = null;
+        let bestDist = Infinity;
+        for (const b of blocks) {
+          const rect = b.getBoundingClientRect();
+          const blockCenter = rect.top + rect.height / 2;
+          const dist = Math.abs(blockCenter - center);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = b;
+          }
+        }
+        if (!best) return;
+        const btn = best.querySelector<HTMLButtonElement>('.mermaid-block-expand');
+        const source = btn?.dataset.mermaidSource;
+        const blockIndex = Number(btn?.dataset.mermaidBlockIndex ?? '0');
+        if (source) mermaidFullscreen.open(source, blockIndex);
+      },
+    });
     return cmds;
   }, [
     setSidebarVisible,
@@ -1367,6 +1467,7 @@ export default function App() {
     currentSnapshot,
     diffEnabled,
     handleDiffToggle,
+    mermaidFullscreen,
   ]);
 
   const fileCommands = useMemo((): Command[] => {
@@ -1822,6 +1923,8 @@ export default function App() {
                             searchActiveIndex={activeSearchIndex}
                             onSearchCount={handleSearchCount}
                             sentCommentIds={sentCommentIds}
+                            mermaidSvgMap={mermaidSvgMap}
+                            onOpenMermaidFullscreen={mermaidFullscreen.open}
                           />
                         ) : (
                           <MarkdownViewer
@@ -1842,6 +1945,8 @@ export default function App() {
                             searchActiveIndex={activeSearchIndex}
                             onSearchCount={handleSearchCount}
                             sentCommentIds={sentCommentIds}
+                            mermaidSvgMap={mermaidSvgMap}
+                            onOpenMermaidFullscreen={mermaidFullscreen.open}
                           />
                         )}
                         <DragHandles
@@ -1983,6 +2088,70 @@ export default function App() {
         recentFiles={recentFiles}
         activeFilePath={activeFilePath}
         onClearRecent={clearRecentFiles}
+      />
+
+      {/* Mermaid fullscreen modal */}
+      <MermaidFullscreenModal
+        open={mermaidFullscreen.isOpen}
+        source={mermaidFullscreen.activeSource}
+        blockIndex={mermaidFullscreen.activeBlockIndex}
+        svgHtml={activeMermaidSvg}
+        cleanMarkdown={cleanMarkdown}
+        comments={comments}
+        activeCommentId={activeCommentId}
+        onClose={mermaidFullscreen.close}
+        onAddComment={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
+          // The hint offset coming out of the modal is in canvas-text-content
+          // coordinates and isn't meaningful in markdown space, so we ignore
+          // it and instead point insertComment at the anchor's position
+          // INSIDE this diagram's source block.
+          //
+          // insertComment expects the hint in plain-text coordinates (the
+          // text produced by stripInlineFormatting, which strips fenced-code
+          // delimiters), not raw clean-markdown coordinates. If we pass a
+          // raw source position, pickBestOccurrence ranks it against
+          // plain-text positions and can prefer a nearby prose occurrence —
+          // the comment then ends up filed against the prose, and
+          // commentsForDiagram filters it out of the diagram panel.
+          const src = mermaidFullscreen.activeSource;
+          const idx = mermaidFullscreen.activeBlockIndex ?? 0;
+          let adjustedHint = hintOffset;
+          if (src) {
+            // Locate the (idx+1)-th `mermaid` fenced block, then search for
+            // the source text WITHIN that block. A bare `indexOf` over the
+            // whole document would also count occurrences outside Mermaid
+            // fences (e.g. the same source quoted in a doc code block) and
+            // file the new marker against the wrong block.
+            const blockRanges: { start: number; end: number }[] = [];
+            const blockRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
+            let m: RegExpExecArray | null;
+            while ((m = blockRegex.exec(cleanMarkdown)) !== null) {
+              blockRanges.push({ start: m.index, end: m.index + m[0].length });
+            }
+            const block = blockRanges[idx];
+            if (block) {
+              const blockStart = cleanMarkdown.indexOf(src, block.start);
+              if (blockStart >= 0 && blockStart + src.length <= block.end) {
+                const anchorInSource = src.indexOf(anchor);
+                const cleanHint = blockStart + (anchorInSource >= 0 ? anchorInSource : 0);
+                const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
+                adjustedHint = toPlainOffset(cleanHint);
+              }
+            }
+          }
+          handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
+        }}
+        onReply={handleReply}
+        onResolve={settings.enableResolve ? handleResolve : undefined}
+        onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+        onDelete={handleDelete}
+        onEdit={handleEdit}
+        onEditReply={handleEditReply}
+        onDeleteReply={handleDeleteReply}
+        onActivateComment={setActiveCommentId}
+        panelWidth={mermaidPanelWidth}
+        onPanelResizeStart={(e) => onResizeStart('mermaidPanel', e)}
+        isResizing={isDragging}
       />
 
       {/* Context menus */}

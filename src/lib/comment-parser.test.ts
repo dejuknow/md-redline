@@ -21,6 +21,7 @@ import {
   findNewReplyIds,
   moveComment,
   transformCommentMarkers,
+  extractMermaidText,
 } from './comment-parser';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
@@ -2265,5 +2266,52 @@ describe('moveComment', () => {
     expect(after[0].anchor).toBe('foo');
     // The marker should now be near the second occurrence, not the first.
     expect(after[0].cleanOffset).toBeGreaterThan(10);
+  });
+});
+
+describe('extractMermaidText — sequence diagrams', () => {
+  const fence = (body: string) => '```mermaid\n' + body + '\n```\n';
+
+  it('extracts participant aliases (with `as`) and bare participant names', () => {
+    const md = fence(
+      'sequenceDiagram\n' +
+        '  participant U as User Browser\n' +
+        '  participant Bus\n' +
+        '  actor Admin as Site Admin\n',
+    );
+    const out = extractMermaidText(md);
+    expect(out).toContain('User Browser');
+    expect(out).toContain('Bus');
+    expect(out).toContain('Site Admin');
+  });
+
+  it('extracts message text after the colon for various arrow styles', () => {
+    const md = fence(
+      'sequenceDiagram\n' +
+        '  participant A\n' +
+        '  participant B\n' +
+        '  A->>B: POST /checkout\n' +
+        '  B-->>A: cart contents\n' +
+        '  A->B: ChargeCard(amount)\n' +
+        '  B-->A: payment confirmed\n',
+    );
+    const out = extractMermaidText(md);
+    expect(out).toContain('POST /checkout');
+    expect(out).toContain('cart contents');
+    expect(out).toContain('ChargeCard(amount)');
+    expect(out).toContain('payment confirmed');
+  });
+
+  it('extracts text from sequence-diagram notes', () => {
+    const md = fence(
+      'sequenceDiagram\n' +
+        '  participant A\n' +
+        '  participant B\n' +
+        '  Note over A,B: shared state\n' +
+        '  Note left of A: client side\n',
+    );
+    const out = extractMermaidText(md);
+    expect(out).toContain('shared state');
+    expect(out).toContain('client side');
   });
 });

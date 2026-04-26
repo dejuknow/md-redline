@@ -343,6 +343,16 @@ describe('cross-process file lock', () => {
     });
   });
 
+  it('preserves mermaidFullscreenPanelCollapsed through the whitelist', async () => {
+    const result = await writePreferences(testDir, {
+      settings: {
+        mermaidFullscreenPanelCollapsed: true,
+        unknownSetting: 'drop me',
+      },
+    } as Record<string, unknown>);
+    expect(result.settings).toEqual({ mermaidFullscreenPanelCollapsed: true });
+  });
+
   it('sanitizePreferencesPatch returns {} for non-object input', () => {
     expect(sanitizePreferencesPatch(null)).toEqual({});
     expect(sanitizePreferencesPatch('hello')).toEqual({});

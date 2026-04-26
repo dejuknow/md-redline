@@ -11,6 +11,8 @@ export interface AppSettings {
   enableResolve: boolean;
   /** Skip the "Comment" button and go straight to the comment form when text is selected. */
   quickComment: boolean;
+  /** When true, the comment thread panel in the Mermaid fullscreen view starts collapsed. Persists across sessions. */
+  mermaidFullscreenPanelCollapsed: boolean;
 }
 
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showTemplatesByDefault: true,
   enableResolve: false,
   quickComment: false,
+  mermaidFullscreenPanelCollapsed: false,
 };
 
 /**
@@ -69,5 +72,9 @@ export function parseSettings(input: unknown): AppSettings {
       typeof parsed.quickComment === 'boolean'
         ? parsed.quickComment
         : DEFAULT_SETTINGS.quickComment,
+    mermaidFullscreenPanelCollapsed:
+      typeof parsed.mermaidFullscreenPanelCollapsed === 'boolean'
+        ? parsed.mermaidFullscreenPanelCollapsed
+        : DEFAULT_SETTINGS.mermaidFullscreenPanelCollapsed,
   };
 }

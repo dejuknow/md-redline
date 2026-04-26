@@ -93,6 +93,7 @@ describe('parseSettings', () => {
       showTemplatesByDefault: true,
       enableResolve: true,
       quickComment: true,
+      mermaidFullscreenPanelCollapsed: false,
     };
     expect(parseSettings(full)).toEqual(full);
   });
