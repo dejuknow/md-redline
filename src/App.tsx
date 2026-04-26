@@ -56,7 +56,11 @@ import { usePersistedTheme, useSetPersistedTheme } from './hooks/useThemePersist
 import { migrateLocalStorageToDisk } from './lib/preferences-client';
 import { readJsonResponse } from './lib/http';
 import { ALL_THEMES } from './lib/themes';
-import { hasMermaidBlocks } from './lib/mermaid-renderer';
+import {
+  collectMermaidBlocks,
+  findCurrentMermaidBlock,
+  getMermaidBlockIdentity,
+} from './lib/mermaid-blocks';
 import { useMermaidRenderer } from './hooks/useMermaidRenderer';
 import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
 import { MermaidFullscreenModal } from './components/MermaidFullscreenModal';
@@ -571,15 +575,22 @@ export default function App() {
     }
   }, [diffEnabled, setDiffEnabled]);
 
-  const viewerNeedsTheme = useMemo(() => hasMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
+  const mermaidBlocks = useMemo(() => collectMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
+  const viewerNeedsTheme = mermaidBlocks.length > 0;
 
   // Mermaid rendering — hoisted here so both MarkdownViewer and the fullscreen modal
   // can share the same pre-rendered SVG map without double-rendering.
   const persistedTheme = usePersistedTheme();
-  const mermaidSvgMap = useMermaidRenderer(cleanMarkdown, persistedTheme || 'light');
-
-  // Fullscreen modal state
   const mermaidFullscreen = useMermaidFullscreen();
+  const openMermaidFullscreenState = mermaidFullscreen.open;
+  const renderedDiffVisible = Boolean(diffEnabled && currentSnapshot && diffLines);
+  const mermaidRendererEnabled =
+    mermaidFullscreen.isOpen || (viewMode === 'rendered' && !renderedDiffVisible);
+  const mermaidSvgMap = useMermaidRenderer(
+    cleanMarkdown,
+    persistedTheme || 'light',
+    mermaidRendererEnabled,
+  );
 
   // Bridge useMermaidFullscreen into the modal-state machine so Escape / palette
   // guards that key on activeModal also work for the fullscreen modal.
@@ -591,45 +602,53 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mermaidFullscreen.isOpen]);
 
+  const activeMermaidBlock = useMemo(() => {
+    if (!mermaidFullscreen.activeSource) return null;
+    return findCurrentMermaidBlock(
+      mermaidBlocks,
+      mermaidFullscreen.activeSource,
+      mermaidFullscreen.activeBlockIndex ?? 0,
+      mermaidFullscreen.activeIdentity,
+    );
+  }, [
+    mermaidBlocks,
+    mermaidFullscreen.activeSource,
+    mermaidFullscreen.activeBlockIndex,
+    mermaidFullscreen.activeIdentity,
+  ]);
+
+  const handleOpenMermaidFullscreen = useCallback(
+    (source: string, blockIndex: number) => {
+      const block =
+        mermaidBlocks[blockIndex]?.source === source
+          ? mermaidBlocks[blockIndex]
+          : findCurrentMermaidBlock(mermaidBlocks, source, blockIndex);
+      openMermaidFullscreenState(source, blockIndex, block ? getMermaidBlockIdentity(block) : null);
+    },
+    [mermaidBlocks, openMermaidFullscreenState],
+  );
+
   // Look up the SVG for the active source.
   const activeMermaidSvg = useMemo(() => {
-    if (!mermaidFullscreen.activeSource) return null;
-    return mermaidSvgMap.get(mermaidFullscreen.activeSource)?.svg ?? null;
-  }, [mermaidFullscreen.activeSource, mermaidSvgMap]);
+    if (!activeMermaidBlock) return null;
+    return mermaidSvgMap.get(activeMermaidBlock.source)?.svg ?? null;
+  }, [activeMermaidBlock, mermaidSvgMap]);
 
   // Auto-close the fullscreen modal and show a toast when the active diagram
   // source is removed from the markdown.
   useEffect(() => {
     if (!mermaidFullscreen.isOpen) return;
     if (!mermaidFullscreen.activeSource) return;
-    // Verify the (activeBlockIndex+1)-th Mermaid block still contains this
-    // source. Searching the whole document (not just fenced Mermaid blocks)
-    // would falsely keep the modal open when the same source string also
-    // appears outside a Mermaid fence — the modal could silently retarget
-    // to a surviving copy after the active one is removed.
-    const src = mermaidFullscreen.activeSource.trim();
-    const targetIndex = mermaidFullscreen.activeBlockIndex ?? 0;
-    const blockRanges: { start: number; end: number }[] = [];
-    const blockRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
-    let m: RegExpExecArray | null;
-    while ((m = blockRegex.exec(cleanMarkdown)) !== null) {
-      blockRanges.push({ start: m.index, end: m.index + m[0].length });
-    }
-    const block = blockRanges[targetIndex];
-    const stillThere =
-      !!block && cleanMarkdown.indexOf(src, block.start) >= 0 &&
-      cleanMarkdown.indexOf(src, block.start) + src.length <= block.end;
-    if (!stillThere) {
+    if (!activeMermaidBlock) {
       mermaidFullscreen.close();
       showToast('Diagram was removed from the document.');
     }
     // mermaidFullscreen is a new object each render; individual fields are listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    cleanMarkdown,
+    activeMermaidBlock,
     mermaidFullscreen.isOpen,
     mermaidFullscreen.activeSource,
-    mermaidFullscreen.activeBlockIndex,
     mermaidFullscreen.close,
     showToast,
   ]);
@@ -1453,7 +1472,7 @@ export default function App() {
         const btn = best.querySelector<HTMLButtonElement>('.mermaid-block-expand');
         const source = btn?.dataset.mermaidSource;
         const blockIndex = Number(btn?.dataset.mermaidBlockIndex ?? '0');
-        if (source) mermaidFullscreen.open(source, blockIndex);
+        if (source) handleOpenMermaidFullscreen(source, blockIndex);
       },
     });
     return cmds;
@@ -1467,7 +1486,7 @@ export default function App() {
     currentSnapshot,
     diffEnabled,
     handleDiffToggle,
-    mermaidFullscreen,
+    handleOpenMermaidFullscreen,
   ]);
 
   const fileCommands = useMemo((): Command[] => {
@@ -1924,7 +1943,7 @@ export default function App() {
                             onSearchCount={handleSearchCount}
                             sentCommentIds={sentCommentIds}
                             mermaidSvgMap={mermaidSvgMap}
-                            onOpenMermaidFullscreen={mermaidFullscreen.open}
+                            onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
                           />
                         ) : (
                           <MarkdownViewer
@@ -1946,7 +1965,7 @@ export default function App() {
                             onSearchCount={handleSearchCount}
                             sentCommentIds={sentCommentIds}
                             mermaidSvgMap={mermaidSvgMap}
-                            onOpenMermaidFullscreen={mermaidFullscreen.open}
+                            onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
                           />
                         )}
                         <DragHandles
@@ -2093,8 +2112,8 @@ export default function App() {
       {/* Mermaid fullscreen modal */}
       <MermaidFullscreenModal
         open={mermaidFullscreen.isOpen}
-        source={mermaidFullscreen.activeSource}
-        blockIndex={mermaidFullscreen.activeBlockIndex}
+        source={activeMermaidBlock?.source ?? mermaidFullscreen.activeSource}
+        blockIndex={activeMermaidBlock?.index ?? mermaidFullscreen.activeBlockIndex}
         svgHtml={activeMermaidSvg}
         cleanMarkdown={cleanMarkdown}
         comments={comments}
@@ -2113,31 +2132,16 @@ export default function App() {
           // plain-text positions and can prefer a nearby prose occurrence —
           // the comment then ends up filed against the prose, and
           // commentsForDiagram filters it out of the diagram panel.
-          const src = mermaidFullscreen.activeSource;
-          const idx = mermaidFullscreen.activeBlockIndex ?? 0;
           let adjustedHint = hintOffset;
-          if (src) {
-            // Locate the (idx+1)-th `mermaid` fenced block, then search for
-            // the source text WITHIN that block. A bare `indexOf` over the
-            // whole document would also count occurrences outside Mermaid
-            // fences (e.g. the same source quoted in a doc code block) and
-            // file the new marker against the wrong block.
-            const blockRanges: { start: number; end: number }[] = [];
-            const blockRegex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
-            let m: RegExpExecArray | null;
-            while ((m = blockRegex.exec(cleanMarkdown)) !== null) {
-              blockRanges.push({ start: m.index, end: m.index + m[0].length });
-            }
-            const block = blockRanges[idx];
-            if (block) {
-              const blockStart = cleanMarkdown.indexOf(src, block.start);
-              if (blockStart >= 0 && blockStart + src.length <= block.end) {
-                const anchorInSource = src.indexOf(anchor);
-                const cleanHint = blockStart + (anchorInSource >= 0 ? anchorInSource : 0);
-                const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
-                adjustedHint = toPlainOffset(cleanHint);
-              }
-            }
+          if (activeMermaidBlock) {
+            // Point insertComment at the active fenced block as it exists now.
+            // The fullscreen modal may stay open while earlier diagrams are
+            // inserted or removed, so the original source-order index can drift.
+            const anchorInSource = activeMermaidBlock.source.indexOf(anchor);
+            const cleanHint =
+              activeMermaidBlock.sourceStart + (anchorInSource >= 0 ? anchorInSource : 0);
+            const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
+            adjustedHint = toPlainOffset(cleanHint);
           }
           handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
         }}

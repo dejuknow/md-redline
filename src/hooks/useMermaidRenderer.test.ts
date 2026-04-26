@@ -67,4 +67,30 @@ describe('useMermaidRenderer', () => {
     });
     expect(renderMermaidBlock).toHaveBeenLastCalledWith('flowchart TD\nA-->B', 'neutral');
   });
+
+  it('does not scan or render while disabled and clears existing results', async () => {
+    const markdown = '```mermaid\nflowchart TD\nA-->B\n```';
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useMermaidRenderer(markdown, 'dark', enabled),
+      { initialProps: { enabled: false } },
+    );
+
+    expect(result.current.size).toBe(0);
+    expect(hasMermaidBlocks).not.toHaveBeenCalled();
+    expect(renderMermaidBlock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+
+    await waitFor(() => {
+      expect(result.current.size).toBe(1);
+    });
+    expect(renderMermaidBlock).toHaveBeenCalledTimes(1);
+
+    rerender({ enabled: false });
+
+    await waitFor(() => {
+      expect(result.current.size).toBe(0);
+    });
+    expect(renderMermaidBlock).toHaveBeenCalledTimes(1);
+  });
 });

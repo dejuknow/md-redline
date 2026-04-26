@@ -16,12 +16,18 @@ const MERMAID_RENDER_DEBOUNCE_MS = 80;
 export function useMermaidRenderer(
   cleanMarkdown: string,
   theme: string,
+  enabled = true,
 ): Map<string, MermaidResult> {
   const [svgMap, setSvgMap] = useState<Map<string, MermaidResult>>(new Map());
   const cacheRef = useRef<Map<string, { theme: string; result: MermaidResult }>>(new Map());
   const mermaidTheme = getMermaidTheme(theme);
 
   useEffect(() => {
+    if (!enabled) {
+      setSvgMap((prev) => (prev.size > 0 ? new Map() : prev));
+      return;
+    }
+
     if (!hasMermaidBlocks(cleanMarkdown)) {
       setSvgMap((prev) => (prev.size > 0 ? new Map() : prev));
       return;
@@ -78,7 +84,7 @@ export function useMermaidRenderer(
         window.clearTimeout(timeoutId);
       }
     };
-  }, [cleanMarkdown, mermaidTheme]);
+  }, [cleanMarkdown, enabled, mermaidTheme]);
 
   return svgMap;
 }
