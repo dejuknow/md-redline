@@ -1,0 +1,15 @@
+{
+  "totalComments": 1,
+  "actionableComments": 1,
+  "comments": [
+    {
+      "id": "eval-15-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["Inventory Service", "ReserveItems"]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": []
+}
