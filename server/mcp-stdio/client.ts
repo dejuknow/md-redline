@@ -41,8 +41,12 @@ export function createMdrClient(baseUrl: string): MdrClient {
       return (await res.json()) as CreateSessionResult;
     },
 
-    async waitForSession(sessionId: string) {
-      const res = await fetch(url(`/api/review-sessions/${sessionId}/wait`), {
+    async waitForSession(sessionId: string, timeoutSeconds?: number) {
+      const path =
+        timeoutSeconds !== undefined
+          ? `/api/review-sessions/${sessionId}/wait?timeout=${timeoutSeconds}`
+          : `/api/review-sessions/${sessionId}/wait`;
+      const res = await fetch(url(path), {
         method: 'GET',
       });
       if (!res.ok) {

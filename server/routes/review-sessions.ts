@@ -189,7 +189,25 @@ export function registerReviewSessionRoutes(
     // waitForSession returns the session's existing waiter promise. If the
     // session is already resolved, the promise is already settled and resolves
     // immediately. If still open, this awaits until batch/finish/abort/sweep.
-    const result = await reviewSessions.waitForSession(id);
+    const waiterPromise = reviewSessions.waitForSession(id);
+
+    // Optional ?timeout=<seconds> lets polling clients (e.g. Codex, which
+    // enforces a 120s hard timeout per tool call) avoid being killed. The
+    // endpoint returns {status:'pending'} after the timeout so the client can
+    // re-poll without losing the session.
+    const timeoutParam = c.req.query('timeout');
+    const timeoutMs = timeoutParam ? parseInt(timeoutParam, 10) * 1000 : 0;
+
+    if (timeoutMs > 0) {
+      const pending = new Promise<{ status: 'pending' }>((resolve) => {
+        const t = setTimeout(() => resolve({ status: 'pending' }), timeoutMs);
+        if (typeof t === 'object' && 'unref' in t) (t as { unref: () => void }).unref();
+      });
+      const result = await Promise.race([waiterPromise, pending]);
+      return c.json(result);
+    }
+
+    const result = await waiterPromise;
     return c.json(result);
   });
 }

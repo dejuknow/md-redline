@@ -88,7 +88,7 @@ describe('handleRequestReviewToolCall', () => {
     expect(openInBrowser).not.toHaveBeenCalled();
 
     // Should wait for session and return the batch result
-    expect(client.waitForSession).toHaveBeenCalledWith('rev_existing');
+    expect(client.waitForSession).toHaveBeenCalledWith('rev_existing', 90);
     expect(result.content[0].text).toContain('SECOND BATCH');
     expect(result.content[0].text).toContain('rev_existing');
   });
@@ -109,6 +109,43 @@ describe('handleRequestReviewToolCall', () => {
 
     expect(result.content[0].text).toContain('FINAL');
     expect(result.content[0].text).not.toContain('mdr_request_review');
+  });
+
+  it('returns still-waiting message with sessionId when wait times out (pending)', async () => {
+    const client = {
+      grantAccess: vi.fn().mockResolvedValue(undefined),
+      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+      waitForSession: vi.fn().mockResolvedValue({ status: 'pending' }),
+      abortSession: vi.fn(),
+    };
+    const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+    const result = await handleRequestReviewToolCall(
+      { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+      { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+    );
+
+    expect(result.content[0].text).toContain('rev_1');
+    expect(result.content[0].text).toContain('mdr_request_review');
+    expect(result.content[0].text).not.toContain('done');
+  });
+
+  it('continue mode returns still-waiting when poll times out (pending)', async () => {
+    const client = {
+      grantAccess: vi.fn(),
+      createSession: vi.fn(),
+      waitForSession: vi.fn().mockResolvedValue({ status: 'pending' }),
+      abortSession: vi.fn(),
+    };
+    const openInBrowser = vi.fn();
+
+    const result = await handleRequestReviewToolCall(
+      { mode: 'continue', sessionId: 'rev_existing' },
+      { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+    );
+
+    expect(result.content[0].text).toContain('rev_existing');
+    expect(result.content[0].text).toContain('mdr_request_review');
   });
 
   it('continue mode returns abort message when session is aborted', async () => {

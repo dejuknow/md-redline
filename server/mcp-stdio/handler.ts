@@ -22,7 +22,18 @@ const DONE_PREAMBLE =
 const DONE_NO_COMMENTS =
   'Review complete. The user has no more feedback. Continue with your original plan.';
 
+const STILL_WAITING = (sessionId: string) =>
+  `Review in progress. The user has not finished reviewing yet. ` +
+  `Call mdr_request_review again with sessionId "${sessionId}" (no filePaths) to continue waiting.`;
+
 const PROGRESS_INTERVAL_MS = 10_000;
+
+/**
+ * How long (seconds) to wait before returning a 'pending' result so the
+ * MCP client doesn't time out. Codex enforces a 120s hard limit per tool
+ * call; 90s gives a comfortable buffer.
+ */
+const POLL_TIMEOUT_SECONDS = 90;
 
 /**
  * The core tool-call handler. Pure function over an injected MdrClient and
@@ -104,10 +115,16 @@ export async function handleRequestReviewToolCall(
 
   let result: WaitResult;
   try {
-    result = await ctx.client.waitForSession(session.sessionId);
+    result = await ctx.client.waitForSession(session.sessionId, POLL_TIMEOUT_SECONDS);
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);
+  }
+
+  if (result.status === 'pending') {
+    return {
+      content: [{ type: 'text', text: STILL_WAITING(session.sessionId) }],
+    };
   }
 
   if (result.status === 'batch') {
@@ -170,10 +187,16 @@ export async function handleContinueReviewToolCall(
 
   let result: WaitResult;
   try {
-    result = await ctx.client.waitForSession(sessionId);
+    result = await ctx.client.waitForSession(sessionId, POLL_TIMEOUT_SECONDS);
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);
+  }
+
+  if (result.status === 'pending') {
+    return {
+      content: [{ type: 'text', text: STILL_WAITING(sessionId) }],
+    };
   }
 
   if (result.status === 'batch') {

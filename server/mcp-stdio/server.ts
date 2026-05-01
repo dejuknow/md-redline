@@ -30,9 +30,10 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         description:
           'Open markdown files in mdr (md-redline) for human review, or continue ' +
           'an existing review session. To start a new review, pass filePaths. ' +
-          'To continue after addressing a batch of comments, pass the sessionId ' +
-          'from the previous result. Blocks until the user sends comments or ' +
-          'finishes the review.',
+          'To continue after addressing a batch of comments, or to re-poll while ' +
+          'the user is still reviewing, pass the sessionId from the previous result ' +
+          '(without filePaths). If the result says the user has not finished yet, ' +
+          'call again with the same sessionId to keep waiting.',
         inputSchema: {
           type: 'object',
           properties: {

@@ -22,7 +22,8 @@ export interface CreateSessionResult {
 export type WaitResult =
   | { status: 'batch'; prompt: string; commentIds: string[] }
   | { status: 'done'; prompt?: string }
-  | { status: 'aborted'; reason: string };
+  | { status: 'aborted'; reason: string }
+  | { status: 'pending' };
 
 export interface CreateSessionInput {
   filePaths: string[];
@@ -32,7 +33,7 @@ export interface CreateSessionInput {
 export interface MdrClient {
   grantAccess(paths: string[]): Promise<void>;
   createSession(input: CreateSessionInput): Promise<CreateSessionResult>;
-  waitForSession(sessionId: string): Promise<WaitResult>;
+  waitForSession(sessionId: string, timeoutSeconds?: number): Promise<WaitResult>;
   abortSession(sessionId: string): Promise<void>;
 }
 
