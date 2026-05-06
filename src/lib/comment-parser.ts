@@ -1056,12 +1056,16 @@ export function stripInlineFormatting(md: string): {
       }
     }
 
-    // Inline formatting: * _ — skip unless flanked by spaces on both sides
-    // (space-flanked * and _ are literal, not formatting)
+    // Inline formatting: * _ — skip as emphasis markers, but keep when literal:
+    //   - flanked by whitespace on both sides (e.g. " * ")
+    //   - intra-word underscores per CommonMark (e.g. field_name): _ between
+    //     alphanumerics on both sides is literal, not emphasis
     if (md[i] === '*' || md[i] === '_') {
       const prev = i > 0 ? md[i - 1] : ' ';
       const next = i < len - 1 ? md[i + 1] : ' ';
-      if (!(/\s/.test(prev) && /\s/.test(next))) {
+      const spaceFlanked = /\s/.test(prev) && /\s/.test(next);
+      const intraWordUnderscore = md[i] === '_' && /\w/.test(prev) && /\w/.test(next);
+      if (!spaceFlanked && !intraWordUnderscore) {
         i++;
         continue;
       }

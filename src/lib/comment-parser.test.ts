@@ -775,6 +775,16 @@ describe('detectMissingAnchors', () => {
     expect(missing.has('a')).toBe(false);
   });
 
+  it('does not flag anchor with intra-word underscores in inline code', () => {
+    // Repro: selecting `field_name` in a table cell anchored a comment that
+    // was immediately flagged as needing re-anchoring because intra-word
+    // underscores were being stripped as emphasis markers.
+    const clean = '| `onboarding_field_changed` | `field_name` | Blur on key fields only |';
+    const comments = [{ id: 'a', anchor: 'field_name' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
   it('does not flag anchor spanning strikethrough', () => {
     const clean = 'the ~~old~~ new approach works';
     const comments = [{ id: 'a', anchor: 'old new approach' }] as MdComment[];
@@ -1356,6 +1366,16 @@ describe('stripInlineFormatting with fenced code blocks', () => {
     const md = 'Use `code` here';
     const { plain } = stripInlineFormatting(md);
     expect(plain).toBe('Use code here');
+  });
+
+  it('preserves intra-word underscores per CommonMark', () => {
+    // Underscores between alphanumerics are literal, not emphasis.
+    // Without this, anchors like `field_name` from inline code fail to match
+    // their stripped plain text and get flagged as needing re-anchoring.
+    expect(stripInlineFormatting('`field_name`').plain).toBe('field_name');
+    expect(stripInlineFormatting('snake_case_var').plain).toBe('snake_case_var');
+    expect(stripInlineFormatting('an _italic_ word').plain).toBe('an italic word');
+    expect(stripInlineFormatting('a_b _c d_ e_f').plain).toBe('a_b c d e_f');
   });
 
   it('handles code block at end of file without trailing newline', () => {
