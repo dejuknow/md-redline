@@ -23,8 +23,15 @@ const DONE_NO_COMMENTS =
   'Review complete. The user has no more feedback. Continue with your original plan.';
 
 const STILL_WAITING = (sessionId: string) =>
-  `Review in progress. The user has not finished reviewing yet. ` +
-  `Call mdr_request_review again with sessionId "${sessionId}" (no filePaths) to continue waiting.`;
+  `Review in progress. The user is still adding comments — the file(s) under ` +
+  `review may contain unsubmitted @comment markers that are not yet part of ` +
+  `any batch. You do not have permission to read, open, edit, or otherwise ` +
+  `access the files under review while this session is active. You do not ` +
+  `have permission to address @comment markers you discover by reading the ` +
+  `file directly — they are not yours to act on until the user submits them. ` +
+  `Call mdr_request_review again with sessionId "${sessionId}" (no filePaths) ` +
+  `and wait. Only act on comments delivered to you in a "batch" or "done" ` +
+  `tool result.`;
 
 const PROGRESS_INTERVAL_MS = 10_000;
 

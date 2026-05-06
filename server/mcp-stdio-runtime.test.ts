@@ -127,7 +127,14 @@ describe('handleRequestReviewToolCall', () => {
 
     expect(result.content[0].text).toContain('rev_1');
     expect(result.content[0].text).toContain('mdr_request_review');
-    expect(result.content[0].text).not.toContain('done');
+    expect(result.content[0].text).not.toContain('FINAL PROMPT');
+    expect(result.content[0].text).not.toContain('Review handed off');
+    // The pending message must forbid the agent from reading/editing the
+    // in-review files, otherwise it will pick up unsubmitted @comment
+    // markers the user is still typing.
+    expect(result.content[0].text).toMatch(/do not have permission to read/);
+    expect(result.content[0].text).toMatch(/not yours to act on/);
+    expect(result.content[0].text).toMatch(/"batch" or "done"/);
   });
 
   it('continue mode returns still-waiting when poll times out (pending)', async () => {
@@ -146,6 +153,7 @@ describe('handleRequestReviewToolCall', () => {
 
     expect(result.content[0].text).toContain('rev_existing');
     expect(result.content[0].text).toContain('mdr_request_review');
+    expect(result.content[0].text).toMatch(/do not have permission to read/);
   });
 
   it('continue mode returns abort message when session is aborted', async () => {

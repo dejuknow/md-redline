@@ -33,7 +33,15 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'To continue after addressing a batch of comments, or to re-poll while ' +
           'the user is still reviewing, pass the sessionId from the previous result ' +
           '(without filePaths). If the result says the user has not finished yet, ' +
-          'call again with the same sessionId to keep waiting.',
+          'call again with the same sessionId to keep waiting. ' +
+          'IMPORTANT: while this tool is waiting (no "batch" or "done" result has ' +
+          'arrived yet, or you are between batches), you do not have permission to ' +
+          'read, open, edit, or otherwise act on the files under review using ' +
+          'other tools. The user is actively writing @comment markers into those ' +
+          'files; reading them yourself will surface unsubmitted markers you must ' +
+          'not address. Once a "batch" or "done" result arrives you may read/edit ' +
+          'the files, but only to address the comments listed in that result — ' +
+          'ignore any other @comment markers you encounter in the file.',
         inputSchema: {
           type: 'object',
           properties: {
