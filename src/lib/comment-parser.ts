@@ -356,6 +356,14 @@ export function pickBestOccurrence(
   const normCtxBefore = contextBefore?.replace(/\s+/g, ' ') ?? '';
   const normCtxAfter = contextAfter?.replace(/\s+/g, ' ') ?? '';
 
+  // Word-only context: keep only [A-Za-z0-9_]. Bridges the gap when DOM
+  // textContent and markdown plaintext disagree on non-word separators —
+  // most importantly tables, where DOM concatenates cell text with no
+  // separator (e.g. "beginsbuild_completedMUST") but markdown plaintext
+  // keeps `|` and spaces between cells.
+  const wordCtxBefore = contextBefore?.replace(/\W+/g, '') ?? '';
+  const wordCtxAfter = contextAfter?.replace(/\W+/g, '') ?? '';
+
   let bestOcc = occurrences[0];
   let bestScore = -1;
   let bestDist = Infinity;
@@ -385,6 +393,33 @@ export function pickBestOccurrence(
       const normAfter = rawAfter.replace(/\s+/g, ' ');
       for (let j = 0; j < Math.min(normAfter.length, normCtxAfter.length); j++) {
         if (normAfter[j] === normCtxAfter[j]) {
+          score++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Additional score from word-only suffix/prefix match. Independent from
+    // the whitespace-normalized score so prose disambiguation is unaffected.
+    if (wordCtxBefore) {
+      const windowSize = wordCtxBefore.length * 4; // generous: pipes/spaces inflate window
+      const wordBefore = plain.slice(Math.max(0, occ - windowSize), occ).replace(/\W+/g, '');
+      for (let j = 1; j <= Math.min(wordBefore.length, wordCtxBefore.length); j++) {
+        if (wordBefore[wordBefore.length - j] === wordCtxBefore[wordCtxBefore.length - j]) {
+          score++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    if (wordCtxAfter) {
+      const afterStart = occ + anchor.length;
+      const windowSize = wordCtxAfter.length * 4;
+      const wordAfter = plain.slice(afterStart, afterStart + windowSize).replace(/\W+/g, '');
+      for (let j = 0; j < Math.min(wordAfter.length, wordCtxAfter.length); j++) {
+        if (wordAfter[j] === wordCtxAfter[j]) {
           score++;
         } else {
           break;

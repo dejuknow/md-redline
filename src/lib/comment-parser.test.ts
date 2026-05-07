@@ -1714,6 +1714,45 @@ describe('pickBestOccurrence', () => {
     // Empty context → fall back to hintOffset
     expect(result).toBe(8);
   });
+
+  it('disambiguates duplicates inside table cells when DOM textContent omits cell separators', () => {
+    // Reproduces a real bug: when an anchor (e.g. `duration_seconds`) appears
+    // in two table rows, the DOM textContent concatenates table cells WITHOUT
+    // separators ("...beginsbuild_completedMUST...") while the markdown
+    // plaintext keeps `|` and spaces between cells. Whitespace-only normalization
+    // can't bridge the gap, so previous logic scored every occurrence as 0
+    // and fell back to a hintOffset distance comparison that picked the wrong
+    // duplicate (since DOM offsets and plaintext offsets diverge in tables).
+    const plain =
+      '| Event | Priority | Properties | Trigger |\n' +
+      '|---|---|---|---|\n' +
+      '| onboarding_completed | MUST | duration_seconds, solution_ids | Continue from final step |\n' +
+      '\n' +
+      '## 3. Build phase\n' +
+      '\n' +
+      '| Event | Priority | Properties | Trigger |\n' +
+      '|---|---|---|---|\n' +
+      '| build_started | MUST | solution_count, solution_ids | Build animation begins |\n' +
+      '| build_completed | MUST | duration_seconds | Animation hits 100% |\n' +
+      '| setup_started | MUST | entry_solution_id | Start setup clicked |\n';
+    const occA = plain.indexOf('duration_seconds');
+    const occB = plain.indexOf('duration_seconds', occA + 1);
+    // Hint offset: in DOM textContent space the section-3 occurrence is much
+    // closer to the section-2 plaintext position than the section-3 plaintext
+    // position because table pipes/spaces inflate plaintext offsets.
+    const wrongHint = occA + 30;
+    const result = pickBestOccurrence(
+      plain,
+      [occA, occB],
+      'duration_seconds',
+      wrongHint,
+      // contextBefore from DOM (cells concatenated with no separators)
+      'uild animation beginsbuild_completedMUST',
+      // contextAfter from DOM
+      'Animation hits 100%setup_startedMUSTentr',
+    );
+    expect(result).toBe(occB);
+  });
 });
 
 describe('context-based disambiguation in insertComment', () => {

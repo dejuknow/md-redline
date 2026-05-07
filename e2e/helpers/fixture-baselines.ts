@@ -14,3 +14,4 @@ export const TEST_DOC_2_BASELINE = readBaseline('test-doc-2.md');
 export const FORMATTED_DOC_BASELINE = readBaseline('formatted-doc.md');
 export const TOC_DOC_BASELINE = readBaseline('toc-doc.md');
 export const HIGHLIGHT_SEAM_DOC_BASELINE = readBaseline('highlight-seam-doc.md');
+export const TABLE_DUPLICATES_DOC_BASELINE = readBaseline('table-duplicates-doc.md');
