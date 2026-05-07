@@ -50,7 +50,12 @@ export async function checkServer(port, {
     const response = await fetchFn(`http://localhost:${port}/api/config`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
-    return response.ok;
+    if (!response.ok) return false;
+    // Validate this is actually mdr's /api/config — other dev servers
+    // (e.g. Next.js) return 200 with their SPA shell for unknown paths,
+    // which would otherwise fool the port scan and hijack the browser open.
+    const data = await response.json();
+    return !!data && typeof data === 'object' && typeof data.homeDir === 'string';
   } catch {
     return false;
   }

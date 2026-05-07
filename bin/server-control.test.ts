@@ -77,12 +77,23 @@ describe('killPort', () => {
   });
 });
 
-function mkResponse(ok: boolean, status = ok ? 200 : 500): Response {
-  return { ok, status } as unknown as Response;
+function mkResponse(
+  ok: boolean,
+  status = ok ? 200 : 500,
+  json: unknown = { homeDir: '/Users/test' },
+): Response {
+  return {
+    ok,
+    status,
+    json: async () => {
+      if (json instanceof Error) throw json;
+      return json;
+    },
+  } as unknown as Response;
 }
 
 describe('checkServer', () => {
-  it('returns true on 2xx', async () => {
+  it('returns true on 2xx with mdr-shaped JSON', async () => {
     const fetchFn = vi.fn(async () => mkResponse(true));
     await expect(checkServer(3001, { fetchFn })).resolves.toBe(true);
     expect(fetchFn).toHaveBeenCalledWith(
@@ -100,6 +111,19 @@ describe('checkServer', () => {
     const fetchFn = vi.fn(async () => {
       throw new Error('ECONNREFUSED');
     });
+    await expect(checkServer(3001, { fetchFn })).resolves.toBe(false);
+  });
+
+  it('returns false when response is 200 but not JSON (e.g. Next.js dev server)', async () => {
+    // Other dev servers (Next.js, etc.) return 200 with HTML for unknown
+    // paths. Without shape validation, port scanning would mistake them for
+    // mdr and the browser open would hit a 404 on the wrong app.
+    const fetchFn = vi.fn(async () => mkResponse(true, 200, new Error('not JSON')));
+    await expect(checkServer(3001, { fetchFn })).resolves.toBe(false);
+  });
+
+  it('returns false when JSON lacks mdr-specific fields', async () => {
+    const fetchFn = vi.fn(async () => mkResponse(true, 200, { foo: 'bar' }));
     await expect(checkServer(3001, { fetchFn })).resolves.toBe(false);
   });
 });
