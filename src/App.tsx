@@ -800,13 +800,29 @@ export default function App() {
         const pathToSave = activeFilePath;
         const contentToSave = nextContent;
         const mtimeToSave = mtime;
-        backfillTimerRef.current = setTimeout(() => {
+        backfillTimerRef.current = setTimeout(async () => {
           backfillTimerRef.current = null;
-          fetch('/api/file', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: pathToSave, content: contentToSave, expectedMtime: mtimeToSave }),
-          }).catch(() => {});
+          try {
+            const res = await fetch('/api/file', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: pathToSave, content: contentToSave, expectedMtime: mtimeToSave }),
+            });
+            // On success, sync the tab's mtime to the post-backfill value so
+            // the next user-initiated save doesn't 409 against the stale
+            // pre-backfill mtime. The backfill's own write is suppressed by
+            // the server's lastWrittenContent cache, so no SSE event will
+            // deliver this mtime — we have to read it from the response.
+            if (res.ok) {
+              const data = await readJsonResponse<{ mtime?: number }>(res);
+              if (data?.mtime != null) {
+                updateTab(pathToSave, { mtime: data.mtime });
+              }
+            }
+            // 409s are expected and benign here (see comment above) — ignore.
+          } catch {
+            // Network errors: the next SSE event will re-trigger the backfill.
+          }
         }, 2000);
       }
 

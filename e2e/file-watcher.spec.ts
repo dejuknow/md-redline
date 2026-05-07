@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { addComment } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -285,5 +286,62 @@ test.describe('File watcher - external changes', () => {
       timeout: 10_000,
     });
     await expect(page.getByText('Invalid Date')).not.toBeVisible();
+  });
+
+  test('user save after agent reply backfill does not 409 against stale mtime', async ({
+    page,
+  }) => {
+    // Regression: the timestamp-correction backfill PUT in App.tsx writes the
+    // file but its fs.watch event is suppressed by the server's
+    // lastWrittenContent cache. Before the fix, the client never learned the
+    // post-backfill mtime, so the next user save sent a stale expectedMtime
+    // and 409'd with "File was modified externally."
+    await openFixture(page);
+    await page.waitForTimeout(1500);
+
+    const withReply = FIXTURE_ORIGINAL.replace(
+      'valid credentials',
+      `<!-- @comment${JSON.stringify({
+        id: 'mtime-c1',
+        anchor: 'valid credentials',
+        text: 'How are creds validated?',
+        author: 'Dennis',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        replies: [{ id: 'mtime-r1', text: 'JWT bearer.', author: 'Agent CLI' }],
+      })} -->valid credentials`,
+    );
+    writeFileSync(FIXTURE, withReply);
+
+    await expect(page.getByText('JWT bearer.')).toBeVisible({ timeout: 15_000 });
+
+    // Wait for the debounced backfill (2s) to land the corrected timestamp on
+    // disk. After this point, the in-memory tab mtime must match the disk
+    // mtime — that's what the fix guarantees.
+    await expect
+      .poll(
+        () => {
+          const onDisk = readFileSync(FIXTURE, 'utf-8');
+          const m = onDisk.match(/"id":"mtime-r1"[^}]*"timestamp":"([^"]+)"/);
+          return m?.[1] ?? null;
+        },
+        { timeout: 10_000 },
+      )
+      .not.toBeNull();
+    // Small grace period for the PUT response handler to update tab mtime.
+    await page.waitForTimeout(250);
+
+    // User save: add a comment via the UI. Before the fix, this 409d.
+    await addComment(page, 'email and password login', 'Local edit after backfill');
+
+    // No "modified externally" toast or banner should appear.
+    await expect(page.getByText(/modified externally/i)).not.toBeVisible({ timeout: 2000 });
+
+    // The new comment must have actually persisted to disk — confirms the
+    // save reached the server without a 409.
+    await expect
+      .poll(() => readFileSync(FIXTURE, 'utf-8').includes('Local edit after backfill'), {
+        timeout: 5_000,
+      })
+      .toBe(true);
   });
 });
