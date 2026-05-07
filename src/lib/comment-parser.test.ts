@@ -754,6 +754,200 @@ describe('detectMissingAnchors', () => {
     expect(missing.has('a')).toBe(false);
   });
 
+  it('does not flag anchor spanning a task list', () => {
+    const clean = '- [ ] First task\n- [x] Done task';
+    const comments = [
+      { id: 'a', anchor: 'First task\nDone task' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning a nested (indented) list', () => {
+    const clean = '- Outer item\n  - Inner item\n  - Another inner';
+    const comments = [
+      { id: 'a', anchor: 'Outer item\nInner item\nAnother inner' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning inline HTML tags', () => {
+    const clean = 'Footnote<sup>1</sup> here.\nLine one<br>Line two.';
+    const comments = [
+      { id: 'a', anchor: 'Footnote1 here.\nLine oneLine two.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning an autolink', () => {
+    const clean = 'Visit <https://example.com> today.';
+    const comments = [
+      { id: 'a', anchor: 'Visit https://example.com today.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning reference-style links and ref definitions', () => {
+    const clean =
+      'See [the docs][docs-ref] and [an example][ex] for info.\n\n[docs-ref]: https://example.com/docs\n[ex]: https://example.com/ex';
+    const comments = [
+      { id: 'a', anchor: 'See the docs and an example for info.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor with escaped punctuation', () => {
+    const clean = 'Use \\*literal\\* not bold and \\_under\\_ not italic.';
+    const comments = [
+      { id: 'a', anchor: 'Use *literal* not bold and _under_ not italic.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning footnote refs and definitions', () => {
+    const clean = 'See the docs[^1] for more details.\n\n[^1]: footnote text here.';
+    const comments = [
+      { id: 'a', anchor: 'See the docs for more details.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning a backslash hard break', () => {
+    const clean = 'Line one\\\nLine two';
+    const comments = [
+      { id: 'a', anchor: 'Line one\nLine two' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not strip a sentence that just happens to start with [Word]:', () => {
+    // Reference-link-definition handler must not fire on prose; the part
+    // after `:` has multiple whitespace-separated word tokens, not a single
+    // URL-like destination.
+    const clean = '[Note]: this is just a sentence with prose.\nNext paragraph.';
+    const comments = [
+      { id: 'a', anchor: '[Note]: this is just a sentence with prose.\nNext paragraph.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('strips reference definitions with quoted titles', () => {
+    const clean = 'See [docs][r] today.\n\n[r]: https://example.com "title text"';
+    const comments = [
+      { id: 'a', anchor: 'See docs today.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('handles mailto and tel autolinks', () => {
+    const clean = 'Email <mailto:foo@bar.com> or call <tel:+1234>.';
+    const comments = [
+      { id: 'a', anchor: 'Email mailto:foo@bar.com or call tel:+1234.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('keeps angle-bracketed text that does not look like a tag or autolink', () => {
+    // `<3 km away`: starts with digit, no closing `>` nearby — the angle
+    // bracket handler bails out and the text is preserved verbatim so users
+    // can comment on it.
+    const clean = 'Math: <3 km away';
+    const comments = [
+      { id: 'a', anchor: 'Math: <3 km away' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('strips collapsed reference links [text][]', () => {
+    const clean = 'See [the docs][] for info.\n\n[the docs]: https://example.com';
+    const comments = [
+      { id: 'a', anchor: 'See the docs for info.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('treats backslash before a non-punctuation char as literal', () => {
+    // CommonMark only escapes ASCII punctuation; `\f`, `\foo`, etc. should
+    // keep both the backslash and the following char.
+    const clean = 'Path: C:\\foo and \\bar end';
+    const comments = [
+      { id: 'a', anchor: 'Path: C:\\foo and \\bar end' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag a blockquoted task list', () => {
+    const clean = '> - [ ] Task in quote\n> - [x] Done in quote';
+    const comments = [
+      { id: 'a', anchor: 'Task in quote\nDone in quote' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag a deeply nested list (4-space indent)', () => {
+    const clean = '- A\n    - B\n        - C';
+    const comments = [
+      { id: 'a', anchor: 'A\nB\nC' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag inline HTML with attributes', () => {
+    const clean = 'See <a href="https://x.com" target="_blank">click here</a> please.';
+    const comments = [
+      { id: 'a', anchor: 'See click here please.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag paragraph following a list-item-like indented line', () => {
+    // Sanity: indented "- foo" should be stripped as nested list, not
+    // misclassified as code block.
+    const clean = '- Outer\n  - Inner one\n  - Inner two\n\nNext paragraph.';
+    const comments = [
+      { id: 'a', anchor: 'Inner one\nInner two\n\nNext paragraph.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning a blockquoted bullet list', () => {
+    // Repro: selecting three bullet points inside a blockquote produced an
+    // anchor like "MUST — ship...\nSHOULD — add...\nLATER — defer..." with no
+    // `> -` prefixes, but the markdown plaintext still has those nested
+    // markers. The comment was immediately flagged as needing re-anchoring.
+    const clean =
+      '> **Priority** is tagged on every event:\n' +
+      '> - **MUST** — ship before launch.\n' +
+      '> - **SHOULD** — add in the first week.\n' +
+      '> - **LATER** — defer to a future phase.';
+    const comments = [
+      {
+        id: 'a',
+        anchor:
+          'MUST — ship before launch.\nSHOULD — add in the first week.\nLATER — defer to a future phase.',
+      },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
   it('does not flag anchor spanning bold formatting', () => {
     const clean = 'the **initial** implementation is ready';
     const comments = [{ id: 'a', anchor: 'initial implementation' }] as MdComment[];

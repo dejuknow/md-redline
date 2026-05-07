@@ -15,3 +15,4 @@ export const FORMATTED_DOC_BASELINE = readBaseline('formatted-doc.md');
 export const TOC_DOC_BASELINE = readBaseline('toc-doc.md');
 export const HIGHLIGHT_SEAM_DOC_BASELINE = readBaseline('highlight-seam-doc.md');
 export const TABLE_DUPLICATES_DOC_BASELINE = readBaseline('table-duplicates-doc.md');
+export const ANCHOR_EDGE_CASES_DOC_BASELINE = readBaseline('anchor-edge-cases-doc.md');

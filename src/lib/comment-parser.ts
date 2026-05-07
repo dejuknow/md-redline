@@ -1010,6 +1010,25 @@ export function stripInlineFormatting(md: string): {
       continue;
     }
 
+    // Backslash escapes (CommonMark): `\` + ASCII punctuation drops the
+    // backslash and emits the next char as literal text — bypassing all
+    // downstream handlers so `\*` doesn't trigger emphasis stripping, `\[`
+    // doesn't trigger link parsing, etc. `\` + `\n` is a hard line break;
+    // drop the backslash and let the newline pass through normally.
+    if (md[i] === '\\' && i + 1 < len) {
+      const nx = md[i + 1];
+      if (nx === '\n') {
+        i++;
+        continue;
+      }
+      if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(nx)) {
+        map.push(i + 1);
+        plain += nx;
+        i += 2;
+        continue;
+      }
+    }
+
     // Fenced code blocks: skip fence lines, keep content as-is
     if (atLineStart(i) && (md[i] === '`' || md[i] === '~')) {
       const fenceChar = md[i];
@@ -1042,6 +1061,46 @@ export function stripInlineFormatting(md: string): {
       }
     }
 
+    // Reference link definition at line start: `[ref]: url` (rest of the
+    // line). DOM doesn't render these at all, so drop the whole line.
+    // The content after `:` must look URL-like (a single non-whitespace
+    // destination plus an optional quoted/parenthesized title) — otherwise
+    // a normal sentence that happens to start with `[Word]:` would be
+    // silently dropped.
+    if (atLineStart(i) && md[i] === '[') {
+      const cb = md.indexOf(']', i + 1);
+      if (cb !== -1 && cb + 1 < len && md[cb + 1] === ':') {
+        const label = md.slice(i + 1, cb);
+        if (label.length > 0 && !label.includes('\n')) {
+          const eol = md.indexOf('\n', cb + 2);
+          const after = md.slice(cb + 2, eol === -1 ? len : eol);
+          // dest = <...> or non-whitespace URL chars; title is optional
+          if (
+            /^[ \t]+(?:<[^<>\n]*>|\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*$/.test(
+              after,
+            )
+          ) {
+            i = eol === -1 ? len : eol + 1;
+            continue;
+          }
+        }
+      }
+    }
+
+    // Footnote reference: [^id] → drop entirely. DOM renders these as a
+    // superscript link; the anchor text users comment on is the surrounding
+    // prose, not the footnote marker.
+    if (md[i] === '[' && md[i + 1] === '^') {
+      const cb = md.indexOf(']', i + 2);
+      if (cb !== -1) {
+        const id = md.slice(i + 2, cb);
+        if (!id.includes('\n') && !id.includes('[')) {
+          i = cb + 1;
+          continue;
+        }
+      }
+    }
+
     // Markdown images: ![alt](url) → skip entirely (no text content in rendered DOM)
     if (md[i] === '!' && i + 1 < len && md[i + 1] === '[') {
       const cb = md.indexOf(']', i + 2);
@@ -1068,6 +1127,106 @@ export function stripInlineFormatting(md: string): {
       }
     }
 
+    // Reference-style link: [text][ref] → keep text, drop `[`, `]`, `[ref]`.
+    // Distinct from `[text](url)` (handled above) and from footnote refs
+    // `[^id]` (handled below — guarded by `md[i + 1] !== '^'`).
+    if (md[i] === '[' && pendingLinkSkipAt === -1 && md[i + 1] !== '^') {
+      const cb = md.indexOf(']', i + 1);
+      if (cb !== -1 && cb + 1 < len && md[cb + 1] === '[') {
+        const cp = md.indexOf(']', cb + 2);
+        if (cp !== -1) {
+          const ref = md.slice(cb + 2, cp);
+          if (!ref.includes('\n') && !ref.includes('[')) {
+            pendingLinkSkipAt = cb;
+            pendingLinkSkipTo = cp + 1;
+            i++;
+            continue;
+          }
+        }
+      }
+    }
+
+    // Angle-bracketed content: autolinks `<scheme://...>` / `<email@host>` and
+    // inline HTML tags like `<br>`, `<sup>foo</sup>`, `<tag attr="x">`.
+    // For autolinks, drop the angle brackets and keep the URL/email content.
+    // For HTML tags, drop everything between `<` and `>`. The browser renders
+    // both with the angle brackets removed from textContent.
+    if (md[i] === '<') {
+      const close = md.indexOf('>', i + 1);
+      if (close !== -1) {
+        const tag = md.slice(i, close + 1);
+        if (!tag.includes('\n') && !tag.includes('<', 1)) {
+          const inner = md.slice(i + 1, close);
+          // Autolink: `<scheme:rest>` (covers `https://`, `mailto:`, `tel:`,
+          // etc.) or `<user@host.tld>`.
+          const isAutolink =
+            /^[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>]+$/.test(inner) ||
+            /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(inner);
+          if (isAutolink) {
+            for (let k = i + 1; k < close; k++) {
+              map.push(k);
+              plain += md[k];
+            }
+            i = close + 1;
+            continue;
+          }
+          // HTML tag: opening (<tag>, <tag attr>), closing (</tag>), or
+          // self-closing (<tag/>). Accept any content starting with an
+          // optional `/` and an HTML name char — we already gated on a
+          // matching `>` and no nested `<`.
+          const isHtmlTag = /^\/?[a-zA-Z]/.test(inner);
+          if (isHtmlTag) {
+            i = close + 1;
+            continue;
+          }
+        }
+      }
+    }
+
+    // Blockquote markers at line start, possibly nested: `> ` or `> > `.
+    // After consuming the blockquote prefix, also consume an immediately
+    // following list marker, ordered-list marker, or heading marker. This
+    // mirrors the dedicated list/heading blocks below — they gate on
+    // atLineStart, which is no longer true after `> ` advances past a space.
+    if (atLineStart(i) && md[i] === '>') {
+      while (i < len && md[i] === '>') {
+        i++;
+        if (i < len && md[i] === ' ') i++;
+      }
+      // Allow indent before nested list/heading marker
+      let j = i;
+      while (j < len && (md[j] === ' ' || md[j] === '\t')) j++;
+      if (
+        j < len &&
+        (md[j] === '-' || md[j] === '*' || md[j] === '+') &&
+        j + 1 < len &&
+        md[j + 1] === ' '
+      ) {
+        i = j + 2;
+        // Optional task list checkbox: [ ], [x], [X] followed by space
+        if (
+          i + 3 < len &&
+          md[i] === '[' &&
+          (md[i + 1] === ' ' || md[i + 1] === 'x' || md[i + 1] === 'X') &&
+          md[i + 2] === ']' &&
+          md[i + 3] === ' '
+        ) {
+          i += 4;
+        }
+      } else if (j < len && /\d/.test(md[j])) {
+        let k = j;
+        while (k < len && /\d/.test(md[k])) k++;
+        if (k < len && md[k] === '.' && k + 1 < len && md[k + 1] === ' ') {
+          i = k + 2;
+        }
+      } else if (j < len && md[j] === '#') {
+        i = j;
+        while (i < len && md[i] === '#') i++;
+        if (i < len && md[i] === ' ') i++;
+      }
+      continue;
+    }
+
     // Heading markers at line start
     if (atLineStart(i) && md[i] === '#') {
       while (i < len && md[i] === '#') i++;
@@ -1075,17 +1234,36 @@ export function stripInlineFormatting(md: string): {
       continue;
     }
 
-    // List markers at line start: - item, * item, N. item
+    // List markers at line start: - item, * item, + item, N. item.
+    // Allow leading indent (any amount of spaces/tabs) so nested list items
+    // are stripped — DOM textContent omits both the indent and the marker.
     if (atLineStart(i)) {
-      if ((md[i] === '-' || md[i] === '*') && i + 1 < len && md[i + 1] === ' ') {
-        i += 2;
+      let j = i;
+      while (j < len && (md[j] === ' ' || md[j] === '\t')) j++;
+      if (
+        j < len &&
+        (md[j] === '-' || md[j] === '*' || md[j] === '+') &&
+        j + 1 < len &&
+        md[j + 1] === ' '
+      ) {
+        i = j + 2;
+        // Optional task list checkbox: [ ], [x], [X] followed by space
+        if (
+          i + 3 < len &&
+          md[i] === '[' &&
+          (md[i + 1] === ' ' || md[i + 1] === 'x' || md[i + 1] === 'X') &&
+          md[i + 2] === ']' &&
+          md[i + 3] === ' '
+        ) {
+          i += 4;
+        }
         continue;
       }
-      if (/\d/.test(md[i])) {
-        let j = i;
-        while (j < len && /\d/.test(md[j])) j++;
-        if (j < len && md[j] === '.' && j + 1 < len && md[j + 1] === ' ') {
-          i = j + 2;
+      if (j < len && /\d/.test(md[j])) {
+        let k = j;
+        while (k < len && /\d/.test(md[k])) k++;
+        if (k < len && md[k] === '.' && k + 1 < len && md[k + 1] === ' ') {
+          i = k + 2;
           continue;
         }
       }
