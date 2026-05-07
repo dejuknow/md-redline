@@ -155,18 +155,19 @@ describe('ReviewSessionStore', () => {
     expect(after - before).toBeGreaterThanOrEqual(15_000);
   });
 
-  it('sweep aborts sessions whose heartbeat is older than 30s', async () => {
+  it('sweep aborts sessions whose heartbeat is older than the timeout (30 min)', async () => {
     store.startSweep(10_000); // sweep every 10s
 
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
     const waiter = store.waitForSession(session.id);
 
-    // 20s passes — still healthy
-    vi.advanceTimersByTime(20_000);
+    // 5 min in — well within the 30-min backstop. Backgrounded tabs whose
+    // heartbeats are throttled by Chrome must not be killed here.
+    vi.advanceTimersByTime(5 * 60_000);
     expect(store.getSession(session.id)?.status).toBe('open');
 
-    // Another 20s passes (40s total since last heartbeat) — should be swept
-    vi.advanceTimersByTime(20_000);
+    // 31 min total — past the 30-min crash backstop. Next sweep aborts.
+    vi.advanceTimersByTime(26 * 60_000);
 
     const result = await waiter;
     expect(result).toEqual({ status: 'aborted', reason: 'browser_disconnected' });
@@ -179,6 +180,8 @@ describe('ReviewSessionStore', () => {
     store.waitForSession(a.id);
     store.finish(a.id, 'done');
 
+    // Note: stay inside TERMINAL_RETENTION_MS (5 min) so the session is
+    // still resolvable; the assertion is that sweep didn't mutate status.
     vi.advanceTimersByTime(60_000);
     expect(store.getSession(a.id)?.status).toBe('done');
   });
@@ -192,9 +195,11 @@ describe('ReviewSessionStore', () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
     const waiter = store.waitForSession(session.id);
 
-    vi.advanceTimersByTime(29_000);
+    // Just before the 30-min backstop, mark the session done. Sweeps after
+    // the timeout must not flip the resolved session back to 'aborted'.
+    vi.advanceTimersByTime(29 * 60_000);
     expect(store.finish(session.id, 'WINNER', ['c1'])).toBe(true);
-    vi.advanceTimersByTime(20_000);
+    vi.advanceTimersByTime(2 * 60_000);
 
     const result = await waiter;
     expect(result).toEqual({ status: 'done', prompt: 'WINNER' });
@@ -206,14 +211,14 @@ describe('ReviewSessionStore', () => {
     const a = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
     const aWaiter = store.waitForSession(a.id);
 
-    // 20s in, create b. a is 20s stale (still within 30s threshold), b is fresh.
-    vi.advanceTimersByTime(20_000);
+    // 10 min in, create b. a is 10 min stale (still within 30-min
+    // threshold), b is fresh.
+    vi.advanceTimersByTime(10 * 60_000);
     const b = store.createSession({ filePaths: ['/tmp/b.md'], enableResolve: false });
 
-    // Advance to t=45 total. Sweeps at t=30 and t=40 both fire.
-    // At t=40: a's heartbeat is 40s old (past threshold) → aborted.
-    //          b's heartbeat is 20s old (within threshold) → still open.
-    vi.advanceTimersByTime(25_000);
+    // Advance to t=31 min total. a is 31 min stale → swept. b is 21 min
+    // stale → still open.
+    vi.advanceTimersByTime(21 * 60_000);
 
     const aResult = await aWaiter;
     expect(aResult).toEqual({ status: 'aborted', reason: 'browser_disconnected' });
@@ -313,6 +318,34 @@ describe('ReviewSessionStore', () => {
       store.waitForSession(session.id);
       store.finish(session.id);
       expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+    });
+
+    // The freshness gate offsets the long HEARTBEAT_TIMEOUT_MS backstop:
+    // crash-leaked sessions sit in the open pool for up to 30 min before
+    // being swept, so without this check, a fresh mdr_request_review for the
+    // same files would attach to the dead one. The threshold is 60s — well
+    // above the client's 10s heartbeat cadence.
+    it('ignores open sessions whose last heartbeat is too stale to dedupe to', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+
+      // 30s in — still fresh, should match.
+      vi.advanceTimersByTime(30_000);
+      expect(store.findOpenSession(['/tmp/a.md'])?.id).toBe(session.id);
+
+      // 90s in — past the 60s freshness window, should not match.
+      vi.advanceTimersByTime(60_000);
+      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+    });
+
+    it('matches stale-then-refreshed session once heartbeat lands', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+
+      vi.advanceTimersByTime(90_000);
+      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+
+      // Browser came back from bfcache and fired a heartbeat — dedupe again.
+      store.heartbeat(session.id);
+      expect(store.findOpenSession(['/tmp/a.md'])?.id).toBe(session.id);
     });
   });
 });

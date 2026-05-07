@@ -1,6 +1,26 @@
 import { randomUUID } from 'crypto';
 
-const HEARTBEAT_TIMEOUT_MS = 30_000;
+/**
+ * How long we keep a session alive without a heartbeat before assuming the
+ * browser is gone. The browser UI heartbeats every 10s on the main thread.
+ * Chrome throttles `setInterval` aggressively in backgrounded tabs, so a
+ * tight (e.g. 30s) timeout silently kills sessions whenever the user tabs
+ * away — the failure mode looks identical to "tab closed" from the server's
+ * perspective even though the user is still there. The timeout is therefore
+ * a crash-and-network-loss backstop, not a primary close detector. 30 min
+ * is generous enough to ride out any realistic background-tab throttling.
+ */
+const HEARTBEAT_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * Maximum age of `lastHeartbeatAt` before `findOpenSession` will refuse to
+ * dedupe to it. Without this gate, a crash-leaked session can sit in the
+ * "open" pool for up to HEARTBEAT_TIMEOUT_MS, and a fresh
+ * `mdr_request_review` for the same files would attach to it instead of
+ * creating a new one. 60s is well above the client's 10s heartbeat cadence
+ * (so live sessions always pass) and well below HEARTBEAT_TIMEOUT_MS.
+ */
+const FIND_OPEN_FRESHNESS_MS = 60_000;
 
 /**
  * How long to keep a terminal (done / aborted) session in memory after
@@ -93,12 +113,15 @@ export class ReviewSessionStore {
   /**
    * Find an existing open session whose file paths match the given set
    * (order-independent). Used to deduplicate when the tool is called twice
-   * for the same files.
+   * for the same files. Requires a recent heartbeat so a crash-leaked
+   * session doesn't get reused — see FIND_OPEN_FRESHNESS_MS.
    */
   findOpenSession(filePaths: string[]): ReviewSession | undefined {
     const sorted = [...filePaths].sort();
+    const freshCutoff = Date.now() - FIND_OPEN_FRESHNESS_MS;
     for (const s of this.sessions.values()) {
       if (s.status !== 'open') continue;
+      if (s.lastHeartbeatAt.getTime() < freshCutoff) continue;
       const existing = [...s.filePaths].sort();
       if (
         sorted.length === existing.length &&

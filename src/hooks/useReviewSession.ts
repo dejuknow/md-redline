@@ -69,7 +69,13 @@ export function useReviewSession() {
   // the tab opened late, or if Chrome throttles the setInterval while the
   // tab is in the background. Without this, the first heartbeat wouldn't
   // fire until HEARTBEAT_INTERVAL_MS after the hook discovers the session,
-  // which can easily race with the server's 30s abandonment sweep.
+  // which can easily race with the server's abandonment sweep.
+  //
+  // We also fire an immediate heartbeat on `pageshow` when the page is
+  // restored from the back/forward cache (event.persisted === true). Tabs
+  // that come back from bfcache are typically off-heartbeat for whatever
+  // duration they were cached, and we want to refresh the lease the moment
+  // they're alive again rather than wait up to HEARTBEAT_INTERVAL_MS.
   //
   // A 404/409 response means the session is gone server-side (swept or
   // resolved in another tab). Refresh the session list immediately so the
@@ -95,9 +101,14 @@ export function useReviewSession() {
     };
     void sendHeartbeats();
     const id = setInterval(() => void sendHeartbeats(), HEARTBEAT_INTERVAL_MS);
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) void sendHeartbeats();
+    };
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       cancelled = true;
       clearInterval(id);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, [sessions, fetchSessions]);
 

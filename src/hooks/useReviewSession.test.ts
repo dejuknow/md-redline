@@ -99,6 +99,69 @@ describe('useReviewSession', () => {
     }
   });
 
+  it('fires an immediate heartbeat when the page is restored from bfcache', async () => {
+    // Backgrounded tabs come off-heartbeat under Chrome throttling. When
+    // the user returns and the page is restored from bfcache, we want to
+    // refresh the server-side lease immediately rather than wait up to
+    // HEARTBEAT_INTERVAL_MS for the next interval tick.
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/api/review-sessions')) {
+        return {
+          ok: true,
+          json: async () => ({
+            sessions: [
+              { id: 'rev_1', filePaths: ['/tmp/a.md'], enableResolve: false, status: 'open', sentCommentIds: [], waitingForAgent: false },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
+    });
+
+    renderHook(() => useReviewSession());
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const heartbeatsAfterMount = fetchMock.mock.calls.filter(([url]) =>
+      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    ).length;
+
+    // Simulate bfcache restore. Real PageTransitionEvent isn't available in
+    // jsdom, but the listener only reads the `persisted` field.
+    await act(async () => {
+      const evt = new Event('pageshow') as Event & { persisted?: boolean };
+      Object.defineProperty(evt, 'persisted', { value: true });
+      window.dispatchEvent(evt);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const heartbeatsAfterPageShow = fetchMock.mock.calls.filter(([url]) =>
+      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    ).length;
+    expect(heartbeatsAfterPageShow).toBeGreaterThan(heartbeatsAfterMount);
+
+    // A non-bfcache pageshow (persisted=false, e.g. normal navigation)
+    // must NOT fire an extra heartbeat — the on-mount path already covers
+    // that case.
+    const before = heartbeatsAfterPageShow;
+    await act(async () => {
+      const evt = new Event('pageshow') as Event & { persisted?: boolean };
+      Object.defineProperty(evt, 'persisted', { value: false });
+      window.dispatchEvent(evt);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const heartbeatsAfterNonBfcacheShow = fetchMock.mock.calls.filter(([url]) =>
+      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    ).length;
+    expect(heartbeatsAfterNonBfcacheShow).toBe(before);
+  });
+
   it('keeps the same sessions reference across polls when the data is unchanged', async () => {
     // Every 5s poll that returns identical data must not produce a new array
     // reference. Downstream consumers (e.g. MarkdownViewer) re-run layout
