@@ -827,6 +827,76 @@ describe('detectMissingAnchors', () => {
     expect(missing.has('a')).toBe(false);
   });
 
+  it('preserves [^] (empty footnote id) as literal text', () => {
+    // `[^]` is not a valid footnote ref per CommonMark/GFM — id must be
+    // non-empty. The handler must leave it in place so a comment whose
+    // anchor includes the literal text still matches.
+    const clean = 'Aside [^] continues here.';
+    const comments = [
+      { id: 'a', anchor: 'Aside [^] continues here.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('preserves list-marker-like content inside indented code blocks', () => {
+    // Repro: `    - bash command` after a blank line is an indented code
+    // block in CommonMark, rendered as <pre><code>- bash command</code></pre>.
+    // Stripping the `- ` would mismatch the DOM textContent and flag the
+    // anchor as orphaned.
+    const clean =
+      'Run these commands:\n' +
+      '\n' +
+      '    - npm install\n' +
+      '    - npm test\n' +
+      '\n' +
+      'Then continue.';
+    const comments = [
+      { id: 'a', anchor: '- npm install\n- npm test' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor on a shortcut reference link', () => {
+    // `[the docs]` with no `(url)` or `[ref]` after, but a matching
+    // `[the docs]: url` definition elsewhere, is a shortcut reference link.
+    // remark-gfm renders just `the docs` (no brackets) — the parser must
+    // drop the brackets to match.
+    const clean =
+      'See [the docs] for full details.\n\n[the docs]: https://example.com';
+    const comments = [
+      { id: 'a', anchor: 'See the docs for full details.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not strip literal [Word] when no matching reference definition exists', () => {
+    // Without a `[Note]: url` definition, remark-gfm renders `[Note]`
+    // verbatim — the parser must NOT drop the brackets, otherwise an anchor
+    // that includes them would fail to match.
+    const clean = 'See [Note] for the warning. No reference defined.';
+    const comments = [
+      { id: 'a', anchor: 'See [Note] for the warning.' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag anchor spanning a doubly-nested blockquote', () => {
+    // The blockquote-prefix loop must consume `> > ` (with space between
+    // markers) and `>>` (no space) before falling through to inline
+    // handling. DOM textContent omits both layers of `> ` plus the bullet
+    // marker, so the anchor only has the inner prose.
+    const clean = '> > - Inner bullet one\n> > - Inner bullet two';
+    const comments = [
+      { id: 'a', anchor: 'Inner bullet one\nInner bullet two' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
   it('does not strip a sentence that just happens to start with [Word]:', () => {
     // Reference-link-definition handler must not fire on prose; the part
     // after `:` has multiple whitespace-separated word tokens, not a single
@@ -1577,6 +1647,50 @@ describe('stripInlineFormatting with fenced code blocks', () => {
     const { plain } = stripInlineFormatting(md);
     expect(plain).toContain('code');
     expect(plain).not.toContain('```');
+  });
+
+  it('preserves indented code block content verbatim (does not strip list markers)', () => {
+    // `    - foo` after a blank line is an indented code block; the `- `
+    // is part of the code text, not a list marker.
+    const md = 'Intro line.\n\n    - foo\n    - bar\n\nOutro.';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('- foo');
+    expect(plain).toContain('- bar');
+  });
+
+  it('treats indented code block as code at doc start (no preceding blank line needed)', () => {
+    const md = '    code line one\n    code line two';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('    code line one');
+    expect(plain).toContain('    code line two');
+  });
+
+  it('does NOT treat indented content inside a list item as a code block', () => {
+    // Previous line is `- A` (not blank), so 4-space indent here is a
+    // nested list, not a code block. List marker should still be stripped.
+    const md = '- A\n    - B';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toBe('A\nB');
+  });
+
+  it('strips shortcut reference links when a matching definition exists', () => {
+    const md = 'See [docs] today.\n\n[docs]: https://example.com';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('See docs today.');
+    expect(plain).not.toContain('[docs]');
+  });
+
+  it('keeps brackets on bare [text] when no matching reference definition exists', () => {
+    const md = 'Look at [Note] please.';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('[Note]');
+  });
+
+  it('matches shortcut reference labels case-insensitively with whitespace collapse', () => {
+    const md = 'See [The Docs] for info.\n\n[the   docs]: https://example.com';
+    const { plain } = stripInlineFormatting(md);
+    expect(plain).toContain('See The Docs for info.');
+    expect(plain).not.toContain('[The Docs]');
   });
 });
 

@@ -1001,6 +1001,20 @@ export function stripInlineFormatting(md: string): {
   let pendingLinkSkipAt = -1;
   let pendingLinkSkipTo = -1;
 
+  // Pre-scan reference link definitions. Used later to recognize shortcut
+  // reference links like `[the docs]` whose label has a matching `[the docs]: url`
+  // definition elsewhere in the doc — remark-gfm renders these without
+  // brackets, but a literal `[Note]` with no definition stays bracketed,
+  // so we only strip when we know there's a real label.
+  const refLabels = new Set<string>();
+  const normalizeRefLabel = (label: string) =>
+    label.replace(/\s+/g, ' ').trim().toLowerCase();
+  const REF_DEF_RE =
+    /(?:^|\n)\[([^\n\]]+)\]:[ \t]+(?:<[^<>\n]*>|\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*(?=\n|$)/g;
+  for (let m: RegExpExecArray | null; (m = REF_DEF_RE.exec(md)) !== null; ) {
+    refLabels.add(normalizeRefLabel(m[1]));
+  }
+
   while (i < len) {
     // Handle pending link URL skip: we reached ], jump past ](url)
     if (pendingLinkSkipAt !== -1 && i >= pendingLinkSkipAt) {
@@ -1061,6 +1075,57 @@ export function stripInlineFormatting(md: string): {
       }
     }
 
+    // Indented code blocks: 4+ leading spaces (or a tab) at line start,
+    // preceded by a blank line or doc start. Per CommonMark these render
+    // as <pre><code> with content preserved verbatim — list/heading/
+    // emphasis stripping must not run on these lines, otherwise an anchor
+    // on rendered code text like `- literal item` gets flagged because we
+    // wrongly stripped the `- ` as a list marker.
+    if (atLineStart(i)) {
+      let leadSpaces = 0;
+      while (i + leadSpaces < len && md[i + leadSpaces] === ' ') leadSpaces++;
+      const tabIndent = leadSpaces === 0 && md[i] === '\t';
+      if (leadSpaces >= 4 || tabIndent) {
+        // Previous line must be blank (or this must be the doc start).
+        // Inside a list item, indented continuation looks identical but
+        // is not a code block — accepting that misclassification here is
+        // benign (line is preserved verbatim, anchors still substring-match).
+        let prevBlank = i === 0;
+        if (i > 0) {
+          let q = i - 2; // skip the '\n' at i-1
+          let allWs = true;
+          while (q >= 0 && md[q] !== '\n') {
+            if (md[q] !== ' ' && md[q] !== '\t') {
+              allWs = false;
+              break;
+            }
+            q--;
+          }
+          prevBlank = allWs;
+        }
+        if (prevBlank) {
+          // Consume consecutive 4+-indented (or tab-indented) lines verbatim.
+          while (i < len) {
+            let li = 0;
+            while (i + li < len && md[i + li] === ' ') li++;
+            const lt = li === 0 && md[i] === '\t';
+            if (!(li >= 4 || lt)) break;
+            while (i < len && md[i] !== '\n') {
+              map.push(i);
+              plain += md[i];
+              i++;
+            }
+            if (i < len) {
+              map.push(i);
+              plain += md[i];
+              i++;
+            }
+          }
+          continue;
+        }
+      }
+    }
+
     // Reference link definition at line start: `[ref]: url` (rest of the
     // line). DOM doesn't render these at all, so drop the whole line.
     // The content after `:` must look URL-like (a single non-whitespace
@@ -1094,7 +1159,7 @@ export function stripInlineFormatting(md: string): {
       const cb = md.indexOf(']', i + 2);
       if (cb !== -1) {
         const id = md.slice(i + 2, cb);
-        if (!id.includes('\n') && !id.includes('[')) {
+        if (id.length > 0 && !id.includes('\n') && !id.includes('[')) {
           i = cb + 1;
           continue;
         }
@@ -1139,6 +1204,34 @@ export function stripInlineFormatting(md: string): {
           if (!ref.includes('\n') && !ref.includes('[')) {
             pendingLinkSkipAt = cb;
             pendingLinkSkipTo = cp + 1;
+            i++;
+            continue;
+          }
+        }
+      }
+    }
+
+    // Shortcut reference link: bare `[text]` whose normalized label has a
+    // matching `[text]: url` definition elsewhere. remark-gfm renders these
+    // without the brackets, so we must drop them too. Requiring a known
+    // label avoids stripping literal `[Note]` in prose.
+    if (md[i] === '[' && pendingLinkSkipAt === -1 && md[i + 1] !== '^') {
+      const cb = md.indexOf(']', i + 1);
+      if (cb !== -1) {
+        const next = cb + 1 < len ? md[cb + 1] : '';
+        // Skip if a more specific bracket form follows — those are handled
+        // by the link / reference-link / definition handlers above.
+        if (next !== '(' && next !== '[' && next !== ':') {
+          const text = md.slice(i + 1, cb);
+          if (
+            text.length > 0 &&
+            !text.includes('\n') &&
+            !text.includes('[') &&
+            refLabels.has(normalizeRefLabel(text))
+          ) {
+            // Drop `[`, process text inline, drop `]` when we reach it.
+            pendingLinkSkipAt = cb;
+            pendingLinkSkipTo = cb + 1;
             i++;
             continue;
           }
