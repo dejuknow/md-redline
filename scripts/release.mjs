@@ -194,6 +194,55 @@ function generateNotes(currentVersion, nextVersion) {
   return path;
 }
 
+/**
+ * Rewrites the GitHub-default notes file in the project's voice using
+ * `claude -p`. Best-effort: if claude isn't installed or exits non-zero,
+ * we leave the default notes in place and let the user edit at the prompt.
+ *
+ * Set RELEASE_SKIP_CLAUDE=1 to skip this step (e.g. offline / CI).
+ */
+function rewriteNotesWithClaude(notesPath, currentVersion, nextVersion) {
+  if (process.env.RELEASE_SKIP_CLAUDE === '1') {
+    console.log(`\n→ Skipping Claude rewrite (RELEASE_SKIP_CLAUDE=1)`);
+    return false;
+  }
+  console.log(`\n→ Rewriting notes with Claude`);
+  const prompt = [
+    `You are generating release notes for md-redline v${nextVersion}.`,
+    ``,
+    `1. Read scripts/RELEASE_NOTES_TEMPLATE.md for the format and writing rules.`,
+    `2. Run: git log v${currentVersion}..HEAD --format='%h %s%n%n%b%n---'`,
+    `3. Overwrite ${notesPath} with the polished release notes.`,
+    ``,
+    `Do not output anything else. Do not add commentary outside the file.`,
+  ].join('\n');
+  const result = spawnSync(
+    'claude',
+    [
+      '-p', prompt,
+      '--allowed-tools', 'Read Write Bash(git log:*)',
+      '--permission-mode', 'acceptEdits',
+    ],
+    {
+      cwd: PROJECT_ROOT,
+      stdio: ['ignore', 'ignore', 'inherit'],
+    }
+  );
+  if (result.error) {
+    const reason = result.error.code === 'ENOENT'
+      ? 'claude CLI not found (install Claude Code or set RELEASE_SKIP_CLAUDE=1)'
+      : result.error.message;
+    console.warn(`  ! Claude rewrite skipped: ${reason}`);
+    return false;
+  }
+  if (result.status !== 0) {
+    console.warn(`  ! Claude rewrite exited ${result.status}; keeping default notes`);
+    return false;
+  }
+  console.log(`  ✓ Notes rewritten`);
+  return true;
+}
+
 function printNotes(filePath, version) {
   const contents = readFileSync(filePath, 'utf8');
   const rule = '─'.repeat(60);
@@ -301,6 +350,7 @@ async function main() {
   console.log(`\n→ Current: v${currentVersion}, next: v${nextVersion}`);
 
   const notesPath = generateNotes(currentVersion, nextVersion);
+  rewriteNotesWithClaude(notesPath, currentVersion, nextVersion);
 
   // SIGINT during the prompt: AbortController + signal option on rl.question.
   // SIGINT during spawnSync: the signal is delivered to the child process,
