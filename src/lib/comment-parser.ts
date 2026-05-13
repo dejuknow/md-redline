@@ -1,4 +1,5 @@
 import { getEffectiveStatus, type MdComment, type ParseResult, type CommentReply } from '../types';
+import { safeRandomUUID } from './uuid';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -446,7 +447,7 @@ export function insertComment(
   contextBefore?: string,
   contextAfter?: string,
   hintOffset?: number,
-  commentId: string = crypto.randomUUID(),
+  commentId: string = safeRandomUUID(),
 ): string {
   const comment: MdComment = {
     id: commentId,
@@ -766,7 +767,7 @@ export function addReply(
   author: string = 'User',
 ): string {
   const reply: CommentReply = {
-    id: crypto.randomUUID(),
+    id: safeRandomUUID(),
     text,
     author,
     timestamp: new Date().toISOString(),

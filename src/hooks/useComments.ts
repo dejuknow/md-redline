@@ -29,6 +29,7 @@ import { renderMarkdown } from '../markdown/pipeline';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
+import { safeRandomUUID } from '../lib/uuid';
 
 interface TabInfo {
   filePath: string;
@@ -171,7 +172,7 @@ export function useComments(params: UseCommentsParams) {
       contextAfter?: string,
       hintOffset?: number,
     ) => {
-      const newCommentId = crypto.randomUUID();
+      const newCommentId = safeRandomUUID();
       const newRaw = insertComment(
         rawMarkdownRef.current ?? '',
         anchor,

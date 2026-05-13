@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 
 import { checkServer, gracefulShutdown, killPort } from './server-control.js';
+import { buildBrowserUrl, getDisplayHost } from './url-builder.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,6 +41,10 @@ function printHelp() {
   console.log('  --restrict      Disable the default home-directory trust');
   console.log('  -v, --version   Show version number');
   console.log('  -h, --help      Show this help message');
+  console.log('');
+  console.log('Environment variables:');
+  console.log('  MDR_HOST        Hostname for printed URLs and the listener bind interface.');
+  console.log('                  Set to your dev-host FQDN to use mdr from a remote browser.');
   console.log('');
   console.log('Subcommands:');
   console.log('  mcp             Run the MCP server (called by the MCP client)');
@@ -282,10 +287,7 @@ async function buildUrl(file, dir) {
   const clientPort = await findClientPort();
   const serverPort = await findServerPort();
   const port = clientPort ?? serverPort ?? DEFAULT_CLIENT_PORT;
-  const baseUrl = `http://localhost:${port}`;
-  if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
-  if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
-  return baseUrl;
+  return buildBrowserUrl({ port, file, dir });
 }
 
 async function openInBrowser(url) {
@@ -465,14 +467,14 @@ async function runMcpStdio() {
   // Bin owns the baseUrl state so there's no module-level mutable in the
   // mcp-stdio module. runMcpServer reads it via getBaseUrl() on every tool
   // call, after ensureServerRunning() has had a chance to refresh it.
-  let currentBaseUrl = `http://localhost:${DEFAULT_CLIENT_PORT}`;
+  let currentBaseUrl = `http://${getDisplayHost()}:${DEFAULT_CLIENT_PORT}`;
   await mod.runMcpServer({
     getBaseUrl: () => currentBaseUrl,
     openInBrowser,
     ensureServerRunning: async () => {
       await ensureServerRunning();
       const port = (await findClientPort()) ?? (await findServerPort()) ?? DEFAULT_CLIENT_PORT;
-      currentBaseUrl = `http://localhost:${port}`;
+      currentBaseUrl = `http://${getDisplayHost()}:${port}`;
     },
   });
 }

@@ -8,6 +8,7 @@ import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
+import { lookup as dnsLookup } from 'dns/promises';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import {
@@ -56,6 +57,13 @@ export interface CreateAppOptions {
   platformName?: NodeJS.Platform;
   staticDir?: string;
   defaultTrustHome?: boolean;
+  /**
+   * Hostname to accept in the Host header allowlist in addition to the
+   * loopback defaults (localhost, 127.0.0.1, ::1). When unset, the
+   * allowlist is loopback-only. Falls back to the MDR_HOST env var.
+   * See README "Remote dev hosts" for the full opt-in story.
+   */
+  mdrHost?: string;
 }
 
 function canonicalize(p: string): string {
@@ -116,6 +124,12 @@ export function createApp(options: CreateAppOptions = {}) {
   const platformName = options.platformName ?? platform();
   const execFileImpl = options.execFileImpl ?? execFile;
   const caseInsensitivePaths = platformName === 'win32';
+  // Optional remote-host opt-in. When set, the Host header allowlist accepts
+  // this hostname in addition to the loopback defaults, and the listener
+  // binds 0.0.0.0 in production so the FQDN's interface accepts traffic.
+  // Trim defensively so `MDR_HOST=" "` doesn't silently widen the allowlist.
+  const mdrHostRaw = options.mdrHost ?? process.env.MDR_HOST ?? '';
+  const mdrHost = mdrHostRaw.trim().toLowerCase();
 
   const app = new Hono();
   // Allow CORS only from Vite dev server ports (default 5188-5197, or custom via env)
@@ -148,14 +162,18 @@ export function createApp(options: CreateAppOptions = {}) {
     }),
   );
   app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 }));
-  // Host header allowlist — closes DNS rebinding. The server only binds to
-  // 127.0.0.1, so any request reaching us either came from a localhost-
-  // bound caller (curl, Vite proxy, the SPA itself) OR from a browser whose
-  // DNS resolver returned 127.0.0.1 for an attacker-controlled hostname.
-  // The CORS allowlist blocks cross-origin JS reads but does NOT prevent
-  // simple GETs from triggering server side effects, and does NOT prevent
-  // a rebinding attack where the attacker site IS the active origin.
+  // Host header allowlist — closes DNS rebinding. The server normally only
+  // binds to 127.0.0.1, so any request reaching us either came from a
+  // localhost-bound caller (curl, Vite proxy, the SPA itself) OR from a
+  // browser whose DNS resolver returned 127.0.0.1 for an attacker-controlled
+  // hostname. The CORS allowlist blocks cross-origin JS reads but does NOT
+  // prevent simple GETs from triggering server side effects, and does NOT
+  // prevent a rebinding attack where the attacker site IS the active origin.
   // Verifying the Host header is loopback closes that gap.
+  //
+  // When MDR_HOST is set the listener binds 0.0.0.0 so the user's dev-host
+  // FQDN works from a laptop browser. We extend the allowlist with that
+  // hostname so legitimate FQDN requests aren't rejected.
   app.use('*', async (c, next) => {
     const host = c.req.header('host');
     // A missing Host header can only come from an internal in-process
@@ -165,10 +183,14 @@ export function createApp(options: CreateAppOptions = {}) {
     // has full code execution and there's nothing to defend against.
     if (host) {
       // Strip an optional port. IPv6 hosts arrive as `[::1]:3001`.
-      const hostname = host.startsWith('[')
+      const hostname = (host.startsWith('[')
         ? host.slice(1, host.indexOf(']'))
-        : host.split(':')[0];
-      if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1') {
+        : host.split(':')[0]
+      ).toLowerCase();
+      const isLoopback =
+        hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+      const isMdrHost = mdrHost !== '' && hostname === mdrHost;
+      if (!isLoopback && !isMdrHost) {
         return c.json({ error: 'Invalid Host header' }, 400);
       }
     }
@@ -1127,9 +1149,25 @@ const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.
 const MAX_PORT_ATTEMPTS = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 
-function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
+async function resolveBindHostname(): Promise<string> {
+  // When MDR_HOST is set the user opts in to accepting traffic on a remote
+  // dev host's network interface (Cloud Desktops, etc). Resolve the hostname
+  // and bind that specific IP rather than 0.0.0.0 so the listener is tied
+  // to one NIC instead of every interface (Docker bridges, VPN tunnels,
+  // secondary NICs all stay invisible). The Host header allowlist is still
+  // the security boundary, but narrowing the bind reduces the blast radius
+  // if anything else on the host has different trust assumptions.
+  // Defaults to 127.0.0.1 when MDR_HOST is unset for the loopback-only path.
+  const mdrHost = process.env.MDR_HOST?.trim();
+  if (!mdrHost) return '127.0.0.1';
+  const { address } = await dnsLookup(mdrHost);
+  return address;
+}
+
+async function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
+  const hostname = await resolveBindHostname();
   return new Promise((res, rej) => {
-    const server = serve({ fetch: appFetch, port, hostname: '127.0.0.1' }, () => res(port));
+    const server = serve({ fetch: appFetch, port, hostname }, () => res(port));
     server.on('error', (err: NodeJS.ErrnoException) => {
       rej(err);
     });
@@ -1173,7 +1211,10 @@ if (isMainModule) {
           throw e;
         }
       }
-      console.log(`md-redline server running on http://localhost:${port}`);
+      const displayHost = process.env.MDR_HOST && process.env.MDR_HOST.trim() !== ''
+        ? process.env.MDR_HOST.trim()
+        : 'localhost';
+      console.log(`md-redline server running on http://${displayHost}:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
       if (initialArg) {
         console.log(`Initial path: ${initialArg}`);

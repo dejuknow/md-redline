@@ -1152,6 +1152,88 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
   });
 });
 
+describe('Host header allowlist with MDR_HOST', () => {
+  it('rejects the configured hostname when MDR_HOST is unset', async () => {
+    const defaultApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+    });
+    const r = await defaultApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'dev-dsk-myname.us-east-1.amazon.com:3001' },
+    });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: 'Invalid Host header' });
+  });
+
+  it('accepts the configured hostname when MDR_HOST is set', async () => {
+    const remoteApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+      mdrHost: 'dev-dsk-myname.us-east-1.amazon.com',
+    });
+    const r = await remoteApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'dev-dsk-myname.us-east-1.amazon.com:3001' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('still accepts loopback hosts when MDR_HOST is set', async () => {
+    const remoteApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+      mdrHost: 'dev-dsk-myname.us-east-1.amazon.com',
+    });
+    for (const host of ['localhost', '127.0.0.1:3001', '[::1]:3001']) {
+      const r = await remoteApp.request(`http://localhost/api/config`, {
+        headers: { Host: host },
+      });
+      expect(r.status, `Host: ${host}`).toBe(200);
+    }
+  });
+
+  it('still rejects unrelated hosts when MDR_HOST is set', async () => {
+    const remoteApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+      mdrHost: 'dev-dsk-myname.us-east-1.amazon.com',
+    });
+    const r = await remoteApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'attacker.example.com:3001' },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('matches MDR_HOST case-insensitively', async () => {
+    const remoteApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+      mdrHost: 'Dev-Dsk-MyName.US-East-1.amazon.com',
+    });
+    const r = await remoteApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'dev-dsk-myname.us-east-1.amazon.com:3001' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('treats an empty MDR_HOST as unset', async () => {
+    const blankApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      platformName: 'linux',
+      mdrHost: '   ',
+    });
+    const r = await blankApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'dev-dsk-myname.us-east-1.amazon.com:3001' },
+    });
+    expect(r.status).toBe(400);
+  });
+});
+
 describe('file size limit (memory DoS defense)', () => {
   it('rejects /api/file when the file exceeds MAX_FILE_BYTES', async () => {
     // Create a 26 MB markdown file (over the 25 MB limit).
