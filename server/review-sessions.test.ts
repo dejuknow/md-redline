@@ -289,6 +289,186 @@ describe('ReviewSessionStore', () => {
     expect(store.getSession(session.id)).toBeUndefined();
   });
 
+  describe('ReviewSessionStore — pendingAsks', () => {
+    it('addAsk creates a pending ask with its own waiter', async () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+      ]);
+      expect(askId).toMatch(/^ask_/);
+      expect(store.getPendingAsks(session.id)).toHaveLength(1);
+      expect(store.getPendingAsks(session.id)[0].askId).toBe(askId);
+      store.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'reply' }]);
+      const result = await waiter;
+      expect(result).toEqual({
+        status: 'reply',
+        replies: [{ questionIndex: 0, text: 'reply' }],
+      });
+    });
+
+    it('addAsk rejects a second ask while another is pending for the same session', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.addAsk(session.id, [{ commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' }]);
+      expect(() =>
+        store.addAsk(session.id, [{ commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' }]),
+      ).toThrow(/previous mdr_ask is still pending/);
+    });
+
+    it('addAsk throws when the session is not open', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.finish(session.id);
+      expect(() =>
+        store.addAsk(session.id, [{ commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' }]),
+      ).toThrow(/session not found or already finished/);
+    });
+
+    it('resolveReplies bundles replies in question order', async () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+        { commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' },
+      ]);
+      store.resolveReplies(session.id, askId, [
+        { commentId: 'c2', text: 'reply2' },
+        { commentId: 'c1', text: 'reply1' },
+      ]);
+      const result = await waiter;
+      expect(result).toEqual({
+        status: 'reply',
+        replies: [
+          { questionIndex: 0, text: 'reply1' },
+          { questionIndex: 1, text: 'reply2' },
+        ],
+      });
+      expect(store.getPendingAsks(session.id)).toHaveLength(0);
+    });
+
+    it('abortAsks resolves pending ask waiters with aborted', async () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+      ]);
+      store.abortAsks(session.id, 'session_cancelled');
+      const result = await waiter;
+      expect(result).toEqual({ status: 'aborted', reason: 'session_cancelled' });
+      expect(store.getPendingAsks(session.id)).toHaveLength(0);
+      void askId;
+    });
+
+    it('abort() also fires abortAsks for any pending asks on that session', async () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+      ]);
+      store.abort(session.id, 'user_cancelled');
+      const result = await waiter;
+      expect(result.status).toBe('aborted');
+    });
+  });
+
+  describe('ReviewSessionStore — onSessionAborted callback', () => {
+    it('fires callback with the aborted session id and pending asks when sweep aborts a session', async () => {
+      const store = new ReviewSessionStore();
+      const calls: Array<{ sessionId: string; askIds: string[] }> = [];
+      store.setOnSessionAborted((sessionId, asks) => {
+        calls.push({ sessionId, askIds: asks.map((a) => a.askId) });
+      });
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+      ]);
+
+      // Force a stale heartbeat so the sweep aborts the session.
+      const internal = (store as unknown as { sessions: Map<string, { lastHeartbeatAt: Date }> }).sessions.get(session.id)!;
+      internal.lastHeartbeatAt = new Date(Date.now() - 31_000);
+      (store as unknown as { sweepStale: () => void }).sweepStale();
+
+      expect(calls).toEqual([{ sessionId: session.id, askIds: [askId] }]);
+      expect(await waiter).toEqual({ status: 'aborted', reason: 'browser_disconnected' });
+    });
+
+    it('fires callback when abort() is called explicitly with pending asks', async () => {
+      const store = new ReviewSessionStore();
+      const calls: Array<{ sessionId: string; askIds: string[] }> = [];
+      store.setOnSessionAborted((sessionId, asks) => {
+        calls.push({ sessionId, askIds: asks.map((a) => a.askId) });
+      });
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+      ]);
+      store.abort(session.id, 'user_cancelled');
+      expect(calls).toEqual([{ sessionId: session.id, askIds: [askId] }]);
+      expect(await waiter).toEqual({ status: 'aborted', reason: 'session_cancelled' });
+    });
+  });
+
+  describe('queueBatch / deliverQueuedBatchIfAny', () => {
+    it('queueBatch adds a batch and updates sentCommentIds', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.waitForSession(session.id);
+      store.sendBatch(session.id, 'batch1', ['c1']); // sets waitingForAgent
+
+      const ok = store.queueBatch(session.id, 'queued prompt', ['c2', 'c3']);
+      expect(ok).toBe(true);
+
+      const queued = store.getQueuedBatch(session.id);
+      expect(queued).toEqual({ prompt: 'queued prompt', commentIds: ['c2', 'c3'] });
+
+      const s = store.getSession(session.id)!;
+      expect(s.sentCommentIds).toContain('c2');
+      expect(s.sentCommentIds).toContain('c3');
+    });
+
+    it('queueBatch merges into an existing queued batch', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.waitForSession(session.id);
+      store.sendBatch(session.id, 'batch1', ['c1']);
+
+      store.queueBatch(session.id, 'first queued', ['c2']);
+      store.queueBatch(session.id, 'second queued', ['c3', 'c2']); // c2 duplicate
+
+      const queued = store.getQueuedBatch(session.id);
+      expect(queued?.prompt).toBe('first queued\n\nsecond queued');
+      expect(queued?.commentIds.sort()).toEqual(['c2', 'c3']);
+    });
+
+    it('queueBatch rejects if session is not open', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.waitForSession(session.id);
+      store.finish(session.id);
+
+      expect(store.queueBatch(session.id, 'prompt', ['c1'])).toBe(false);
+    });
+
+    it('deliverQueuedBatchIfAny returns true when a batch is queued (delivery happens via waitForSession)', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.waitForSession(session.id);
+      store.sendBatch(session.id, 'batch1', ['c1']);
+
+      store.queueBatch(session.id, 'queued prompt', ['c2']);
+
+      // deliverQueuedBatchIfAny is a read-only check; actual delivery is in waitForSession.
+      expect(store.deliverQueuedBatchIfAny(session.id)).toBe(true);
+
+      // waitForSession delivers the queued batch immediately.
+      const result = await store.waitForSession(session.id);
+      expect(result).toEqual({ status: 'batch', prompt: 'queued prompt', commentIds: ['c2'] });
+      expect(store.getQueuedBatch(session.id)).toBeNull();
+    });
+
+    it('deliverQueuedBatchIfAny returns false when no batch is queued', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      expect(store.deliverQueuedBatchIfAny(session.id)).toBe(false);
+    });
+  });
+
   describe('findOpenSession', () => {
     it('returns an open session with matching file paths', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });

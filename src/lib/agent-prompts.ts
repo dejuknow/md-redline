@@ -65,6 +65,10 @@ ${
 4. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it`
 }
 
+## Asking me a question
+
+If a comment is ambiguous, or you encounter a planning fork while editing where the right answer would meaningfully change your edit, you may call the \`mdr_ask\` tool to post one or more anchored questions to me. Pass the \`sessionId\` from this review and the file path, the exact text to anchor against, and your question. The tool blocks until I have replied to every question. Prefer asking over guessing when the answer matters.
+
 ## How to respond
 
 After you are done, give me a brief summary:

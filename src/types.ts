@@ -21,6 +21,10 @@ export interface MdComment {
   contextAfter?: string;
   /** Character offset of the anchor's start position in the clean markdown. Computed at parse time, not stored in the file. */
   cleanOffset?: number;
+  /** True when this marker was inserted by an agent calling `mdr_ask`. Drives sidebar section + card styling. */
+  agentInitiated?: boolean;
+  /** Review session that owns this agent question. Used for reply routing. */
+  sessionId?: string;
 }
 
 export function getEffectiveStatus(comment: MdComment): CommentStatus {

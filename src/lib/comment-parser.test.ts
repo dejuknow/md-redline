@@ -129,6 +129,25 @@ describe('parseComments', () => {
   });
 });
 
+describe('parseComments — agent-initiated fields', () => {
+  it('round-trips agentInitiated and sessionId through parse', () => {
+    const raw =
+      'Some text <!-- @comment{"id":"abc","anchor":"Some text","text":"q?","author":"Claude","timestamp":"2026-04-26T00:00:00.000Z","agentInitiated":true,"sessionId":"rev_xyz"} -->Some text continues.';
+    const { comments } = parseComments(raw);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].agentInitiated).toBe(true);
+    expect(comments[0].sessionId).toBe('rev_xyz');
+  });
+
+  it('treats markers without the new fields as non-agent (backwards compat)', () => {
+    const raw =
+      'Some text <!-- @comment{"id":"abc","anchor":"Some text","text":"hi","author":"User","timestamp":"2026-04-26T00:00:00.000Z"} -->Some text continues.';
+    const { comments } = parseComments(raw);
+    expect(comments[0].agentInitiated).toBeUndefined();
+    expect(comments[0].sessionId).toBeUndefined();
+  });
+});
+
 describe('insertComment', () => {
   it('inserts a comment marker before the anchor text', () => {
     const raw = 'Hello world';
@@ -2634,6 +2653,29 @@ describe('moveComment', () => {
     // The marker should now be near the second occurrence, not the first.
     expect(after[0].cleanOffset).toBeGreaterThan(10);
   });
+
+  it('preserves agentInitiated and sessionId when moving anchor', () => {
+    // Insert an agent-initiated comment, then move it to a new anchor.
+    const raw = 'First sentence here.\nSecond sentence here.\n';
+    const withAgent = insertComment(
+      raw,
+      'First sentence',
+      'q?',
+      'Claude',
+      undefined,
+      undefined,
+      undefined,
+      'cid-1',
+      { agentInitiated: true, sessionId: 'rev_xyz' },
+    );
+    const moved = moveComment(withAgent, 'cid-1', 'Second sentence');
+    const { comments } = parseComments(moved);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].id).toBe('cid-1');
+    expect(comments[0].anchor).toBe('Second sentence');
+    expect(comments[0].agentInitiated).toBe(true);
+    expect(comments[0].sessionId).toBe('rev_xyz');
+  });
 });
 
 describe('extractMermaidText — sequence diagrams', () => {
@@ -2680,5 +2722,35 @@ describe('extractMermaidText — sequence diagrams', () => {
     const out = extractMermaidText(md);
     expect(out).toContain('shared state');
     expect(out).toContain('client side');
+  });
+});
+
+describe('insertComment — extraFields', () => {
+  it('attaches agentInitiated and sessionId when extraFields is provided', () => {
+    const raw = 'Some text continues here.';
+    const out = insertComment(
+      raw,
+      'Some text',
+      'q?',
+      'Claude',
+      undefined,
+      undefined,
+      undefined,
+      'fixed-id',
+      { agentInitiated: true, sessionId: 'rev_xyz' },
+    );
+    const { comments } = parseComments(out);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].author).toBe('Claude');
+    expect(comments[0].agentInitiated).toBe(true);
+    expect(comments[0].sessionId).toBe('rev_xyz');
+  });
+
+  it('omits the new fields when extraFields is absent', () => {
+    const raw = 'Some text continues here.';
+    const out = insertComment(raw, 'Some text', 'hi', 'User');
+    const { comments } = parseComments(out);
+    expect(comments[0].agentInitiated).toBeUndefined();
+    expect(comments[0].sessionId).toBeUndefined();
   });
 });

@@ -70,3 +70,15 @@ describe('buildAddressCommentsPrompt', () => {
     expect(prompt).toContain('Do NOT include a `timestamp` field');
   });
 });
+
+describe('buildAddressCommentsPrompt — mdr_ask hint', () => {
+  it('mentions the mdr_ask tool so agents know it exists', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/a.md'],
+      commentCounts: new Map([['/tmp/a.md', 1]]),
+      enableResolve: false,
+    });
+    expect(prompt).toContain('mdr_ask');
+    expect(prompt.toLowerCase()).toMatch(/anchored.*question/);
+  });
+});

@@ -108,36 +108,41 @@ export function useComments(params: UseCommentsParams) {
 
   const newOrphanIds = newOrphanIdsRef.current;
 
-  // Comment counts per tab (for badges) + comment IDs grouped by file path
+  // Comment counts per tab (for badges) + comment IDs grouped by file path.
+  // Agent-initiated comments (mdr_ask questions) are excluded — they're tracked
+  // and surfaced separately via the "Awaiting your reply" section, and they
+  // must NOT be sent back to the agent as part of a user batch.
   const { commentCounts, resolvedCommentCounts, commentIdsByFile } = useMemo(() => {
     const counts = new Map<string, number>();
     const resolvedCounts = new Map<string, number>();
     const idsByFile = new Map<string, string[]>();
     for (const tab of tabs) {
       if (tab.filePath === activeFilePath) {
+        const userComments = comments.filter((c) => !c.agentInitiated);
         const count = enableResolve
-          ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-          : comments.length;
+          ? userComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+          : userComments.length;
         counts.set(tab.filePath, count);
-        idsByFile.set(tab.filePath, comments.map((c) => c.id));
+        idsByFile.set(tab.filePath, userComments.map((c) => c.id));
         if (enableResolve) {
           resolvedCounts.set(
             tab.filePath,
-            comments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+            userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
           );
         }
       } else {
         try {
           const { comments: tabComments } = parseComments(tab.rawMarkdown);
+          const userTabComments = tabComments.filter((c) => !c.agentInitiated);
           const count = enableResolve
-            ? tabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-            : tabComments.length;
+            ? userTabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+            : userTabComments.length;
           counts.set(tab.filePath, count);
-          idsByFile.set(tab.filePath, tabComments.map((c) => c.id));
+          idsByFile.set(tab.filePath, userTabComments.map((c) => c.id));
           if (enableResolve) {
             resolvedCounts.set(
               tab.filePath,
-              tabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+              userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
             );
           }
         } catch {

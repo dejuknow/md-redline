@@ -74,10 +74,12 @@ import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
-import { useReviewSession } from './hooks/useReviewSession';
+import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { ReviewBanner } from './components/ReviewBanner';
+import type { PendingAskSummary } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
+import { selectAgentAsks } from './lib/agent-asks';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -565,6 +567,116 @@ export default function App() {
     refreshReviewSessions();
     stripReviewParamFromUrl();
   }, [refreshReviewSessions]);
+
+  // --- Agent-ask state ---
+  const activeSession = useMemo(
+    () => findActiveSessionForFile(reviewSessions, activeFilePath),
+    [reviewSessions, activeFilePath],
+  );
+  const agentAsks = useMemo(
+    () => selectAgentAsks(comments, activeSession?.id ?? null),
+    [comments, activeSession?.id],
+  );
+
+  const [activeAskId, setActiveAskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeSession || agentAsks.length === 0) {
+      setActiveAskId(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/review-sessions/${activeSession.id}/asks`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const { asks } = (await res.json()) as { asks: Array<{ askId: string; commentIds: string[] }> };
+        if (cancelled) return;
+        setActiveAskId(asks[0]?.askId ?? null);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // activeSession?.id and agentAsks.length are the meaningful triggers — the
+    // full activeSession object changes on every poll even when the id is stable,
+    // which would thrash this fetch on each heartbeat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession?.id, agentAsks.length]);
+
+  const pendingAsksBySession = useMemo(() => {
+    const map = new Map<string, PendingAskSummary>();
+    if (activeSession && agentAsks.length > 0 && activeAskId) {
+      const readyCount = agentAsks.filter((c) => (c.replies?.length ?? 0) > 0).length;
+      map.set(activeSession.id, {
+        askId: activeAskId,
+        commentIds: agentAsks.map((c) => c.id),
+        agentName: agentAsks[0]?.author ?? 'Agent',
+        readyCount,
+      });
+    }
+    return map;
+  }, [activeSession, agentAsks, activeAskId]);
+
+  const handleSendReplies = useCallback(
+    async (sessionId: string, askId: string) => {
+      const replies = agentAsks
+        .map((c) => {
+          const lastReply = c.replies?.[c.replies.length - 1];
+          return lastReply ? { commentId: c.id, text: lastReply.text } : null;
+        })
+        .filter((r): r is { commentId: string; text: string } => r !== null);
+      if (replies.length === 0) return;
+      try {
+        const res = await fetch(`/api/review-sessions/${sessionId}/asks/${askId}/reply`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ replies }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          showToast(`Send replies failed: ${body.error ?? `HTTP ${res.status}`}`);
+          return;
+        }
+        showToast('Replies sent to agent');
+      } catch (err) {
+        showToast(`Send replies failed: ${err instanceof Error ? err.message : 'network error'}`);
+      }
+    },
+    [agentAsks, showToast],
+  );
+
+  // Toast on new agent ask (debounced)
+  const lastSeenAskIdsRef = useRef<Set<string>>(new Set());
+  const askToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didMountRef = useRef(false);
+
+  useEffect(() => {
+    const currentIds = new Set(agentAsks.map((c) => c.id));
+    let hasNew = false;
+    for (const id of currentIds) {
+      if (!lastSeenAskIdsRef.current.has(id)) {
+        hasNew = true;
+        break;
+      }
+    }
+    lastSeenAskIdsRef.current = currentIds;
+
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return; // first run — populate the ref but do not toast
+    }
+
+    if (!hasNew) return;
+    if (askToastTimerRef.current) clearTimeout(askToastTimerRef.current);
+    askToastTimerRef.current = setTimeout(() => {
+      const author = agentAsks[0]?.author ?? 'Agent';
+      const fileBase = activeFilePath ? activeFilePath.split('/').pop() : '';
+      showToast(`${author} has a question${fileBase ? ` on ${fileBase}` : ''}`);
+    }, 500);
+  }, [agentAsks, activeFilePath, showToast]);
 
   const handleDiffToggle = useCallback(() => {
     if (!diffEnabled) {
@@ -1642,6 +1754,35 @@ export default function App() {
     [tocHeadings, handleHeadingNavigate],
   );
 
+  const agentAskCommands = useMemo((): Command[] => {
+    const cmds: Command[] = [];
+    if (agentAsks.length > 0) {
+      cmds.push({
+        id: 'jump-next-agent-question',
+        label: 'Jump to next agent question',
+        section: 'Comments',
+        onExecute: () => {
+          const ask = agentAsks[0];
+          if (ask) requestCommentFocus(ask.id);
+        },
+      });
+    }
+    if (activeSession) {
+      const ask = pendingAsksBySession.get(activeSession.id);
+      if (ask && ask.readyCount === ask.commentIds.length) {
+        cmds.push({
+          id: 'send-replies-to-agent',
+          label: 'Send replies to agent',
+          section: 'Comments',
+          onExecute: () => {
+            void handleSendReplies(activeSession.id, ask.askId);
+          },
+        });
+      }
+    }
+    return cmds;
+  }, [agentAsks, activeSession, pendingAsksBySession, requestCommentFocus, handleSendReplies]);
+
   const paletteCommands = useMemo(
     () => [
       ...navigationCommands,
@@ -1649,6 +1790,7 @@ export default function App() {
       ...fileCommands,
       ...generalCommands,
       ...commentCommands,
+      ...agentAskCommands,
       ...headingCommands,
     ],
     [
@@ -1657,6 +1799,7 @@ export default function App() {
       fileCommands,
       generalCommands,
       commentCommands,
+      agentAskCommands,
       headingCommands,
     ],
   );
@@ -1707,6 +1850,8 @@ export default function App() {
         onBatchSent={handleBatchSent}
         showToast={showToast}
         commentIdsByFile={commentIdsByFile}
+        pendingAsksBySession={pendingAsksBySession}
+        onSendReplies={handleSendReplies}
       />
       <Toolbar
         error={error}

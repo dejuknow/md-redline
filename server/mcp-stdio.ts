@@ -5,7 +5,7 @@
  * dist bundle) keep their imports stable.
  */
 
-export { validateRequestReviewInput, validateContinueReviewInput } from './mcp-stdio/validate';
+export { validateRequestReviewInput, validateContinueReviewInput, validateAskInput } from './mcp-stdio/validate';
 export { createMdrClient } from './mcp-stdio/client';
 export { handleRequestReviewToolCall, handleContinueReviewToolCall } from './mcp-stdio/handler';
 export type { ContinueReviewInput } from './mcp-stdio/validate';
@@ -14,9 +14,13 @@ export { runMcpServer } from './mcp-stdio/server';
 // exported for backward compatibility, but the continue behavior is now
 // handled by mdr_request_review with a sessionId parameter.
 export type {
+  AskInput,
+  AskQuestion,
+  AskWaitResult,
   CreateSessionInput,
   CreateSessionResult,
   MdrClient,
+  PostAgentCommentsResult,
   RequestReviewInput,
   RunMcpServerOptions,
   ToolCallContext,

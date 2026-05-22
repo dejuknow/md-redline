@@ -116,3 +116,11 @@ export function useReviewSession() {
 
   return { sessions, refresh };
 }
+
+export function findActiveSessionForFile(
+  sessions: ReviewSession[],
+  filePath: string | null,
+): ReviewSession | null {
+  if (!filePath) return null;
+  return sessions.find((s) => s.filePaths.includes(filePath)) ?? null;
+}

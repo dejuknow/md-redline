@@ -7,9 +7,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { createMdrClient } from './client';
-import { handleRequestReviewToolCall } from './handler';
+import { handleAskToolCall, handleRequestReviewToolCall } from './handler';
 import type { RunMcpServerOptions } from './types';
-import { validateRequestReviewInput } from './validate';
+import { validateAskInput, validateRequestReviewInput } from './validate';
 
 /**
  * Wire the MCP SDK Server with stdio transport and register the
@@ -64,19 +64,45 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           },
         },
       },
+      {
+        name: 'mdr_ask',
+        description:
+          'Ask the user one or more questions anchored to specific text in a file ' +
+          'inside an active review session. Each question becomes an inline marker the user ' +
+          'sees and replies to in the md-redline UI. Blocks until the user has replied to ' +
+          'every question or the session aborts. Use this when a comment is unclear, or when ' +
+          'you hit a planning fork while editing. Prefer asking over guessing when the right ' +
+          'answer would meaningfully change your edit.',
+        inputSchema: {
+          type: 'object',
+          required: ['sessionId', 'questions'],
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'Session ID from a previous mdr_request_review batch result.',
+            },
+            questions: {
+              type: 'array',
+              minItems: 1,
+              items: {
+                type: 'object',
+                required: ['filePath', 'anchor', 'text'],
+                properties: {
+                  filePath: { type: 'string', description: 'Absolute path to a file in the session.' },
+                  anchor: { type: 'string', description: 'Exact text in the file the question refers to.' },
+                  text: { type: 'string', description: 'Your question.' },
+                  contextBefore: { type: 'string' },
+                  contextAfter: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
     ],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    if (request.params.name !== 'mdr_request_review') {
-      throw new Error(`Unknown tool: ${request.params.name}`);
-    }
-
-    const validation = validateRequestReviewInput(request.params.arguments);
-    if (!validation.ok) {
-      throw new Error(`Invalid input: ${validation.error}`);
-    }
-
     await opts.ensureServerRunning();
     const baseUrl = opts.getBaseUrl();
 
@@ -102,15 +128,29 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         : undefined;
 
     const signal = (extra as { signal?: AbortSignal } | undefined)?.signal;
+    const client = createMdrClient(baseUrl);
 
-    const result = await handleRequestReviewToolCall(validation.value, {
-      client: createMdrClient(baseUrl),
-      openInBrowser: opts.openInBrowser,
-      baseUrl,
-      sendProgress,
-      signal,
-    });
-    return result as CallToolResult;
+    if (request.params.name === 'mdr_request_review') {
+      const validation = validateRequestReviewInput(request.params.arguments);
+      if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
+      const result = await handleRequestReviewToolCall(validation.value, {
+        client,
+        openInBrowser: opts.openInBrowser,
+        baseUrl,
+        sendProgress,
+        signal,
+      });
+      return result as CallToolResult;
+    }
+
+    if (request.params.name === 'mdr_ask') {
+      const validation = validateAskInput(request.params.arguments);
+      if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
+      const result = await handleAskToolCall(validation.value, { client, sendProgress, signal });
+      return result as CallToolResult;
+    }
+
+    throw new Error(`Unknown tool: ${request.params.name}`);
   });
 
   const transport = new StdioServerTransport();

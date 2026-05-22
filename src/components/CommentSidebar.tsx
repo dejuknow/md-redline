@@ -147,7 +147,9 @@ export function CommentSidebar({
     setActiveEditor(null);
   };
 
-  // Count by status (only meaningful when resolve is enabled)
+  // Count by status (only meaningful when resolve is enabled).
+  // Agent-initiated comments are rendered inline in document order alongside
+  // user comments; the per-card "Awaiting your reply" banner labels them.
   const openCount = resolveEnabled
     ? comments.filter((c) => getEffectiveStatus(c) === 'open').length
     : comments.length;
@@ -300,6 +302,7 @@ export function CommentSidebar({
                 selectionText={selectionText ?? null}
                 selectionOffset={selectionOffset ?? null}
                 onReanchorToSelection={onReanchorToSelection}
+                agentQuestion={comment.agentInitiated === true}
                 sent={sentCommentIds?.includes(comment.id) ?? false}
                 onSelect={onActivate}
                 onResolve={resolveEnabled ? onResolve : undefined}
@@ -338,6 +341,7 @@ export function CommentSidebar({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            agentQuestion={comment.agentInitiated === true}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
@@ -383,6 +387,7 @@ export function CommentSidebar({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            agentQuestion={comment.agentInitiated === true}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}

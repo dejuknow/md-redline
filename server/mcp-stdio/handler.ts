@@ -1,4 +1,6 @@
 import type {
+  AskInput,
+  AskWaitResult,
   RequestReviewInput,
   ToolCallContext,
   ToolCallResult,
@@ -232,6 +234,95 @@ export async function handleContinueReviewToolCall(
       {
         type: 'text',
         text: `Review was not completed (${reasonText}). No comments to address. Continue with your original plan.`,
+      },
+    ],
+  };
+}
+
+const ASK_PROGRESS_INTERVAL_MS = 10_000;
+
+export async function handleAskToolCall(
+  input: AskInput,
+  ctx: Pick<ToolCallContext, 'client' | 'sendProgress' | 'signal'>,
+): Promise<ToolCallResult> {
+  let askId: string;
+  try {
+    const postResult = await ctx.client.postAgentComments(input.sessionId, input.questions);
+    askId = postResult.askId;
+  } catch (err) {
+    const e = err as Error & { failedIndices?: number[] };
+    const detail =
+      e.failedIndices && e.failedIndices.length > 0
+        ? ` failedIndices: ${JSON.stringify(e.failedIndices)}`
+        : '';
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: `mdr_ask: ${e.message}${detail}`,
+        },
+      ],
+    };
+  }
+
+  ctx.sendProgress?.(`mdr: posted ${input.questions.length} question(s); waiting for your reply`);
+
+  let elapsed = 0;
+  const progressTimer = ctx.sendProgress
+    ? setInterval(() => {
+        elapsed += ASK_PROGRESS_INTERVAL_MS / 1000;
+        ctx.sendProgress?.(`mdr: still waiting for your reply (${elapsed}s elapsed)`);
+      }, ASK_PROGRESS_INTERVAL_MS)
+    : null;
+  if (progressTimer && 'unref' in progressTimer) {
+    (progressTimer as { unref: () => void }).unref();
+  }
+
+  const cancelListener = () => {
+    void ctx.client.abortSession(input.sessionId).catch(() => {
+      /* already gone */
+    });
+  };
+  if (ctx.signal?.aborted) {
+    cancelListener();
+  } else {
+    ctx.signal?.addEventListener('abort', cancelListener, { once: true });
+  }
+
+  let askResult: AskWaitResult;
+  try {
+    askResult = await ctx.client.waitForAsk(input.sessionId, askId);
+  } finally {
+    if (progressTimer) clearInterval(progressTimer);
+    ctx.signal?.removeEventListener('abort', cancelListener);
+  }
+
+  if (askResult.status === 'reply') {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `mdr_ask: user replied to all ${askResult.replies.length} question(s).\n\n` +
+            '```json\n' +
+            JSON.stringify(askResult.replies, null, 2) +
+            '\n```',
+        },
+      ],
+    };
+  }
+
+  // status === 'aborted'
+  const askReasonText =
+    askResult.reason === 'browser_disconnected'
+      ? 'the mdr browser tab was closed before you replied'
+      : 'the review session was cancelled';
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `mdr_ask: review was cancelled (${askReasonText}). Continue with your original plan, treating the questions as unanswered.`,
       },
     ],
   };

@@ -54,7 +54,7 @@ async function waitFor(
 // Requires dist/mcp-stdio.js — `npm test` builds first, but local
 // `vitest run` may not. Skip cleanly so local dev isn't blocked.
 (HAS_DIST ? describe : describe.skip)('mdr mcp stdio (subprocess)', () => {
-  it('responds to initialize and tools/list with the mdr_request_review tool', async () => {
+  it('exposes both mdr_request_review and mdr_ask in ListTools', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, NODE_ENV: 'test' },
@@ -95,8 +95,8 @@ async function waitFor(
       const toolsResp = afterList.find((r) => r.id === 2);
       expect(toolsResp, `tools/list response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
-      expect(tools.map((t) => t.name)).toContain('mdr_request_review');
-      expect(tools.map((t) => t.name)).not.toContain('mdr_continue_review');
+      const names = tools.map((t) => t.name).sort();
+      expect(names).toEqual(['mdr_ask', 'mdr_request_review']);
     } finally {
       child.kill();
     }

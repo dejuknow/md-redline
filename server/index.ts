@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import { readFile, readdir, stat, realpath, rename, open } from 'fs/promises';
+import { promises as fsPromises } from 'fs';
 import { randomBytes } from 'crypto';
 import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
@@ -17,8 +18,9 @@ import {
   writePreferences,
 } from './preferences';
 import { injectSvgDimensions } from './svg-dimensions';
-import { ReviewSessionStore } from './review-sessions';
+import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { registerReviewSessionRoutes } from './routes/review-sessions';
+import { removeComment } from '../src/lib/comment-parser';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION } = require('../package.json') as { version: string };
@@ -108,7 +110,7 @@ const MAX_WRITTEN_CACHE = 100;
 // or repeated watcher reads.
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-export function createApp(options: CreateAppOptions = {}) {
+export function createAppFull(options: CreateAppOptions = {}) {
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
   const homeDir = options.homeDir ?? process.env.MD_REDLINE_HOME ?? homedir();
   const initialArgRaw = options.initialArg ?? process.argv[2] ?? '';
@@ -331,9 +333,52 @@ export function createApp(options: CreateAppOptions = {}) {
   >();
 
   const reviewSessions = new ReviewSessionStore();
+
+  reviewSessions.setOnSessionAborted((_sessionId, asks) => {
+    void cleanupAgentMarkers(asks).catch((err) => {
+      console.warn('[review-session] agent marker cleanup failed:', err);
+    });
+  });
+
+  async function cleanupAgentMarkers(asks: PendingAsk[]): Promise<void> {
+    const byFile = new Map<string, string[]>();
+    for (const ask of asks) {
+      for (const q of ask.questions) {
+        const ids = byFile.get(q.filePath) ?? [];
+        ids.push(q.commentId);
+        byFile.set(q.filePath, ids);
+      }
+    }
+    for (const [filePath, commentIds] of byFile) {
+      try {
+        let content = await fsPromises.readFile(filePath, 'utf8');
+        for (const id of commentIds) content = removeComment(content, id);
+        await fsPromises.writeFile(filePath, content, 'utf8');
+        // No SSE here — the browser is gone; the next session will re-read.
+      } catch {
+        /* swallow; cleanup is best-effort */
+      }
+    }
+  }
+
   reviewSessions.startSweep(10_000);
 
-  registerReviewSessionRoutes(app, reviewSessions, resolveAndValidate);
+  // Build SSE notifier: triggers the file watcher broadcast for a given path.
+  function notifyFileChanged(resolvedPath: string): void {
+    const entry = fileWatchers.get(resolvedPath);
+    if (!entry) return;
+    // Trigger a debounced broadcast by firing the watcher callback synthetically.
+    // The watcher's broadcastChange reads the current file content and pushes SSE.
+    // We trigger it by dispatching a fake 'change' event on the watcher.
+    entry.watcher.emit('change', 'change', resolvedPath);
+  }
+
+  registerReviewSessionRoutes(app, reviewSessions, {
+    resolveAndValidate,
+    readFileText: (p) => fsPromises.readFile(p, 'utf8'),
+    writeFileText: (p, content) => fsPromises.writeFile(p, content, 'utf8'),
+    notifyFileChanged,
+  });
 
   app.get('/api/config', (c) => {
     return c.json({ initialFile, initialDir, homeDir });
@@ -1106,7 +1151,11 @@ export function createApp(options: CreateAppOptions = {}) {
     });
   }
 
-  return app;
+  return { app, reviewSessions };
+}
+
+export function createApp(options: CreateAppOptions = {}) {
+  return createAppFull(options).app;
 }
 
 // Auto-detect production mode: if index.html exists next to this file, serve it

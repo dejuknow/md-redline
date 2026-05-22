@@ -42,6 +42,30 @@ export type ReviewResult =
   | { status: 'done'; prompt?: string }
   | { status: 'aborted'; reason: 'user_cancelled' | 'browser_disconnected' };
 
+export interface AskQuestion {
+  commentId: string;
+  filePath: string;
+  anchor: string;
+  text: string;
+  contextBefore?: string;
+  contextAfter?: string;
+}
+
+export type AskResult =
+  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }> }
+  | { status: 'aborted'; reason: 'session_cancelled' | 'browser_disconnected' };
+
+export interface PendingAsk {
+  askId: string;
+  sessionId: string;
+  questions: AskQuestion[];
+}
+
+interface InternalPendingAsk extends PendingAsk {
+  resolver: (result: AskResult) => void;
+  waiter: Promise<AskResult>;
+}
+
 export interface ReviewSession {
   id: string;
   filePaths: string[];
@@ -60,6 +84,8 @@ interface InternalSession extends ReviewSession {
   terminalAt: Date | null;
   /** When waitingForAgent was last set to true. Used for auto-clear timeout. */
   waitingForAgentSince: Date | null;
+  /** Batch queued while waitingForAgent was true. Delivered on the next agent poll. */
+  queuedBatch: { prompt: string; commentIds: string[] } | null;
 }
 
 export interface CreateSessionInput {
@@ -69,7 +95,13 @@ export interface CreateSessionInput {
 
 export class ReviewSessionStore {
   private sessions = new Map<string, InternalSession>();
+  private pendingAsks = new Map<string, InternalPendingAsk>();
   private sweepHandle: ReturnType<typeof setInterval> | null = null;
+  private onSessionAborted: ((sessionId: string, asks: PendingAsk[]) => void) | null = null;
+
+  setOnSessionAborted(cb: (sessionId: string, asks: PendingAsk[]) => void): void {
+    this.onSessionAborted = cb;
+  }
 
   createSession(input: CreateSessionInput): ReviewSession {
     const id = `rev_${randomUUID()}`;
@@ -93,6 +125,7 @@ export class ReviewSessionStore {
       waiter,
       terminalAt: null,
       waitingForAgentSince: null,
+      queuedBatch: null,
     };
 
     this.sessions.set(id, session);
@@ -136,6 +169,11 @@ export class ReviewSessionStore {
   /**
    * Returns the session's resolution promise. Throws if the session does not
    * exist — callers should check existence first (the HTTP layer already does).
+   *
+   * If a batch was queued while waitingForAgent was true, it is delivered
+   * immediately: the current waiter is resolved with the queued batch, a new
+   * waiter is installed for the next cycle, and the resolved (old) waiter is
+   * returned so the caller receives the batch right away.
    */
   waitForSession(id: string): Promise<ReviewResult> {
     const s = this.sessions.get(id);
@@ -144,6 +182,25 @@ export class ReviewSessionStore {
     }
     s.waitingForAgent = false;
     s.waitingForAgentSince = null;
+
+    // If a batch was queued while the agent was busy, deliver it now by
+    // resolving the current waiter and returning it before replacing it.
+    if (s.queuedBatch) {
+      const queued = s.queuedBatch;
+      s.queuedBatch = null;
+      const resolvedWaiter = s.waiter;
+      s.resolver({ status: 'batch', prompt: queued.prompt, commentIds: queued.commentIds });
+      // Create a fresh waiter for the next poll cycle.
+      let resolver!: (result: ReviewResult) => void;
+      s.waiter = new Promise<ReviewResult>((resolve) => {
+        resolver = resolve;
+      });
+      s.resolver = resolver;
+      s.waitingForAgent = true;
+      s.waitingForAgentSince = new Date();
+      return resolvedWaiter;
+    }
+
     return s.waiter;
   }
 
@@ -173,9 +230,51 @@ export class ReviewSessionStore {
     return true;
   }
 
+  /**
+   * Queue a batch for delivery on the next agent poll. Used when the user
+   * clicks Send batch while waitingForAgent is true (e.g. during a pending
+   * mdr_ask). If a batch is already queued, merge with it (concatenate
+   * prompts, union of commentIds).
+   */
+  queueBatch(id: string, prompt: string, commentIds: string[]): boolean {
+    const s = this.sessions.get(id);
+    if (!s || s.status !== 'open') return false;
+    // Update sentCommentIds so the UI correctly disables the button after queuing.
+    for (const cid of commentIds) {
+      if (!s.sentCommentIds.includes(cid)) s.sentCommentIds.push(cid);
+    }
+    if (s.queuedBatch) {
+      s.queuedBatch = {
+        prompt: s.queuedBatch.prompt + '\n\n' + prompt,
+        commentIds: Array.from(new Set([...s.queuedBatch.commentIds, ...commentIds])),
+      };
+    } else {
+      s.queuedBatch = { prompt, commentIds: [...commentIds] };
+    }
+    return true;
+  }
+
+  /**
+   * Returns true if a queued batch is pending delivery for this session.
+   * The actual delivery happens inside waitForSession when it is next called.
+   * This method exists so the route layer can log/detect queued delivery;
+   * calling it has no side effects.
+   */
+  deliverQueuedBatchIfAny(id: string): boolean {
+    const s = this.sessions.get(id);
+    return !!(s?.queuedBatch);
+  }
+
+  getQueuedBatch(id: string): { prompt: string; commentIds: string[] } | null {
+    return this.sessions.get(id)?.queuedBatch ?? null;
+  }
+
   finish(id: string, prompt?: string, commentIds?: string[]): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
+
+    // Defensive: if anyone called finish while asks were pending, abort them.
+    this.abortAsks(id, 'session_cancelled');
 
     if (commentIds) {
       for (const cid of commentIds) {
@@ -198,10 +297,91 @@ export class ReviewSessionStore {
   abort(id: string, reason: 'user_cancelled' | 'browser_disconnected'): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
+    const askReason = reason === 'user_cancelled' ? 'session_cancelled' : 'browser_disconnected';
+    const aborted = this.abortAsks(id, askReason);
     s.status = 'aborted';
     s.terminalAt = new Date();
     s.resolver({ status: 'aborted', reason });
+    if (aborted.length > 0 && this.onSessionAborted) {
+      try {
+        this.onSessionAborted(id, aborted);
+      } catch {
+        /* callback errors are swallowed; cleanup is best-effort */
+      }
+    }
     return true;
+  }
+
+  addAsk(
+    sessionId: string,
+    questions: AskQuestion[],
+  ): { askId: string; waiter: Promise<AskResult> } {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.status !== 'open') {
+      throw new Error('session not found or already finished');
+    }
+    for (const ask of this.pendingAsks.values()) {
+      if (ask.sessionId === sessionId) {
+        throw new Error('a previous mdr_ask is still pending; receive its reply first');
+      }
+    }
+    const askId = `ask_${randomUUID()}`;
+    let resolver!: (result: AskResult) => void;
+    const waiter = new Promise<AskResult>((resolve) => {
+      resolver = resolve;
+    });
+    this.pendingAsks.set(askId, {
+      askId,
+      sessionId,
+      questions: [...questions],
+      resolver,
+      waiter,
+    });
+    return { askId, waiter };
+  }
+
+  waitForAsk(askId: string): Promise<AskResult> | undefined {
+    const ask = this.pendingAsks.get(askId);
+    return ask?.waiter;
+  }
+
+  resolveReplies(
+    sessionId: string,
+    askId: string,
+    replies: Array<{ commentId: string; text: string }>,
+  ): boolean {
+    const ask = this.pendingAsks.get(askId);
+    if (!ask || ask.sessionId !== sessionId) return false;
+    const ordered: Array<{ questionIndex: number; text: string }> = [];
+    ask.questions.forEach((q, idx) => {
+      const reply = replies.find((r) => r.commentId === q.commentId);
+      if (reply) ordered.push({ questionIndex: idx, text: reply.text });
+    });
+    if (ordered.length !== ask.questions.length) return false;
+    ask.resolver({ status: 'reply', replies: ordered });
+    this.pendingAsks.delete(askId);
+    return true;
+  }
+
+  abortAsks(sessionId: string, reason: 'session_cancelled' | 'browser_disconnected'): PendingAsk[] {
+    const removed: PendingAsk[] = [];
+    for (const [id, ask] of this.pendingAsks.entries()) {
+      if (ask.sessionId !== sessionId) continue;
+      ask.resolver({ status: 'aborted', reason });
+      removed.push({ askId: ask.askId, sessionId: ask.sessionId, questions: ask.questions });
+      this.pendingAsks.delete(id);
+    }
+    return removed;
+  }
+
+  getPendingAsks(sessionId: string): PendingAsk[] {
+    const result: PendingAsk[] = [];
+    for (const ask of this.pendingAsks.values()) {
+      if (ask.sessionId === sessionId) {
+        result.push({ askId: ask.askId, sessionId: ask.sessionId, questions: ask.questions });
+      }
+    }
+    return result;
   }
 
   heartbeat(id: string): boolean {
@@ -227,9 +407,17 @@ export class ReviewSessionStore {
     for (const [id, s] of this.sessions.entries()) {
       if (s.status === 'open') {
         if (s.lastHeartbeatAt.getTime() < heartbeatCutoff) {
+          const aborted = this.abortAsks(id, 'browser_disconnected');
           s.status = 'aborted';
           s.terminalAt = new Date(now);
           s.resolver({ status: 'aborted', reason: 'browser_disconnected' });
+          if (aborted.length > 0 && this.onSessionAborted) {
+            try {
+              this.onSessionAborted(id, aborted);
+            } catch {
+              /* swallow */
+            }
+          }
         } else if (
           s.waitingForAgent &&
           s.waitingForAgentSince &&
@@ -254,7 +442,11 @@ export class ReviewSessionStore {
       clearInterval(this.sweepHandle);
       this.sweepHandle = null;
     }
+    for (const s of this.sessions.values()) {
+      s.queuedBatch = null;
+    }
     this.sessions.clear();
+    this.pendingAsks.clear();
   }
 
   private toPublic(s: InternalSession): ReviewSession {

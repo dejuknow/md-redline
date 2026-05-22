@@ -30,11 +30,34 @@ export interface CreateSessionInput {
   enableResolve: boolean;
 }
 
+export interface AskQuestion {
+  filePath: string;
+  anchor: string;
+  text: string;
+  contextBefore?: string;
+  contextAfter?: string;
+}
+
+export interface AskInput {
+  sessionId: string;
+  questions: AskQuestion[];
+}
+
+export type AskWaitResult =
+  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }> }
+  | { status: 'aborted'; reason: 'session_cancelled' | 'browser_disconnected' };
+
+export interface PostAgentCommentsResult {
+  askId: string;
+}
+
 export interface MdrClient {
   grantAccess(paths: string[]): Promise<void>;
   createSession(input: CreateSessionInput): Promise<CreateSessionResult>;
   waitForSession(sessionId: string, timeoutSeconds?: number): Promise<WaitResult>;
   abortSession(sessionId: string): Promise<void>;
+  postAgentComments(sessionId: string, questions: AskQuestion[]): Promise<PostAgentCommentsResult>;
+  waitForAsk(sessionId: string, askId: string): Promise<AskWaitResult>;
 }
 
 export interface ToolCallContext {

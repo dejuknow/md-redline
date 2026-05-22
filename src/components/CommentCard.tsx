@@ -21,6 +21,7 @@ interface Props {
   isActive: boolean;
   anchorMissing?: boolean;
   sent?: boolean;
+  agentQuestion?: boolean;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
@@ -51,6 +52,7 @@ export const CommentCard = memo(function CommentCard({
   isActive,
   anchorMissing,
   sent,
+  agentQuestion,
   onActivate,
   onResolve,
   onUnresolve,
@@ -212,6 +214,15 @@ export const CommentCard = memo(function CommentCard({
         }
       }}
     >
+      {agentQuestion && (
+        <div
+          className="rounded-t-lg bg-primary text-on-primary text-xs font-semibold px-3 py-1.5"
+          title={`Question from ${comment.author} awaiting your reply`}
+        >
+          Awaiting your reply
+        </div>
+      )}
+
       {/* Header: anchor + optional status badge */}
       <div className="px-3 pt-3 pb-1 flex items-start gap-2">
         <div
@@ -240,7 +251,7 @@ export const CommentCard = memo(function CommentCard({
               Changed
             </span>
           )}
-          {resolveEnabled && (
+          {resolveEnabled && !agentQuestion && (
             <span
               className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${STATUS_CONFIG[status].className}`}
             >
@@ -362,39 +373,43 @@ export const CommentCard = memo(function CommentCard({
                 >
                   Reply
                 </ActionButton>
-                <ActionButton
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRequestCommentEdit(comment.id);
-                  }}
-                >
-                  Edit
-                </ActionButton>
-              </>
-            )}
-            {isResolved
-              ? onUnresolve && (
+                {!agentQuestion && (
                   <ActionButton
-                    intent="primary"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onUnresolve(comment.id);
+                      onRequestCommentEdit(comment.id);
                     }}
                   >
-                    Reopen
-                  </ActionButton>
-                )
-              : onResolve && (
-                  <ActionButton
-                    intent="success"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onResolve(comment.id);
-                    }}
-                  >
-                    Resolve
+                    Edit
                   </ActionButton>
                 )}
+              </>
+            )}
+            {!agentQuestion && (
+              isResolved
+                ? onUnresolve && (
+                    <ActionButton
+                      intent="primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUnresolve(comment.id);
+                      }}
+                    >
+                      Reopen
+                    </ActionButton>
+                  )
+                : onResolve && (
+                    <ActionButton
+                      intent="success"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onResolve(comment.id);
+                      }}
+                    >
+                      Resolve
+                    </ActionButton>
+                  )
+            )}
             {showAnchorContext && selectionText && selectionText.trim().length > 0 && onReanchorToSelection && (
               <span data-preserve-selection>
                 <ActionButton
@@ -410,12 +425,14 @@ export const CommentCard = memo(function CommentCard({
                 </ActionButton>
               </span>
             )}
-            <DeleteIconButton
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(comment.id);
-              }}
-            />
+            {!agentQuestion && (
+              <DeleteIconButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(comment.id);
+                }}
+              />
+            )}
           </div>
         )}
       </div>

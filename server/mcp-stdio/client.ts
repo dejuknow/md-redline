@@ -1,4 +1,6 @@
 import type {
+  AskQuestion,
+  AskWaitResult,
   CreateSessionInput,
   CreateSessionResult,
   MdrClient,
@@ -64,6 +66,33 @@ export function createMdrClient(baseUrl: string): MdrClient {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `abort failed for ${sessionId} (HTTP ${res.status})`);
       }
+    },
+
+    async postAgentComments(sessionId: string, questions: AskQuestion[]) {
+      const res = await fetch(url(`/api/review-sessions/${sessionId}/agent-comments`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ questions }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; failedIndices?: number[] };
+        const err = new Error(body.error ?? `postAgentComments failed (HTTP ${res.status})`);
+        if (body.failedIndices) {
+          (err as Error & { failedIndices?: number[] }).failedIndices = body.failedIndices;
+        }
+        throw err;
+      }
+      return (await res.json()) as { askId: string };
+    },
+
+    async waitForAsk(sessionId: string, askId: string) {
+      const res = await fetch(url(`/api/review-sessions/${sessionId}/asks/${askId}/wait`), {
+        method: 'GET',
+      });
+      if (!res.ok) {
+        throw new Error(`waitForAsk failed (HTTP ${res.status})`);
+      }
+      return (await res.json()) as AskWaitResult;
     },
   };
 }

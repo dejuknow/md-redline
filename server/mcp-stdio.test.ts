@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { validateRequestReviewInput, createMdrClient } from './mcp-stdio';
+import { validateRequestReviewInput, validateAskInput, createMdrClient } from './mcp-stdio';
 
 describe('mcp-stdio: validateRequestReviewInput', () => {
   it('accepts filePaths for a new session', () => {
@@ -55,6 +55,51 @@ describe('mcp-stdio: validateRequestReviewInput', () => {
 
   it('rejects empty sessionId', () => {
     const result = validateRequestReviewInput({ sessionId: '' });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('mcp-stdio: validateAskInput', () => {
+  it('accepts a well-formed ask', () => {
+    const result = validateAskInput({
+      sessionId: 'rev_xyz',
+      questions: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'q?' }],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sessionId).toBe('rev_xyz');
+      expect(result.value.questions).toHaveLength(1);
+    }
+  });
+
+  it('rejects empty sessionId', () => {
+    const result = validateAskInput({ sessionId: '', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects empty questions', () => {
+    const result = validateAskInput({ sessionId: 'x', questions: [] });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects malformed question shape', () => {
+    const result = validateAskInput({
+      sessionId: 'x',
+      questions: [{ filePath: 1, anchor: 'a', text: 'q?' }],
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects null question entries', () => {
+    const result = validateAskInput({ sessionId: 'x', questions: [null] });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects non-string contextBefore', () => {
+    const result = validateAskInput({
+      sessionId: 'x',
+      questions: [{ filePath: '/x', anchor: 'a', text: 'q?', contextBefore: 5 }],
+    });
     expect(result.ok).toBe(false);
   });
 });

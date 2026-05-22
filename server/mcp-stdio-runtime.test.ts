@@ -1,9 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleRequestReviewToolCall } from './mcp-stdio';
+import type { AskWaitResult, MdrClient } from './mcp-stdio/types';
+import { handleAskToolCall } from './mcp-stdio/handler';
 
 describe('handleRequestReviewToolCall', () => {
+  function makeReviewClient(overrides: Partial<MdrClient> = {}): MdrClient {
+    return {
+      grantAccess: vi.fn(),
+      createSession: vi.fn(),
+      waitForSession: vi.fn(),
+      abortSession: vi.fn(),
+      postAgentComments: vi.fn(),
+      waitForAsk: vi.fn(),
+      ...overrides,
+    } as MdrClient;
+  }
+
   it('returns batch prompt with sessionId and continue instruction', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
       waitForSession: vi.fn().mockResolvedValue({
@@ -12,7 +26,7 @@ describe('handleRequestReviewToolCall', () => {
         commentIds: ['c1', 'c2'],
       }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     const result = await handleRequestReviewToolCall(
@@ -26,7 +40,7 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('returns done prompt without continue instruction when user finishes', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
       waitForSession: vi.fn().mockResolvedValue({
@@ -34,7 +48,7 @@ describe('handleRequestReviewToolCall', () => {
         prompt: 'FINAL PROMPT',
       }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     const result = await handleRequestReviewToolCall(
@@ -47,12 +61,12 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('returns proceed message when user finishes with no comments', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
       waitForSession: vi.fn().mockResolvedValue({ status: 'done' }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     const result = await handleRequestReviewToolCall(
@@ -65,16 +79,13 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('continue mode skips session creation and waits for next batch', async () => {
-    const client = {
-      grantAccess: vi.fn(),
-      createSession: vi.fn(),
+    const client = makeReviewClient({
       waitForSession: vi.fn().mockResolvedValue({
         status: 'batch',
         prompt: 'SECOND BATCH',
         commentIds: ['c3'],
       }),
-      abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn();
 
     const result = await handleRequestReviewToolCall(
@@ -94,12 +105,9 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('continue mode returns done when user finishes', async () => {
-    const client = {
-      grantAccess: vi.fn(),
-      createSession: vi.fn(),
+    const client = makeReviewClient({
       waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'FINAL' }),
-      abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn();
 
     const result = await handleRequestReviewToolCall(
@@ -157,12 +165,9 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('continue mode returns abort message when session is aborted', async () => {
-    const client = {
-      grantAccess: vi.fn(),
-      createSession: vi.fn(),
+    const client = makeReviewClient({
       waitForSession: vi.fn().mockResolvedValue({ status: 'aborted', reason: 'user_cancelled' }),
-      abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn();
 
     const result = await handleRequestReviewToolCall(
@@ -176,14 +181,12 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('calls sendProgress once up front when a callback is provided', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
-      waitForSession: vi
-        .fn()
-        .mockResolvedValue({ status: 'done', prompt: 'X' }),
+      waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'X' }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
     const sendProgress = vi.fn();
 
@@ -207,12 +210,12 @@ describe('handleRequestReviewToolCall', () => {
         resolveWait = r;
       });
 
-      const client = {
+      const client = makeReviewClient({
         grantAccess: vi.fn().mockResolvedValue(undefined),
         createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
         waitForSession: vi.fn().mockReturnValue(waitPromise),
         abortSession: vi.fn(),
-      };
+      });
       const openInBrowser = vi.fn().mockResolvedValue(undefined);
       const sendProgress = vi.fn();
 
@@ -246,14 +249,12 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('returns a descriptive not-completed result when the session is aborted by the user', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
-      waitForSession: vi
-        .fn()
-        .mockResolvedValue({ status: 'aborted', reason: 'user_cancelled' }),
+      waitForSession: vi.fn().mockResolvedValue({ status: 'aborted', reason: 'user_cancelled' }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     const result = await handleRequestReviewToolCall(
@@ -268,14 +269,12 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('returns a descriptive not-completed result when the browser disconnected', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
-      waitForSession: vi
-        .fn()
-        .mockResolvedValue({ status: 'aborted', reason: 'browser_disconnected' }),
+      waitForSession: vi.fn().mockResolvedValue({ status: 'aborted', reason: 'browser_disconnected' }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     const result = await handleRequestReviewToolCall(
@@ -287,12 +286,10 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('throws on createSession failure with the underlying error message', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockRejectedValue(new Error('Access denied: outside roots')),
-      waitForSession: vi.fn(),
-      abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn();
 
     await expect(
@@ -304,14 +301,9 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('throws on grantAccess failure with the underlying error message', async () => {
-    const client = {
-      grantAccess: vi
-        .fn()
-        .mockRejectedValue(new Error('Cannot grant access outside allowed directories')),
-      createSession: vi.fn(),
-      waitForSession: vi.fn(),
-      abortSession: vi.fn(),
-    };
+    const client = makeReviewClient({
+      grantAccess: vi.fn().mockRejectedValue(new Error('Cannot grant access outside allowed directories')),
+    });
     const openInBrowser = vi.fn();
 
     await expect(
@@ -332,7 +324,7 @@ describe('handleRequestReviewToolCall', () => {
       resolveWait = r;
     });
 
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
       waitForSession: vi.fn().mockReturnValue(waitPromise),
@@ -341,7 +333,7 @@ describe('handleRequestReviewToolCall', () => {
         // Simulate the server resolving the long-poll once abort fires.
         resolveWait?.({ status: 'aborted', reason: 'user_cancelled' });
       }),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     // Fire the signal shortly after the handler starts waiting.
@@ -363,12 +355,12 @@ describe('handleRequestReviewToolCall', () => {
   });
 
   it('skips openInBrowser when createSession returns created: false (dedup)', async () => {
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
       waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'X' }),
       abortSession: vi.fn(),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     await handleRequestReviewToolCall(
@@ -388,14 +380,14 @@ describe('handleRequestReviewToolCall', () => {
       resolveWait = r;
     });
 
-    const client = {
+    const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
       waitForSession: vi.fn().mockReturnValue(waitPromise),
       abortSession: vi.fn().mockImplementation(async () => {
         resolveWait?.({ status: 'aborted', reason: 'user_cancelled' });
       }),
-    };
+    });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
     const result = await handleRequestReviewToolCall(
@@ -410,5 +402,86 @@ describe('handleRequestReviewToolCall', () => {
 
     expect(client.abortSession).toHaveBeenCalled();
     expect(result.content[0].text).toContain('Review was not completed');
+  });
+});
+
+describe('handleAskToolCall', () => {
+  function makeMockClient(overrides: Partial<MdrClient> = {}): MdrClient {
+    return {
+      grantAccess: vi.fn(),
+      createSession: vi.fn(),
+      waitForSession: vi.fn(),
+      abortSession: vi.fn(),
+      postAgentComments: vi.fn().mockResolvedValue({ askId: 'ask_test' }),
+      waitForAsk: vi.fn().mockResolvedValue({
+        status: 'reply',
+        replies: [{ questionIndex: 0, text: 'the answer' }],
+      }),
+      ...overrides,
+    } as MdrClient;
+  }
+
+  it('posts agent comments and returns the reply payload to the agent', async () => {
+    const client = makeMockClient();
+    const result = await handleAskToolCall(
+      {
+        sessionId: 'rev_xyz',
+        questions: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'q?' }],
+      },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    expect(client.postAgentComments).toHaveBeenCalledWith('rev_xyz', [
+      { filePath: '/tmp/a.md', anchor: 'a', text: 'q?' },
+    ]);
+    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
+    expect(result.content[0].text).toContain('the answer');
+    expect(result.content[0].text).toContain('questionIndex');
+  });
+
+  it('returns an aborted result when wait reports session_cancelled', async () => {
+    const client = makeMockClient({
+      waitForAsk: vi.fn().mockResolvedValue({ status: 'aborted', reason: 'session_cancelled' }),
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    expect(result.content[0].text).toContain('cancelled');
+  });
+
+  it('surfaces postAgentComments failedIndices in the error message', async () => {
+    const err = new Error('one or more anchors could not be located') as Error & {
+      failedIndices?: number[];
+    };
+    err.failedIndices = [0, 2];
+    const client = makeMockClient({
+      postAgentComments: vi.fn().mockRejectedValue(err),
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('failedIndices');
+  });
+
+  it('aborts the ask when the cancellation signal fires', async () => {
+    let resolveWait!: (v: AskWaitResult) => void;
+    const waitPromise = new Promise<AskWaitResult>((r) => (resolveWait = r));
+    const client = makeMockClient({
+      waitForAsk: vi.fn().mockReturnValue(waitPromise),
+      abortSession: vi.fn().mockImplementation(async () => {
+        resolveWait({ status: 'aborted', reason: 'session_cancelled' });
+      }),
+    });
+    const ac = new AbortController();
+    const promise = handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: ac.signal },
+    );
+    setTimeout(() => ac.abort(), 5);
+    const result = await promise;
+    expect(client.abortSession).toHaveBeenCalledWith('rev_xyz');
+    expect(result.content[0].text).toContain('cancelled');
   });
 });

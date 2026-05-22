@@ -72,7 +72,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send batch/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -169,7 +169,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    const batchButton = screen.getByRole('button', { name: /send batch/i });
+    const batchButton = screen.getByRole('button', { name: /send \d+ comment/i });
     expect((batchButton as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -190,7 +190,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send & finish/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ & finish/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -283,7 +283,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send batch/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
 
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
@@ -313,7 +313,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send batch/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
 
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
@@ -370,7 +370,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send batch/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
 
     await waitFor(() => {
       expect(onBatchSent).toHaveBeenCalledWith(['c1', 'c2', 'c3']);
@@ -397,7 +397,7 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send & finish/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ & finish/i }));
 
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
@@ -471,11 +471,128 @@ describe('ReviewBanner', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /send batch/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
 
     await waitFor(() => {
       // Only c1 from spec-a should be sent, not c2/c3/c4 from other files
       expect(onBatchSent).toHaveBeenCalledWith(['c1']);
     });
+  });
+});
+
+describe('ReviewBanner — awaiting-reply state', () => {
+  function renderBanner(overrides: Partial<Parameters<typeof ReviewBanner>[0]> = {}) {
+    const defaultProps: Parameters<typeof ReviewBanner>[0] = {
+      sessions: [
+        {
+          id: 'rev_test',
+          filePaths: ['/tmp/a.md'],
+          enableResolve: false,
+          status: 'open',
+          sentCommentIds: [],
+          waitingForAgent: false,
+        },
+      ],
+      commentCounts: new Map([['/tmp/a.md', 0]]),
+      onHandoffSuccess: () => {},
+      onResolved: () => {},
+      commentIdsByFile: new Map(),
+      pendingAsksBySession: new Map([
+        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 0 }],
+      ]),
+      onSendReplies: vi.fn(),
+    };
+    return { props: { ...defaultProps, ...overrides }, ...render(<ReviewBanner {...{ ...defaultProps, ...overrides }} />) };
+  }
+
+  it('shows "Claude has N questions" copy when asks are pending', () => {
+    renderBanner();
+    expect(screen.getByText(/has 3 questions/i)).not.toBeNull();
+  });
+
+  it('disables Send replies until all replies are ready', () => {
+    renderBanner({
+      pendingAsksBySession: new Map([
+        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 1 }],
+      ]),
+    });
+    const btn = screen.getByRole('button', { name: /Send replies/i });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('enables Send replies once all replies are ready and triggers callback', () => {
+    const onSendReplies = vi.fn();
+    renderBanner({
+      pendingAsksBySession: new Map([
+        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 3 }],
+      ]),
+      onSendReplies,
+    });
+    const btn = screen.getByRole('button', { name: /Send replies/i });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(onSendReplies).toHaveBeenCalledWith('rev_test', 'ask_x');
+  });
+
+  it('hides Send & finish but shows Send batch when there are unsent comments in awaiting-reply state', () => {
+    renderBanner({
+      commentIdsByFile: new Map([['/tmp/a.md', ['new-c1']]]),
+    });
+    // Send batch should appear (there are unsent comments)
+    expect(screen.getByRole('button', { name: /Send \d+ comment/i })).not.toBeNull();
+    // Send & finish should not appear
+    expect(screen.queryByRole('button', { name: /Send \d+ & finish/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Cancel review/i })).not.toBeNull();
+  });
+
+  it('hides Send batch in awaiting-reply state when there are no unsent comments', () => {
+    renderBanner({
+      commentIdsByFile: new Map(),
+    });
+    expect(screen.queryByRole('button', { name: /Send \d+ comment/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Cancel review/i })).not.toBeNull();
+  });
+
+  it('falls back to waiting-for-batch state when ask has no commentIds', () => {
+    renderBanner({
+      pendingAsksBySession: new Map([
+        ['rev_test', { askId: 'ask_x', commentIds: [], agentName: 'Claude', readyCount: 0 }],
+      ]),
+    });
+    // Send replies should NOT appear; the existing batch state should.
+    expect(screen.queryByRole('button', { name: /Send replies/i })).toBeNull();
+  });
+
+  it('shows queued toast when server responds with queued:true', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, queued: true }) } as Response);
+    const showToast = vi.fn();
+    renderBanner({
+      commentIdsByFile: new Map([['/tmp/a.md', ['new-c1']]]),
+      showToast,
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Send \d+ comment/i }));
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalled();
+    });
+    expect((showToast.mock.calls[0][0] as string)).toContain('Queued');
+    expect((showToast.mock.calls[0][0] as string)).toContain('will send after your reply');
+  });
+
+  it('disables Send replies during an in-flight call', async () => {
+    let resolveSend: () => void = () => {};
+    const onSendReplies = vi.fn().mockImplementation(
+      () => new Promise<void>((r) => { resolveSend = r; }),
+    );
+    renderBanner({
+      pendingAsksBySession: new Map([
+        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 3 }],
+      ]),
+      onSendReplies,
+    });
+    const btn = screen.getByRole('button', { name: /Send replies/i });
+    fireEvent.click(btn);
+    // Banner is now in busy state.
+    expect((screen.getByRole('button', { name: /Send replies/i }) as HTMLButtonElement).disabled).toBe(true);
+    resolveSend();
   });
 });

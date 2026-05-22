@@ -3,6 +3,13 @@ import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import type { ReviewSession } from '../hooks/useReviewSession';
 
+export interface PendingAskSummary {
+  askId: string;
+  commentIds: string[];
+  agentName: string;
+  readyCount: number;
+}
+
 interface ReviewBannerProps {
   sessions: ReviewSession[];
   commentCounts: Map<string, number>;
@@ -15,6 +22,10 @@ interface ReviewBannerProps {
   showToast?: (message: string) => void;
   /** Comment IDs grouped by file path. */
   commentIdsByFile: Map<string, string[]>;
+  /** Pending asks per session id — drives the awaiting-reply banner state. */
+  pendingAsksBySession?: Map<string, PendingAskSummary>;
+  /** Called when the user clicks Send replies. Can be async; banner manages busy state during the call. */
+  onSendReplies?: (sessionId: string, askId: string) => void | Promise<void>;
 }
 
 // A session is ready to send only when we have an authoritative comment count
@@ -46,6 +57,8 @@ export function ReviewBanner({
   onBatchSent,
   showToast,
   commentIdsByFile,
+  pendingAsksBySession,
+  onSendReplies,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -94,9 +107,14 @@ export function ReviewBanner({
           showToast?.(`Batch send failed: ${detail}`);
           return;
         }
+        const data = (await res.json()) as { ok: boolean; queued?: boolean };
         onHandoffSuccess(s);
         onBatchSent?.(unsentIds);
-        showToast?.(`Sent ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'} to agent`);
+        if (data.queued) {
+          showToast?.(`Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`);
+        } else {
+          showToast?.(`Sent ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'} to agent`);
+        }
       } finally {
         setBusyId(null);
       }
@@ -145,6 +163,19 @@ export function ReviewBanner({
     [buildPromptForSession, commentIdsByFile, onHandoffSuccess, onResolved, showToast],
   );
 
+  const handleSendReplies = useCallback(
+    async (sessionId: string, askId: string) => {
+      if (!onSendReplies) return;
+      setBusyId(sessionId);
+      try {
+        await onSendReplies(sessionId, askId);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [onSendReplies],
+  );
+
   const handleCancel = useCallback(
     async (s: ReviewSession) => {
       setBusyId(s.id);
@@ -180,10 +211,64 @@ export function ReviewBanner({
 
   return (
     <div
-      className="sticky top-0 z-40 border-b border-warning/30 bg-warning-bg px-4 py-2 text-warning-text"
+      className="sticky top-0 z-40 border-b border-primary/30 bg-primary-bg px-4 py-2 text-primary-text"
       data-testid="review-banner"
     >
       {sessions.map((s) => {
+        const ask = pendingAsksBySession?.get(s.id);
+        if (ask && ask.commentIds.length > 0) {
+          const readyCount = ask.readyCount;
+          const allReady = readyCount === ask.commentIds.length;
+          const askSessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
+          const askUnsentIds = askSessionIds.filter((id) => !s.sentCommentIds.includes(id));
+          return (
+            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
+              <span className="text-sm">
+                <span
+                  className="mr-2 inline-block h-2 w-2 rounded-full bg-primary align-middle"
+                  aria-hidden
+                />
+                <strong>{ask.agentName} has {ask.commentIds.length} question{ask.commentIds.length === 1 ? '' : 's'}</strong>{' '}
+                on {s.filePaths.map((p, i) => (
+                  <span key={p}>
+                    {i > 0 && ', '}
+                    <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
+                  </span>
+                ))}.
+              </span>
+              <span className="flex gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
+                  onClick={() => void handleSendReplies(s.id, ask.askId)}
+                  disabled={busyId === s.id || !allReady}
+                  title={allReady ? undefined : `${readyCount} of ${ask.commentIds.length} replies drafted`}
+                >
+                  Send replies ({readyCount}/{ask.commentIds.length})
+                </button>
+                {askUnsentIds.length > 0 && (
+                  <button
+                    type="button"
+                    className="rounded border-2 border-primary text-primary-text bg-surface px-3 py-1 text-sm font-semibold hover:bg-primary-bg-strong disabled:opacity-50"
+                    onClick={() => void handleSendBatch(s)}
+                    disabled={busyId === s.id}
+                  >
+                    Send {askUnsentIds.length} comment{askUnsentIds.length === 1 ? '' : 's'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
+                  onClick={() => void handleCancel(s)}
+                  disabled={busyId === s.id}
+                >
+                  Cancel review
+                </button>
+              </span>
+            </div>
+          );
+        }
+
         const ready = sessionIsReady(s, commentCounts);
         const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
         const unsentIds = sessionIds.filter((id) => !s.sentCommentIds.includes(id));
@@ -209,7 +294,7 @@ export function ReviewBanner({
             <span className="flex gap-2">
               <button
                 type="button"
-                className="rounded border-2 border-current px-3 py-1 text-sm font-semibold hover:bg-current/10 disabled:opacity-50"
+                className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
                 onClick={() => void handleSendBatch(s)}
                 disabled={disabled || s.waitingForAgent || unsentIds.length === 0}
                 title={
@@ -226,19 +311,23 @@ export function ReviewBanner({
                   ? 'Waiting for agent\u2026'
                   : !ready
                     ? 'Loading\u2026'
-                    : 'Send batch'}
+                    : `Send ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}`}
               </button>
               <button
                 type="button"
-                className="rounded border-2 border-current px-3 py-1 text-sm font-semibold hover:bg-current/10 disabled:opacity-50"
+                className="rounded border-2 border-primary text-primary-text bg-surface px-3 py-1 text-sm font-semibold hover:bg-primary-bg-strong disabled:opacity-50"
                 onClick={() => void handleSendAndFinish(s)}
                 disabled={busyId === s.id || !ready}
               >
-                {!ready ? 'Loading\u2026' : unsentIds.length > 0 ? 'Send & finish' : 'Finish review'}
+                {!ready
+                  ? 'Loading\u2026'
+                  : unsentIds.length > 0
+                    ? `Send ${unsentIds.length} & finish`
+                    : 'Finish review'}
               </button>
               <button
                 type="button"
-                className="rounded border border-current/40 px-3 py-1 text-sm hover:bg-current/10 disabled:opacity-50"
+                className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
                 onClick={() => void handleCancel(s)}
                 disabled={busyId === s.id}
               >

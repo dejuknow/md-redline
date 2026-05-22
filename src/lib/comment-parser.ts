@@ -438,6 +438,11 @@ export function pickBestOccurrence(
   return bestOcc;
 }
 
+export interface InsertCommentExtras {
+  agentInitiated?: boolean;
+  sessionId?: string;
+}
+
 export function insertComment(
   rawMarkdown: string,
   anchor: string,
@@ -447,6 +452,7 @@ export function insertComment(
   contextAfter?: string,
   hintOffset?: number,
   commentId: string = crypto.randomUUID(),
+  extras?: InsertCommentExtras,
 ): string {
   const comment: MdComment = {
     id: commentId,
@@ -456,6 +462,8 @@ export function insertComment(
     timestamp: new Date().toISOString(),
     ...(contextBefore ? { contextBefore } : {}),
     ...(contextAfter ? { contextAfter } : {}),
+    ...(extras?.agentInitiated ? { agentInitiated: true } : {}),
+    ...(extras?.sessionId ? { sessionId: extras.sessionId } : {}),
   };
 
   // Find the anchor text in the CLEAN markdown (no comment markers),
@@ -738,6 +746,10 @@ export function moveComment(
     undefined,
     hintOffset,
     commentId,
+    {
+      agentInitiated: existing.agentInitiated,
+      sessionId: existing.sessionId,
+    },
   );
 
   if (reinserted === withoutOld) return rawMarkdown;
