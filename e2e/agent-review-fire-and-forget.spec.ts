@@ -105,7 +105,6 @@ test.describe('Agent review fire-and-forget', () => {
               text: 'Add a summary sentence here.',
             },
           ],
-          expectsReply: false,
         },
       },
     );
@@ -120,7 +119,8 @@ test.describe('Agent review fire-and-forget', () => {
     // 5. No awaiting-reply section — fire-and-forget does not create pendingAsks.
     await expect(page.getByTestId('awaiting-reply-section')).toHaveCount(0);
 
-    // 6. Toast fires: "Agent left 2 comments".
-    await expect(page.getByText(/Agent left 2 comments/i)).toBeVisible({ timeout: 10_000 });
+    // 6. Banner shows "Done" button (fire-and-forget mode).
+    const banner = page.getByTestId('review-banner');
+    await expect(banner.getByRole('button', { name: /^done$/i })).toBeVisible({ timeout: 5_000 });
   });
 });

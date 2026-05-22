@@ -96,7 +96,7 @@ async function waitFor(
       expect(toolsResp, `tools/list response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(['mdr_ask', 'mdr_request_review', 'mdr_review']);
+      expect(names).toEqual(['mdr_ask', 'mdr_request_review', 'mdr_review', 'mdr_wait']);
     } finally {
       child.kill();
     }

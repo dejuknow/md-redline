@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'child_process';
-import { statSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
@@ -464,31 +464,58 @@ async function runMcpStdio() {
   // code (which is exactly what bit us when iterating on this tool).
   // `npm run dev` watches and rebuilds the bundle automatically, so this
   // only triggers when developing outside the dev script.
-  try {
-    const bundleMtime = statSync(distMcp).mtimeMs;
-    const sourceDir = join(APP_DIR, 'server', 'mcp-stdio');
-    const stack = [sourceDir, join(APP_DIR, 'server', 'mcp-stdio.ts')];
-    let newestSource = 0;
-    while (stack.length) {
-      const p = stack.pop();
-      let stat;
-      try { stat = statSync(p); } catch { continue; }
-      if (stat.isDirectory()) {
-        for (const entry of (await import('fs')).readdirSync(p)) stack.push(join(p, entry));
-      } else if (p.endsWith('.ts')) {
-        if (stat.mtimeMs > newestSource) newestSource = stat.mtimeMs;
+  {
+    // Inline staleness check (no broad try/catch — only specific filesystem
+    // race errors are swallowed). The inner `try { statSync(p) } catch` handles
+    // entries that disappear between readdir and stat. The outer block lets
+    // unexpected errors surface instead of being misclassified as staleness.
+    const bundleStat = (() => {
+      try { return statSync(distMcp); } catch { return null; }
+    })();
+    if (bundleStat) {
+      // The MCP bundle pulls in `server/**`, modules from `src/lib/`
+      // (agent-prompts, comment-parser), and `src/types.ts` (comment-parser
+      // imports getEffectiveStatus). Scan all three roots so edits to any
+      // compiled dependency trip the staleness check.
+      //
+      // Staleness is binary — the moment we find one source file newer than
+      // the bundle, we know enough to throw. Don't walk the rest of the tree
+      // (this runs on every `mdr mcp` startup, so the early-exit matters).
+      const bundleMtime = bundleStat.mtimeMs;
+      const stack = [
+        join(APP_DIR, 'server'),
+        join(APP_DIR, 'src', 'lib'),
+        join(APP_DIR, 'src', 'types.ts'),
+      ];
+      let stalePath = null;
+      let staleAgeSec = 0;
+      outer: while (stack.length) {
+        const p = stack.pop();
+        if (!p) continue;
+        let entryStat;
+        try { entryStat = statSync(p); } catch { continue; }
+        if (entryStat.isDirectory()) {
+          let entries;
+          try { entries = readdirSync(p); } catch { continue; }
+          for (const entry of entries) stack.push(join(p, entry));
+        } else if (p.endsWith('.ts')) {
+          // Skip test files — they don't contribute to the bundled output,
+          // so editing only a *.test.ts must not flag staleness.
+          if (p.endsWith('.test.ts') || p.endsWith('.spec.ts')) continue;
+          if (entryStat.mtimeMs > bundleMtime) {
+            stalePath = p;
+            staleAgeSec = Math.round((entryStat.mtimeMs - bundleMtime) / 1000);
+            break outer;
+          }
+        }
+      }
+      if (stalePath) {
+        throw new Error(
+          `mdr mcp bundle is stale (${stalePath} is ${staleAgeSec}s newer than dist/mcp-stdio.js).\n` +
+          `Run \`npm run build\` (or \`npm run dev\` which rebuilds on save).`,
+        );
       }
     }
-    if (newestSource > bundleMtime) {
-      const ageSec = Math.round((newestSource - bundleMtime) / 1000);
-      throw new Error(
-        `mdr mcp bundle is stale (source is ${ageSec}s newer than dist/mcp-stdio.js).\n` +
-        `Run \`npm run build\` (or \`npm run dev\` which rebuilds on save).`,
-      );
-    }
-  } catch (err) {
-    // Only re-throw our own staleness error. statSync failures on either side fall through.
-    if (err && err.message && err.message.startsWith('mdr mcp bundle is stale')) throw err;
   }
 
   // Dynamic import so the SDK is only loaded when the mcp subcommand is invoked
@@ -505,10 +532,6 @@ async function runMcpStdio() {
       await ensureServerRunning();
       const port = (await findClientPort()) ?? (await findServerPort()) ?? DEFAULT_CLIENT_PORT;
       currentBaseUrl = `http://localhost:${port}`;
-    },
-    getUserSettings: async () => {
-      const prefs = await mod.readPreferences(homedir());
-      return prefs.settings ?? {};
     },
   });
 }

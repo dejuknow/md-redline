@@ -440,6 +440,10 @@ export function pickBestOccurrence(
 
 export interface InsertCommentExtras {
   agentInitiated?: boolean;
+  /** When true, the marker represents an mdr_ask question; the UI surfaces it
+   *  as a pending agent question (toast + palette entry). When false/omitted,
+   *  the marker is a fire-and-forget mdr_review comment with no toast. */
+  expectsReply?: boolean;
   sessionId?: string;
 }
 
@@ -463,6 +467,7 @@ export function insertComment(
     ...(contextBefore ? { contextBefore } : {}),
     ...(contextAfter ? { contextAfter } : {}),
     ...(extras?.agentInitiated ? { agentInitiated: true } : {}),
+    ...(extras?.expectsReply ? { expectsReply: true } : {}),
     ...(extras?.sessionId ? { sessionId: extras.sessionId } : {}),
   };
 
@@ -748,6 +753,7 @@ export function moveComment(
     commentId,
     {
       agentInitiated: existing.agentInitiated,
+      expectsReply: existing.expectsReply,
       sessionId: existing.sessionId,
     },
   );
@@ -784,12 +790,31 @@ export function addReply(
     timestamp: new Date().toISOString(),
   };
 
-  return updateReplies(rawMarkdown, commentId, (replies) => [...replies, reply]);
+  // Use transformCommentMarkers directly so we can clear `expectsReply` on the
+  // same write — an agentInitiated question that's been answered inline is no
+  // longer pending. selectAgentAsks already filters out markers with non-empty
+  // replies, but persisting a flag that no longer applies is misleading and
+  // can mask future bugs in code that consults the field directly.
+  let found = false;
+  const result = transformCommentMarkers(rawMarkdown, (comment) => {
+    if (comment?.id !== commentId) return { type: 'keep' };
+    found = true;
+    const existingReplies = comment.replies ?? [];
+    const next = { ...comment, replies: [...existingReplies, reply] };
+    if (next.expectsReply) delete next.expectsReply;
+    return { type: 'replace', comment: next };
+  });
+  return found ? result : rawMarkdown;
 }
 
 /**
  * Append a reply to an existing top-level comment by id.
  * Returns `content` unchanged when the commentId is not found.
+ *
+ * Any reply (from user or agent) marks the question as answered, so this
+ * also clears `expectsReply` on the target marker — same semantic as
+ * `addReply`. Without this, an agent-self-reply via mdr_review would leave
+ * the marker carrying expectsReply:true forever.
  */
 export function appendReply(
   content: string,
@@ -802,10 +827,9 @@ export function appendReply(
     if (comment?.id !== commentId) return { type: 'keep' };
     found = true;
     const existingReplies = comment.replies ?? [];
-    return {
-      type: 'replace',
-      comment: { ...comment, replies: [...existingReplies, reply] },
-    };
+    const next = { ...comment, replies: [...existingReplies, reply] };
+    if (next.expectsReply) delete next.expectsReply;
+    return { type: 'replace', comment: next };
   });
   return found ? result : content;
 }

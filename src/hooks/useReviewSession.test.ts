@@ -1,7 +1,21 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useReviewSession } from './useReviewSession';
+import { findActiveSessionForFile, useReviewSession, type ReviewSession } from './useReviewSession';
+
+function mkSession(overrides: Partial<ReviewSession>): ReviewSession {
+  return {
+    id: 'rev_x',
+    filePaths: ['/tmp/a.md'],
+    enableResolve: false,
+    status: 'open',
+    sentCommentIds: [],
+    waitingForAgent: false,
+    origin: 'user',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
 
 const fetchMock = vi.fn();
 
@@ -299,6 +313,55 @@ describe('useReviewSession', () => {
 
     expect(result.current.sessions).toHaveLength(1);
     expect(result.current.sessions[0].origin).toBe('agent');
+  });
+
+  describe('findActiveSessionForFile', () => {
+    it('returns null when no filePath provided', () => {
+      expect(findActiveSessionForFile([mkSession({})], null)).toBeNull();
+    });
+
+    it('returns null when no session matches the file', () => {
+      const sessions = [mkSession({ filePaths: ['/tmp/other.md'] })];
+      expect(findActiveSessionForFile(sessions, '/tmp/a.md')).toBeNull();
+    });
+
+    it('returns the single matching session', () => {
+      const session = mkSession({ id: 'rev_1' });
+      expect(findActiveSessionForFile([session], '/tmp/a.md')).toBe(session);
+    });
+
+    it('prefers agent-origin over user-origin when both match', () => {
+      const userSession = mkSession({ id: 'rev_user', origin: 'user' });
+      const agentSession = mkSession({ id: 'rev_agent', origin: 'agent' });
+      expect(
+        findActiveSessionForFile([userSession, agentSession], '/tmp/a.md'),
+      ).toBe(agentSession);
+      // Order doesn't matter.
+      expect(
+        findActiveSessionForFile([agentSession, userSession], '/tmp/a.md'),
+      ).toBe(agentSession);
+    });
+
+    it('within same origin, prefers the most recently created session', () => {
+      const older = mkSession({ id: 'rev_old', createdAt: '2026-01-01T00:00:00Z' });
+      const newer = mkSession({ id: 'rev_new', createdAt: '2026-05-01T00:00:00Z' });
+      expect(findActiveSessionForFile([older, newer], '/tmp/a.md')).toBe(newer);
+      expect(findActiveSessionForFile([newer, older], '/tmp/a.md')).toBe(newer);
+    });
+
+    it('treats invalid createdAt as oldest (0)', () => {
+      const withDate = mkSession({ id: 'rev_dated', createdAt: '2026-05-01T00:00:00Z' });
+      const invalid = mkSession({ id: 'rev_invalid', createdAt: 'not-a-date' });
+      expect(findActiveSessionForFile([invalid, withDate], '/tmp/a.md')).toBe(withDate);
+      expect(findActiveSessionForFile([withDate, invalid], '/tmp/a.md')).toBe(withDate);
+    });
+
+    it('filters out non-open sessions even when they match the file', () => {
+      const open = mkSession({ id: 'rev_open', status: 'open' });
+      const done = mkSession({ id: 'rev_done', status: 'done', origin: 'agent' });
+      // The terminal agent session is more "recent" but must be skipped.
+      expect(findActiveSessionForFile([done, open], '/tmp/a.md')).toBe(open);
+    });
   });
 
   it('re-polls the session list when a heartbeat returns 404 (session swept server-side)', async () => {

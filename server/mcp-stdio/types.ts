@@ -4,7 +4,6 @@
  * dependency cycle.
  */
 
-import type { AppSettings } from '../preferences';
 
 export type RequestReviewInput =
   | { mode: 'new'; filePaths: string[]; enableResolve: boolean }
@@ -19,6 +18,14 @@ export interface CreateSessionResult {
   url: string;
   /** False when the server returned an existing open session for the same files. */
   created?: boolean;
+  /**
+   * The session's origin. The server filters dedupe by origin, so a fresh
+   * create-or-attach should always return the requested origin. The handler
+   * asserts on this defensively so a future server bug doesn't silently
+   * attach an agent flow to a user-origin session (the two have incompatible
+   * terminal-state semantics).
+   */
+  origin?: 'user' | 'agent';
 }
 
 export type WaitResult =
@@ -38,6 +45,9 @@ export interface AskQuestion {
   filePath: string;
   anchor: string;
   text: string;
+  /** Agent name shown in the mdr UI for this question (e.g. "Claude", "Codex").
+   *  Falls back to "Agent" when absent. */
+  author?: string;
   contextBefore?: string;
   contextAfter?: string;
 }
@@ -51,7 +61,7 @@ import type { AskNoReplyReason } from '../review-sessions';
 export type { AskNoReplyReason };
 
 export type AskWaitResult =
-  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }> }
+  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
   | { status: 'no_reply'; reason: AskNoReplyReason };
 
 export interface PostAgentCommentsResult {
@@ -77,16 +87,30 @@ export interface ReviewReply {
 export interface PostReviewArgs {
   comments?: ReviewComment[];
   replies?: ReviewReply[];
-  expectsReply: boolean;
+  // expectsReply removed — always fire-and-forget
 }
 
 export interface ReviewInput {
   filePaths: string[];
   comments?: Array<{ filePath: string; anchor: string; text: string; author?: string; contextBefore?: string; contextAfter?: string }>;
   replies?: Array<{ filePath: string; commentId: string; text: string; author?: string }>;
-  waitForResponse?: boolean;
   enableResolve?: boolean;
 }
+
+export interface WaitInput {
+  sessionId: string;
+}
+
+export type WaitForReviewResult =
+  | { status: 'done' }
+  | { status: 'pending' }
+  /**
+   * The session ended without the user explicitly clicking Done — they
+   * cancelled, the browser disconnected, the agent timed out (agent_silent),
+   * or the agent invoked /finish from the legacy user-batch flow. The agent
+   * should treat this as "no engagement" rather than "user finished".
+   */
+  | { status: 'aborted'; reason: 'user_cancelled' | 'browser_disconnected' | 'agent_silent' | 'finished' };
 
 export interface PostReviewResult {
   askId?: string;
@@ -103,9 +127,12 @@ export interface MdrClient {
   waitForSession(sessionId: string, timeoutSeconds?: number): Promise<WaitResult>;
   abortSession(sessionId: string): Promise<void>;
   postAgentComments(sessionId: string, questions: AskQuestion[]): Promise<PostAgentCommentsResult>;
+  /** Long-poll — intentionally not signal-aware; cancel via releaseAsk instead. */
   waitForAsk(sessionId: string, askId: string): Promise<AskWaitResult>;
   postReview(sessionId: string, args: PostReviewArgs): Promise<PostReviewResult>;
   releaseAsk(sessionId: string, askId: string): Promise<void>;
+  /** Long-poll — server's 90s timeout bounds the wait; client doesn't abort the fetch. */
+  waitForReview(sessionId: string, timeoutSeconds?: number): Promise<WaitForReviewResult>;
 }
 
 export interface ToolCallContext {
@@ -125,12 +152,6 @@ export interface ToolCallContext {
    * so we don't leave a 30-second orphan waiting for the heartbeat sweep.
    */
   signal?: AbortSignal;
-  /**
-   * Read the current user settings (preferences). Used by handleReviewToolCall
-   * to resolve defaultAgentReviewWait when waitForResponse is omitted.
-   * Optional — if absent, defaults to fire-and-forget (expectsReply=false).
-   */
-  getUserSettings?: () => Promise<AppSettings>;
 }
 
 export interface ToolCallResult {
@@ -147,10 +168,4 @@ export interface RunMcpServerOptions {
   getBaseUrl: () => string;
   openInBrowser: (url: string) => Promise<void>;
   ensureServerRunning: () => Promise<void>;
-  /**
-   * Read the current user settings. If provided, handleReviewToolCall uses
-   * defaultAgentReviewWait to determine expectsReply when waitForResponse is
-   * omitted from the tool input. Defaults to fire-and-forget when absent.
-   */
-  getUserSettings?: () => Promise<AppSettings>;
 }

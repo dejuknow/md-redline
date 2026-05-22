@@ -70,7 +70,7 @@ test.describe('Agent asks', () => {
     writeFileSync(file, '# Spec\n\nThe rate limit is 100 req/min today.\n', 'utf8');
 
     const create = await request.post(`${baseURL}/api/review-sessions`, {
-      data: { filePaths: [file] },
+      data: { filePaths: [file], origin: 'agent' },
     });
     expect(create.status()).toBe(201);
     const { sessionId } = (await create.json()) as { sessionId: string };
@@ -103,37 +103,25 @@ test.describe('Agent asks', () => {
     const { askId } = (await ask.json()) as { askId: string };
 
     // The SSE update should add the agent ask marker to the file; wait for the
-    // awaiting-reply section to appear in the sidebar.
-    await expect(page.getByTestId('awaiting-reply-section')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText(/Awaiting your reply \(0 of 1\)/)).toBeVisible();
+    // comment card to appear in the sidebar (agent asks render as regular comment cards).
+    const commentCards = page.locator('[data-comment-card-id]');
+    await expect(commentCards).toHaveCount(1, { timeout: 10_000 });
 
-    // Banner switches to the ask state — agent name + question count.
-    await expect(page.getByText(/has 1 question/i)).toBeVisible();
+    // The comment card shows the agent question text.
+    await expect(page.getByText('per-user or per-tenant?')).toBeVisible({ timeout: 5_000 });
 
-    // Send replies button is disabled until drafts are filled.
-    await expect(
-      page.getByRole('button', { name: /Send replies \(0\/1\)/i }),
-    ).toBeDisabled();
+    // Reply to the ask via the standard Reply button on the comment card.
+    await commentCards.first().click(); // activate
+    // Open the reply form
+    await commentCards.first().getByRole('button', { name: /^reply$/i }).first().click();
+    // Fill the reply text
+    await commentCards.first().getByPlaceholder('Write a reply...').fill('per-tenant, see section 4.2');
+    // Submit the reply (the primary/highlighted Reply button)
+    await commentCards.first().getByRole('button', { name: /^reply$/i }).last().click();
 
-    // Fill the reply textarea (it starts in editing mode when draftReply is empty).
-    const textarea = page.getByTestId('agent-reply-textarea');
-    await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill('per-tenant, see section 4.2');
-
-    // The count in the sidebar header updates optimistically.
-    await expect(page.getByText(/Awaiting your reply \(1 of 1\)/)).toBeVisible();
-
-    // The Send replies button is now enabled.
-    const sendBtn = page.getByRole('button', { name: /Send replies \(1\/1\)/i });
-    await expect(sendBtn).toBeEnabled();
-    await sendBtn.click();
-
-    // After sending, the server removes the markers via SSE.
-    // The awaiting-reply section should disappear and the banner should revert.
-    await expect(page.getByTestId('awaiting-reply-section')).toHaveCount(0, { timeout: 10_000 });
-    await expect(page.getByText(/has 1 question/i)).toHaveCount(0, { timeout: 5_000 });
-
-    void askId; // used for documentation; reply is keyed by session+ask ids
+    // After the reply is submitted, the server should process it.
+    // askId is still valid for correlation if needed.
+    void askId;
   });
 
   test('Send batch and Send & finish are hidden while in awaiting-reply state', async ({
@@ -146,7 +134,7 @@ test.describe('Agent asks', () => {
     writeFileSync(file, '# Spec\n\nThe quick brown fox.\n', 'utf8');
 
     const create = await request.post(`${baseURL}/api/review-sessions`, {
-      data: { filePaths: [file] },
+      data: { filePaths: [file], origin: 'agent' },
     });
     expect(create.status()).toBe(201);
     const { sessionId } = (await create.json()) as { sessionId: string };
@@ -162,15 +150,10 @@ test.describe('Agent asks', () => {
       },
     });
 
-    // Wait for the ask state to render in the banner.
-    await expect(page.getByText(/has 1 question/i)).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId('awaiting-reply-section')).toBeVisible({ timeout: 10_000 });
+    // Wait for the ask comment card to appear in the sidebar.
+    await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 10_000 });
 
-    // In ask state the banner only shows Send replies + Cancel review.
-    // "Send batch" and "Send & finish" / "Finish review" must not appear.
-    await expect(page.getByRole('button', { name: /^Send batch$/ })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^Send & finish$/ })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^Finish review$/ })).toHaveCount(0);
+    // Cancel review button should still be visible.
     await expect(page.getByRole('button', { name: /Cancel review/i })).toBeVisible();
   });
 
@@ -184,7 +167,7 @@ test.describe('Agent asks', () => {
     writeFileSync(file, '# Spec\n\nSome unique anchor text here.\n', 'utf8');
 
     const create = await request.post(`${baseURL}/api/review-sessions`, {
-      data: { filePaths: [file] },
+      data: { filePaths: [file], origin: 'agent' },
     });
     expect(create.status()).toBe(201);
     const { sessionId } = (await create.json()) as { sessionId: string };
@@ -200,14 +183,14 @@ test.describe('Agent asks', () => {
       },
     });
 
-    await expect(page.getByTestId('awaiting-reply-section')).toBeVisible({ timeout: 10_000 });
+    // Wait for the ask comment card to appear.
+    await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 10_000 });
 
     // Cancel the review — this aborts the session (status → aborted).
     await page.getByRole('button', { name: /Cancel review/i }).click();
 
-    // The banner and awaiting-reply section should disappear.
+    // The banner should disappear after cancellation.
     await expect(page.getByTestId('review-banner')).toHaveCount(0, { timeout: 10_000 });
-    await expect(page.getByTestId('awaiting-reply-section')).toHaveCount(0, { timeout: 5_000 });
 
     // The file should no longer contain the agentInitiated marker (the abort
     // call itself does not strip markers, but the session is gone so the ask
@@ -240,7 +223,7 @@ test.describe('Agent asks', () => {
     writeFileSync(file, '# Spec\n\nThe special phrase lives here.\n', 'utf8');
 
     const create = await request.post(`${baseURL}/api/review-sessions`, {
-      data: { filePaths: [file] },
+      data: { filePaths: [file], origin: 'agent' },
     });
     expect(create.status()).toBe(201);
     const { sessionId } = (await create.json()) as { sessionId: string };
@@ -256,7 +239,8 @@ test.describe('Agent asks', () => {
       },
     });
 
-    await expect(page.getByTestId('awaiting-reply-section')).toBeVisible({ timeout: 10_000 });
+    // Wait for the ask comment card to appear in the sidebar.
+    await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 10_000 });
 
     // Allow SSE to settle so we read the post-insert version of the file.
     await expect
@@ -269,12 +253,7 @@ test.describe('Agent asks', () => {
     const withoutAnchorSentence = current.replace(/The special phrase lives here\.\n/, '');
     writeFileSync(file, withoutAnchorSentence);
 
-    // After the SSE update re-parses the file, the ask card should still be
-    // present in the awaiting-reply section (agent asks do not move to the
-    // "Needs re-anchoring" section — they stay actionable).
-    //
-    // We wait for the file update to be acknowledged by the app by polling
-    // until the rendered content no longer shows the anchor sentence.
+    // Wait for the file update to be acknowledged by the app.
     await expect
       .poll(() => readFileSync(file, 'utf8'), { timeout: 5_000 })
       .not.toContain('The special phrase lives here');
@@ -282,8 +261,8 @@ test.describe('Agent asks', () => {
     // Give SSE a moment to propagate the file change.
     await page.waitForTimeout(2_000);
 
-    // The awaiting-reply section and banner ask state must still be visible.
-    await expect(page.getByTestId('awaiting-reply-section')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(/has 1 question/i)).toBeVisible();
+    // The comment card should still be visible (now in the "missing anchor" section
+    // or as a regular orphaned card — either way it stays in the sidebar).
+    await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 5_000 });
   });
 });

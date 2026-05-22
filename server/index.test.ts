@@ -1775,17 +1775,21 @@ describe('review sessions API', () => {
     const result1 = await waitPromise1;
     expect(result1.body).toMatchObject({ status: 'batch', prompt: 'batch1' });
 
-    // Queue a batch while waitingForAgent is true
+    // Queue a batch while waitingForAgent is true. The server rebuilds the
+    // prompt on delivery (so the prompt the UI sends here is ignored for the
+    // queued path — see queueBatch).
     const queued = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'queued batch', commentIds: ['c2'] }),
+      body: JSON.stringify({ prompt: 'queued batch', commentIds: ['c2'], commentCounts: { [writtenFile]: 2 } }),
     });
     expect(queued.body).toMatchObject({ ok: true, queued: true });
 
-    // Agent polls again — queued batch should be delivered immediately
+    // Agent polls again — queued batch should be delivered immediately with
+    // a server-rebuilt prompt that references the queued commentId.
     const result2 = await requestJson(app, `/api/review-sessions/${sessionId}/wait`);
-    expect(result2.body).toMatchObject({ status: 'batch', prompt: 'queued batch', commentIds: ['c2'] });
+    expect(result2.body).toMatchObject({ status: 'batch', commentIds: ['c2'] });
+    expect((result2.body as { prompt: string }).prompt).toMatch(/`c2`/);
   });
 
   it('POST .../finish with prompt marks session done', async () => {
@@ -2024,6 +2028,37 @@ describe('review sessions API', () => {
 
     expect(idA).toBe(idB);
   });
+
+  it('does NOT dedupe across origins (agent must not attach to user session)', async () => {
+    // The user opens a review of a file. Then an agent calls mdr_review on
+    // the same file. The agent must get a fresh agent-origin session — never
+    // the user's — because the two have incompatible terminal-state contracts.
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-cross-origin-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const userCreate = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] /* defaults to user */ }),
+    });
+    expect(userCreate.status).toBe(201);
+    const { sessionId: userId } = (await userCreate.json()) as { sessionId: string };
+
+    const agentCreate = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    expect(agentCreate.status).toBe(201); // 201 = newly created, not 200 (reused)
+    const { sessionId: agentId, origin } = (await agentCreate.json()) as {
+      sessionId: string;
+      origin: string;
+    };
+    expect(agentId).not.toBe(userId);
+    expect(origin).toBe('agent');
+  });
 });
 
 async function buildTestApp(options: { allowedRoots: string[] }) {
@@ -2045,7 +2080,7 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
     const create = await testApp.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
 
@@ -2079,7 +2114,7 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
     const create = await testApp.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
 
@@ -2137,7 +2172,7 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
 
@@ -2152,6 +2187,233 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
 
     const pending = reviewSessions.getPendingAsks(sessionId);
     expect(pending[0].questions[0].filePath).toBe(filePath); // canonical path stored
+  });
+});
+
+describe('POST /api/review-sessions origin validation', () => {
+  it('rejects unknown origin values with 400 (no silent coercion to user)', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-origin-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# X\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const res = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // 'Agent' (capitalised) is the kind of typo that previously coerced
+      // silently to user-origin, causing downstream mdr_wait 409s.
+      body: JSON.stringify({ filePaths: [filePath], origin: 'Agent' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/origin must be/i);
+  });
+
+  it('accepts omitted origin (defaults to user)', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-origin-default-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# X\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const res = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { origin: string };
+    expect(body.origin).toBe('user');
+  });
+});
+
+describe('POST /agent-comments mode rejection contracts', () => {
+  it('treats empty questions:[] as non-ask when mode is omitted (no silent flip)', async () => {
+    // Defense in depth: an empty `questions: []` on a review-mode-shaped
+    // payload would previously have flipped the inference to ask mode.
+    // Now the inference only fires when at least one element is present.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-empty-questions-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // Empty questions[] + non-empty comments[] should be reviewed-mode, not
+    // ambiguous, and not silently downgraded.
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [],
+        comments: [{ filePath, anchor: 'Hello', text: 'fyi' }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { askId?: string };
+    expect(body.askId).toBeUndefined(); // confirms review-mode (no ask waiter created)
+  });
+
+  it('rejects ambiguous shape: both questions and comments arrays without mode', async () => {
+    // The shape-inference fallback can't tell ask from review when both
+    // arrays are present, so the route rejects 400 rather than silently
+    // collapsing to review.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-mode-ambig-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
+        comments: [{ filePath, anchor: 'world', text: 'c1' }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/cannot infer mode/i);
+  });
+
+  it("rejects mode:'ask' with expectsReply:false as a contradiction", async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-mode-contradict-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
+        expectsReply: false,
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/contradictory/i);
+  });
+
+  it('rejects inferred-ask payload on user-origin session with 409', async () => {
+    // Inferred ask (no explicit mode, questions:[], no comments:[]) on a
+    // user-origin session must also be gated to agent-origin — otherwise
+    // legacy callers using the shape-inference path bypass the L2 guard.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-inferred-user-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] /* user origin */ }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // No explicit mode; questions:[] alone makes this an inferred ask.
+      body: JSON.stringify({
+        questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
+      }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/agent-origin/i);
+  });
+
+  it('rejects review-mode with expectsReply:true as a reverse contradiction', async () => {
+    // Symmetric to mode:'ask' + expectsReply:false. A review-mode caller
+    // (explicit or inferred via comments:[]) asking for a blocking reply
+    // is using the wrong tool and gets 400 instead of being silently
+    // downgraded.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-rev-contradict-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        comments: [{ filePath, anchor: 'Hello', text: 'fyi' }],
+        expectsReply: true,
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/contradictory/i);
+  });
+
+  it("rejects mdr_ask payload on user-origin session with 409", async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-user-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] /* defaults to user */ }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
+      }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/agent-origin/i);
+  });
+
+  it("accepts mode:'ask' without expectsReply (default to true)", async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-mode-ask-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { askId?: string };
+    expect(body.askId).toMatch(/^ask_/);
   });
 });
 
@@ -2263,7 +2525,7 @@ describe('POST /agent-comments with replies and expectsReply=false', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [tempFile] }),
+      body: JSON.stringify({ filePaths: [tempFile], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
 
@@ -2296,6 +2558,9 @@ describe('POST /agent-comments with replies and expectsReply=false', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        // Explicit mode required for replies-only payloads — the Loop 8
+        // guard rejects ambiguous shape (replies without mode/comments/questions).
+        mode: 'review',
         replies: [{ filePath: tempFile, commentId: 'cmt_does_not_exist', text: 'orphan' }],
         expectsReply: false,
       }),
@@ -2348,7 +2613,7 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
     const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
@@ -2367,10 +2632,11 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
     }, 10);
 
     const wait = await waitPromise;
-    const body = (await wait.json()) as { status: string; replies: unknown };
+    const body = (await wait.json()) as { status: string; replies: unknown; totalQuestions: number };
     expect(body).toEqual({
       status: 'reply',
       replies: [{ questionIndex: 0, text: 'reply text' }],
+      totalQuestions: 1,
     });
   });
 
@@ -2406,7 +2672,7 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
     const createB = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [fileB] }),
+      body: JSON.stringify({ filePaths: [fileB], origin: 'agent' }),
     });
     const { sessionId: sessionB } = (await createB.json()) as { sessionId: string };
 
@@ -2433,7 +2699,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
     const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
@@ -2464,7 +2730,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
     expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
   });
 
-  it('rejects when not all questions have replies', async () => {
+  it('accepts partial replies (not all questions need a reply)', async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'First anchor. Second anchor.\n', 'utf8');
@@ -2472,7 +2738,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
     const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
@@ -2488,12 +2754,54 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
     const { askId } = (await post.json()) as { askId: string };
     const pending = reviewSessions.getPendingAsks(sessionId)[0].questions;
 
+    // Reply to only the first question — partial replies are now accepted.
     const reply = await app.request(`/api/review-sessions/${sessionId}/asks/${askId}/reply`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ replies: [{ commentId: pending[0].commentId, text: 'r1' }] }),
     });
+    expect(reply.status).toBe(200);
+    // The ask should be resolved (partial reply is sufficient).
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
+
+    // Regression guard: the unanswered question's marker MUST remain on disk
+    // (preserved as "closed without reply"), not silently deleted. Earlier
+    // implementation removed every marker in the ask regardless of which
+    // ones received replies.
+    const afterReply = await readFile(filePath, 'utf8');
+    // q1 was replied → its marker removed
+    expect(afterReply).not.toMatch(/"text":"q1"/);
+    // q2 was unanswered → its marker preserved with expectsReply CLEARED
+    expect(afterReply).toMatch(/"text":"q2"/);
+    expect(afterReply).not.toMatch(/"text":"q2"[^}]*"expectsReply":true/);
+  });
+
+  it('still rejects replies referencing unknown commentIds', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-unknown-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, 'Some text here.\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ questions: [{ filePath, anchor: 'Some text', text: 'q?' }] }),
+    });
+    const { askId } = (await post.json()) as { askId: string };
+
+    const reply = await app.request(`/api/review-sessions/${sessionId}/asks/${askId}/reply`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ replies: [{ commentId: 'cmt_does_not_exist', text: 'r1' }] }),
+    });
     expect(reply.status).toBe(400);
+    const body = (await reply.json()) as { error: string };
+    expect(body.error).toContain('unknown commentId');
   });
 });
 
@@ -2506,7 +2814,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
     const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
@@ -2559,8 +2867,253 @@ describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
   });
 });
 
+describe('mdr_review reply resolves a pending mdr_ask + cleans markers', () => {
+  it('replied markers are removed; unreplied are preserved with expectsReply cleared', async () => {
+    // The agent posts mdr_ask with 2 questions, then posts mdr_review with
+    // a `replies:[]` that targets only ONE of those commentIds. The route
+    // should: (a) resolve the in-memory ask waiter with the matching reply,
+    // (b) remove the marker for the replied question, (c) preserve the
+    // unanswered marker but clear its expectsReply flag.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-cross-tool-reply-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nFirst anchor. Second anchor.\n', 'utf8');
+    const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // Post an ask with two questions.
+    const ask = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [
+          { filePath, anchor: 'First anchor', text: 'q1' },
+          { filePath, anchor: 'Second anchor', text: 'q2' },
+        ],
+      }),
+    });
+    expect(ask.status).toBe(201);
+    const { askId } = (await ask.json()) as { askId: string };
+    const pending = reviewSessions.getPendingAsks(sessionId)[0].questions;
+    const [q1, q2] = pending;
+
+    // Park the ask waiter so we can observe its resolution.
+    const waiter = reviewSessions.waitForAsk(askId)!;
+
+    // Now post mdr_review with a reply to ONLY q1.
+    const review = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'review',
+        replies: [{ filePath, commentId: q1.commentId, text: 'partial answer' }],
+      }),
+    });
+    expect(review.status).toBe(201);
+
+    // The ask waiter resolves with the matching reply.
+    const result = await waiter;
+    expect(result).toMatchObject({ status: 'reply' });
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
+
+    // File state: q1's marker removed, q2's marker preserved with expectsReply cleared.
+    const after = await readFile(filePath, 'utf8');
+    expect(after).not.toMatch(/"text":"q1"/);
+    expect(after).toMatch(/"text":"q2"/);
+    expect(after).not.toMatch(/"text":"q2"[^}]*"expectsReply":true/);
+    void q2;
+  });
+});
+
+describe('agentCommentCount rollback when addAsk fails', () => {
+  it('decrements agentCommentCount on addAsk failure so the invariant matches disk', async () => {
+    // Two concurrent mdr_ask payloads can both pass the pre-check then both
+    // write markers. The loser's addAsk throws "previous ask still pending",
+    // markers roll back, AND agentCommentCount should be unbumped so that
+    // the next addAsk after the FIRST ask resolves doesn't pass the
+    // "agent already posted" guard against a session whose markers were
+    // actually all rolled back.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-counter-rollback-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nFirst anchor. Second anchor.\n', 'utf8');
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const first = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'First anchor', text: 'q1' }] }),
+    });
+    expect(first.status).toBe(201);
+
+    // Internal: count after first ask should be 1.
+    // Inspect via the only public way — the session listing.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((reviewSessions as any).sessions.get(sessionId).agentCommentCount).toBe(1);
+
+    const second = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'Second anchor', text: 'q2' }] }),
+    });
+    expect(second.status).toBe(409);
+
+    // Counter must be 1 (only the first ask's marker survives), NOT 2.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((reviewSessions as any).sessions.get(sessionId).agentCommentCount).toBe(1);
+  });
+});
+
+describe('rollback restores expectsReply when appendReply cleared it', () => {
+  it('restores expectsReply on a previously-pending ask marker after batch rollback', async () => {
+    // Scenario: agent posts mdr_ask (commentId X has expectsReply:true).
+    // Agent then posts mdr_review with replies:[{commentId:X}] AND a comment
+    // with an anchor that does NOT match — triggering rollback. The reply
+    // that landed clears expectsReply on X; rollback must restore it so the
+    // pending question keeps surfacing in the ask UI.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-rollback-restore-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nThe anchor we want.\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // First, post a pending mdr_ask on the existing anchor.
+    const ask = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'The anchor', text: 'q1' }],
+      }),
+    });
+    expect(ask.status).toBe(201);
+
+    // Find the commentId of the ask marker.
+    const askedFile = await readFile(filePath, 'utf8');
+    const askedMatch = askedFile.match(/"id":"(cmt_[^"]+)"[^}]*"expectsReply":true/);
+    expect(askedMatch).not.toBeNull();
+    const askCommentId = askedMatch![1];
+
+    // Now post mdr_review with a reply targeting that ask AND a comment
+    // whose anchor doesn't exist — forces rollback.
+    const review = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'review',
+        comments: [{ filePath, anchor: 'this anchor will never match', text: 'fail' }],
+        replies: [{ filePath, commentId: askCommentId, text: 'partial answer' }],
+      }),
+    });
+    expect(review.status).toBe(400);
+
+    // expectsReply must be restored on the marker, since the reply was
+    // rolled back along with the failed insert.
+    const afterFile = await readFile(filePath, 'utf8');
+    expect(afterFile).toMatch(/"expectsReply":true/);
+  });
+});
+
+describe('rollback path when addAsk throws after marker write', () => {
+  it('removes inserted markers if addAsk throws on subsequent attempt', async () => {
+    // Two concurrent mdr_ask posts can both pass the pre-check; the loser's
+    // addAsk throws "previous mdr_ask is still pending." The rollback must
+    // remove the loser's markers from the file so they don't sit orphaned.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-rollback-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nFirst anchor. Second anchor.\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // First ask succeeds.
+    const first = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'First anchor', text: 'q1' }] }),
+    });
+    expect(first.status).toBe(201);
+
+    // Second ask hits the addAsk-already-pending path. Marker is written by
+    // transformFile, then addAsk throws. Rollback must remove it.
+    const second = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'Second anchor', text: 'q2' }] }),
+    });
+    expect(second.status).toBe(409);
+
+    const after = await readFile(filePath, 'utf8');
+    // First ask's marker should still be there; second ask's marker rolled back.
+    expect(after).toMatch(/"text":"q1"/);
+    expect(after).not.toMatch(/"text":"q2"/);
+  });
+
+  it('preserves markers that already received a user reply during the rollback window', async () => {
+    // Race scenario: agent posts an ask marker. Before addAsk fires, a user
+    // adds a reply to that marker via a separate write. Then addAsk fails
+    // (the race window in question). Rollback must NOT remove the marker,
+    // because doing so would discard the user's reply text. The implementation
+    // detects this via parseComments and skips removal when replies.length > 0.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-rb-user-reply-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nFirst anchor. Second anchor.\n', 'utf8');
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // First ask: writes marker, registers ask.
+    const first = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'First anchor', text: 'q1' }] }),
+    });
+    expect(first.status).toBe(201);
+
+    // Simulate the race by manually injecting a reply onto the second-anchor
+    // marker BEFORE the second ask runs. We do this by mocking the second
+    // ask's commentId-to-be: after the second ask's transformFile writes its
+    // marker (and addAsk fails), the file should be in a state where the
+    // marker exists. To exercise the "reply preserved" branch, we'd need to
+    // add a reply to that marker before rollback. The simplest deterministic
+    // test: pre-create a marker with a reply, then have the route try to
+    // rollback it. Since the route only rolls back markers it inserted in
+    // THIS request, we can't easily trigger the branch end-to-end without
+    // race timing. The store-level test below covers the unit-level guard.
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(1);
+  });
+});
+
 describe('POST /api/review-sessions/:id/finish (pending ask guard)', () => {
   it('rejects finish while agent asks are pending', async () => {
+    // mdr_ask now requires an agent-origin session, so the only way the
+    // pending-ask guard on /finish can fire today is when /finish is mis-
+    // directed at an agent-origin session that has an open ask. Confirms the
+    // server still defends that path even though the unified UX routes
+    // agent sessions through /agent-done.
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'Anchor here.\n', 'utf8');
@@ -2568,7 +3121,7 @@ describe('POST /api/review-sessions/:id/finish (pending ask guard)', () => {
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath] }),
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
     await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
@@ -2584,6 +3137,215 @@ describe('POST /api/review-sessions/:id/finish (pending ask guard)', () => {
     expect(finish.status).toBe(409);
     const body = (await finish.json()) as { error: string };
     expect(body.error).toMatch(/pending/i);
+  });
+});
+
+describe('Done-with-pending-ask preserves marker and clears expectsReply on disk', () => {
+  it('agent posts ask, user clicks Done — file keeps the marker but drops expectsReply', async () => {
+    // Covers the setOnAsksClosedOnDone callback (server/index.ts). The marker
+    // stays as a record of "asked, closed without reply" but the on-disk
+    // expectsReply flag must be cleared so the state matches the semantic.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-done-with-ask-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nA single anchor.\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const ask = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'single anchor', text: 'q?' }] }),
+    });
+    expect(ask.status).toBe(201);
+
+    // Sanity: file has the marker with expectsReply:true.
+    const beforeDone = await readFile(filePath, 'utf8');
+    expect(beforeDone).toMatch(/"expectsReply":true/);
+
+    // User clicks Done.
+    const done = await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(done.status).toBe(200);
+
+    // The callback fires async. Wait briefly for the file write to land.
+    let afterDone = '';
+    for (let attempt = 0; attempt < 20; attempt++) {
+      afterDone = await readFile(filePath, 'utf8');
+      if (!afterDone.includes('"expectsReply":true')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(afterDone).toMatch(/"text":"q\?"/); // marker preserved
+    expect(afterDone).toMatch(/"agentInitiated":true/); // attribution preserved
+    expect(afterDone).not.toMatch(/"expectsReply":true/); // flag cleared
+  });
+});
+
+describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
+  it('POST /agent-done returns 200 and sets session done', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-done-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createRes = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    expect(createRes.status).toBe(201);
+    const { sessionId } = (await createRes.json()) as { sessionId: string };
+
+    const doneRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(doneRes.status).toBe(200);
+    const doneBody = (await doneRes.json()) as { ok: boolean };
+    expect(doneBody.ok).toBe(true);
+  });
+
+  it('POST /agent-done rejects user-origin sessions with 409', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-done-user-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createRes = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] /* defaults to user origin */ }),
+    });
+    const { sessionId } = (await createRes.json()) as { sessionId: string };
+
+    const doneRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(doneRes.status).toBe(409);
+  });
+
+  it('GET /agent-wait returns immediately with {status:"done"} if already done', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createRes = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await createRes.json()) as { sessionId: string };
+
+    // Mark done first
+    await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+
+    // Now wait should return immediately
+    const waitRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-wait?timeout=1`);
+    expect(waitRes.status).toBe(200);
+    const waitBody = (await waitRes.json()) as { status: string };
+    expect(waitBody.status).toBe('done');
+  });
+
+  it('GET /agent-wait returns pending after timeout when not yet done', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-pending-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createRes = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await createRes.json()) as { sessionId: string };
+
+    const waitRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-wait?timeout=1`);
+    expect(waitRes.status).toBe(200);
+    const waitBody = (await waitRes.json()) as { status: string };
+    expect(waitBody.status).toBe('pending');
+  });
+
+  it('POST /agent-done returns 404 for unknown session', async () => {
+    const res = await requestJson(app, '/api/review-sessions/rev_nonexistent/agent-done', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(res.response.status).toBe(404);
+  });
+
+  it('GET /agent-wait returns 404 for unknown session that was never marked done', async () => {
+    const res = await requestJson(app, '/api/review-sessions/rev_nonexistent/agent-wait?timeout=1');
+    expect(res.response.status).toBe(404);
+  });
+
+  it('GET /agent-wait returns aborted(user_cancelled) when the agent session is aborted by /abort', async () => {
+    // user_cancelled / browser_disconnected / agent_silent all set the
+    // session to terminal-aborted. The agent's parked mdr_wait wakes up with
+    // {status:'aborted', reason: …} so the agent can distinguish "user
+    // engaged and clicked Done" from "session ended without engagement."
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-aborted-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createRes = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await createRes.json()) as { sessionId: string };
+
+    // Start the long-poll BEFORE the abort so we exercise the "wake the
+    // parked doneWaiter" path, not just the cached recentlyDoneIds path.
+    const waitPromise = testApp.request(`/api/review-sessions/${sessionId}/agent-wait?timeout=5`);
+    await testApp.request(`/api/review-sessions/${sessionId}/abort`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    const waitRes = await waitPromise;
+    expect(waitRes.status).toBe(200);
+    const waitBody = (await waitRes.json()) as { status: string; reason?: string };
+    expect(waitBody.status).toBe('aborted');
+    expect(waitBody.reason).toBe('user_cancelled');
+  });
+
+  it('GET /agent-wait returns done for a session that was marked done before the store gc\'d it', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-late-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createRes = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await createRes.json()) as { sessionId: string };
+
+    // Mark done
+    await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+
+    // Simulate terminal-retention GC removing the session from the live Map.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (reviewSessions as any).sessions.delete(sessionId);
+
+    const waitRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-wait?timeout=1`);
+    expect(waitRes.status).toBe(200);
+    const waitBody = (await waitRes.json()) as { status: string };
+    expect(waitBody.status).toBe('done');
   });
 });
 

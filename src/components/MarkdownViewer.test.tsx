@@ -96,6 +96,50 @@ describe('MarkdownViewer comment highlights — markdown-formatted anchor fallba
 });
 
 describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', () => {
+  it('highlights a Mermaid label even when the anchor includes markdown formatting inside the brackets', async () => {
+    // Covers the deepest fallback branch in findMatchRange: Mermaid node
+    // syntax where the inner label itself carries markdown markup the SVG
+    // strips out (e.g. "E[**Important** Step]" renders as "Important Step").
+    const markdown = [
+      '# Doc',
+      '',
+      '```mermaid',
+      'flowchart LR',
+      '  E[Important Step]',
+      '  F[Done]',
+      '  E --> F',
+      '```',
+    ].join('\n');
+    const html = renderMarkdown(markdown);
+
+    const comment = {
+      id: 'cmt_mermaid_stripped',
+      anchor: 'E[**Important** Step]',
+      text: 'Drop the emphasis',
+      author: 'Claude',
+      timestamp: new Date().toISOString(),
+      cleanOffset: 0,
+    };
+
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const htmlMark = container.querySelector('mark.comment-highlight, mark.comment-highlight-sent');
+      const svgMark = container.querySelector('.mermaid-comment-highlight');
+      expect(htmlMark ?? svgMark).not.toBeNull();
+    });
+  });
+
   it('highlights a comment anchor written in Mermaid node syntax by extracting the inner label', async () => {
     // The agent wrote the anchor as "E[Clicks Discover Pages]" (Mermaid source syntax).
     // The rendered SVG only contains the inner label text; wrapText must extract it

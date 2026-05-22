@@ -6,6 +6,8 @@ import type {
   ReviewInput,
   ToolCallContext,
   ToolCallResult,
+  WaitForReviewResult,
+  WaitInput,
   WaitResult,
 } from './types';
 
@@ -49,7 +51,13 @@ const PROGRESS_INTERVAL_MS = 10_000;
  * Lives in module scope intentionally: the MCP server is one long-lived
  * process per Claude session, and "have I already opened this URL?" is
  * exactly the question we need to answer.
+ *
+ * Bounded with FIFO eviction so a long-lived MCP process (days/weeks) that
+ * accumulates many distinct review URLs can't grow this set without limit.
+ * Evicting the oldest URL means it could re-open if revisited later, which
+ * is an acceptable trade vs. unbounded memory growth.
  */
+const OPENED_URLS_CAP = 1000;
 const openedUrls = new Set<string>();
 
 async function openBrowserOnce(
@@ -57,6 +65,11 @@ async function openBrowserOnce(
   openInBrowser: (url: string) => Promise<void>,
 ): Promise<void> {
   if (openedUrls.has(fullUrl)) return;
+  if (openedUrls.size >= OPENED_URLS_CAP) {
+    // Set iteration order is insertion order — drop the oldest entry.
+    const oldest = openedUrls.values().next().value;
+    if (oldest !== undefined) openedUrls.delete(oldest);
+  }
   openedUrls.add(fullUrl);
   await openInBrowser(fullUrl).catch(() => {
     // Non-fatal — user can navigate manually.
@@ -296,6 +309,29 @@ export async function handleAskToolCall(
     };
   }
 
+  // Cancellation-race window: if the MCP signal fired between
+  // postAgentComments resolving (server has written markers and registered
+  // the pendingAsk) and the addEventListener('abort', ...) registration
+  // below, the listener never fires and the server-side ask hangs until
+  // the heartbeat sweep. Eager-check the signal now and fire releaseAsk
+  // before we install the listener.
+  if (ctx.signal?.aborted) {
+    void ctx.client.releaseAsk(input.sessionId, askId).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('HTTP 404')) {
+        console.warn(`[mcp] releaseAsk on early-cancel failed for ${input.sessionId}/${askId}:`, err);
+      }
+    });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `mdr_ask: tool call was cancelled before the user could reply. The questions were posted but the ask has been released.`,
+        },
+      ],
+    };
+  }
+
   ctx.sendProgress?.(`mdr: posted ${input.questions.length} question(s); waiting for your reply`);
 
   let elapsed = 0;
@@ -309,9 +345,21 @@ export async function handleAskToolCall(
     (progressTimer as { unref: () => void }).unref();
   }
 
+  // The MCP cancel signal means "the agent gave up waiting" — not "destroy
+  // the session." mdr_ask and mdr_review share a long-lived session, so
+  // tearing it down on cancel would also discard the user's pending comments
+  // in the browser. Release JUST this ask (resolves the waiter with
+  // no_reply/released); the session lives on for any pending mdr_wait /
+  // continued review.
   const cancelListener = () => {
-    void ctx.client.abortSession(input.sessionId).catch(() => {
-      /* already gone */
+    void ctx.client.releaseAsk(input.sessionId, askId).catch((err) => {
+      // 404 = the ask was already resolved or released (expected — the
+      // user may have answered just before cancel fired). Any other error
+      // is a real failure worth surfacing on the server log.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('HTTP 404')) {
+        console.warn(`[mcp] releaseAsk on cancel failed for ${input.sessionId}/${askId}:`, err);
+      }
     });
   };
   if (ctx.signal?.aborted) {
@@ -322,6 +370,11 @@ export async function handleAskToolCall(
 
   let askResult: AskWaitResult;
   try {
+    // Intentionally NOT passing ctx.signal here. The cancelListener already
+    // fires releaseAsk on cancel, which resolves the server-side waiter and
+    // makes /asks/:askId/wait return {status:'released'}. Aborting the fetch
+    // would race with that resolution and cause an AbortError before the
+    // handler can return the graceful "released" payload.
     askResult = await ctx.client.waitForAsk(input.sessionId, askId);
   } finally {
     if (progressTimer) clearInterval(progressTimer);
@@ -329,50 +382,170 @@ export async function handleAskToolCall(
   }
 
   if (askResult.status === 'reply') {
+    const replyCount = askResult.replies.length;
+    const totalCount = askResult.totalQuestions;
+    const countPhrase = replyCount === totalCount
+      ? `all ${replyCount}`
+      : `${replyCount} of ${totalCount}`;
     return {
       content: [
         {
           type: 'text',
           text:
-            `mdr_ask: user replied to all ${askResult.replies.length} question(s).\n\n` +
+            `mdr_ask: user replied to ${countPhrase} question(s).\n\n` +
             '```json\n' +
             JSON.stringify(askResult.replies, null, 2) +
-            '\n```',
+            '\n```' +
+            (replyCount < totalCount
+              ? `\n\nAny comments without replies were not addressed this round.`
+              : ''),
         },
       ],
     };
   }
 
-  // status === 'no_reply'
-  const reasonText = {
-    released: 'the user released you (they may reply later)',
-    tab_closed: 'the mdr browser tab was closed before you replied',
-    cancelled: 'the user cancelled the review',
-    timeout: 'the review session timed out',
-    agent_silent: 'no comments were posted in time',
-  }[askResult.reason] ?? askResult.reason;
+  // status === 'no_reply'. The user may still have replied via the sidebar
+  // (writes the reply text into the marker's `replies` array on disk). The
+  // agent should re-read the file to see those replies rather than treat
+  // every no_reply as "user ignored my questions."
+  const READ_FILE_HINT =
+    'Re-read the file(s) — the user may have answered by replying to the comment markers inline.';
+  const reasonDetails: Record<string, { text: string; hintReadFile: boolean }> = {
+    released: { text: 'your tool call was cancelled before the user could reply', hintReadFile: true },
+    tab_closed: { text: 'the mdr browser tab was closed', hintReadFile: true },
+    cancelled: { text: 'the user cancelled the review', hintReadFile: false },
+    done_without_reply: { text: 'the user clicked Done without replying', hintReadFile: false },
+    timeout: { text: 'the review session timed out', hintReadFile: false },
+    agent_silent: { text: 'no comments were posted in time', hintReadFile: false },
+  };
+  const detail = reasonDetails[askResult.reason] ?? { text: askResult.reason, hintReadFile: true };
+  const tail = detail.hintReadFile
+    ? ` ${READ_FILE_HINT}`
+    : ' Continue with your original plan, treating the questions as unanswered.';
   return {
     content: [
       {
         type: 'text',
-        text: `mdr_ask: no reply received (${reasonText}). Continue with your original plan, treating the questions as unanswered.`,
+        text: `mdr_ask: ${detail.text} without a reply via the structured channel.${tail}`,
       },
     ],
   };
 }
 
+const WAIT_DONE =
+  'User has finished engaging. Read the file to see their replies, deletions, and resolutions.';
+
+const WAIT_STILL_REVIEWING = (sessionId: string) =>
+  `The user is still reviewing. Call mdr_wait again with sessionId "${sessionId}" to keep waiting.`;
+
+const WAIT_ABORTED_TEXT: Record<
+  'user_cancelled' | 'browser_disconnected' | 'agent_silent' | 'finished',
+  string
+> = {
+  user_cancelled:
+    'Review session was cancelled by the user before they engaged with your comments. Continue with your original plan.',
+  browser_disconnected:
+    'The mdr browser tab was closed before the user engaged with your comments. Continue with your original plan.',
+  agent_silent:
+    'The session timed out because no further activity was detected. No user feedback to apply.',
+  finished:
+    'The user closed the review (via Finish review) without engaging directly with your comments. Read the file for any user-side changes, then continue with your original plan.',
+};
+
+export async function handleWaitToolCall(
+  input: WaitInput,
+  ctx: Pick<ToolCallContext, 'client' | 'sendProgress' | 'signal'>,
+): Promise<ToolCallResult> {
+  ctx.sendProgress?.(`mdr: waiting for user to finish reviewing (session ${input.sessionId})`);
+
+  let elapsed = 0;
+  const progressTimer = ctx.sendProgress
+    ? setInterval(() => {
+        elapsed += PROGRESS_INTERVAL_MS / 1000;
+        ctx.sendProgress?.(`mdr: still waiting for user review (${elapsed}s elapsed)`);
+      }, PROGRESS_INTERVAL_MS)
+    : null;
+  if (progressTimer && 'unref' in progressTimer) {
+    (progressTimer as { unref: () => void }).unref();
+  }
+
+  // MCP cancel signal during mdr_wait means "agent gave up." Do NOT abort
+  // the session — the user is still engaging via the open browser tab, and
+  // killing the session here would discard their pending comments and
+  // surprise them. The long-poll itself terminates promptly when the fetch
+  // is cancelled (the server's setTimeout race resolves to 'pending') so
+  // there's nothing to clean up on the server side.
+  const cancelListener = () => {
+    /* no-op — see comment above */
+  };
+  if (ctx.signal?.aborted) {
+    cancelListener();
+  } else {
+    ctx.signal?.addEventListener('abort', cancelListener, { once: true });
+  }
+
+  let result: WaitForReviewResult;
+  try {
+    // Intentionally NOT passing ctx.signal — the server-side long-poll has
+    // its own 90s timeout, so a cancelled mdr_wait returns to the handler
+    // within at most 90s without server-side cleanup. Aborting the fetch
+    // would throw AbortError before any state can be reported back; the
+    // existing 90s ceiling is the acceptable upper bound.
+    result = await ctx.client.waitForReview(input.sessionId, POLL_TIMEOUT_SECONDS);
+  } catch (err) {
+    if (progressTimer) clearInterval(progressTimer);
+    ctx.signal?.removeEventListener('abort', cancelListener);
+    const msg = err instanceof Error ? err.message : String(err);
+    // The route returns 409 for user-origin sessions (mdr_wait is agent-only).
+    // Surface a clearer hint so the agent doesn't loop on a misdirected
+    // sessionId.
+    if (msg.includes('HTTP 409')) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text:
+              `mdr_wait: session ${input.sessionId} is user-origin and cannot be ` +
+              'awaited via mdr_wait. Use mdr_request_review for the user-batch flow.',
+          },
+        ],
+      };
+    }
+    throw err;
+  }
+  if (progressTimer) clearInterval(progressTimer);
+  ctx.signal?.removeEventListener('abort', cancelListener);
+
+  if (result.status === 'done') {
+    return { content: [{ type: 'text', text: WAIT_DONE }] };
+  }
+
+  if (result.status === 'aborted') {
+    return {
+      content: [
+        { type: 'text', text: WAIT_ABORTED_TEXT[result.reason] ?? `Review session ended (${result.reason}).` },
+      ],
+    };
+  }
+
+  // status === 'pending' — timed out, agent should re-poll
+  return {
+    content: [{ type: 'text', text: WAIT_STILL_REVIEWING(input.sessionId) }],
+  };
+}
+
 /**
  * Handler for the mdr_review tool. The agent calls this to post comments (and
- * optionally replies) to a file and optionally wait for the user's response.
+ * optionally replies) to a file and immediately returns. The agent should then
+ * call mdr_wait to block until the user has finished engaging.
  *
  * Flow:
  *   1. grantAccess for every file path.
  *   2. createSession with origin='agent'.
  *   3. openInBrowser (non-fatal).
- *   4. Resolve waitForResponse from explicit input or user settings.
- *   5. postReview with the resolved expectsReply flag.
- *   6. If fire-and-forget, return immediately.
- *   7. If waiting, block on waitForAsk and return the reply or no_reply result.
+ *   4. postReview — always fire-and-forget.
+ *   5. Return immediately, nudging agent to call mdr_wait.
  */
 export async function handleReviewToolCall(
   input: ReviewInput,
@@ -388,35 +561,37 @@ export async function handleReviewToolCall(
     origin: 'agent',
   });
 
+  // Defensive assertion: createSession should always return an agent-origin
+  // session here (the server filters dedupe by origin). If a future server
+  // bug ever returns a user-origin session, fail loudly rather than tell the
+  // agent to call mdr_wait — that combination would deadlock because
+  // user-origin sessions don't resolve via setSessionDone.
+  if (session.origin !== undefined && session.origin !== 'agent') {
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text:
+            `mdr_review: server returned a ${session.origin}-origin session, but mdr_review ` +
+            `requires agent-origin. This is a server bug — file an issue.`,
+        },
+      ],
+    };
+  }
+
   const fullUrl = `${ctx.baseUrl.replace(/\/$/, '')}${session.url}`;
-  // Server-side dedupe says "this is a fresh session" → open the browser.
-  // The process-scoped `openBrowserOnce` ensures we never open the same URL
-  // twice even if the server is wrong or there's a race.
   if (session.created !== false) {
     await openBrowserOnce(fullUrl, ctx.openInBrowser);
   }
   ctx.sendProgress?.(`mdr: opening review at ${fullUrl}`);
 
-  // 3. Resolve waitForResponse from input or user settings
-  let expectsReply: boolean;
-  if (typeof input.waitForResponse === 'boolean') {
-    expectsReply = input.waitForResponse;
-  } else {
-    try {
-      const settings = await ctx.getUserSettings?.();
-      expectsReply = settings?.defaultAgentReviewWait ?? false;
-    } catch {
-      expectsReply = false;
-    }
-  }
-
-  // 4. Post review
+  // 3. Post review (always fire-and-forget — no waitForAsk)
   let postResult: PostReviewResult;
   try {
     postResult = await ctx.client.postReview(session.sessionId, {
       comments: input.comments,
       replies: input.replies,
-      expectsReply,
     });
   } catch (err) {
     const e = err as Error & { failedComments?: number[]; failedReplies?: number[] };
@@ -430,88 +605,18 @@ export async function handleReviewToolCall(
     };
   }
 
-  // 5. Fire-and-forget: return now
-  if (!expectsReply) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `mdr_review: wrote ${postResult.commentsWritten} comment(s) and ${postResult.repliesWritten} reply(ies) to the file(s). The user has been notified.`,
-        },
-      ],
-    };
-  }
-
-  // 6. Wait for reply
-  ctx.sendProgress?.(`mdr: posted ${postResult.commentsWritten} comment(s); waiting for your reply`);
-
-  if (!postResult.askId) {
-    return {
-      isError: true,
-      content: [{ type: 'text', text: 'mdr_review: server did not return askId despite expectsReply=true' }],
-    };
-  }
-
-  // Progress pings during the wait phase prevent the MCP client (Codex 120s
-  // hard limit) from killing the call mid-wait.
-  let reviewElapsed = 0;
-  const reviewProgressTimer = ctx.sendProgress
-    ? setInterval(() => {
-        reviewElapsed += ASK_PROGRESS_INTERVAL_MS / 1000;
-        ctx.sendProgress?.(`mdr: still waiting for your reply (${reviewElapsed}s elapsed)`);
-      }, ASK_PROGRESS_INTERVAL_MS)
-    : null;
-  if (reviewProgressTimer && 'unref' in reviewProgressTimer) {
-    (reviewProgressTimer as { unref: () => void }).unref();
-  }
-
-  // If the MCP client cancels the tool call, release the server-side session
-  // immediately so the /wait promise resolves promptly.
-  const reviewCancelListener = () => {
-    void ctx.client.abortSession(session.sessionId).catch(() => {});
-  };
-  if (ctx.signal?.aborted) {
-    reviewCancelListener();
-  } else {
-    ctx.signal?.addEventListener('abort', reviewCancelListener, { once: true });
-  }
-
-  let askResult: AskWaitResult;
-  try {
-    askResult = await ctx.client.waitForAsk(session.sessionId, postResult.askId);
-  } finally {
-    if (reviewProgressTimer) clearInterval(reviewProgressTimer);
-    ctx.signal?.removeEventListener('abort', reviewCancelListener);
-  }
-
-  if (askResult.status === 'reply') {
-    return {
-      content: [
-        {
-          type: 'text',
-          text:
-            `mdr_review: user replied to ${askResult.replies.length} comment(s).\n\n` +
-            '```json\n' +
-            JSON.stringify(askResult.replies, null, 2) +
-            '\n```',
-        },
-      ],
-    };
-  }
-
-  // status === 'no_reply'
-  const reviewReasonText = {
-    released: 'the user released you and may reply later',
-    tab_closed: 'the mdr browser tab was closed before you got a reply',
-    cancelled: 'the user cancelled the review',
-    timeout: 'the review session timed out',
-    agent_silent: 'no comments were posted in time',
-  }[askResult.reason] ?? askResult.reason;
+  // 4. Return immediately — nudge agent to call mdr_wait
+  const fileList = input.filePaths.join(', ');
   return {
     content: [
       {
         type: 'text',
-        text: `mdr_review: no reply received (${reviewReasonText}). Comments are still in the file. Continue with your original plan.`,
+        text:
+          `mdr_review: posted ${postResult.commentsWritten} comment(s) and ` +
+          `${postResult.repliesWritten} reply(ies) to ${fileList}. ` +
+          `Session ID: ${session.sessionId}. ` +
+          `When you have finished posting all feedback, call mdr_wait with ` +
+          `sessionId "${session.sessionId}" to block until the user has engaged.`,
       },
     ],
   };

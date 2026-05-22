@@ -30,11 +30,13 @@ async function main() {
     body: JSON.stringify({ path: filePath }),
   });
 
-  // Create the session.
+  // Create the session. origin:'agent' matches the production mdr_ask path —
+  // user-origin sessions reject /agent-done and /agent-wait, so a simulator
+  // that uses agent-side flows must declare itself as agent-origin too.
   const create = await fetchOk(`${baseUrl}/api/review-sessions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ filePaths: [filePath] }),
+    body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
   });
   const { sessionId, url } = (await create.json()) as { sessionId: string; url: string };
   console.log(`Created session ${sessionId}, opening ${baseUrl}${url}`);
@@ -44,11 +46,12 @@ async function main() {
     console.log(`Open this URL in your browser: ${baseUrl}${url}`);
   }
 
-  // Post the ask.
+  // Post the ask. Explicit mode:'ask' matches the production MCP client and
+  // avoids relying on the shape-inference fallback in /agent-comments.
   const ask = await fetchOk(`${baseUrl}/api/review-sessions/${sessionId}/agent-comments`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ questions: [{ filePath, anchor, text }] }),
+    body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor, text }] }),
   });
   const { askId } = (await ask.json()) as { askId: string };
   console.log(`Posted ask ${askId}; waiting for reply in the UI...`);

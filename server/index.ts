@@ -20,7 +20,7 @@ import {
 import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { registerReviewSessionRoutes } from './routes/review-sessions';
-import { removeComment } from '../src/lib/comment-parser';
+import { removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION } = require('../package.json') as { version: string };
@@ -329,6 +329,14 @@ export function createAppFull(options: CreateAppOptions = {}) {
       watcher: FSWatcher;
       clients: Set<WritableStreamDefaultWriter>;
       cleanup: () => void;
+      /**
+       * Run the broadcast pipeline (read file, push SSE frames) once.
+       * Called from the real watcher event listener and from
+       * `notifyFileChanged` after agent writes. The `internal` flag
+       * suppresses the [EXTERNAL CHANGE] warn log when the broadcast was
+       * triggered by an internal write the server initiated itself.
+       */
+      broadcast: (opts?: { internal?: boolean }) => Promise<void>;
     }
   >();
 
@@ -338,6 +346,42 @@ export function createAppFull(options: CreateAppOptions = {}) {
     void cleanupAgentMarkers(asks).catch((err) => {
       console.warn('[review-session] agent marker cleanup failed:', err);
     });
+  });
+
+  // On the Done-without-reply path, preserve the markers but clear the
+  // expectsReply flag so the on-disk JSON accurately reflects "asked,
+  // closed without reply" rather than "still pending."
+  reviewSessions.setOnAsksClosedOnDone((_sessionId, asks) => {
+    const byFile = new Map<string, string[]>();
+    for (const ask of asks) {
+      for (const q of ask.questions) {
+        const ids = byFile.get(q.filePath) ?? [];
+        ids.push(q.commentId);
+        byFile.set(q.filePath, ids);
+      }
+    }
+    void Promise.all(
+      Array.from(byFile, async ([filePath, commentIds]) => {
+        try {
+          const targetIds = new Set(commentIds);
+          const result = await withFileLock(filePath, async () => {
+            const original = await fsPromises.readFile(filePath, 'utf8');
+            const updated = transformCommentMarkers(original, (c) => {
+              if (!c?.id || !targetIds.has(c.id)) return { type: 'keep' };
+              if (!c.expectsReply) return { type: 'keep' };
+              const next = { ...c };
+              delete next.expectsReply;
+              return { type: 'replace', comment: next };
+            });
+            if (updated !== original) await atomicWriteFile(filePath, updated);
+            return { original, updated };
+          });
+          if (result.updated !== result.original) notifyFileChanged(filePath);
+        } catch (err) {
+          console.warn(`[review-session] clear expectsReply failed for ${filePath}:`, err);
+        }
+      }),
+    ).catch(() => { /* per-file errors already logged */ });
   });
 
   async function cleanupAgentMarkers(asks: PendingAsk[]): Promise<void> {
@@ -351,12 +395,32 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     for (const [filePath, commentIds] of byFile) {
       try {
-        let content = await fsPromises.readFile(filePath, 'utf8');
-        for (const id of commentIds) content = removeComment(content, id);
-        await fsPromises.writeFile(filePath, content, 'utf8');
-        // No SSE here — the browser is gone; the next session will re-read.
-      } catch {
-        /* swallow; cleanup is best-effort */
+        // Route through the per-file writeLock + atomic temp+rename so the
+        // cleanup serializes with concurrent user edits and the agent-comments
+        // route. Without this, a Done-while-ask cleanup can clobber a user
+        // edit landed via PUT /api/file under writeLocks.
+        const result = await withFileLock(filePath, async () => {
+          const original = await fsPromises.readFile(filePath, 'utf8');
+          let updated = original;
+          for (const id of commentIds) updated = removeComment(updated, id);
+          if (updated !== original) {
+            await atomicWriteFile(filePath, updated);
+          }
+          return { original, updated };
+        });
+        // Broadcast SSE only if the file actually changed and the browser
+        // is still present (Done path). For abort paths the SSE channel is
+        // closed by the heartbeat sweep anyway — extra frames are harmless.
+        if (result.updated !== result.original) {
+          notifyFileChanged(filePath);
+        }
+      } catch (err) {
+        // Log the path + error code so a stale-marker bug has a trail.
+        const code = (err as NodeJS.ErrnoException | undefined)?.code ?? 'unknown';
+        console.warn(
+          `[review-session] agent marker cleanup failed for ${filePath} (${code}):`,
+          err,
+        );
       }
     }
   }
@@ -364,19 +428,86 @@ export function createAppFull(options: CreateAppOptions = {}) {
   reviewSessions.startSweep(10_000);
 
   // Build SSE notifier: triggers the file watcher broadcast for a given path.
+  // Previously this synthesized an FSWatcher 'change' event, but that relied
+  // on undocumented EventEmitter behavior on Node's FSWatcher. Call the
+  // broadcast pipeline directly instead — same effect, no private-API coupling.
+  //
+  // We tag the broadcast as `internal: true` so the change-detection branch
+  // suppresses its "[EXTERNAL CHANGE]" warn log — this write came from the
+  // server's own agent-comments path, not from an out-of-band editor.
   function notifyFileChanged(resolvedPath: string): void {
     const entry = fileWatchers.get(resolvedPath);
     if (!entry) return;
-    // Trigger a debounced broadcast by firing the watcher callback synthetically.
-    // The watcher's broadcastChange reads the current file content and pushes SSE.
-    // We trigger it by dispatching a fake 'change' event on the watcher.
-    entry.watcher.emit('change', 'change', resolvedPath);
+    void entry.broadcast({ internal: true }).catch(() => {
+      /* swallow — same as the real listener's catch */
+    });
+  }
+
+  // Generic per-file serialization helper: wraps `fn` in the same writeLocks
+  // chain the user-edit handler uses. Lets the agent-comments route do
+  // read-modify-write atomically against concurrent user edits.
+  async function withFileLock<T>(resolved: string, fn: () => Promise<T>): Promise<T> {
+    const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
+    let result!: T;
+    const currentWrite = prevLock
+      .then(async () => {
+        result = await fn();
+      })
+      .finally(() => {
+        if (writeLocks.get(resolved) === currentWrite) {
+          writeLocks.delete(resolved);
+        }
+      });
+    writeLocks.set(resolved, currentWrite);
+    await currentWrite;
+    return result;
+  }
+
+  // Atomic temp+rename write so a crash mid-write can't leave a half-written
+  // file. Used by both the user-edit handler and the agent-comments route
+  // (the latter via withFileLock to serialize the surrounding read-modify-write).
+  //
+  // Intentionally does NOT update `lastWrittenContent`: that dedupe map exists
+  // to suppress the SSE echo when the same client that just wrote a file
+  // would otherwise receive its own change frame. For agent writes the
+  // browser IS the consumer of the SSE — the user needs to see the marker
+  // arrive. The user-edit handler populates lastWrittenContent inline.
+  async function atomicWriteFile(resolved: string, content: string): Promise<void> {
+    const tmpPath = `${resolved}.${randomBytes(6).toString('hex')}.tmp`;
+    const fd = await open(tmpPath, 'wx');
+    try {
+      await fd.writeFile(content, 'utf-8');
+    } finally {
+      await fd.close();
+    }
+    await rename(tmpPath, resolved);
   }
 
   registerReviewSessionRoutes(app, reviewSessions, {
     resolveAndValidate,
+    // Combined read-modify-write under the per-file lock. `transform` may
+    // return null to signal "no write needed" (apply detected a failure
+    // condition the caller will handle). If `transform` throws (e.g. parser
+    // corruption on a malformed marker), wrap with the path so the route
+    // sees a typed error rather than a generic 500 with no context.
+    transformFile: (resolved, transform) =>
+      withFileLock(resolved, async () => {
+        const original = await fsPromises.readFile(resolved, 'utf8');
+        let updated: string | null;
+        try {
+          updated = transform(original);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`transformFile callback failed for ${resolved}: ${msg}`);
+        }
+        if (updated !== null && updated !== original) {
+          await atomicWriteFile(resolved, updated);
+        }
+        return { original, updated };
+      }),
+    // Used by the reply-cleanup path which is best-effort and racing-tolerant.
     readFileText: (p) => fsPromises.readFile(p, 'utf8'),
-    writeFileText: (p, content) => fsPromises.writeFile(p, content, 'utf8'),
+    writeFileText: (p, content) => withFileLock(p, () => atomicWriteFile(p, content)),
     notifyFileChanged,
   });
 
@@ -924,7 +1055,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
         let debounce: ReturnType<typeof setTimeout> | null = null;
         let lastBroadcast: string | null = null;
 
-        const broadcastChange = async () => {
+        const broadcastChange = async (opts?: { internal?: boolean }) => {
           try {
             const watchStat = await stat(resolved);
             if (watchStat.size > MAX_FILE_BYTES) {
@@ -945,11 +1076,17 @@ export function createAppFull(options: CreateAppOptions = {}) {
             const content = await readFile(resolved, 'utf-8');
             if (lastWrittenContent.get(resolved) === content) return;
             if (content === lastBroadcast) return;
-            const extComments = (content.match(/@comment\{/g) ?? []).length;
-            const prevComments = (lastBroadcast?.match(/@comment\{/g) ?? []).length;
-            console.warn(
-              `[EXTERNAL CHANGE] ${resolved} — ${extComments} comment(s) (was ${prevComments})`,
-            );
+            // Suppress the EXTERNAL CHANGE warn log when the broadcast came
+            // from an internal write (notifyFileChanged after agent-comments
+            // writes). The browser still receives the SSE frame — the log
+            // is only meant to surface out-of-band editor edits.
+            if (!opts?.internal) {
+              const extComments = (content.match(/@comment\{/g) ?? []).length;
+              const prevComments = (lastBroadcast?.match(/@comment\{/g) ?? []).length;
+              console.warn(
+                `[EXTERNAL CHANGE] ${resolved} — ${extComments} comment(s) (was ${prevComments})`,
+              );
+            }
             lastWrittenContent.delete(resolved);
             lastBroadcast = content;
             const fileStat = await stat(resolved);
@@ -1020,7 +1157,12 @@ export function createAppFull(options: CreateAppOptions = {}) {
         };
 
         activeWatcher.on('error', cleanUpWatcher);
-        fileWatchers.set(resolved, { watcher: activeWatcher, clients, cleanup: cleanUpWatcher });
+        fileWatchers.set(resolved, {
+          watcher: activeWatcher,
+          clients,
+          cleanup: cleanUpWatcher,
+          broadcast: broadcastChange,
+        });
       }
 
       const entry = fileWatchers.get(resolved)!;

@@ -41,13 +41,6 @@ interface Props {
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
-  /** IDs of agent-ask comments that form the current pending ask. When set, these
-   *  comments are rendered in a dedicated awaiting-reply section with draft textareas. */
-  agentAskCommentIds?: Set<string>;
-  /** Controlled draft reply text keyed by comment ID. */
-  agentDrafts?: Map<string, string>;
-  /** Called when a draft reply textarea changes. */
-  onAgentDraftChange?: (commentId: string, text: string) => void;
 }
 
 type FilterMode = 'all' | 'open' | 'resolved';
@@ -75,9 +68,6 @@ export function CommentSidebar({
   selectionText,
   selectionOffset,
   onReanchorToSelection,
-  agentAskCommentIds,
-  agentDrafts,
-  onAgentDraftChange,
 }: Props) {
   const activeRef = useRef<HTMLDivElement>(null);
   const commentRefs = useRef(new Map<string, HTMLDivElement>());
@@ -158,8 +148,6 @@ export function CommentSidebar({
   };
 
   // Count by status (only meaningful when resolve is enabled).
-  // Agent-initiated comments are rendered inline in document order alongside
-  // user comments; the per-card "Awaiting your reply" banner labels them.
   const openCount = resolveEnabled
     ? comments.filter((c) => getEffectiveStatus(c) === 'open').length
     : comments.length;
@@ -189,18 +177,11 @@ export function CommentSidebar({
     return true;
   });
 
-  // Separate agent-ask comments from the main list (shown in their own section)
-  const agentAskComments = agentAskCommentIds && agentAskCommentIds.size > 0
-    ? comments.filter((c) => agentAskCommentIds.has(c.id))
-    : [];
-  const agentAskDraftCount = agentAskComments.filter((c) =>
-    (agentDrafts?.get(c.id) ?? '').trim().length > 0,
-  ).length;
-
-  // Sort: open first, then resolved (only when resolve enabled)
+  // Sort: open first, then resolved (only when resolve enabled).
+  // All comments (including agent-ask comments) render in natural document order.
   const activeCommentsAll = resolveEnabled
-    ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved' && !agentAskCommentIds?.has(c.id))
-    : filtered.filter((c) => !agentAskCommentIds?.has(c.id));
+    ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
+    : filtered;
   const orphanActiveComments = activeCommentsAll.filter((c) =>
     missingAnchors.has(c.id),
   );
@@ -208,7 +189,7 @@ export function CommentSidebar({
     (c) => !missingAnchors.has(c.id),
   );
   const resolvedComments = resolveEnabled
-    ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved' && !agentAskCommentIds?.has(c.id))
+    ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved')
     : [];
 
   if (comments.length === 0) {
@@ -288,58 +269,6 @@ export function CommentSidebar({
 
       {/* Comment list */}
       <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
-        {/* Awaiting-reply section: agent-ask comments shown at the top with draft textareas */}
-        {agentAskComments.length > 0 && (
-          <div data-testid="awaiting-reply-section">
-            <div className="flex items-center gap-2 pb-1">
-              <div className="h-px flex-1 bg-border-subtle" />
-              <span className="text-xs font-semibold text-primary-text">
-                Awaiting your reply ({agentAskDraftCount} of {agentAskComments.length})
-              </span>
-              <div className="h-px flex-1 bg-border-subtle" />
-            </div>
-            <div className="space-y-2">
-              {agentAskComments.map((comment) => (
-                <ThreadCard
-                  key={comment.id}
-                  thread={comment}
-                  active={comment.id === activeCommentId}
-                  divRef={(node) => {
-                    if (node) {
-                      commentRefs.current.set(comment.id, node);
-                    } else {
-                      commentRefs.current.delete(comment.id);
-                    }
-                    if (comment.id === activeCommentId) {
-                      activeRef.current = node;
-                    }
-                  }}
-                  anchorMissing={missingAnchors.has(comment.id)}
-                  agentQuestion
-                  draftReply={agentDrafts?.get(comment.id) ?? ''}
-                  onDraftReplyChange={onAgentDraftChange}
-                  sent={sentCommentIds?.includes(comment.id) ?? false}
-                  onSelect={onActivate}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                  onReply={onReply}
-                  onEditReply={onEditReply}
-                  onDeleteReply={onDeleteReply}
-                  editor={activeEditor}
-                  onRequestCommentEdit={openCommentEdit}
-                  onRequestReplyCompose={openReplyCompose}
-                  onRequestReplyEdit={openReplyEdit}
-                  onCloseEditor={closeEditor}
-                  onContextMenu={
-                    onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
-                  }
-                />
-              ))}
-            </div>
-            <div className="h-2" />
-          </div>
-        )}
-
         {orphanActiveComments.length > 0 && (
           <>
             <div className="flex items-center gap-2 pb-1">
@@ -372,7 +301,6 @@ export function CommentSidebar({
                 selectionText={selectionText ?? null}
                 selectionOffset={selectionOffset ?? null}
                 onReanchorToSelection={onReanchorToSelection}
-                agentQuestion={agentAskCommentIds?.has(comment.id) === true}
                 sent={sentCommentIds?.includes(comment.id) ?? false}
                 onSelect={onActivate}
                 onResolve={resolveEnabled ? onResolve : undefined}
@@ -411,7 +339,6 @@ export function CommentSidebar({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
-            agentQuestion={agentAskCommentIds?.has(comment.id) === true}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
@@ -457,7 +384,6 @@ export function CommentSidebar({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
-            agentQuestion={agentAskCommentIds?.has(comment.id) === true}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}

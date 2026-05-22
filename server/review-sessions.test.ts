@@ -304,6 +304,7 @@ describe('ReviewSessionStore', () => {
       expect(result).toEqual({
         status: 'reply',
         replies: [{ questionIndex: 0, text: 'reply' }],
+        totalQuestions: 1,
       });
     });
 
@@ -343,6 +344,26 @@ describe('ReviewSessionStore', () => {
           { questionIndex: 0, text: 'reply1' },
           { questionIndex: 1, text: 'reply2' },
         ],
+        totalQuestions: 2,
+      });
+      expect(store.getPendingAsks(session.id)).toHaveLength(0);
+    });
+
+    it('resolveReplies accepts partial replies and includes totalQuestions in result', async () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+        { commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' },
+        { commentId: 'c3', filePath: '/tmp/a.md', anchor: 'c', text: 'q3' },
+      ]);
+      // Only reply to c1 — partial is now accepted
+      store.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'reply1' }]);
+      const result = await waiter;
+      expect(result).toEqual({
+        status: 'reply',
+        replies: [{ questionIndex: 0, text: 'reply1' }],
+        totalQuestions: 3,
       });
       expect(store.getPendingAsks(session.id)).toHaveLength(0);
     });
@@ -415,28 +436,29 @@ describe('ReviewSessionStore', () => {
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']); // sets waitingForAgent
 
-      const ok = store.queueBatch(session.id, 'queued prompt', ['c2', 'c3']);
+      const ok = store.queueBatch(session.id, ['c2', 'c3'], new Map([['/tmp/a.md', 3]]));
       expect(ok).toBe(true);
 
       const queued = store.getQueuedBatch(session.id);
-      expect(queued).toEqual({ prompt: 'queued prompt', commentIds: ['c2', 'c3'] });
+      expect(queued?.commentIds).toEqual(['c2', 'c3']);
+      expect(queued?.commentCountsByPath.get('/tmp/a.md')).toBe(3);
 
       const s = store.getSession(session.id)!;
       expect(s.sentCommentIds).toContain('c2');
       expect(s.sentCommentIds).toContain('c3');
     });
 
-    it('queueBatch merges into an existing queued batch', () => {
+    it('queueBatch merges into an existing queued batch by unioning IDs and taking max-per-file counts', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']);
 
-      store.queueBatch(session.id, 'first queued', ['c2']);
-      store.queueBatch(session.id, 'second queued', ['c3', 'c2']); // c2 duplicate
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
+      store.queueBatch(session.id, ['c3', 'c2'], new Map([['/tmp/a.md', 3]])); // c2 duplicate, count grew
 
       const queued = store.getQueuedBatch(session.id);
-      expect(queued?.prompt).toBe('first queued\n\nsecond queued');
       expect(queued?.commentIds.sort()).toEqual(['c2', 'c3']);
+      expect(queued?.commentCountsByPath.get('/tmp/a.md')).toBe(3);
     });
 
     it('queueBatch rejects if session is not open', () => {
@@ -444,7 +466,7 @@ describe('ReviewSessionStore', () => {
       store.waitForSession(session.id);
       store.finish(session.id);
 
-      expect(store.queueBatch(session.id, 'prompt', ['c1'])).toBe(false);
+      expect(store.queueBatch(session.id, ['c1'], new Map())).toBe(false);
     });
 
     it('deliverQueuedBatchIfAny returns true when a batch is queued (delivery happens via waitForSession)', async () => {
@@ -452,15 +474,43 @@ describe('ReviewSessionStore', () => {
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']);
 
-      store.queueBatch(session.id, 'queued prompt', ['c2']);
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
 
       // deliverQueuedBatchIfAny is a read-only check; actual delivery is in waitForSession.
       expect(store.deliverQueuedBatchIfAny(session.id)).toBe(true);
 
-      // waitForSession delivers the queued batch immediately.
+      // waitForSession delivers the queued batch immediately, rebuilding the prompt.
       const result = await store.waitForSession(session.id);
-      expect(result).toEqual({ status: 'batch', prompt: 'queued prompt', commentIds: ['c2'] });
+      expect(result.status).toBe('batch');
+      if (result.status === 'batch') {
+        expect(result.commentIds).toEqual(['c2']);
+        // The rebuilt prompt must reference the queued comment ID.
+        expect(result.prompt).toMatch(/`c2`/);
+      }
       expect(store.getQueuedBatch(session.id)).toBeNull();
+    });
+
+    it('delivered prompt after merge includes the union of comment IDs, not just the latest', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.waitForSession(session.id);
+      store.sendBatch(session.id, 'batch1', ['c1']);
+
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
+      store.queueBatch(session.id, ['c3'], new Map([['/tmp/a.md', 3]]));
+
+      const result = await store.waitForSession(session.id);
+      expect(result.status).toBe('batch');
+      if (result.status === 'batch') {
+        expect(result.commentIds.sort()).toEqual(['c2', 'c3']);
+        // Rebuilt prompt should mention BOTH queued IDs in the scope line —
+        // the bug was that prebuilt-prompt concatenation duplicated system
+        // instructions instead of unioning the scope.
+        expect(result.prompt).toMatch(/`c2`/);
+        expect(result.prompt).toMatch(/`c3`/);
+        // System instructions must appear exactly once, not twice.
+        const handoffPreambleCount = (result.prompt.match(/## Comment format/g) ?? []).length;
+        expect(handoffPreambleCount).toBe(1);
+      }
     });
 
     it('deliverQueuedBatchIfAny returns false when no batch is queued', () => {
@@ -477,6 +527,7 @@ describe('ReviewSessionStore', () => {
         enableResolve: false,
         origin: 'agent',
       });
+      store.recordAgentComments(session.id, 1);
       const { askId } = store.addAsk(session.id, [
         { commentId: 'cmt_1', filePath: '/tmp/test.md', anchor: 'hi', text: 'q1' },
       ]);
@@ -571,37 +622,87 @@ describe('ReviewSessionStore', () => {
       expect(store.getSession(session.id)?.status).toBe('open');
       store.dispose();
     });
+
+    it('dedupe-reused agent session stays protected on later silent usage', () => {
+      // Reproduces the dedupe edge: agent A creates a session and posts a
+      // batch (agentCommentCount > 0). A second mdr_review call from the
+      // same agent dedupes onto this session via findOpenSession. The agent
+      // crashes or hangs on the second usage without posting. The session
+      // must remain open — the previously-posted batch already represents
+      // legitimate agent activity and protects against silent-session GC.
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      store.recordAgentComments(session.id, 2); // first usage posted
+
+      // Simulate dedupe: the same session is returned to a second tool call.
+      const reused = store.findOpenSession(['/tmp/a.md'], 'agent');
+      expect(reused?.id).toBe(session.id);
+
+      // Time passes, the second usage never posts.
+      vi.advanceTimersByTime(5 * 60 * 1000 + 5_000);
+      store.gcSilentAgentSessions();
+      expect(store.getSession(session.id)?.status).toBe('open');
+      store.dispose();
+    });
   });
 
   describe('findOpenSession', () => {
     it('returns an open session with matching file paths', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
-      const found = store.findOpenSession(['/tmp/a.md', '/tmp/b.md']);
+      const found = store.findOpenSession(['/tmp/a.md', '/tmp/b.md'], 'user');
       expect(found?.id).toBe(session.id);
     });
 
     it('matches regardless of file path order', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
-      const found = store.findOpenSession(['/tmp/b.md', '/tmp/a.md']);
+      const found = store.findOpenSession(['/tmp/b.md', '/tmp/a.md'], 'user');
       expect(found?.id).toBe(session.id);
     });
 
     it('returns undefined when no open session matches', () => {
       store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
-      expect(store.findOpenSession(['/tmp/other.md'])).toBeUndefined();
+      expect(store.findOpenSession(['/tmp/other.md'], 'user')).toBeUndefined();
+    });
+
+    it('does not match across origins (user → agent)', () => {
+      // An agent calling mdr_review for files the user is already reviewing
+      // must get a fresh session, not the user's. The two flows have
+      // incompatible terminal-state semantics (setSessionDone vs finish/abort);
+      // sharing one deadlocks the agent's mdr_wait.
+      const userSession = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'user',
+      });
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')?.id).toBe(userSession.id);
+      expect(store.findOpenSession(['/tmp/a.md'], 'agent')).toBeUndefined();
+    });
+
+    it('does not match across origins (agent → user)', () => {
+      const agentSession = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      expect(store.findOpenSession(['/tmp/a.md'], 'agent')?.id).toBe(agentSession.id);
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
     });
 
     it('ignores aborted sessions', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       store.abort(session.id, 'user_cancelled');
-      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
     });
 
     it('ignores done sessions', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       store.waitForSession(session.id);
       store.finish(session.id);
-      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
     });
 
     // The freshness gate offsets the long HEARTBEAT_TIMEOUT_MS backstop:
@@ -615,22 +716,22 @@ describe('ReviewSessionStore', () => {
 
       // 4 minutes in — still fresh, should match.
       vi.advanceTimersByTime(4 * 60_000);
-      expect(store.findOpenSession(['/tmp/a.md'])?.id).toBe(session.id);
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')?.id).toBe(session.id);
 
       // 6 minutes in — past the 5min freshness window, should not match.
       vi.advanceTimersByTime(2 * 60_000);
-      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
     });
 
     it('matches stale-then-refreshed session once heartbeat lands', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
 
       vi.advanceTimersByTime(6 * 60_000);
-      expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
 
       // Browser came back from bfcache and fired a heartbeat — dedupe again.
       store.heartbeat(session.id);
-      expect(store.findOpenSession(['/tmp/a.md'])?.id).toBe(session.id);
+      expect(store.findOpenSession(['/tmp/a.md'], 'user')?.id).toBe(session.id);
     });
   });
 
@@ -672,6 +773,119 @@ describe('ReviewSessionStore', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       const pub = store.getSession(session.id)!;
       expect(pub.lastAgentActivityAt).toBeNull();
+    });
+  });
+
+  describe('setSessionDone / waitForSessionDone', () => {
+    it('waitForSessionDone resolves when setSessionDone is called', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      const waiter = store.waitForSessionDone(session.id);
+      let resolved = false;
+      void waiter.then(() => { resolved = true; });
+
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      store.setSessionDone(session.id);
+      await waiter;
+      expect(resolved).toBe(true);
+    });
+
+    it('waitForSessionDone returns immediately when already done', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      store.setSessionDone(session.id);
+
+      const waiter = store.waitForSessionDone(session.id);
+      let resolved = false;
+      void waiter.then(() => { resolved = true; });
+
+      await Promise.resolve();
+      expect(resolved).toBe(true);
+    });
+
+    it('setSessionDone is idempotent', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      expect(() => {
+        store.setSessionDone(session.id);
+        store.setSessionDone(session.id);
+      }).not.toThrow();
+    });
+
+    it('setSessionDone rejects user-origin sessions', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'user' });
+      expect(() => store.setSessionDone(session.id)).toThrow(/only valid for agent-origin/);
+    });
+
+    it('waitForSessionDone rejects with error for unknown session', () => {
+      expect(() => store.waitForSessionDone('rev_nonexistent')).toThrow('Session not found');
+    });
+
+    it('wasSessionDone is true after setSessionDone, even after the session is gc\'d', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      store.setSessionDone(session.id);
+      expect(store.wasSessionDone(session.id)).toBe(true);
+      // Simulate the terminal-retention sweep removing the session from the live Map.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (store as any).sessions.delete(session.id);
+      expect(store.getSession(session.id)).toBeUndefined();
+      expect(store.wasSessionDone(session.id)).toBe(true);
+    });
+
+    it('wasSessionDone is false for unknown ids', () => {
+      expect(store.wasSessionDone('rev_unknown')).toBe(false);
+    });
+
+    it('setSessionDone does NOT fire onSessionAborted (markers preserved on Done)', async () => {
+      // When the user clicks Done while questions are pending, the marker is
+      // a deliberate record of "this got asked, no answer" and should stay
+      // in the file. Cleanup should only run for genuine abort paths
+      // (tab_closed / cancelled / agent_silent), not for the Done path.
+      const calls: Array<{ sessionId: string; askIds: string[] }> = [];
+      store.setOnSessionAborted((sessionId, asks) => {
+        calls.push({ sessionId, askIds: asks.map((a) => a.askId) });
+      });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      store.recordAgentComments(session.id, 1);
+      const { waiter } = store.addAsk(session.id, [
+        { commentId: 'cmt_1', filePath: '/tmp/a.md', anchor: 'x', text: 'q1' },
+      ]);
+
+      store.setSessionDone(session.id);
+      await waiter;
+
+      expect(calls).toEqual([]);
+    });
+
+    it('setSessionDone aborts any pending mdr_ask so the agent waiter unblocks', async () => {
+      // Reproduces the deadlock: agent posts a question via mdr_ask, user
+      // clicks Done on the unified agent banner without replying. The ask
+      // waiter must resolve to no_reply (reason=done_without_reply) — otherwise
+      // the agent's tool call hangs and pendingAsks leaks.
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      // Simulate the route's own "first record comments, then addAsk" ordering
+      // — the addAsk invariant guard requires agentCommentCount > 0 for
+      // agent-origin sessions.
+      store.recordAgentComments(session.id, 1);
+      const { askId, waiter } = store.addAsk(session.id, [
+        { commentId: 'cmt_1', filePath: '/tmp/a.md', anchor: 'x', text: 'q1' },
+      ]);
+      expect(store.getPendingAsks(session.id)).toHaveLength(1);
+
+      store.setSessionDone(session.id);
+
+      const result = await waiter;
+      expect(result).toEqual({ status: 'no_reply', reason: 'done_without_reply' });
+      expect(store.getPendingAsks(session.id)).toHaveLength(0);
+      // The ask map entry must be gone too — otherwise this is a memory leak.
+      expect(store.waitForAsk(askId)).toBeUndefined();
     });
   });
 });

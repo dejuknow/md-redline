@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { buildAddressCommentsPrompt } from '../src/lib/agent-prompts';
 
 /**
  * How long we keep a session alive without a heartbeat before assuming the
@@ -66,9 +67,14 @@ export interface AskQuestion {
 
 /**
  * Reasons for a no_reply ask result.
- * - released: user explicitly clicked "Release agent"
+ * - released: the agent cancelled its own mdr_ask tool call (cancelListener
+ *   in handleAskToolCall fires releaseAsk on signal abort). No user-facing
+ *   "Release agent" button exists today — this is exclusively an agent-side
+ *   cancel signal.
  * - tab_closed: browser disconnected before user replied
  * - cancelled: user explicitly cancelled the review
+ * - done_without_reply: user clicked Done on the agent banner while an ask
+ *   was pending (they ended the session intentionally without replying)
  * - timeout: reserved for future session-timeout mechanism (not yet emitted)
  * - agent_silent: agent session created but no comments posted in time (see Task 16, not yet emitted)
  */
@@ -76,11 +82,12 @@ export type AskNoReplyReason =
   | 'released'
   | 'tab_closed'
   | 'cancelled'
+  | 'done_without_reply'
   | 'timeout'
   | 'agent_silent';
 
 export type AskResult =
-  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }> }
+  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
   | { status: 'no_reply'; reason: AskNoReplyReason };
 
 export interface PendingAsk {
@@ -117,8 +124,14 @@ interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
   terminalAt: Date | null;
   /** When waitingForAgent was last set to true. Used for auto-clear timeout. */
   waitingForAgentSince: Date | null;
-  /** Batch queued while waitingForAgent was true. Delivered on the next agent poll. */
-  queuedBatch: { prompt: string; commentIds: string[] } | null;
+  /**
+   * Batch queued while waitingForAgent was true. Delivered on the next agent
+   * poll. We store the comment IDs + counts (not a prebuilt prompt) so that
+   * if the user queues a SECOND batch on top of an already-queued one, we can
+   * rebuild a single prompt from the union — concatenating prebuilt prompts
+   * duplicates the system instructions and confuses the agent.
+   */
+  queuedBatch: { commentIds: string[]; commentCountsByPath: Map<string, number> } | null;
   /**
    * Total number of comments posted by the agent to this session.
    * Used by gcSilentAgentSessions to distinguish sessions where the agent has
@@ -133,6 +146,32 @@ interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
    * when idle.
    */
   lastAgentActivityAt: Date | null;
+  /**
+   * Set when the user clicks Done in the UI (POST /agent-done).
+   * Used by waitForSessionDone to unblock mdr_wait.
+   */
+  sessionDoneAt: Date | null;
+  /**
+   * Disambiguates why an agent-origin session ended. Set whenever the session
+   * resolves a parked mdr_wait poll:
+   *   'done'                — user clicked Done (setSessionDone)
+   *   'finished'            — /finish was called (user-batch flow on the same session)
+   *   'user_cancelled'      — /abort by user
+   *   'browser_disconnected' — heartbeat sweep aborted
+   *   'agent_silent'        — gcSilentAgentSessions aborted
+   * Null until a terminal handler runs.
+   */
+  terminalReason:
+    | 'done'
+    | 'finished'
+    | 'user_cancelled'
+    | 'browser_disconnected'
+    | 'agent_silent'
+    | null;
+  /** Resolves the waitForSessionDone promise. */
+  doneResolver: (() => void) | null;
+  /** The promise mdr_wait polls on. */
+  doneWaiter: Promise<void> | null;
 }
 
 export interface CreateSessionInput {
@@ -146,9 +185,21 @@ export class ReviewSessionStore {
   private pendingAsks = new Map<string, InternalPendingAsk>();
   private sweepHandle: ReturnType<typeof setInterval> | null = null;
   private onSessionAborted: ((sessionId: string, asks: PendingAsk[]) => void) | null = null;
+  private onAsksClosedOnDone: ((sessionId: string, asks: PendingAsk[]) => void) | null = null;
 
   setOnSessionAborted(cb: (sessionId: string, asks: PendingAsk[]) => void): void {
     this.onSessionAborted = cb;
+  }
+
+  /**
+   * Fired by setSessionDone when there were pending asks at the moment the
+   * user clicked Done. Unlike onSessionAborted, the consumer is expected to
+   * PRESERVE the markers on disk and only clear the `expectsReply` flag so
+   * the file accurately reflects "asked, closed without reply" rather than
+   * "still pending."
+   */
+  setOnAsksClosedOnDone(cb: (sessionId: string, asks: PendingAsk[]) => void): void {
+    this.onAsksClosedOnDone = cb;
   }
 
   createSession(input: CreateSessionInput): ReviewSession {
@@ -177,6 +228,10 @@ export class ReviewSessionStore {
       queuedBatch: null,
       agentCommentCount: 0,
       lastAgentActivityAt: null,
+      sessionDoneAt: null,
+      terminalReason: null,
+      doneResolver: null,
+      doneWaiter: null,
     };
 
     this.sessions.set(id, session);
@@ -199,12 +254,19 @@ export class ReviewSessionStore {
    * (order-independent). Used to deduplicate when the tool is called twice
    * for the same files. Requires a recent heartbeat so a crash-leaked
    * session doesn't get reused — see FIND_OPEN_FRESHNESS_MS.
+   *
+   * The `origin` filter is mandatory: agent-origin and user-origin sessions
+   * have divergent terminal-state semantics (setSessionDone vs finish/abort),
+   * so reusing a user-origin session for an agent request would deadlock the
+   * agent's mdr_wait poll when the user clicks Finish or Cancel (those paths
+   * never resolve `doneResolver`). Filter callers to match-on-origin.
    */
-  findOpenSession(filePaths: string[]): ReviewSession | undefined {
+  findOpenSession(filePaths: string[], origin: SessionOrigin): ReviewSession | undefined {
     const sorted = [...filePaths].sort();
     const freshCutoff = Date.now() - FIND_OPEN_FRESHNESS_MS;
     for (const s of this.sessions.values()) {
       if (s.status !== 'open') continue;
+      if (s.origin !== origin) continue;
       if (s.lastHeartbeatAt.getTime() < freshCutoff) continue;
       const existing = [...s.filePaths].sort();
       if (
@@ -225,11 +287,23 @@ export class ReviewSessionStore {
    * immediately: the current waiter is resolved with the queued batch, a new
    * waiter is installed for the next cycle, and the resolved (old) waiter is
    * returned so the caller receives the batch right away.
+   *
+   * Restricted to user-origin sessions. Agent-origin sessions resolve via
+   * `waitForSessionDone` + `doneResolver`; calling waitForSession on one
+   * would return a promise that never settles via the agent's terminal
+   * path (only via the legacy resolver, which finish/abort/setSessionDone
+   * also settle for symmetry — but that's defensive). Throw to catch
+   * mis-wiring at the source rather than silently hanging.
    */
   waitForSession(id: string): Promise<ReviewResult> {
     const s = this.sessions.get(id);
     if (!s) {
       throw new Error(`Session not found: ${id}`);
+    }
+    if (s.origin !== 'user') {
+      throw new Error(
+        `waitForSession is only valid for user-origin sessions (got origin=${s.origin}); use waitForSessionDone for agent-origin`,
+      );
     }
     s.waitingForAgent = false;
     s.waitingForAgentSince = null;
@@ -239,8 +313,14 @@ export class ReviewSessionStore {
     if (s.queuedBatch) {
       const queued = s.queuedBatch;
       s.queuedBatch = null;
+      const prompt = buildAddressCommentsPrompt({
+        filePaths: s.filePaths,
+        commentCounts: queued.commentCountsByPath,
+        enableResolve: s.enableResolve,
+        commentIds: queued.commentIds,
+      });
       const resolvedWaiter = s.waiter;
-      s.resolver({ status: 'batch', prompt: queued.prompt, commentIds: queued.commentIds });
+      s.resolver({ status: 'batch', prompt, commentIds: queued.commentIds });
       // Create a fresh waiter for the next poll cycle.
       let resolver!: (result: ReviewResult) => void;
       s.waiter = new Promise<ReviewResult>((resolve) => {
@@ -253,6 +333,142 @@ export class ReviewSessionStore {
     }
 
     return s.waiter;
+  }
+
+  /**
+   * Mark a session as done from the user's side (Done button clicked).
+   * Resolves any pending waitForSessionDone call immediately.
+   * Idempotent — safe to call multiple times.
+   *
+   * Restricted to agent-origin sessions: this is the "user clicked Done in
+   * the agent-review banner" path, which has no meaning for user-origin
+   * sessions (they use finish/abort). Guarding here ensures a future caller
+   * that wires this method up incorrectly can't silently deadlock the
+   * legacy ReviewResult waiter for a user-origin session.
+   */
+  setSessionDone(id: string): void {
+    const s = this.sessions.get(id);
+    if (!s) throw new Error(`Session not found: ${id}`);
+    if (s.origin !== 'agent') {
+      throw new Error(
+        `setSessionDone is only valid for agent-origin sessions (got origin=${s.origin})`,
+      );
+    }
+    if (s.sessionDoneAt) return; // already done, idempotent
+    const now = new Date();
+    s.sessionDoneAt = now;
+    s.terminalReason = 'done';
+    // If the agent has a pending mdr_ask when the user clicks Done, resolve
+    // its waiter with done_without_reply so the agent's tool call unblocks
+    // with accurate semantics (the user finished intentionally without
+    // replying). finish() and abort() handle their own paths via
+    // abortAsks; setSessionDone uses a Done-specific reason here.
+    //
+    // Note: we intentionally do NOT pass abortAsks's return value to
+    // onSessionAborted on this path — the markers should be preserved in
+    // the file. The user clicked Done knowing the agent had pending
+    // questions; leaving the marker in place is a useful record of "this
+    // got asked, no answer." The abort-paths (tab_closed / cancelled /
+    // agent_silent) still remove markers because there the session ended
+    // unexpectedly.
+    //
+    // But we DO clear the `expectsReply` flag on those preserved markers
+    // via the onAsksClosedOnDone callback so the on-disk state accurately
+    // reflects "no longer pending." selectAgentAsks already filters by
+    // sessionId, but the persisted flag should match the semantic.
+    const closedAsks = this.abortAsks(id, 'done_without_reply');
+    if (closedAsks.length > 0 && this.onAsksClosedOnDone) {
+      try {
+        this.onAsksClosedOnDone(id, closedAsks);
+      } catch {
+        /* swallow — cleanup is best-effort */
+      }
+    }
+    // Mark terminal so listOpenSessions stops returning it and the UI banner
+    // clears. The session remains queryable by id so a late mdr_wait poll
+    // still gets the "done" signal.
+    if (s.status === 'open') {
+      s.status = 'done';
+      s.terminalAt = now;
+    }
+    if (s.doneResolver) {
+      s.doneResolver();
+      s.doneResolver = null;
+    }
+    // Also settle the legacy ReviewResult waiter (s.resolver) for symmetry
+    // with finish()/abort(). The /wait HTTP route 409s on agent-origin so
+    // no production consumer awaits this promise today, but an in-process
+    // helper that calls waitForSession(agentSessionId) would otherwise hang
+    // until TERMINAL_RETENTION_MS GCs the session.
+    s.resolver({ status: 'done' });
+    // Remember the id and the precise reason past terminal retention so a
+    // late mdr_wait poll still gets the right status after the session is
+    // GC'd.
+    this.rememberDoneSession(id, 'done');
+    // Intentionally NOT firing onSessionAborted — see comment above. The
+    // user's choice to click Done while questions were pending is a
+    // deliberate "I'm done" signal, not an abort. Preserve markers.
+  }
+
+  /**
+   * Bounded log of recently-completed session IDs and their terminal reason.
+   * Used by `wasSessionDone` / `getTerminalReason` so a late `mdr_wait` poll
+   * after TERMINAL_RETENTION_MS still resolves correctly (with the right
+   * reason — not a blanket 'done') even after the session is GC'd from the
+   * live map. Cap and FIFO eviction keep memory bounded over a long-lived
+   * server.
+   */
+  private recentlyDoneIds = new Map<
+    string,
+    NonNullable<InternalSession['terminalReason']>
+  >();
+  private static RECENTLY_DONE_CAP = 1000;
+  private rememberDoneSession(
+    id: string,
+    reason: NonNullable<InternalSession['terminalReason']>,
+  ): void {
+    if (this.recentlyDoneIds.has(id)) return;
+    if (this.recentlyDoneIds.size >= ReviewSessionStore.RECENTLY_DONE_CAP) {
+      const oldest = this.recentlyDoneIds.keys().next().value;
+      if (oldest !== undefined) this.recentlyDoneIds.delete(oldest);
+    }
+    this.recentlyDoneIds.set(id, reason);
+  }
+
+  /**
+   * True if the given session id ever reached a terminal state (Done, finish,
+   * abort, sweep), even if the session has since been GC'd past
+   * TERMINAL_RETENTION_MS.
+   *
+   * Note: the `recentlyDoneIds` map lives in process memory only — it does
+   * NOT survive a server restart. After a restart, a late mdr_wait poll for
+   * a session that completed before the restart will see 404. Acceptable for
+   * a single-user dev tool; if you ever need durable wait semantics,
+   * persist this set or extend TERMINAL_RETENTION_MS.
+   */
+  wasSessionDone(id: string): boolean {
+    if (this.recentlyDoneIds.has(id)) return true;
+    const s = this.sessions.get(id);
+    return !!s?.sessionDoneAt;
+  }
+
+  /**
+   * Returns a promise that resolves when setSessionDone is called.
+   * If setSessionDone was already called, resolves immediately.
+   * Throws if session does not exist.
+   */
+  waitForSessionDone(id: string): Promise<void> {
+    const s = this.sessions.get(id);
+    if (!s) throw new Error(`Session not found: ${id}`);
+    // Already done — resolve immediately
+    if (s.sessionDoneAt) return Promise.resolve();
+    // Lazily create the waiter
+    if (!s.doneWaiter) {
+      s.doneWaiter = new Promise<void>((resolve) => {
+        s.doneResolver = resolve;
+      });
+    }
+    return s.doneWaiter;
   }
 
   sendBatch(id: string, prompt: string, commentIds: string[]): boolean {
@@ -284,10 +500,16 @@ export class ReviewSessionStore {
   /**
    * Queue a batch for delivery on the next agent poll. Used when the user
    * clicks Send batch while waitingForAgent is true (e.g. during a pending
-   * mdr_ask). If a batch is already queued, merge with it (concatenate
-   * prompts, union of commentIds).
+   * mdr_ask). If a batch is already queued, merge with it: union of
+   * commentIds, max-of per-file commentCounts. The prompt itself is
+   * rebuilt at delivery time (in waitForSession) so back-to-back queue
+   * merges don't double-up the system-instructions preamble.
    */
-  queueBatch(id: string, prompt: string, commentIds: string[]): boolean {
+  queueBatch(
+    id: string,
+    commentIds: string[],
+    commentCountsByPath: Map<string, number>,
+  ): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
     // Update sentCommentIds so the UI correctly disables the button after queuing.
@@ -295,12 +517,25 @@ export class ReviewSessionStore {
       if (!s.sentCommentIds.includes(cid)) s.sentCommentIds.push(cid);
     }
     if (s.queuedBatch) {
+      const mergedIds = Array.from(
+        new Set([...s.queuedBatch.commentIds, ...commentIds]),
+      );
+      const mergedCounts = new Map(s.queuedBatch.commentCountsByPath);
+      for (const [path, count] of commentCountsByPath) {
+        const prev = mergedCounts.get(path) ?? 0;
+        // Use the larger count — the file may have gained more comments
+        // between the first and second queue call.
+        if (count > prev) mergedCounts.set(path, count);
+      }
       s.queuedBatch = {
-        prompt: s.queuedBatch.prompt + '\n\n' + prompt,
-        commentIds: Array.from(new Set([...s.queuedBatch.commentIds, ...commentIds])),
+        commentIds: mergedIds,
+        commentCountsByPath: mergedCounts,
       };
     } else {
-      s.queuedBatch = { prompt, commentIds: [...commentIds] };
+      s.queuedBatch = {
+        commentIds: [...commentIds],
+        commentCountsByPath: new Map(commentCountsByPath),
+      };
     }
     return true;
   }
@@ -316,8 +551,15 @@ export class ReviewSessionStore {
     return !!(s?.queuedBatch);
   }
 
-  getQueuedBatch(id: string): { prompt: string; commentIds: string[] } | null {
-    return this.sessions.get(id)?.queuedBatch ?? null;
+  getQueuedBatch(
+    id: string,
+  ): { commentIds: string[]; commentCountsByPath: Map<string, number> } | null {
+    const queued = this.sessions.get(id)?.queuedBatch;
+    if (!queued) return null;
+    return {
+      commentIds: [...queued.commentIds],
+      commentCountsByPath: new Map(queued.commentCountsByPath),
+    };
   }
 
   finish(id: string, prompt?: string, commentIds?: string[]): boolean {
@@ -325,7 +567,12 @@ export class ReviewSessionStore {
     if (!s || s.status !== 'open') return false;
 
     // Defensive: if anyone called finish while asks were pending, abort them.
-    this.abortAsks(id, 'session_cancelled');
+    // Today the route layer's pending-ask 409 guard at POST /finish
+    // unconditionally intercepts this, so the path is unreachable via HTTP.
+    // It still runs for programmatic in-process callers (tests, internal
+    // helpers) so stranded `agentInitiated` markers don't sit in the file —
+    // same behavior as abort() / setSessionDone.
+    const aborted = this.abortAsks(id, 'session_cancelled');
 
     if (commentIds) {
       for (const cid of commentIds) {
@@ -335,6 +582,8 @@ export class ReviewSessionStore {
       }
     }
 
+    // Drop any queued batch — the session is closing.
+    s.queuedBatch = null;
     s.status = 'done';
     s.terminalAt = new Date();
     if (prompt) {
@@ -342,17 +591,47 @@ export class ReviewSessionStore {
     } else {
       s.resolver({ status: 'done' });
     }
+    // Unblock any pending mdr_wait. For an agent-origin session, /finish was
+    // invoked via the user-batch flow rather than the agent banner's Done
+    // button — surface that to the agent so it doesn't claim "the user
+    // clicked Done" when they actually clicked Finish review.
+    this.markDoneWaiterResolved(s, 'finished');
+    if (aborted.length > 0 && this.onSessionAborted) {
+      try {
+        this.onSessionAborted(id, aborted);
+      } catch {
+        /* swallow — cleanup is best-effort */
+      }
+    }
     return true;
   }
 
   abort(id: string, reason: 'user_cancelled' | 'browser_disconnected' | 'agent_silent'): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
+    // Invariant: agent_silent only fires when agentCommentCount === 0
+    // (see gcSilentAgentSessions), and addAsk requires the agent to have
+    // posted comments first. So there should be no pending asks here. If
+    // this ever changes, the askReason mapping below would mis-tag the
+    // ask result as 'tab_closed' instead of 'agent_silent'.
+    if (reason === 'agent_silent' && this.getPendingAsks(id).length > 0) {
+      console.warn(
+        `[review-session] invariant violation: agent_silent abort with pending asks (session ${id})`,
+      );
+    }
     const askReason = reason === 'user_cancelled' ? 'session_cancelled' : 'browser_disconnected';
     const aborted = this.abortAsks(id, askReason);
+    // Drop any queued batch — it can't be delivered on an aborted session,
+    // and holding the prompt + commentIds in memory until TERMINAL_RETENTION_MS
+    // GC is wasteful.
+    s.queuedBatch = null;
     s.status = 'aborted';
     s.terminalAt = new Date();
     s.resolver({ status: 'aborted', reason });
+    // Unblock any pending mdr_wait with the actual abort reason so the agent
+    // doesn't mistake an abort for a user-Done. wasSessionDone tracks the
+    // id so a late mdr_wait after GC still resolves (falls back to 'done').
+    this.markDoneWaiterResolved(s, reason);
     if (aborted.length > 0 && this.onSessionAborted) {
       try {
         this.onSessionAborted(id, aborted);
@@ -363,6 +642,42 @@ export class ReviewSessionStore {
     return true;
   }
 
+  /**
+   * Resolve a pending mdr_wait poll and remember the session ID. Used by the
+   * non-setSessionDone terminal paths (finish, abort, heartbeat-sweep) for
+   * agent-origin sessions so a parked mdr_wait wakes up cleanly regardless
+   * of which terminal path the session took. The caller passes the precise
+   * reason so /agent-wait can return {status:'aborted', reason:'…'} for the
+   * non-Done paths instead of a misleading {status:'done'}.
+   */
+  private markDoneWaiterResolved(
+    s: InternalSession,
+    reason: NonNullable<InternalSession['terminalReason']>,
+  ): void {
+    if (s.origin !== 'agent') return;
+    if (!s.sessionDoneAt) s.sessionDoneAt = new Date();
+    if (s.terminalReason === null) s.terminalReason = reason;
+    if (s.doneResolver) {
+      s.doneResolver();
+      s.doneResolver = null;
+    }
+    this.rememberDoneSession(s.id, reason);
+  }
+
+  /**
+   * Returns the precise terminal reason for an agent-origin session, if
+   * known. Used by /agent-wait to distinguish "user clicked Done" from the
+   * various abort paths so mdr_wait can report the right thing to the
+   * agent. Falls back to `recentlyDoneIds` for sessions that have been GC'd
+   * past TERMINAL_RETENTION_MS. Returns null only if the session was never
+   * seen by this store (process restart, typo, etc.).
+   */
+  getTerminalReason(id: string): InternalSession['terminalReason'] {
+    const s = this.sessions.get(id);
+    if (s?.terminalReason) return s.terminalReason;
+    return this.recentlyDoneIds.get(id) ?? null;
+  }
+
   addAsk(
     sessionId: string,
     questions: AskQuestion[],
@@ -370,6 +685,16 @@ export class ReviewSessionStore {
     const s = this.sessions.get(sessionId);
     if (!s || s.status !== 'open') {
       throw new Error('session not found or already finished');
+    }
+    // Structural invariant: addAsk must run after recordAgentComments. The
+    // route ensures this today, but encoding it here lets gcSilentAgentSessions
+    // safely assume "no pending asks" when it fires (agentCommentCount===0).
+    // Otherwise the agent_silent → tab_closed reason mapping in abortAsks
+    // would silently mis-tag any racing ask result.
+    if (s.origin === 'agent' && s.agentCommentCount === 0) {
+      throw new Error(
+        'addAsk requires the agent to have posted at least one comment first',
+      );
     }
     for (const ask of this.pendingAsks.values()) {
       if (ask.sessionId === sessionId) {
@@ -408,14 +733,22 @@ export class ReviewSessionStore {
       const reply = replies.find((r) => r.commentId === q.commentId);
       if (reply) ordered.push({ questionIndex: idx, text: reply.text });
     });
-    if (ordered.length !== ask.questions.length) return false;
-    ask.resolver({ status: 'reply', replies: ordered });
+    // Partial replies are accepted — comments without a reply are implicit "no reply".
+    ask.resolver({ status: 'reply', replies: ordered, totalQuestions: ask.questions.length });
     this.pendingAsks.delete(askId);
     return true;
   }
 
-  abortAsks(sessionId: string, reason: 'session_cancelled' | 'browser_disconnected'): PendingAsk[] {
-    const noReplyReason: AskNoReplyReason = reason === 'browser_disconnected' ? 'tab_closed' : 'cancelled';
+  abortAsks(
+    sessionId: string,
+    reason: 'session_cancelled' | 'browser_disconnected' | 'done_without_reply',
+  ): PendingAsk[] {
+    const noReplyReason: AskNoReplyReason =
+      reason === 'browser_disconnected'
+        ? 'tab_closed'
+        : reason === 'done_without_reply'
+          ? 'done_without_reply'
+          : 'cancelled';
     const removed: PendingAsk[] = [];
     for (const [id, ask] of this.pendingAsks.entries()) {
       if (ask.sessionId !== sessionId) continue;
@@ -452,17 +785,46 @@ export class ReviewSessionStore {
   }
 
   /**
-   * Abort any open agent-origin sessions that have not posted any comments
-   * within AGENT_SILENT_TIMEOUT_MS. Called periodically to clean up hanging
-   * sessions from agents that failed before posting.
+   * Inverse of recordAgentComments — used by the agent-comments route when
+   * a write succeeds but a subsequent step (addAsk, downstream validation)
+   * fails and rolls back the markers. Without this, agentCommentCount stays
+   * inflated relative to actual on-disk markers, breaking the addAsk-
+   * requires-comments invariant and the silent-GC eligibility for the
+   * lifetime of the session.
+   */
+  unrecordAgentComments(sessionId: string, count: number): void {
+    const s = this.sessions.get(sessionId);
+    if (!s) return;
+    s.agentCommentCount = Math.max(0, s.agentCommentCount - count);
+  }
+
+  /**
+   * Abort any open agent-origin sessions that have shown no activity within
+   * AGENT_SILENT_TIMEOUT_MS. Called periodically to clean up hanging
+   * sessions from agents that failed before posting OR before continuing.
+   *
+   * Activity is measured against `lastAgentActivityAt` (which the route
+   * bumps for reply-only posts too) rather than `agentCommentCount` alone.
+   * A long-running reply-only flow (agent posts comments, then replies for
+   * several minutes) won't be silent-GC'd just because no NEW comments were
+   * added. We still require `agentCommentCount > 0` as the protective
+   * shortcut for established sessions.
    */
   gcSilentAgentSessions(): void {
     const now = Date.now();
     for (const s of this.sessions.values()) {
       if (s.status !== 'open') continue;
       if (s.origin !== 'agent') continue;
+      // Once the agent has posted at least one comment, the session is
+      // considered established; future activity is tracked by replies and
+      // the heartbeat watchdog, not the silent-session GC.
       if (s.agentCommentCount > 0) continue;
-      if (now - s.createdAt.getTime() < AGENT_SILENT_TIMEOUT_MS) continue;
+      // Use lastAgentActivityAt if present (reply-only path), otherwise
+      // fall back to createdAt for sessions where nothing has happened yet.
+      const lastActivity = s.lastAgentActivityAt
+        ? s.lastAgentActivityAt.getTime()
+        : s.createdAt.getTime();
+      if (now - lastActivity < AGENT_SILENT_TIMEOUT_MS) continue;
       this.abort(s.id, 'agent_silent');
     }
   }
@@ -505,6 +867,9 @@ export class ReviewSessionStore {
           s.status = 'aborted';
           s.terminalAt = new Date(now);
           s.resolver({ status: 'aborted', reason: 'browser_disconnected' });
+          // Same as the explicit abort() path: wake any parked mdr_wait so
+          // the agent doesn't hang waiting for a Done that will never come.
+          this.markDoneWaiterResolved(s, 'browser_disconnected');
           if (aborted.length > 0 && this.onSessionAborted) {
             try {
               this.onSessionAborted(id, aborted);
@@ -539,8 +904,15 @@ export class ReviewSessionStore {
     for (const s of this.sessions.values()) {
       s.queuedBatch = null;
     }
+    // Resolve any in-flight ask waiters BEFORE clearing the map. Otherwise
+    // a `GET /api/.../asks/:askId/wait` handler holding a reference to the
+    // waiter would hang indefinitely on dispose (matters most for tests).
+    for (const ask of this.pendingAsks.values()) {
+      ask.resolver({ status: 'no_reply', reason: 'cancelled' });
+    }
     this.sessions.clear();
     this.pendingAsks.clear();
+    this.recentlyDoneIds.clear();
   }
 
   private toPublic(s: InternalSession): ReviewSession {

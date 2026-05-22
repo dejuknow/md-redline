@@ -475,225 +475,13 @@ function wrapText(
   }
   const fullText = allTextNodes.map((n) => n.textContent || '').join('');
 
-  // Find the match
-  let matchStart: number;
-  let matchEnd: number;
-
-  if (hintOffset != null) {
-    // Collect ALL occurrences to support context-based disambiguation
-    const allOccs: number[] = [];
-    let sf = 0;
-    while (sf < fullText.length) {
-      const idx = fullText.indexOf(text, sf);
-      if (idx === -1) break;
-      allOccs.push(idx);
-      sf = idx + 1;
-    }
-
-    if (allOccs.length > 0) {
-      let best: number;
-      if (allOccs.length === 1) {
-        best = allOccs[0];
-      } else if (contextBefore || contextAfter) {
-        // Context-based disambiguation: context strings are from the same
-        // DOM textContent space as fullText, so compare directly (no normalization).
-        let bestScore = -1;
-        let bestDist = Infinity;
-        best = allOccs[0];
-        for (const occ of allOccs) {
-          let score = 0;
-          if (contextBefore) {
-            const before = fullText.slice(Math.max(0, occ - contextBefore.length), occ);
-            for (let j = 1; j <= Math.min(before.length, contextBefore.length); j++) {
-              if (before[before.length - j] === contextBefore[contextBefore.length - j]) score++;
-              else break;
-            }
-          }
-          if (contextAfter) {
-            const after = fullText.slice(
-              occ + text.length,
-              occ + text.length + contextAfter.length,
-            );
-            for (let j = 0; j < Math.min(after.length, contextAfter.length); j++) {
-              if (after[j] === contextAfter[j]) score++;
-              else break;
-            }
-          }
-          const dist = Math.abs(occ - hintOffset);
-          if (score > bestScore || (score === bestScore && dist < bestDist)) {
-            bestScore = score;
-            best = occ;
-            bestDist = dist;
-          }
-        }
-      } else {
-        // No context — use the existing hintOffset proximity with search window.
-        // When the anchor is drag-expanded backwards, it can start well before
-        // the hint (the marker stays put but the anchor grows leftward).
-        const searchWindow = Math.max(20, text.length);
-        const exactIdx = fullText.indexOf(text, Math.max(0, hintOffset - searchWindow));
-        if (exactIdx !== -1 && exactIdx <= hintOffset + 20) {
-          best = exactIdx;
-        } else {
-          best = allOccs.reduce((b, idx) =>
-            Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-          );
-        }
-      }
-      matchStart = best;
-      matchEnd = best + text.length;
-    } else {
-      // No exact match — try stripped formatting fallback (agent anchors may include
-      // markdown markup like **bold** that the DOM strips to plain text).
-      const strippedText = stripInlineFormatting(text).plain;
-      if (strippedText !== text && strippedText.length > 0) {
-        const strippedOccs: number[] = [];
-        let sf = 0;
-        while (sf < fullText.length) {
-          const idx = fullText.indexOf(strippedText, sf);
-          if (idx === -1) break;
-          strippedOccs.push(idx);
-          sf = idx + 1;
-        }
-        if (strippedOccs.length > 0) {
-          const best = strippedOccs.reduce((b, idx) =>
-            Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-          );
-          matchStart = best;
-          matchEnd = best + strippedText.length;
-        } else {
-          // Fallback to flexible whitespace search on the stripped text
-          const result = flexibleSearch(fullText, strippedText);
-          if (!result) return;
-          matchStart = result.start;
-          matchEnd = result.end;
-        }
-      } else {
-        // No exact match — try Mermaid node syntax fallback (e.g. "E[label]" → "label").
-        // The SVG renders only the inner label, not the node ID + brackets.
-        const mermaidMatch = text.match(/^[A-Za-z][A-Za-z0-9_]*\s*[\[\{\(>]+(.+?)[\]\}\)]+\s*$/s);
-        if (mermaidMatch) {
-          const mermaidLabel = mermaidMatch[1];
-          if (mermaidLabel && mermaidLabel !== text) {
-            // First try literal label, then stripped formatting of the label.
-            const mermaidOccs: number[] = [];
-            let sf = 0;
-            while (sf < fullText.length) {
-              const idx = fullText.indexOf(mermaidLabel, sf);
-              if (idx === -1) break;
-              mermaidOccs.push(idx);
-              sf = idx + 1;
-            }
-            if (mermaidOccs.length > 0) {
-              const best = mermaidOccs.reduce((b, idx) =>
-                Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-              );
-              matchStart = best;
-              matchEnd = best + mermaidLabel.length;
-            } else {
-              const strippedMermaidLabel = stripInlineFormatting(mermaidLabel).plain;
-              if (strippedMermaidLabel && strippedMermaidLabel !== mermaidLabel) {
-                const idx = fullText.indexOf(strippedMermaidLabel);
-                if (idx !== -1) {
-                  matchStart = idx;
-                  matchEnd = idx + strippedMermaidLabel.length;
-                } else {
-                  const result = flexibleSearch(fullText, strippedMermaidLabel);
-                  if (!result) return;
-                  matchStart = result.start;
-                  matchEnd = result.end;
-                }
-              } else {
-                const result = flexibleSearch(fullText, mermaidLabel);
-                if (!result) return;
-                matchStart = result.start;
-                matchEnd = result.end;
-              }
-            }
-          } else {
-            // No exact match — try flexible whitespace search
-            const result = flexibleSearch(fullText, text);
-            if (!result) return;
-            matchStart = result.start;
-            matchEnd = result.end;
-          }
-        } else {
-          // No exact match — try flexible whitespace search
-          const result = flexibleSearch(fullText, text);
-          if (!result) return;
-          matchStart = result.start;
-          matchEnd = result.end;
-        }
-      }
-    }
-  } else {
-    // No offset — first occurrence (used for selection highlights and comment marks
-    // without a recorded offset). Try literal first, then stripped formatting fallback
-    // (agent anchors may include markdown markup like **bold** stripped in the DOM).
-    const exactIdx = fullText.indexOf(text);
-    if (exactIdx !== -1) {
-      matchStart = exactIdx;
-      matchEnd = exactIdx + text.length;
-    } else {
-      // Try stripped formatting fallback before flexible search
-      const strippedText = stripInlineFormatting(text).plain;
-      if (strippedText !== text && strippedText.length > 0) {
-        const strippedIdx = fullText.indexOf(strippedText);
-        if (strippedIdx !== -1) {
-          matchStart = strippedIdx;
-          matchEnd = strippedIdx + strippedText.length;
-        } else {
-          const result = flexibleSearch(fullText, strippedText);
-          if (!result) return;
-          matchStart = result.start;
-          matchEnd = result.end;
-        }
-      } else {
-        // Try Mermaid node syntax fallback (e.g. "E[label]" → "label").
-        // The SVG renders only the inner label, not the node ID + brackets.
-        const mermaidMatch = text.match(/^[A-Za-z][A-Za-z0-9_]*\s*[\[\{\(>]+(.+?)[\]\}\)]+\s*$/s);
-        if (mermaidMatch) {
-          const mermaidLabel = mermaidMatch[1];
-          if (mermaidLabel && mermaidLabel !== text) {
-            const labelIdx = fullText.indexOf(mermaidLabel);
-            if (labelIdx !== -1) {
-              matchStart = labelIdx;
-              matchEnd = labelIdx + mermaidLabel.length;
-            } else {
-              const strippedMermaidLabel = stripInlineFormatting(mermaidLabel).plain;
-              if (strippedMermaidLabel && strippedMermaidLabel !== mermaidLabel) {
-                const sIdx = fullText.indexOf(strippedMermaidLabel);
-                if (sIdx !== -1) {
-                  matchStart = sIdx;
-                  matchEnd = sIdx + strippedMermaidLabel.length;
-                } else {
-                  const result = flexibleSearch(fullText, strippedMermaidLabel);
-                  if (!result) return;
-                  matchStart = result.start;
-                  matchEnd = result.end;
-                }
-              } else {
-                const result = flexibleSearch(fullText, mermaidLabel);
-                if (!result) return;
-                matchStart = result.start;
-                matchEnd = result.end;
-              }
-            }
-          } else {
-            const result = flexibleSearch(fullText, text);
-            if (!result) return;
-            matchStart = result.start;
-            matchEnd = result.end;
-          }
-        } else {
-          const result = flexibleSearch(fullText, text);
-          if (!result) return;
-          matchStart = result.start;
-          matchEnd = result.end;
-        }
-      }
-    }
-  }
+  // Find the match. The fallback tiers (literal → stripped → Mermaid label →
+  // flexibleSearch) are shared between the hint-offset and no-offset paths;
+  // see findMatchRange for the consolidated implementation.
+  const matchRange = findMatchRange(fullText, text, hintOffset, contextBefore, contextAfter);
+  if (!matchRange) return;
+  const matchStart = matchRange.start;
+  const matchEnd = matchRange.end;
 
   // Determine which text nodes the match spans and their local offsets
   const wraps: { node: Text; start: number; end: number }[] = [];
@@ -880,6 +668,183 @@ function textNodeOffsetWithin(ancestor: Element, target: Text): number {
     offset += node.textContent?.length || 0;
   }
   return -1;
+}
+
+/** Collect every starting index of `needle` in `haystack`. */
+function findAllOccurrences(haystack: string, needle: string): number[] {
+  if (needle.length === 0) return [];
+  const out: number[] = [];
+  let sf = 0;
+  while (sf < haystack.length) {
+    const idx = haystack.indexOf(needle, sf);
+    if (idx === -1) break;
+    out.push(idx);
+    sf = idx + 1;
+  }
+  return out;
+}
+
+/**
+ * Choose the best occurrence for the *literal* anchor path. Behavior:
+ * - 1 occurrence: take it.
+ * - hintOffset absent: take the first.
+ * - context provided: score by context match, tiebreak by distance to hint.
+ * - no context: search within a window around hint, else closest.
+ *
+ * The window-then-closest behavior captures drag-expanded anchors where the
+ * selection grew leftward of the marker.
+ */
+function pickLiteralOccurrence(
+  occs: number[],
+  fullText: string,
+  needle: string,
+  hintOffset?: number,
+  contextBefore?: string,
+  contextAfter?: string,
+): number {
+  if (occs.length === 1) return occs[0];
+  if (hintOffset == null) return occs[0];
+  if (contextBefore || contextAfter) {
+    let bestScore = -1;
+    let bestDist = Infinity;
+    let best = occs[0];
+    for (const occ of occs) {
+      let score = 0;
+      if (contextBefore) {
+        const before = fullText.slice(Math.max(0, occ - contextBefore.length), occ);
+        for (let j = 1; j <= Math.min(before.length, contextBefore.length); j++) {
+          if (before[before.length - j] === contextBefore[contextBefore.length - j]) score++;
+          else break;
+        }
+      }
+      if (contextAfter) {
+        const after = fullText.slice(occ + needle.length, occ + needle.length + contextAfter.length);
+        for (let j = 0; j < Math.min(after.length, contextAfter.length); j++) {
+          if (after[j] === contextAfter[j]) score++;
+          else break;
+        }
+      }
+      const dist = Math.abs(occ - hintOffset);
+      if (score > bestScore || (score === bestScore && dist < bestDist)) {
+        bestScore = score;
+        best = occ;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
+  // No context — window-then-closest. Re-scan within the window so we keep
+  // the original "first match in window" preference; if nothing falls in the
+  // window, fall back to the closest occurrence overall.
+  const searchWindow = Math.max(20, needle.length);
+  const windowed = fullText.indexOf(needle, Math.max(0, hintOffset - searchWindow));
+  if (windowed !== -1 && windowed <= hintOffset + 20) return windowed;
+  return occs.reduce((b, idx) =>
+    Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
+  );
+}
+
+/**
+ * Pick the closest occurrence to the hint, with no context scoring and no
+ * window logic. Used for stripped-formatting and Mermaid-label fallbacks.
+ */
+function pickClosestOccurrence(occs: number[], hintOffset?: number): number {
+  if (occs.length === 1) return occs[0];
+  if (hintOffset == null) return occs[0];
+  return occs.reduce((b, idx) =>
+    Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
+  );
+}
+
+// Mermaid node syntax: an identifier (capital-first is the Mermaid convention)
+// followed by a bracketed label that contains at least one alphabetic char.
+// The alphabetic-char requirement excludes incidental matches like `arr[0]` or
+// `map[key]` from prose where the bracketed text is purely numeric or operator.
+// Mermaid labels in practice are human-readable strings ("Clicks Discover", etc.).
+//
+// The label is captured with character classes (NOT `.*?`) so the regex
+// matches in linear time. The original `.*?[A-Za-z].*?` between alternating
+// bracket classes is the textbook ReDoS shape — pathological inputs like
+// `A[xxxxxxxx...]` failing the final bracket would force catastrophic
+// backtracking on every iteration.
+const MERMAID_NODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*\s*[\[\{\(>]+([^\]\}\)]*[A-Za-z][^\]\}\)]*)[\]\}\)]+\s*$/s;
+
+// Hard bound on input length before invoking MERMAID_NODE_PATTERN. Real
+// Mermaid node anchors are short ("E[Clicks Discover Pages]"); anything
+// > 1KB is almost certainly prose, code, or an adversarial agent payload.
+// The regex has worst-case backtracking proportional to N² on inputs that
+// match the prefix but never anchor the closing bracket — even though
+// character classes are linear in the common case, the failure path
+// degenerates. Skip entirely above the cap.
+const MERMAID_NODE_MAX_LEN = 1024;
+
+/**
+ * Find a matching range for `text` in `fullText`. Tiers:
+ *   1. Literal exact match (hint/context aware).
+ *   2. Stripped-formatting fallback (e.g. **bold** → bold).
+ *   3. Mermaid node syntax fallback (e.g. "E[label]" → "label"), with its
+ *      own stripped-formatting and flexible-search inner fallbacks.
+ *   4. Flexible whitespace search on the original text.
+ *
+ * Returns null when no tier finds a match. Tier 2 (stripped) shortcircuits
+ * to flexibleSearch on the stripped text — it does NOT fall through to the
+ * Mermaid path, preserving the original wrapText behavior.
+ */
+function findMatchRange(
+  fullText: string,
+  text: string,
+  hintOffset?: number,
+  contextBefore?: string,
+  contextAfter?: string,
+): { start: number; end: number } | null {
+  // Tier 1: literal
+  const literalOccs = findAllOccurrences(fullText, text);
+  if (literalOccs.length > 0) {
+    const start = pickLiteralOccurrence(
+      literalOccs,
+      fullText,
+      text,
+      hintOffset,
+      contextBefore,
+      contextAfter,
+    );
+    return { start, end: start + text.length };
+  }
+
+  // Tier 2: stripped formatting
+  const strippedText = stripInlineFormatting(text).plain;
+  if (strippedText !== text && strippedText.length > 0) {
+    const occs = findAllOccurrences(fullText, strippedText);
+    if (occs.length > 0) {
+      const start = pickClosestOccurrence(occs, hintOffset);
+      return { start, end: start + strippedText.length };
+    }
+    return flexibleSearch(fullText, strippedText) ?? null;
+  }
+
+  // Tier 3: Mermaid node syntax
+  const mermaidMatch =
+    text.length <= MERMAID_NODE_MAX_LEN ? text.match(MERMAID_NODE_PATTERN) : null;
+  if (mermaidMatch) {
+    const mermaidLabel = mermaidMatch[1];
+    if (mermaidLabel && mermaidLabel !== text) {
+      const labelOccs = findAllOccurrences(fullText, mermaidLabel);
+      if (labelOccs.length > 0) {
+        const start = pickClosestOccurrence(labelOccs, hintOffset);
+        return { start, end: start + mermaidLabel.length };
+      }
+      const strippedMermaidLabel = stripInlineFormatting(mermaidLabel).plain;
+      if (strippedMermaidLabel && strippedMermaidLabel !== mermaidLabel) {
+        const idx = fullText.indexOf(strippedMermaidLabel);
+        if (idx !== -1) return { start: idx, end: idx + strippedMermaidLabel.length };
+        return flexibleSearch(fullText, strippedMermaidLabel) ?? null;
+      }
+      return flexibleSearch(fullText, mermaidLabel) ?? null;
+    }
+  }
+
+  // Tier 4: flexible whitespace on the original
+  return flexibleSearch(fullText, text) ?? null;
 }
 
 /**

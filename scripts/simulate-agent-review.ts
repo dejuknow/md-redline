@@ -256,16 +256,31 @@ async function main() {
   }
 
   // 3. Post the synthetic review comments.
-  const expectsReply = mode !== 'fire-and-forget';
-  console.log(`\nPosting ${comments.length} comment(s) [mode=${mode}, expectsReply=${expectsReply}]`);
+  console.log(`\nPosting ${comments.length} comment(s) [mode=${mode}]`);
   for (const [i, c] of comments.entries()) {
     console.log(`  [${i + 1}] ${c.anchor.slice(0, 50)} — "${c.text.slice(0, 50)}..."`);
   }
 
+  // Use explicit mode + the right field name. The route's shape-inference
+  // path treats `{comments, expectsReply: true}` as review-mode (because
+  // `comments` is present) — that would downgrade ask/release/wait scenarios
+  // to fire-and-forget. Send the body in the canonical shape per mode.
+  const askPayload =
+    mode === 'fire-and-forget'
+      ? { mode: 'review' as const, comments }
+      : {
+          mode: 'ask' as const,
+          questions: comments.map(({ filePath, anchor, text }) => ({
+            filePath,
+            anchor,
+            text,
+          })),
+        };
+
   const postRes = await fetchOk(`${server}/api/review-sessions/${sessionId}/agent-comments`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ comments, expectsReply }),
+    body: JSON.stringify(askPayload),
   });
   const postBody = (await postRes.json()) as {
     askId?: string;

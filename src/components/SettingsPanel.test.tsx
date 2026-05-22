@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 
 // Mock preferences-client so SettingsContext doesn't try to hit the network
 const fetchPreferences = vi.fn();
@@ -53,39 +53,15 @@ afterEach(() => {
   cleanup();
 });
 
-describe('SettingsPanel — Agent reviews section', () => {
-  it('renders the "Agent reviews" section heading in the General tab', () => {
-    renderPanel();
-    expect(screen.getByText(/agent reviews/i)).not.toBeNull();
+describe('SettingsPanel', () => {
+  it('renders General settings when open=true', () => {
+    renderPanel({ open: true });
+    expect(screen.getByText(/general/i)).not.toBeNull();
   });
 
-  it('renders the defaultAgentReviewWait toggle with correct label', () => {
-    renderPanel();
-    const toggle = screen.getByRole('switch', { name: /wait for my response by default/i });
-    expect(toggle).not.toBeNull();
-  });
-
-  it('reflects defaultAgentReviewWait: false (off) by default', () => {
-    renderPanel();
-    const toggle = screen.getByRole('switch', { name: /wait for my response by default/i });
-    expect(toggle.getAttribute('aria-checked')).toBe('false');
-  });
-
-  it('calls updateDefaultAgentReviewWait with true when toggled on', async () => {
-    renderPanel();
-    const toggle = screen.getByRole('switch', { name: /wait for my response by default/i });
-    // Toggle off → on
-    fireEvent.click(toggle);
-    // After click, aria-checked should flip to true
-    expect(toggle.getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('toggles back to false after being clicked twice', async () => {
-    renderPanel();
-    const toggle = screen.getByRole('switch', { name: /wait for my response by default/i });
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-checked')).toBe('false');
+  it('does not render Agent reviews section (removed)', () => {
+    renderPanel({ open: true });
+    expect(screen.queryByText(/agent reviews/i)).toBeNull();
   });
 });
+

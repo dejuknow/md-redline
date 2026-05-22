@@ -46,7 +46,6 @@ function renderCard(props: Partial<Parameters<typeof CommentCard>[0]> = {}) {
   const defaults: Parameters<typeof CommentCard>[0] = {
     comment: baseComment,
     isActive: false,
-    agentQuestion: false,
     editor: null,
     onActivate: vi.fn(),
     onDelete: vi.fn(),
@@ -65,34 +64,42 @@ function renderCard(props: Partial<Parameters<typeof CommentCard>[0]> = {}) {
   );
 }
 
-describe('CommentCard — fire-and-forget agent comment (agentInitiated=true, agentQuestion=false)', () => {
+describe('CommentCard — agent-initiated comment', () => {
   it('does not render "Awaiting your reply" banner', () => {
-    renderCard({ agentQuestion: false });
+    renderCard();
     expect(screen.queryByText(/awaiting your reply/i)).toBeNull();
   });
 
-  it('renders the Delete action', () => {
-    renderCard({ isActive: true, agentQuestion: false });
-    // Delete button is rendered; it has aria-label="Delete"
+  it('renders the Delete action when active', () => {
+    renderCard({ isActive: true });
     const deleteBtn = screen.queryByRole('button', { name: /delete/i });
     expect(deleteBtn).not.toBeNull();
   });
 
   it('renders the Reply action when active', () => {
-    renderCard({ isActive: true, agentQuestion: false });
-    const replyBtn = screen.queryByRole('button', { name: /reply/i });
+    renderCard({ isActive: true });
+    const replyBtn = screen.queryByRole('button', { name: /^reply$/i });
     expect(replyBtn).not.toBeNull();
+  });
+
+  it('renders the Edit action when active', () => {
+    renderCard({ isActive: true });
+    const editBtn = screen.queryByRole('button', { name: /^edit$/i });
+    expect(editBtn).not.toBeNull();
   });
 });
 
-describe('CommentCard — agent question (agentQuestion=true)', () => {
-  it('renders "Awaiting your reply" banner', () => {
-    renderCard({ agentQuestion: true });
-    expect(screen.getByText(/awaiting your reply/i)).not.toBeNull();
-  });
+describe('CommentCard — user-authored comment', () => {
+  const userComment: MdComment = {
+    ...baseComment,
+    agentInitiated: false,
+    author: 'Alice',
+  };
 
-  it('does not render the Delete action', () => {
-    renderCard({ isActive: true, agentQuestion: true });
-    expect(screen.queryByRole('button', { name: /delete/i })).toBeNull();
+  it('renders Delete, Edit, and Reply when active', () => {
+    renderCard({ comment: userComment, isActive: true });
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^reply$/i })).not.toBeNull();
   });
 });

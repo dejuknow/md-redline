@@ -101,7 +101,6 @@ test.describe('Agent review scenarios', () => {
               text: 'Is 30% realistic given current baselines?',
             },
           ],
-          expectsReply: false,
         },
       },
     );
@@ -174,7 +173,6 @@ test.describe('Agent review scenarios', () => {
               text: 'Is 3 the right default?',
             },
           ],
-          expectsReply: false,
         },
       },
     );
@@ -186,7 +184,7 @@ test.describe('Agent review scenarios', () => {
     // Banner remains visible with "is reviewing" copy — it does NOT clear on comment arrival.
     await expect(page.getByText(/is reviewing/i)).toBeVisible({ timeout: 5_000 });
     // The Dismiss button should be present
-    await expect(page.getByRole('button', { name: /dismiss/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^done$/i })).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -238,7 +236,6 @@ test.describe('Agent review scenarios', () => {
               text: 'Consider making this configurable.',
             },
           ],
-          expectsReply: false,
         },
       },
     );
@@ -257,7 +254,7 @@ test.describe('Agent review scenarios', () => {
 
     // 6. The unified "is reviewing" banner IS present — it stays up until dismissed.
     await expect(page.getByText(/is reviewing/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /dismiss/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^done$/i })).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -360,7 +357,6 @@ test.describe('Agent review scenarios', () => {
             { filePath: file, anchor: 'Hello world', text: 'Nice greeting.' },
             { filePath: file, anchor: 'This is a doc', text: 'Add a summary.' },
           ],
-          expectsReply: false,
         },
       },
     );
@@ -386,7 +382,7 @@ test.describe('Agent review scenarios', () => {
     // 7. The unified "is reviewing" banner is present and shows a Dismiss button.
     //    (It stays up until the user explicitly dismisses — no auto-clear on comment arrival.)
     await expect(page.getByText(/is reviewing/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /dismiss/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^done$/i })).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -429,7 +425,6 @@ test.describe('Agent review scenarios', () => {
           comments: [
             { filePath: file, anchor: 'batch size is 100', text: 'Should this scale dynamically?' },
           ],
-          expectsReply: false,
         },
       },
     );
@@ -489,7 +484,6 @@ test.describe('Agent review scenarios', () => {
               text: 'Why italics here?',
             },
           ],
-          expectsReply: false,
         },
       },
     );

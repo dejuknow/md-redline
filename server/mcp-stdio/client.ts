@@ -71,10 +71,17 @@ export function createMdrClient(baseUrl: string): MdrClient {
     },
 
     async postAgentComments(sessionId: string, questions: AskQuestion[]) {
+      // Intentionally NOT signal-aware: the server commits markers + creates
+      // the pendingAsk during this POST, but the client receives the askId
+      // only after it resolves. Aborting the fetch mid-flight would leave
+      // the server with a live ask whose id the client never learned, so
+      // the post-await cancelListener (which calls releaseAsk(askId)) can't
+      // clean it up. The POST is bounded by the server's own request
+      // handling — short by design.
       const res = await fetch(url(`/api/review-sessions/${sessionId}/agent-comments`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ questions }),
+        body: JSON.stringify({ mode: 'ask', questions }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; failedComments?: number[] };
@@ -101,7 +108,11 @@ export function createMdrClient(baseUrl: string): MdrClient {
       const res = await fetch(url(`/api/review-sessions/${sessionId}/agent-comments`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(args),
+        body: JSON.stringify({
+          mode: 'review',
+          comments: args.comments,
+          replies: args.replies,
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
@@ -122,6 +133,23 @@ export function createMdrClient(baseUrl: string): MdrClient {
         method: 'POST',
       });
       if (!res.ok) throw new Error(`releaseAsk failed (HTTP ${res.status})`);
+    },
+
+    async waitForReview(sessionId: string, timeoutSeconds?: number) {
+      const path =
+        timeoutSeconds !== undefined
+          ? `/api/review-sessions/${sessionId}/agent-wait?timeout=${timeoutSeconds}`
+          : `/api/review-sessions/${sessionId}/agent-wait`;
+      const res = await fetch(url(path), { method: 'GET' });
+      if (!res.ok) {
+        // 409 means the session exists but is the wrong origin for /agent-wait
+        // (user-origin). Surface the route's specific error so the handler can
+        // give the agent a clear next-step.
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const detail = body.error ? `: ${body.error}` : '';
+        throw new Error(`waitForReview failed (HTTP ${res.status})${detail}`);
+      }
+      return (await res.json()) as import('./types').WaitForReviewResult;
     },
   };
 }

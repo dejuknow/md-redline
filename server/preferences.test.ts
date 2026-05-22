@@ -353,20 +353,6 @@ describe('cross-process file lock', () => {
     expect(result.settings).toEqual({ mermaidFullscreenPanelCollapsed: true });
   });
 
-  it('round-trips defaultAgentReviewWait through sanitizeSettings', async () => {
-    const result = await writePreferences(testDir, {
-      settings: { defaultAgentReviewWait: true },
-    } as Record<string, unknown>);
-    expect(result.settings).toEqual({ defaultAgentReviewWait: true });
-  });
-
-  it('drops defaultAgentReviewWait when not a boolean', async () => {
-    const result = await writePreferences(testDir, {
-      settings: { defaultAgentReviewWait: 'yes' },
-    } as Record<string, unknown>);
-    expect(result.settings).toEqual({});
-  });
-
   it('sanitizePreferencesPatch returns {} for non-object input', () => {
     expect(sanitizePreferencesPatch(null)).toEqual({});
     expect(sanitizePreferencesPatch('hello')).toEqual({});

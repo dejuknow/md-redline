@@ -7,9 +7,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { createMdrClient } from './client';
-import { handleAskToolCall, handleRequestReviewToolCall, handleReviewToolCall } from './handler';
+import { handleAskToolCall, handleRequestReviewToolCall, handleReviewToolCall, handleWaitToolCall } from './handler';
 import type { RunMcpServerOptions } from './types';
-import { validateAskInput, validateRequestReviewInput, validateReviewInput } from './validate';
+import { validateAskInput, validateRequestReviewInput, validateReviewInput, validateWaitInput } from './validate';
 
 /**
  * Wire the MCP SDK Server with stdio transport and register the
@@ -69,17 +69,27 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         description:
           'Ask the user one or more questions anchored to specific text in a file ' +
           'inside an active review session. Each question becomes an inline marker the user ' +
-          'sees and replies to in the md-redline UI. Blocks until the user has replied to ' +
-          'every question or the session aborts. Use this when a comment is unclear, or when ' +
+          'sees and can reply to in the md-redline UI. Returns when the user clicks Done or ' +
+          'the session aborts. The user typically writes their reply directly into the ' +
+          "marker's reply thread in the file, so when this tool returns you MUST re-read the " +
+          'file(s) to see the user\'s answer. Use this when a comment is unclear, or when ' +
           'you hit a planning fork while editing. Prefer asking over guessing when the right ' +
-          'answer would meaningfully change your edit.',
+          'answer would meaningfully change your edit.\n\n' +
+          'Only one mdr_ask can be pending per session at a time. If this returns ' +
+          '"a previous mdr_ask is still pending", post a reply to the prior question ' +
+          'via mdr_review (with a `replies:` payload targeting that commentId) — that ' +
+          'resolves the pending ask in-place — and then retry mdr_ask with your new questions.',
         inputSchema: {
           type: 'object',
           required: ['sessionId', 'questions'],
           properties: {
             sessionId: {
               type: 'string',
-              description: 'Session ID from a previous mdr_request_review batch result.',
+              description:
+                'Session ID from a previous mdr_review call. The session must be ' +
+                'agent-origin — mdr_ask cannot run against the user-driven flow ' +
+                'created by mdr_request_review (that banner has no Reply/Release ' +
+                'affordance for pending asks).',
             },
             questions: {
               type: 'array',
@@ -91,6 +101,11 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
                   filePath: { type: 'string', description: 'Absolute path to a file in the session.' },
                   anchor: { type: 'string', description: 'Exact text in the file the question refers to.' },
                   text: { type: 'string', description: 'Your question.' },
+                  author: {
+                    type: 'string',
+                    description:
+                      'Your agent name (e.g. "Claude"). Shown in the mdr UI so users running multiple agents can tell who asked.',
+                  },
                   contextBefore: { type: 'string' },
                   contextAfter: { type: 'string' },
                 },
@@ -103,15 +118,21 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         name: 'mdr_review',
         description:
           'Review markdown files in md-redline (mdr) and leave inline feedback. ' +
+          'Returns IMMEDIATELY after posting (never blocks). The returned `sessionId` ' +
+          'MUST be passed to mdr_wait afterward to block until the user clicks Done — ' +
+          'this is a two-tool flow: mdr_review (post) → mdr_wait (block). Skipping ' +
+          'mdr_wait leaves a banner on the user\'s screen until they click Done; you ' +
+          'will not see their replies or edits before continuing, and any user feedback ' +
+          'will be invisible to you for this turn.\n\n' +
           'Use this when the user asks you to review a doc and drop comments. ' +
           'The comments appear as inline markers anchored to specific text, which ' +
-          'the user can then address. Pass waitForResponse: true if you want to ' +
-          'block until the user replies to your comments (for example, you are ' +
-          'reviewing iteratively). Otherwise the tool returns once the comments ' +
-          'are written and you are done. ' +
+          'the user can then address.\n\n' +
+          'Comments are anchored to exact text in the rendered document (not the ' +
+          'raw markdown). For text inside Mermaid diagrams or markdown-formatted ' +
+          'spans, the renderer will fall back to label/stripped matching.\n\n' +
           'Include `author` on each comment/reply identifying yourself (e.g. ' +
-          '\'Claude\', \'Codex\', \'Gemini\'). This appears in the mdr UI so the ' +
-          'user knows which agent left the feedback.',
+          "'Claude', 'Codex', 'Gemini'). This appears in the mdr UI so the user " +
+          'knows which agent left the feedback.',
         inputSchema: {
           type: 'object',
           required: ['filePaths'],
@@ -150,12 +171,28 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
                 },
               },
             },
-            waitForResponse: {
-              type: 'boolean',
-              description:
-                "If true, block until the user replies. If omitted, the server uses the user's default setting.",
-            },
             enableResolve: { type: 'boolean' },
+          },
+        },
+      },
+      {
+        name: 'mdr_wait',
+        description:
+          'Block until the user has finished engaging with an mdr_review session. ' +
+          'Call this once after you have posted all your feedback batches via mdr_review. ' +
+          'Returns when the user clicks Done in the mdr UI. ' +
+          'If the wait times out (90s), returns {status:"pending"} — call mdr_wait again ' +
+          'with the same sessionId to keep waiting. ' +
+          "After this returns {status:\"done\"}, read the file(s) to see the user's " +
+          'replies, deletions, and resolutions.',
+        inputSchema: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'Session ID returned by mdr_review.',
+            },
           },
         },
       },
@@ -199,7 +236,6 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         baseUrl,
         sendProgress,
         signal,
-        getUserSettings: opts.getUserSettings,
       });
       return result as CallToolResult;
     }
@@ -220,8 +256,14 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         baseUrl,
         sendProgress,
         signal,
-        getUserSettings: opts.getUserSettings,
       });
+      return result as CallToolResult;
+    }
+
+    if (request.params.name === 'mdr_wait') {
+      const validation = validateWaitInput(request.params.arguments);
+      if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
+      const result = await handleWaitToolCall(validation.value, { client, sendProgress, signal });
       return result as CallToolResult;
     }
 

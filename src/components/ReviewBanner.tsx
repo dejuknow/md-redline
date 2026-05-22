@@ -3,13 +3,6 @@ import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import type { ReviewSession } from '../hooks/useReviewSession';
 
-export interface PendingAskSummary {
-  askId: string;
-  commentIds: string[];
-  agentName: string;
-  readyCount: number;
-}
-
 interface ReviewBannerProps {
   sessions: ReviewSession[];
   commentCounts: Map<string, number>;
@@ -23,12 +16,6 @@ interface ReviewBannerProps {
   showToast?: (message: string) => void;
   /** Comment IDs grouped by file path. */
   commentIdsByFile: Map<string, string[]>;
-  /** Pending asks per session id — drives the awaiting-reply banner state. */
-  pendingAsksBySession?: Map<string, PendingAskSummary>;
-  /** Called when the user clicks Send replies. Can be async; banner manages busy state during the call. */
-  onSendReplies?: (sessionId: string, askId: string) => void | Promise<void>;
-  /** Called after the user successfully releases the agent so the parent can clear pending-ask UI state. */
-  onRelease?: (sessionId: string) => void;
   /** Agent name per session id — used for the completion banner in fire-and-forget sessions. */
   agentNamesBySession?: Map<string, string>;
 }
@@ -63,20 +50,9 @@ export function ReviewBanner({
   onBatchSent,
   showToast,
   commentIdsByFile,
-  pendingAsksBySession,
-  onSendReplies,
-  onRelease,
   agentNamesBySession,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  // Self-ticking timer to drive the spinner/dot decision without relying on
-  // external polling cadence. Ticks every 5s to match the session poll interval.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(id);
-  }, []);
 
   const buildPromptForSession = useCallback(
     (s: ReviewSession, ids?: string[]): string => {
@@ -106,12 +82,23 @@ export function ReviewBanner({
       setBusyId(s.id);
       try {
         const prompt = buildPromptForSession(s, unsentIds);
+        // Pass per-file commentCounts so the server can rebuild an accurate
+        // prompt if this batch ends up merged into an existing queued one
+        // (waitingForAgent path).
+        const commentCountsForSession: Record<string, number> = {};
+        for (const p of s.filePaths) {
+          commentCountsForSession[p] = commentCounts.get(p) ?? 0;
+        }
         let res: Response;
         try {
           res = await fetch(`/api/review-sessions/${s.id}/batch`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt, commentIds: unsentIds }),
+            body: JSON.stringify({
+              prompt,
+              commentIds: unsentIds,
+              commentCounts: commentCountsForSession,
+            }),
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
@@ -135,7 +122,7 @@ export function ReviewBanner({
         setBusyId(null);
       }
     },
-    [buildPromptForSession, commentIdsByFile, onHandoffSuccess, onBatchSent, showToast],
+    [buildPromptForSession, commentIdsByFile, commentCounts, onHandoffSuccess, onBatchSent, showToast],
   );
 
   const handleSendAndFinish = useCallback(
@@ -179,46 +166,32 @@ export function ReviewBanner({
     [buildPromptForSession, commentIdsByFile, onHandoffSuccess, onResolved, showToast],
   );
 
-  const handleSendReplies = useCallback(
-    async (sessionId: string, askId: string) => {
-      if (!onSendReplies) return;
-      setBusyId(sessionId);
-      try {
-        await onSendReplies(sessionId, askId);
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [onSendReplies],
-  );
-
-  const handleRelease = useCallback(
-    async (sessionId: string, askId: string) => {
-      setBusyId(sessionId);
+  const handleDone = useCallback(
+    async (s: ReviewSession) => {
+      setBusyId(s.id);
       try {
         let res: Response;
         try {
-          res = await fetch(`/api/review-sessions/${sessionId}/asks/${askId}/release`, {
+          res = await fetch(`/api/review-sessions/${s.id}/agent-done`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Release failed: ${message}`);
+          showToast?.(`Done failed: ${message}`);
           return;
         }
         if (!res.ok) {
           const detail = await readErrorMessage(res);
-          showToast?.(`Release failed: ${detail}`);
+          showToast?.(`Done failed: ${detail}`);
           return;
         }
-        showToast?.('Agent released. Comments stay in the file.');
-        onRelease?.(sessionId);
+        onResolved();
       } finally {
         setBusyId(null);
       }
     },
-    [showToast, onRelease],
+    [onResolved, showToast],
   );
 
   const handleCancel = useCallback(
@@ -252,36 +225,6 @@ export function ReviewBanner({
     [onResolved, showToast],
   );
 
-  const handleDismissAgentSession = useCallback(
-    async (s: ReviewSession) => {
-      setBusyId(s.id);
-      try {
-        let res: Response;
-        try {
-          res = await fetch(`/api/review-sessions/${s.id}/abort`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Dismiss failed: ${message}`);
-          return;
-        }
-
-        if (!res.ok) {
-          const detail = await readErrorMessage(res);
-          showToast?.(`Dismiss failed: ${detail}`);
-          return;
-        }
-
-        onResolved();
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [onResolved, showToast],
-  );
-
   if (sessions.length === 0) return null;
 
   return (
@@ -290,117 +233,23 @@ export function ReviewBanner({
       data-testid="review-banner"
     >
       {sessions.map((s) => {
-        const ask = pendingAsksBySession?.get(s.id);
-        if (ask && ask.commentIds.length > 0) {
-          const readyCount = ask.readyCount;
-          const allReady = readyCount === ask.commentIds.length;
-          const askSessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
-          const askUnsentIds = askSessionIds.filter((id) => !s.sentCommentIds.includes(id));
-          return (
-            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
-              <span className="text-sm">
-                <span
-                  className="mr-2 inline-block h-2 w-2 rounded-full bg-primary align-middle"
-                  aria-hidden
-                />
-                <strong>{ask.agentName} has {ask.commentIds.length} question{ask.commentIds.length === 1 ? '' : 's'}</strong>{' '}
-                on {s.filePaths.map((p, i) => (
-                  <span key={p}>
-                    {i > 0 && ', '}
-                    <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
-                  </span>
-                ))}.
-              </span>
-              <span className="flex gap-2">
-                <button
-                  type="button"
-                  className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
-                  onClick={() => void handleSendReplies(s.id, ask.askId)}
-                  disabled={busyId === s.id || !allReady}
-                  title={allReady ? undefined : `${readyCount} of ${ask.commentIds.length} replies drafted`}
-                >
-                  Send replies ({readyCount}/{ask.commentIds.length})
-                </button>
-                {askUnsentIds.length > 0 && (
-                  <button
-                    type="button"
-                    className="rounded border-2 border-primary text-primary-text bg-surface px-3 py-1 text-sm font-semibold hover:bg-primary-bg-strong disabled:opacity-50"
-                    onClick={() => void handleSendBatch(s)}
-                    disabled={busyId === s.id}
-                  >
-                    Send {askUnsentIds.length} comment{askUnsentIds.length === 1 ? '' : 's'}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
-                  onClick={() => void handleRelease(s.id, ask.askId)}
-                  disabled={busyId === s.id}
-                >
-                  Release agent
-                </button>
-                <button
-                  type="button"
-                  className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
-                  onClick={() => void handleCancel(s)}
-                  disabled={busyId === s.id}
-                >
-                  Cancel review
-                </button>
-              </span>
-            </div>
-          );
-        }
-
-        // Unified agent-reviewing banner: stays up for the entire active review,
-        // showing a live comment count as batches arrive. Clears only on Dismiss.
+        // Unified agent-reviewing banner: covers both wait-mode (pending ask) and
+        // fire-and-forget. Shape is always the same; only the button label differs.
         if (s.origin === 'agent') {
           const agentName = agentNamesBySession?.get(s.id) ?? 'Agent';
           const agentCommentCount = s.filePaths.reduce(
             (sum, p) => sum + (agentCommentCounts?.get(p) ?? 0),
             0,
           );
-          const fileBasenames = s.filePaths.map((p, i) => (
-            <span key={p}>
-              {i > 0 && ', '}
-              <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
-            </span>
-          ));
-          const AGENT_ACTIVE_WINDOW_MS = 30_000;
-          const isAgentActive = s.lastAgentActivityAt
-            ? now - new Date(s.lastAgentActivityAt).getTime() < AGENT_ACTIVE_WINDOW_MS
-            : false;
           return (
-            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
-              <span className="text-sm flex items-center">
-                {isAgentActive ? (
-                  <span
-                    role="status"
-                    className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent align-middle"
-                    aria-label="Agent is active"
-                  />
-                ) : (
-                  <span
-                    className="mr-2 inline-block h-2 w-2 rounded-full bg-primary align-middle"
-                    aria-hidden
-                  />
-                )}
-                <strong>{agentName} is reviewing {fileBasenames}</strong>
-                {agentCommentCount > 0 && (
-                  <span className="ml-2 text-secondary-text">
-                    — {agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'} so far
-                  </span>
-                )}
-              </span>
-              <button
-                type="button"
-                className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
-                onClick={() => void handleDismissAgentSession(s)}
-                disabled={busyId === s.id}
-              >
-                Dismiss
-              </button>
-            </div>
+            <AgentSessionRow
+              key={s.id}
+              session={s}
+              agentName={agentName}
+              agentCommentCount={agentCommentCount}
+              busy={busyId === s.id}
+              onDone={handleDone}
+            />
           );
         }
 
@@ -472,6 +321,82 @@ export function ReviewBanner({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+interface AgentSessionRowProps {
+  session: ReviewSession;
+  agentName: string;
+  agentCommentCount: number;
+  busy: boolean;
+  onDone: (s: ReviewSession) => void;
+}
+
+const AGENT_ACTIVE_WINDOW_MS = 30_000;
+const AGENT_TICK_MS = 5_000;
+
+/**
+ * Agent-origin banner row. Owns its own 5s ticking timer so the spinner-vs-dot
+ * transition stays correct without forcing a re-render of every other banner.
+ * Mounting this component is the gate that creates the timer — when no
+ * agent-origin sessions are open, no timer runs.
+ */
+function AgentSessionRow({
+  session,
+  agentName,
+  agentCommentCount,
+  busy,
+  onDone,
+}: AgentSessionRowProps) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), AGENT_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  const isAgentActive = session.lastAgentActivityAt
+    ? now - new Date(session.lastAgentActivityAt).getTime() < AGENT_ACTIVE_WINDOW_MS
+    : false;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+      <span className="text-sm flex items-center">
+        {isAgentActive ? (
+          <span
+            role="status"
+            className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent align-middle"
+            aria-label="Agent is active"
+          />
+        ) : (
+          <span
+            className="mr-2 inline-block h-2 w-2 rounded-full bg-primary align-middle"
+            aria-hidden
+          />
+        )}
+        <strong>
+          {agentName} is reviewing{' '}
+          {session.filePaths.map((p, i) => (
+            <span key={p}>
+              {i > 0 && ', '}
+              <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
+            </span>
+          ))}
+        </strong>
+        {agentCommentCount > 0 && (
+          <span className="ml-2 text-secondary-text">
+            — {agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'}
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
+        onClick={() => onDone(session)}
+        disabled={busy}
+      >
+        Done
+      </button>
     </div>
   );
 }

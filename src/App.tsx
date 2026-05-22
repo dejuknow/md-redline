@@ -76,7 +76,6 @@ import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { ReviewBanner } from './components/ReviewBanner';
-import type { PendingAskSummary } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 import { selectAgentAsks } from './lib/agent-asks';
@@ -579,118 +578,28 @@ export default function App() {
     [comments, activeSession?.id],
   );
 
-  const [activeAskId, setActiveAskId] = useState<string | null>(null);
 
-  // Draft reply text keyed by commentId for the current agent ask.
-  // Updated as the user types in the always-visible agent-question textareas.
-  const [agentDrafts, setAgentDrafts] = useState<Map<string, string>>(new Map());
-
-  const handleAgentDraftChange = useCallback((commentId: string, text: string) => {
-    setAgentDrafts((prev) => {
-      const next = new Map(prev);
-      next.set(commentId, text);
-      return next;
-    });
-  }, []);
-
-  // Reset drafts when the set of agent asks changes (new ask or ask resolved)
-  useEffect(() => {
-    setAgentDrafts(new Map());
-  }, [activeAskId]);
-
-  useEffect(() => {
-    if (!activeSession || agentAsks.length === 0) {
-      setActiveAskId(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/review-sessions/${activeSession.id}/asks`, { cache: 'no-store' });
-        if (!res.ok) return;
-        const { asks } = (await res.json()) as { asks: Array<{ askId: string; commentIds: string[] }> };
-        if (cancelled) return;
-        setActiveAskId(asks[0]?.askId ?? null);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // activeSession?.id and agentAsks.length are the meaningful triggers — the
-    // full activeSession object changes on every poll even when the id is stable,
-    // which would thrash this fetch on each heartbeat.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSession?.id, agentAsks.length]);
-
-  const pendingAsksBySession = useMemo(() => {
-    const map = new Map<string, PendingAskSummary>();
-    if (activeSession && agentAsks.length > 0 && activeAskId) {
-      // readyCount: number of ask cards with a non-empty draft reply
-      const readyCount = agentAsks.filter((c) =>
-        (agentDrafts.get(c.id) ?? '').trim().length > 0,
-      ).length;
-      map.set(activeSession.id, {
-        askId: activeAskId,
-        commentIds: agentAsks.map((c) => c.id),
-        agentName: agentAsks[0]?.author ?? 'Agent',
-        readyCount,
-      });
-    }
-    return map;
-  }, [activeSession, agentAsks, activeAskId, agentDrafts]);
-
-  const handleSendReplies = useCallback(
-    async (sessionId: string, askId: string) => {
-      const replies = agentAsks
-        .map((c) => {
-          const draft = (agentDrafts.get(c.id) ?? '').trim();
-          return draft ? { commentId: c.id, text: draft } : null;
-        })
-        .filter((r): r is { commentId: string; text: string } => r !== null);
-      if (replies.length === 0) return;
-      try {
-        const res = await fetch(`/api/review-sessions/${sessionId}/asks/${askId}/reply`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ replies }),
-        });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          showToast(`Send replies failed: ${body.error ?? `HTTP ${res.status}`}`);
-          return;
-        }
-        showToast('Replies sent to agent');
-      } catch (err) {
-        showToast(`Send replies failed: ${err instanceof Error ? err.message : 'network error'}`);
-      }
-    },
-    [agentAsks, agentDrafts, showToast],
-  );
-
-  // Called by ReviewBanner after the user releases the agent so the
-  // pending-ask UI state is cleared immediately (without waiting for the
-  // agentAsks.length change that would normally trigger the re-fetch).
-  const handleReleaseAsk = useCallback(() => {
-    setActiveAskId(null);
-  }, []);
-
-  // Toast on new agent ask (debounced)
+  // Toast on new agent ask (debounced). `lastSeenAskIdsRef` accumulates all
+  // ask IDs seen for the entire browser-tab lifetime (across file tabs and
+  // sessions), so switching to a tab whose asks were already seen earlier
+  // does not refire the toast. We rely on browser-tab reload to clear it —
+  // that's intentional, asks-from-yesterday warrant a re-notification.
   const lastSeenAskIdsRef = useRef<Set<string>>(new Set());
   const askToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didMountRef = useRef(false);
 
   useEffect(() => {
-    const currentIds = new Set(agentAsks.map((c) => c.id));
     let hasNew = false;
-    for (const id of currentIds) {
-      if (!lastSeenAskIdsRef.current.has(id)) {
+    const newlySeen: string[] = [];
+    for (const ask of agentAsks) {
+      if (!lastSeenAskIdsRef.current.has(ask.id)) {
         hasNew = true;
-        break;
+        newlySeen.push(ask.id);
       }
     }
-    lastSeenAskIdsRef.current = currentIds;
+    // Union (not replace) so cross-tab visits don't reset the seen set and
+    // re-toast the same asks the user saw on the previous tab.
+    for (const id of newlySeen) lastSeenAskIdsRef.current.add(id);
 
     if (!didMountRef.current) {
       didMountRef.current = true;
@@ -698,10 +607,6 @@ export default function App() {
     }
 
     if (!hasNew) return;
-    // Only fire when there's actually a pending ask on the server side.
-    // In fire-and-forget mode, agentAsks includes the agent-initiated comments
-    // but activeAskId stays null because no pendingAsk exists.
-    if (!activeAskId) return;
 
     if (askToastTimerRef.current) clearTimeout(askToastTimerRef.current);
     askToastTimerRef.current = setTimeout(() => {
@@ -709,7 +614,7 @@ export default function App() {
       const fileBase = activeFilePath ? activeFilePath.split('/').pop() : '';
       showToast(`${author} has a question${fileBase ? ` on ${fileBase}` : ''}`);
     }, 500);
-  }, [agentAsks, activeFilePath, activeAskId, showToast]);
+  }, [agentAsks, activeFilePath, showToast]);
 
 
   // Derive agentName (first agent-initiated comment author) per review session.
@@ -1834,21 +1739,8 @@ export default function App() {
         },
       });
     }
-    if (activeSession) {
-      const ask = pendingAsksBySession.get(activeSession.id);
-      if (ask && ask.readyCount === ask.commentIds.length) {
-        cmds.push({
-          id: 'send-replies-to-agent',
-          label: 'Send replies to agent',
-          section: 'Comments',
-          onExecute: () => {
-            void handleSendReplies(activeSession.id, ask.askId);
-          },
-        });
-      }
-    }
     return cmds;
-  }, [agentAsks, activeSession, pendingAsksBySession, requestCommentFocus, handleSendReplies]);
+  }, [agentAsks, requestCommentFocus]);
 
   const paletteCommands = useMemo(
     () => [
@@ -1918,9 +1810,6 @@ export default function App() {
         onBatchSent={handleBatchSent}
         showToast={showToast}
         commentIdsByFile={commentIdsByFile}
-        pendingAsksBySession={pendingAsksBySession}
-        onSendReplies={handleSendReplies}
-        onRelease={handleReleaseAsk}
         agentNamesBySession={agentNamesBySession}
       />
       <Toolbar
@@ -2288,9 +2177,6 @@ export default function App() {
                   requestedFocus={requestedCommentFocus}
                   onFocusHandled={() => setRequestedCommentFocus(null)}
                   sentCommentIds={sentCommentIds}
-                  agentAskCommentIds={activeAskId && agentAsks.length > 0 ? new Set(agentAsks.map((c) => c.id)) : undefined}
-                  agentDrafts={agentDrafts}
-                  onAgentDraftChange={handleAgentDraftChange}
                 />
               </div>
             </div>

@@ -146,6 +146,25 @@ describe('parseComments — agent-initiated fields', () => {
     const { comments } = parseComments(raw);
     expect(comments[0].agentInitiated).toBeUndefined();
     expect(comments[0].sessionId).toBeUndefined();
+    expect(comments[0].expectsReply).toBeUndefined();
+  });
+
+  it('round-trips expectsReply through parse (mdr_ask question)', () => {
+    const raw =
+      'Some text <!-- @comment{"id":"abc","anchor":"Some text","text":"q?","author":"Claude","timestamp":"2026-04-26T00:00:00.000Z","agentInitiated":true,"expectsReply":true,"sessionId":"rev_xyz"} -->Some text continues.';
+    const { comments } = parseComments(raw);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].agentInitiated).toBe(true);
+    expect(comments[0].expectsReply).toBe(true);
+    expect(comments[0].sessionId).toBe('rev_xyz');
+  });
+
+  it('agentInitiated without expectsReply (fire-and-forget mdr_review) parses correctly', () => {
+    const raw =
+      'Some text <!-- @comment{"id":"abc","anchor":"Some text","text":"fyi","author":"Claude","timestamp":"2026-04-26T00:00:00.000Z","agentInitiated":true,"sessionId":"rev_xyz"} -->Some text continues.';
+    const { comments } = parseComments(raw);
+    expect(comments[0].agentInitiated).toBe(true);
+    expect(comments[0].expectsReply).toBeUndefined();
   });
 });
 
@@ -365,6 +384,28 @@ describe('appendReply', () => {
     const parsed = parseComments(result);
     expect(parsed.comments[0].contextBefore).toBe('pre');
     expect(parsed.comments[0].contextAfter).toBe('post');
+    expect(parsed.comments[0].replies).toHaveLength(1);
+  });
+
+  it('preserves agentInitiated + sessionId but CLEARS expectsReply across appendReply', () => {
+    // The agent-question marker must survive a reply so the UI keeps the
+    // sidebar styling and the session linkage. But expectsReply is the
+    // "still pending" flag — once any reply lands, the question is no
+    // longer pending and the flag is cleared. selectAgentAsks also filters
+    // by replies.length, but persisting a stale flag is misleading.
+    const raw = `${marker({
+      id: 'c1',
+      anchor: 'foo',
+      agentInitiated: true,
+      expectsReply: true,
+      sessionId: 'rev_xyz',
+    })}foo`;
+    const reply = { id: 'r1', text: 'my answer', author: 'User', timestamp: '2026-01-01T00:00:00.000Z' };
+    const result = appendReply(raw, 'c1', reply);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].agentInitiated).toBe(true);
+    expect(parsed.comments[0].expectsReply).toBeUndefined();
+    expect(parsed.comments[0].sessionId).toBe('rev_xyz');
     expect(parsed.comments[0].replies).toHaveLength(1);
   });
 });

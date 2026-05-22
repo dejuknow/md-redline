@@ -24,6 +24,7 @@ const session: ReviewSession = {
   sentCommentIds: [],
   waitingForAgent: false,
   origin: 'user',
+  createdAt: '2026-01-01T00:00:00.000Z',
 };
 
 describe('ReviewBanner', () => {
@@ -481,184 +482,7 @@ describe('ReviewBanner', () => {
   });
 });
 
-describe('ReviewBanner — awaiting-reply state', () => {
-  function renderBanner(overrides: Partial<Parameters<typeof ReviewBanner>[0]> = {}) {
-    const defaultProps: Parameters<typeof ReviewBanner>[0] = {
-      sessions: [
-        {
-          id: 'rev_test',
-          filePaths: ['/tmp/a.md'],
-          enableResolve: false,
-          status: 'open',
-          sentCommentIds: [],
-          waitingForAgent: false,
-          origin: 'user',
-        },
-      ],
-      commentCounts: new Map([['/tmp/a.md', 0]]),
-      onHandoffSuccess: () => {},
-      onResolved: () => {},
-      commentIdsByFile: new Map(),
-      pendingAsksBySession: new Map([
-        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 0 }],
-      ]),
-      onSendReplies: vi.fn(),
-    };
-    return { props: { ...defaultProps, ...overrides }, ...render(<ReviewBanner {...{ ...defaultProps, ...overrides }} />) };
-  }
-
-  it('shows "Claude has N questions" copy when asks are pending', () => {
-    renderBanner();
-    expect(screen.getByText(/has 3 questions/i)).not.toBeNull();
-  });
-
-  it('disables Send replies until all replies are ready', () => {
-    renderBanner({
-      pendingAsksBySession: new Map([
-        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 1 }],
-      ]),
-    });
-    const btn = screen.getByRole('button', { name: /Send replies/i });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('enables Send replies once all replies are ready and triggers callback', () => {
-    const onSendReplies = vi.fn();
-    renderBanner({
-      pendingAsksBySession: new Map([
-        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 3 }],
-      ]),
-      onSendReplies,
-    });
-    const btn = screen.getByRole('button', { name: /Send replies/i });
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(btn);
-    expect(onSendReplies).toHaveBeenCalledWith('rev_test', 'ask_x');
-  });
-
-  it('hides Send & finish but shows Send batch when there are unsent comments in awaiting-reply state', () => {
-    renderBanner({
-      commentIdsByFile: new Map([['/tmp/a.md', ['new-c1']]]),
-    });
-    // Send batch should appear (there are unsent comments)
-    expect(screen.getByRole('button', { name: /Send \d+ comment/i })).not.toBeNull();
-    // Send & finish should not appear
-    expect(screen.queryByRole('button', { name: /Send \d+ & finish/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /Cancel review/i })).not.toBeNull();
-  });
-
-  it('hides Send batch in awaiting-reply state when there are no unsent comments', () => {
-    renderBanner({
-      commentIdsByFile: new Map(),
-    });
-    expect(screen.queryByRole('button', { name: /Send \d+ comment/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /Cancel review/i })).not.toBeNull();
-  });
-
-  it('falls back to waiting-for-batch state when ask has no commentIds', () => {
-    renderBanner({
-      pendingAsksBySession: new Map([
-        ['rev_test', { askId: 'ask_x', commentIds: [], agentName: 'Claude', readyCount: 0 }],
-      ]),
-    });
-    // Send replies should NOT appear; the existing batch state should.
-    expect(screen.queryByRole('button', { name: /Send replies/i })).toBeNull();
-  });
-
-  it('shows queued toast when server responds with queued:true', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, queued: true }) } as Response);
-    const showToast = vi.fn();
-    renderBanner({
-      commentIdsByFile: new Map([['/tmp/a.md', ['new-c1']]]),
-      showToast,
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Send \d+ comment/i }));
-    await waitFor(() => {
-      expect(showToast).toHaveBeenCalled();
-    });
-    expect((showToast.mock.calls[0][0] as string)).toContain('Queued');
-    expect((showToast.mock.calls[0][0] as string)).toContain('will send after your reply');
-  });
-
-  it('disables Send replies during an in-flight call', async () => {
-    let resolveSend: () => void = () => {};
-    const onSendReplies = vi.fn().mockImplementation(
-      () => new Promise<void>((r) => { resolveSend = r; }),
-    );
-    renderBanner({
-      pendingAsksBySession: new Map([
-        ['rev_test', { askId: 'ask_x', commentIds: ['c1', 'c2', 'c3'], agentName: 'Claude', readyCount: 3 }],
-      ]),
-      onSendReplies,
-    });
-    const btn = screen.getByRole('button', { name: /Send replies/i });
-    fireEvent.click(btn);
-    // Banner is now in busy state.
-    expect((screen.getByRole('button', { name: /Send replies/i }) as HTMLButtonElement).disabled).toBe(true);
-    resolveSend();
-  });
-
-  it('shows Release agent button when ask is pending', () => {
-    renderBanner();
-    expect(screen.getByRole('button', { name: /release agent/i })).not.toBeNull();
-  });
-
-  it('POSTs to /release endpoint when Release agent is clicked', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
-    renderBanner({
-      pendingAsksBySession: new Map([
-        ['rev_test', { askId: 'ask_X', commentIds: ['c1'], agentName: 'Claude', readyCount: 0 }],
-      ]),
-    });
-    fireEvent.click(screen.getByRole('button', { name: /release agent/i }));
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
-    });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toMatch(/asks\/ask_X\/release$/);
-    expect(init.method).toBe('POST');
-  });
-
-  it('shows confirmation toast after Release agent succeeds', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
-    const showToast = vi.fn();
-    renderBanner({ showToast });
-    fireEvent.click(screen.getByRole('button', { name: /release agent/i }));
-    await waitFor(() => {
-      expect(showToast).toHaveBeenCalled();
-    });
-    expect((showToast.mock.calls[0][0] as string).toLowerCase()).toContain('released');
-  });
-
-  it('shows error toast when Release agent POST returns non-2xx', async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 404,
-      json: async () => ({ error: 'Ask not found' }),
-    } as Response);
-    const showToast = vi.fn();
-    renderBanner({ showToast });
-    fireEvent.click(screen.getByRole('button', { name: /release agent/i }));
-    await waitFor(() => {
-      expect(showToast).toHaveBeenCalled();
-    });
-    expect((showToast.mock.calls[0][0] as string).toLowerCase()).toContain('release failed');
-  });
-
-  it('disables Release agent button while the request is in flight', async () => {
-    let resolveRelease: (value: Response) => void = () => {};
-    fetchMock.mockImplementation(
-      () => new Promise<Response>((r) => { resolveRelease = r; }),
-    );
-    renderBanner();
-    const btn = screen.getByRole('button', { name: /release agent/i });
-    fireEvent.click(btn);
-    expect((screen.getByRole('button', { name: /release agent/i }) as HTMLButtonElement).disabled).toBe(true);
-    resolveRelease({ ok: true, json: async () => ({ ok: true }) } as Response);
-  });
-});
-
-describe('ReviewBanner — agent-reviewing state', () => {
+describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-and-forget)', () => {
   const agentSession: ReviewSession = {
     id: 'rev_agent',
     filePaths: ['/tmp/spec-a.md'],
@@ -667,75 +491,92 @@ describe('ReviewBanner — agent-reviewing state', () => {
     sentCommentIds: [],
     waitingForAgent: false,
     origin: 'agent',
+    createdAt: '2026-01-01T00:00:00.000Z',
     lastAgentActivityAt: null,
   };
 
-  it('renders the active agent review banner with no count before any comments arrive', () => {
-    render(
-      <ReviewBanner
-        sessions={[agentSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', []]])}
-      />,
-    );
-
-    const banner = screen.getByTestId('review-banner');
-    expect(banner.textContent?.toLowerCase()).toContain('is reviewing');
-    // No spinner before any activity (lastAgentActivityAt is null)
-    expect(banner.querySelector('[role="status"]')).toBeNull();
-    // Static dot is shown instead
-    expect(banner.querySelector('[aria-hidden]')).not.toBeNull();
-    // No count phrase before any comments arrive
-    expect(banner.textContent?.toLowerCase()).not.toContain('comments so far');
-    // Dismiss button is present from the start
-    expect(screen.getByRole('button', { name: /dismiss/i })).not.toBeNull();
-  });
-
-  it('renders the active agent review banner with count when comments exist', () => {
-    // Recent activity — spinner should show
-    const recentActivitySession: ReviewSession = {
-      ...agentSession,
-      lastAgentActivityAt: new Date(Date.now() - 5_000).toISOString(), // 5s ago
+  // Helper for rendering an agent-origin session banner
+  function renderAgentBanner(overrides: Partial<Parameters<typeof ReviewBanner>[0]> = {}) {
+    const defaultProps: Parameters<typeof ReviewBanner>[0] = {
+      sessions: [agentSession],
+      commentCounts: new Map([['/tmp/spec-a.md', 0]]),
+      agentCommentCounts: new Map([['/tmp/spec-a.md', 0]]),
+      onHandoffSuccess: () => {},
+      onResolved: () => {},
+      commentIdsByFile: new Map([['/tmp/spec-a.md', []]]),
+      agentNamesBySession: new Map([['rev_agent', 'Claude']]),
     };
-    render(
-      <ReviewBanner
-        sessions={[recentActivitySession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 3]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2', 'c3']]])}
-        agentNamesBySession={new Map([['rev_agent', 'Claude']])}
-      />,
-    );
+    return render(<ReviewBanner {...{ ...defaultProps, ...overrides }} />);
+  }
 
+  it('shows "Done" button for agent sessions', () => {
+    renderAgentBanner();
+    expect(screen.getByRole('button', { name: /^done$/i })).not.toBeNull();
+  });
+
+  it('shows "is reviewing" copy in the banner', () => {
+    renderAgentBanner();
     const banner = screen.getByTestId('review-banner');
     expect(banner.textContent?.toLowerCase()).toContain('is reviewing');
-    // Spinner is present for recent activity
-    expect(banner.querySelector('[role="status"]')).not.toBeNull();
-    // Comment count is shown
-    expect(banner.textContent).toContain('3 comments so far');
-    expect(screen.getByRole('button', { name: /dismiss/i })).not.toBeNull();
   });
+
+  it('Done POSTs to /agent-done and calls onResolved', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const onResolved = vi.fn();
+    renderAgentBanner({ onResolved });
+
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/review-sessions/rev_agent/agent-done',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    expect(onResolved).toHaveBeenCalled();
+  });
+
+  it('shows error toast when Done POST returns non-2xx', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'Already done' }),
+    } as Response);
+    const showToast = vi.fn();
+    renderAgentBanner({ showToast });
+
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+
+    await waitFor(() => {
+      expect(showToast).toHaveBeenCalled();
+    });
+    expect((showToast.mock.calls[0][0] as string).toLowerCase()).toContain('done failed');
+  });
+
+  it('button is disabled while request is in flight', async () => {
+    let resolveDone: (value: Response) => void = () => {};
+    fetchMock.mockImplementation(
+      () => new Promise<Response>((r) => { resolveDone = r; }),
+    );
+    renderAgentBanner();
+
+    const btn = screen.getByRole('button', { name: /^done$/i });
+    fireEvent.click(btn);
+    expect((screen.getByRole('button', { name: /^done$/i }) as HTMLButtonElement).disabled).toBe(true);
+    resolveDone({ ok: true, json: async () => ({ ok: true }) } as Response);
+  });
+
+  // ─── Spinner / dot indicator ─────────────────────────────────────────────
 
   it('shows spinner when lastAgentActivityAt is recent (within 30s)', () => {
     const activeSession: ReviewSession = {
       ...agentSession,
-      lastAgentActivityAt: new Date(Date.now() - 10_000).toISOString(), // 10s ago
+      lastAgentActivityAt: new Date(Date.now() - 10_000).toISOString(),
     };
-    render(
-      <ReviewBanner
-        sessions={[activeSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 1]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']]])}
-      />,
-    );
+    renderAgentBanner({
+      sessions: [activeSession],
+      agentCommentCounts: new Map([['/tmp/spec-a.md', 1]]),
+    });
     const banner = screen.getByTestId('review-banner');
     expect(banner.querySelector('[role="status"]')).not.toBeNull();
   });
@@ -743,54 +584,46 @@ describe('ReviewBanner — agent-reviewing state', () => {
   it('shows static dot when lastAgentActivityAt is stale (older than 30s)', () => {
     const staleSession: ReviewSession = {
       ...agentSession,
-      lastAgentActivityAt: new Date(Date.now() - 60_000).toISOString(), // 60s ago
+      lastAgentActivityAt: new Date(Date.now() - 60_000).toISOString(),
     };
-    render(
-      <ReviewBanner
-        sessions={[staleSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 1]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']]])}
-      />,
-    );
+    renderAgentBanner({ sessions: [staleSession] });
     const banner = screen.getByTestId('review-banner');
     expect(banner.querySelector('[role="status"]')).toBeNull();
     expect(banner.querySelector('[aria-hidden]')).not.toBeNull();
   });
 
-  it('shows static dot when lastAgentActivityAt is null (no activity yet)', () => {
-    render(
-      <ReviewBanner
-        sessions={[agentSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', []]])}
-      />,
-    );
+  it('shows static dot when lastAgentActivityAt is null', () => {
+    renderAgentBanner();
     const banner = screen.getByTestId('review-banner');
     expect(banner.querySelector('[role="status"]')).toBeNull();
     expect(banner.querySelector('[aria-hidden]')).not.toBeNull();
   });
+
+  // ─── Comment count ──────────────────────────────────────────────────────
+
+  it('shows comment count when comments exist', () => {
+    renderAgentBanner({
+      agentCommentCounts: new Map([['/tmp/spec-a.md', 3]]),
+    });
+    const banner = screen.getByTestId('review-banner');
+    expect(banner.textContent).toContain('3 comments');
+  });
+
+  it('does not show comment count before any comments arrive', () => {
+    renderAgentBanner();
+    const banner = screen.getByTestId('review-banner');
+    expect(banner.textContent?.toLowerCase()).not.toContain('comments');
+  });
+
+  // ─── Agent name ─────────────────────────────────────────────────────────
 
   it('uses "Agent" fallback name when agentNamesBySession is absent', () => {
-    render(
-      <ReviewBanner
-        sessions={[agentSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 2]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']]])}
-      />,
-    );
-
+    renderAgentBanner({ agentNamesBySession: undefined });
     const banner = screen.getByTestId('review-banner');
     expect(banner.textContent?.toLowerCase()).toContain('agent is reviewing');
   });
+
+  // ─── User-origin session doesn't use the unified banner ─────────────────
 
   it('does not show the agent-reviewing banner for user-origin sessions', () => {
     const userSession: ReviewSession = {
@@ -798,78 +631,17 @@ describe('ReviewBanner — agent-reviewing state', () => {
       id: 'rev_user',
       origin: 'user',
     };
-
-    render(
-      <ReviewBanner
-        sessions={[userSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', []]])}
-      />,
-    );
-
+    renderAgentBanner({ sessions: [userSession] });
     const banner = screen.getByTestId('review-banner');
     expect(banner.textContent?.toLowerCase()).not.toContain('is reviewing');
   });
 
-  it('pending-ask banner takes priority over agent-reviewing banner', () => {
-    render(
-      <ReviewBanner
-        sessions={[agentSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        onHandoffSuccess={() => {}}
-        onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', []]])}
-        pendingAsksBySession={new Map([
-          ['rev_agent', { askId: 'ask_1', commentIds: ['c1'], agentName: 'Claude', readyCount: 0 }],
-        ])}
-        onSendReplies={vi.fn()}
-      />,
-    );
-
-    // Should show the pending-ask state, not the agent-reviewing state
-    expect(screen.getByText(/has 1 question/i)).not.toBeNull();
-    const banner = screen.getByTestId('review-banner');
-    expect(banner.textContent?.toLowerCase()).not.toContain('is reviewing');
-  });
-
-  it('Dismiss POSTs to /abort and calls onResolved', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
-    const onResolved = vi.fn();
-
-    render(
-      <ReviewBanner
-        sessions={[agentSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0]])}
-        agentCommentCounts={new Map([['/tmp/spec-a.md', 1]])}
-        onHandoffSuccess={() => {}}
-        onResolved={onResolved}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']]])}
-        agentNamesBySession={new Map([['rev_agent', 'Gemini']])}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/review-sessions/rev_agent/abort',
-        expect.objectContaining({ method: 'POST' }),
-      );
-    });
-    expect(onResolved).toHaveBeenCalled();
-  });
-
-  it('user-origin session still renders the "Agent is waiting" banner (regression guard)', () => {
+  it('user-origin session renders the "Agent is waiting" banner (regression guard)', () => {
     const userSession: ReviewSession = {
       ...agentSession,
       id: 'rev_user2',
       origin: 'user',
     };
-
     render(
       <ReviewBanner
         sessions={[userSession]}
@@ -880,8 +652,76 @@ describe('ReviewBanner — agent-reviewing state', () => {
         commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2', 'c3']]])}
       />,
     );
-
     const banner = screen.getByTestId('review-banner');
     expect(banner.textContent?.toLowerCase()).toContain('agent is waiting on your review');
+  });
+});
+
+describe('Agent session Done button', () => {
+  const agentSession: ReviewSession = {
+    id: 'rev_agent_1',
+    filePaths: ['/tmp/prd.md'],
+    enableResolve: false,
+    status: 'open',
+    sentCommentIds: [],
+    waitingForAgent: false,
+    origin: 'agent',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    lastAgentActivityAt: null,
+  };
+
+  it('renders Done button for agent sessions', () => {
+    render(
+      <ReviewBanner
+        sessions={[agentSession]}
+        commentCounts={new Map([['/tmp/prd.md', 0]])}
+        onHandoffSuccess={() => {}}
+        onResolved={() => {}}
+        commentIdsByFile={new Map([['/tmp/prd.md', []]])}
+        agentCommentCounts={new Map([['/tmp/prd.md', 2]])}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /^done$/i })).not.toBeNull();
+  });
+
+  it('Done button POSTs to /agent-done then calls onResolved', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const onResolved = vi.fn();
+
+    render(
+      <ReviewBanner
+        sessions={[agentSession]}
+        commentCounts={new Map([['/tmp/prd.md', 0]])}
+        onHandoffSuccess={() => {}}
+        onResolved={onResolved}
+        commentIdsByFile={new Map([['/tmp/prd.md', []]])}
+        agentCommentCounts={new Map([['/tmp/prd.md', 2]])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/review-sessions/rev_agent_1/agent-done',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    expect(onResolved).toHaveBeenCalled();
+  });
+
+  it('Done button shows correct agent name from agentNamesBySession', () => {
+    render(
+      <ReviewBanner
+        sessions={[agentSession]}
+        commentCounts={new Map([['/tmp/prd.md', 0]])}
+        onHandoffSuccess={() => {}}
+        onResolved={() => {}}
+        commentIdsByFile={new Map([['/tmp/prd.md', []]])}
+        agentCommentCounts={new Map([['/tmp/prd.md', 3]])}
+        agentNamesBySession={new Map([['rev_agent_1', 'Codex']])}
+      />,
+    );
+    expect(screen.getByText(/Codex is reviewing/)).not.toBeNull();
   });
 });

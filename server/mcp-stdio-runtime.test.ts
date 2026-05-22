@@ -4,6 +4,7 @@ import type { AskWaitResult, MdrClient } from './mcp-stdio/types';
 import {
   handleAskToolCall,
   handleReviewToolCall,
+  handleWaitToolCall,
   __resetOpenedBrowserUrlsForTests,
 } from './mcp-stdio/handler';
 import { createMdrClient } from './mcp-stdio/client';
@@ -22,6 +23,9 @@ describe('handleRequestReviewToolCall', () => {
       abortSession: vi.fn(),
       postAgentComments: vi.fn(),
       waitForAsk: vi.fn(),
+      postReview: vi.fn(),
+      releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
       ...overrides,
     } as MdrClient;
   }
@@ -139,6 +143,7 @@ describe('handleRequestReviewToolCall', () => {
       waitForAsk: vi.fn(),
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
     };
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
@@ -169,6 +174,7 @@ describe('handleRequestReviewToolCall', () => {
       waitForAsk: vi.fn(),
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
     };
     const openInBrowser = vi.fn();
 
@@ -435,6 +441,9 @@ describe('handleAskToolCall', () => {
         status: 'reply',
         replies: [{ questionIndex: 0, text: 'the answer' }],
       }),
+      postReview: vi.fn(),
+      releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
       ...overrides,
     } as MdrClient;
   }
@@ -483,13 +492,20 @@ describe('handleAskToolCall', () => {
     expect(result.content[0].text).toContain('failedComments');
   });
 
-  it('aborts the ask when the cancellation signal fires', async () => {
+  it('releases the ask (not the whole session) when the cancellation signal fires', async () => {
+    // Loop 3 H2: MCP tool-cancel for mdr_ask must release just the ask, not
+    // tear down the entire shared session. Releasing resolves the waiter
+    // with no_reply/released; the session lives on for any pending
+    // mdr_wait or continued review.
     let resolveWait!: (v: AskWaitResult) => void;
     const waitPromise = new Promise<AskWaitResult>((r) => (resolveWait = r));
+    let capturedAskId = '';
     const client = makeMockClient({
+      postAgentComments: vi.fn().mockResolvedValue({ askId: 'ask_signal_test' }),
       waitForAsk: vi.fn().mockReturnValue(waitPromise),
-      abortSession: vi.fn().mockImplementation(async () => {
-        resolveWait({ status: 'no_reply', reason: 'cancelled' });
+      releaseAsk: vi.fn().mockImplementation(async (_sid: string, askId: string) => {
+        capturedAskId = askId;
+        resolveWait({ status: 'no_reply', reason: 'released' });
       }),
     });
     const ac = new AbortController();
@@ -499,188 +515,168 @@ describe('handleAskToolCall', () => {
     );
     setTimeout(() => ac.abort(), 5);
     const result = await promise;
-    expect(client.abortSession).toHaveBeenCalledWith('rev_xyz');
+    expect(client.releaseAsk).toHaveBeenCalledWith('rev_xyz', 'ask_signal_test');
+    expect(capturedAskId).toBe('ask_signal_test');
+    expect(client.abortSession).not.toHaveBeenCalled();
+    // Loop 2 (4th run) reworded the 'released' message — no user-facing
+    // "Release agent" button exists; the only producer is the agent's own
+    // tool-cancel via cancelListener. Message now reflects that.
+    expect(result.content[0].text).toContain('cancelled');
+  });
+
+  it('eager-releases the ask when signal is already aborted at await postAgentComments', async () => {
+    // Regression guard for Loop 2's eager-cancel race fix: if the signal
+    // fires BEFORE the cancelListener is registered (i.e. between
+    // postAgentComments resolving and the addEventListener call), the
+    // listener never fires and the server-side ask would otherwise hang
+    // until the heartbeat sweep. The eager `if (ctx.signal?.aborted)` check
+    // after the post-await must fire releaseAsk before installing the
+    // listener.
+    //
+    // Deterministic exercise of the eager branch: signal is ALREADY aborted
+    // when handleAskToolCall starts, so the check trips on first reach.
+    let capturedAskId = '';
+    const client = makeMockClient({
+      postAgentComments: vi.fn().mockResolvedValue({ askId: 'ask_eager_test' }),
+      releaseAsk: vi.fn().mockImplementation(async (_sid: string, askId: string) => {
+        capturedAskId = askId;
+      }),
+    });
+    const ac = new AbortController();
+    ac.abort(); // already aborted BEFORE handleAskToolCall runs
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_eager', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: ac.signal },
+    );
+    expect(client.postAgentComments).toHaveBeenCalled();
+    expect(client.releaseAsk).toHaveBeenCalledWith('rev_eager', 'ask_eager_test');
+    expect(capturedAskId).toBe('ask_eager_test');
+    // The eager-cancel path returns immediately without entering waitForAsk.
+    expect(client.waitForAsk).not.toHaveBeenCalled();
     expect(result.content[0].text).toContain('cancelled');
   });
 });
 
-describe('handleReviewToolCall', () => {
-  const baseCtx = {
-    baseUrl: 'http://localhost:3000',
-    openInBrowser: vi.fn().mockResolvedValue(undefined),
-    getUserSettings: vi.fn().mockResolvedValue({ defaultAgentReviewWait: false }),
-  };
+describe('handleWaitToolCall', () => {
+  function makeWaitClient(overrides: Partial<MdrClient> = {}): MdrClient {
+    return {
+      grantAccess: vi.fn(),
+      createSession: vi.fn(),
+      waitForSession: vi.fn(),
+      abortSession: vi.fn(),
+      postAgentComments: vi.fn(),
+      waitForAsk: vi.fn(),
+      postReview: vi.fn(),
+      releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
+      ...overrides,
+    } as MdrClient;
+  }
 
-  it('fire-and-forget happy path returns immediately', async () => {
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
+  it('returns done message when user clicks Done', async () => {
+    const client = makeWaitClient({
+      waitForReview: vi.fn().mockResolvedValue({ status: 'done' }),
+    });
+    const result = await handleWaitToolCall(
+      { sessionId: 'rev_1' },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    expect(result.content[0].text).toContain('finished engaging');
+    expect(result.content[0].text).toContain('Read the file');
+    expect(client.waitForReview).toHaveBeenCalledWith('rev_1', 90);
+  });
+
+  it('returns pending message when timeout elapses', async () => {
+    const client = makeWaitClient({
+      waitForReview: vi.fn().mockResolvedValue({ status: 'pending' }),
+    });
+    const result = await handleWaitToolCall(
+      { sessionId: 'rev_1' },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    expect(result.content[0].text).toContain('still reviewing');
+    expect(result.content[0].text).toContain('rev_1');
+    expect(result.content[0].text).toContain('mdr_wait');
+  });
+
+  it('sends progress while waiting', async () => {
+    const client = makeWaitClient({
+      waitForReview: vi.fn().mockResolvedValue({ status: 'done' }),
+    });
+    const sendProgress = vi.fn();
+    await handleWaitToolCall(
+      { sessionId: 'rev_1' },
+      { client, sendProgress, signal: undefined },
+    );
+    expect(sendProgress).toHaveBeenCalledWith(expect.stringContaining('rev_1'));
+  });
+});
+
+describe('handleReviewToolCall (fire-and-forget)', () => {
+  function makeReviewClient(overrides: Partial<MdrClient> = {}): MdrClient {
+    return {
+      grantAccess: vi.fn(),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
-      postReview: vi.fn().mockResolvedValue({ commentsWritten: 2, repliesWritten: 0 }),
-    };
+      waitForSession: vi.fn(),
+      abortSession: vi.fn(),
+      postAgentComments: vi.fn(),
+      waitForAsk: vi.fn(),
+      postReview: vi.fn().mockResolvedValue({ commentsWritten: 2, repliesWritten: 0, commentIds: ['c1', 'c2'] }),
+      releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
+      ...overrides,
+    } as MdrClient;
+  }
+
+  it('posts comments and returns immediately with sessionId and count', async () => {
+    const client = makeReviewClient();
     const result = await handleReviewToolCall(
       {
-        filePaths: ['/tmp/a.md'],
+        filePaths: ['/abs/a.md'],
         comments: [
-          { filePath: '/tmp/a.md', anchor: 'a', text: 'x' },
-          { filePath: '/tmp/a.md', anchor: 'b', text: 'y' },
+          { filePath: '/abs/a.md', anchor: 'foo', text: 'bar', author: 'Claude' },
         ],
       },
-      { client: client as unknown as MdrClient, ...baseCtx },
+      { client, openInBrowser: vi.fn().mockResolvedValue(undefined), baseUrl: 'http://localhost:5188' },
     );
-    expect(result.isError).toBeFalsy();
-    expect(client.postReview).toHaveBeenCalledWith('rev_1', expect.objectContaining({ expectsReply: false }));
+    expect(result.content[0].text).toContain('2 comment');
+    expect(result.content[0].text).toContain('rev_1');
+    expect(result.content[0].text).toContain('mdr_wait');
+    // Must NOT have called waitForAsk or waitForReview
+    expect(client.waitForAsk).not.toHaveBeenCalled();
+    expect(client.waitForReview).not.toHaveBeenCalled();
   });
 
-  it('omitted waitForResponse defaults to user setting', async () => {
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
-      postReview: vi.fn().mockResolvedValue({ askId: 'ask_1', commentsWritten: 1, repliesWritten: 0 }),
-      waitForAsk: vi.fn().mockResolvedValue({ status: 'reply', replies: [{ questionIndex: 0, text: 'ok' }] }),
-    };
-    const ctx = {
-      ...baseCtx,
-      getUserSettings: vi.fn().mockResolvedValue({ defaultAgentReviewWait: true }),
-    };
-    await handleReviewToolCall(
-      {
-        filePaths: ['/tmp/a.md'],
-        comments: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'x' }],
-      },
-      { client: client as unknown as MdrClient, ...ctx },
-    );
-    expect(client.postReview).toHaveBeenCalledWith('rev_1', expect.objectContaining({ expectsReply: true }));
-    expect(client.waitForAsk).toHaveBeenCalledWith('rev_1', 'ask_1');
-  });
-
-  it('explicit waitForResponse=false overrides user setting', async () => {
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
-      postReview: vi.fn().mockResolvedValue({ commentsWritten: 1, repliesWritten: 0 }),
-    };
-    const ctx = {
-      ...baseCtx,
-      getUserSettings: vi.fn().mockResolvedValue({ defaultAgentReviewWait: true }),
-    };
-    await handleReviewToolCall(
-      {
-        filePaths: ['/tmp/a.md'],
-        comments: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'x' }],
-        waitForResponse: false,
-      },
-      { client: client as unknown as MdrClient, ...ctx },
-    );
-    expect(client.postReview).toHaveBeenCalledWith('rev_1', expect.objectContaining({ expectsReply: false }));
-  });
-
-  it('surfaces no_reply with reason released', async () => {
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
-      postReview: vi.fn().mockResolvedValue({ askId: 'ask_1', commentsWritten: 1, repliesWritten: 0 }),
-      waitForAsk: vi.fn().mockResolvedValue({ status: 'no_reply', reason: 'released' }),
-    };
-    const result = await handleReviewToolCall(
-      {
-        filePaths: ['/tmp/a.md'],
-        comments: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'x' }],
-        waitForResponse: true,
-      },
-      { client: client as unknown as MdrClient, ...baseCtx },
-    );
-    expect(result.content[0].text).toMatch(/released/);
-    expect(result.content[0].text).toMatch(/may reply later/);
-  });
-
-  it('opens the browser on first session creation (created=true)', async () => {
+  it('opens browser on first call, skips on dedupe', async () => {
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
-      createSession: vi.fn().mockResolvedValue({
-        sessionId: 'rev_1',
-        url: '/?review=rev_1',
-        created: true,
-      }),
-      postReview: vi.fn().mockResolvedValue({ commentsWritten: 1, repliesWritten: 0 }),
-    };
+    const client = makeReviewClient({
+      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
+    });
     await handleReviewToolCall(
-      {
-        filePaths: ['/tmp/a.md'],
-        comments: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'x' }],
-      },
-      {
-        client: client as unknown as MdrClient,
-        baseUrl: 'http://localhost:3000',
-        openInBrowser,
-        getUserSettings: vi.fn().mockResolvedValue({ defaultAgentReviewWait: false }),
-      },
-    );
-    expect(openInBrowser).toHaveBeenCalledTimes(1);
-    expect(openInBrowser).toHaveBeenCalledWith('http://localhost:3000/?review=rev_1');
-  });
-
-  it('does NOT open the browser when reusing an existing session (created=false)', async () => {
-    const openInBrowser = vi.fn().mockResolvedValue(undefined);
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
-      createSession: vi.fn().mockResolvedValue({
-        sessionId: 'rev_1',
-        url: '/?review=rev_1',
-        created: false,
-      }),
-      postReview: vi.fn().mockResolvedValue({ commentsWritten: 1, repliesWritten: 0 }),
-    };
-    await handleReviewToolCall(
-      {
-        filePaths: ['/tmp/a.md'],
-        comments: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'x' }],
-      },
-      {
-        client: client as unknown as MdrClient,
-        baseUrl: 'http://localhost:3000',
-        openInBrowser,
-        getUserSettings: vi.fn().mockResolvedValue({ defaultAgentReviewWait: false }),
-      },
+      { filePaths: ['/abs/a.md'], comments: [{ filePath: '/abs/a.md', anchor: 'x', text: 'y', author: 'Claude' }] },
+      { client, openInBrowser, baseUrl: 'http://localhost:5188' },
     );
     expect(openInBrowser).not.toHaveBeenCalled();
   });
 
   it('opens the browser AT MOST ONCE per URL even if created=true is returned repeatedly', async () => {
-    // Defensive case: even if something upstream lies about `created`, the
-    // module-scoped openedUrls set prevents duplicate tabs for the same URL.
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
-    const client = {
-      grantAccess: vi.fn().mockResolvedValue(undefined),
-      // Returns created: true on every call (the buggy upstream we're defending against).
-      createSession: vi.fn().mockResolvedValue({
-        sessionId: 'rev_1',
-        url: '/?review=rev_1',
-        created: true,
-      }),
-      postReview: vi.fn().mockResolvedValue({ commentsWritten: 1, repliesWritten: 0 }),
-    };
-    const ctx = {
-      client: client as unknown as MdrClient,
-      baseUrl: 'http://localhost:3000',
-      openInBrowser,
-      getUserSettings: vi.fn().mockResolvedValue({ defaultAgentReviewWait: false }),
-    };
+    const client = makeReviewClient({
+      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
+    });
     const input = {
-      filePaths: ['/tmp/a.md'],
-      comments: [{ filePath: '/tmp/a.md', anchor: 'a', text: 'x' }],
+      filePaths: ['/abs/a.md'],
+      comments: [{ filePath: '/abs/a.md', anchor: 'a', text: 'x' }],
     };
-    // Call the handler three times — simulating a batched agent making
-    // multiple successive mdr_review tool calls.
-    await handleReviewToolCall(input, ctx);
-    await handleReviewToolCall(input, ctx);
-    await handleReviewToolCall(input, ctx);
+    await handleReviewToolCall(input, { client, openInBrowser, baseUrl: 'http://localhost:3000' });
+    await handleReviewToolCall(input, { client, openInBrowser, baseUrl: 'http://localhost:3000' });
+    await handleReviewToolCall(input, { client, openInBrowser, baseUrl: 'http://localhost:3000' });
     expect(openInBrowser).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('createMdrClient HTTP methods', () => {
-  it('postReview sends comments + replies + expectsReply', async () => {
+  it('postReview sends comments + replies (fire-and-forget, no expectsReply)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ commentIds: ['cmt_1'], commentsWritten: 1, repliesWritten: 0 }), { status: 201 }),
     );
@@ -690,14 +686,13 @@ describe('createMdrClient HTTP methods', () => {
     const result = await client.postReview('rev_xyz', {
       comments: [{ filePath: '/tmp/a.md', anchor: 'hi', text: 't' }],
       replies: [],
-      expectsReply: false,
     });
     expect(result.commentsWritten).toBe(1);
     expect(fetchSpy).toHaveBeenCalledWith(
       'http://localhost:3000/api/review-sessions/rev_xyz/agent-comments',
       expect.objectContaining({
         method: 'POST',
-        body: expect.stringContaining('"expectsReply":false'),
+        body: expect.not.stringContaining('expectsReply'),
       }),
     );
   });

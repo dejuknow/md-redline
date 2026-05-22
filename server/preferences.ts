@@ -22,7 +22,6 @@ export interface AppSettings {
   enableResolve?: boolean;
   quickComment?: boolean;
   mermaidFullscreenPanelCollapsed?: boolean;
-  defaultAgentReviewWait?: boolean;
 }
 
 export interface Preferences {
@@ -77,9 +76,6 @@ function sanitizeSettings(value: unknown): AppSettings | undefined {
   if (typeof value.quickComment === 'boolean') out.quickComment = value.quickComment;
   if (typeof value.mermaidFullscreenPanelCollapsed === 'boolean') {
     out.mermaidFullscreenPanelCollapsed = value.mermaidFullscreenPanelCollapsed;
-  }
-  if (typeof value.defaultAgentReviewWait === 'boolean') {
-    out.defaultAgentReviewWait = value.defaultAgentReviewWait;
   }
   return out;
 }

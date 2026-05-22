@@ -8,6 +8,8 @@ export interface ReviewSession {
   sentCommentIds: string[];
   waitingForAgent: boolean;
   origin: 'user' | 'agent';
+  /** ISO timestamp when the session was created. Always populated by the server's toPublic; used to tiebreak overlapping sessions for the same file. */
+  createdAt: string;
   /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
   lastAgentActivityAt?: string | null;
 }
@@ -123,10 +125,39 @@ export function useReviewSession() {
   return { sessions, refresh };
 }
 
+/**
+ * Find the session that should drive UX for `filePath`. When multiple
+ * sessions overlap on the same file (e.g. a user-origin session created
+ * earlier and an agent-origin session opened by an `mdr_review` call),
+ * prefer agent-origin first — the agent banner and ask UI take priority
+ * over the user's own review flow. Within a tier, prefer the most-recently
+ * created session so a freshly opened review wins over a stale one.
+ */
 export function findActiveSessionForFile(
   sessions: ReviewSession[],
   filePath: string | null,
 ): ReviewSession | null {
   if (!filePath) return null;
-  return sessions.find((s) => s.filePaths.includes(filePath)) ?? null;
+  // Explicit status filter: even though the API only returns open sessions
+  // today, this keeps the invariant local — a terminal session sitting in
+  // the local cache (e.g. between the abort and the next poll) must not be
+  // returned as "active."
+  const matches = sessions.filter(
+    (s) => s.status === 'open' && s.filePaths.includes(filePath),
+  );
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  const parsedCreatedAt = (s: ReviewSession): number => {
+    const t = Date.parse(s.createdAt);
+    return Number.isFinite(t) ? t : 0;
+  };
+  // Tuple comparator: agent-origin first, then most-recent createdAt.
+  // Avoids fudge-math (originRank * 1e15) that would break if epoch ms ever
+  // exceed that magnitude.
+  return matches.reduce((best, candidate) => {
+    const candAgent = candidate.origin === 'agent';
+    const bestAgent = best.origin === 'agent';
+    if (candAgent !== bestAgent) return candAgent ? candidate : best;
+    return parsedCreatedAt(candidate) > parsedCreatedAt(best) ? candidate : best;
+  });
 }

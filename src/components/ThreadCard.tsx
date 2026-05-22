@@ -12,12 +12,6 @@ export interface ThreadCardProps {
   anchorMissing?: boolean;
   /** Whether this comment has already been sent to the reviewing agent. */
   sent?: boolean;
-  /** Whether this is an agent-initiated question (adds pill, hides Resolve/Delete/Edit). */
-  agentQuestion?: boolean;
-  /** Controlled draft reply text for agent-question cards (always-visible textarea). */
-  draftReply?: string;
-  /** Called when the draft reply textarea value changes. */
-  onDraftReplyChange?: (commentId: string, text: string) => void;
   /** Optional externally-managed editor state. When omitted, ThreadCard manages editor state internally. */
   editor?: SidebarCommentEditorState;
   onRequestCommentEdit?: (commentId: string) => void;
@@ -52,9 +46,6 @@ export function ThreadCard({
   divRef,
   anchorMissing,
   sent,
-  agentQuestion,
-  draftReply,
-  onDraftReplyChange,
   editor: externalEditor,
   onRequestCommentEdit: externalRequestCommentEdit,
   onRequestReplyCompose: externalRequestReplyCompose,
@@ -111,9 +102,6 @@ export function ThreadCard({
         isActive={active}
         anchorMissing={anchorMissing}
         sent={sent}
-        agentQuestion={agentQuestion}
-        draftReply={draftReply}
-        onDraftReplyChange={onDraftReplyChange}
         onActivate={onSelect}
         onResolve={onResolve}
         onUnresolve={onUnresolve}
