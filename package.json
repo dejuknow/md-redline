@@ -36,9 +36,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"tsx server/index.ts\" \"vite\"",
+    "dev": "concurrently -n server,client,mcp -c blue,green,magenta \"tsx server/index.ts\" \"vite\" \"npm run dev:mcp\"",
     "dev:server": "tsx server/index.ts",
     "dev:client": "vite",
+    "dev:mcp": "esbuild server/mcp-stdio.ts --bundle --platform=node --format=esm --outfile=dist/mcp-stdio.js --external:@modelcontextprotocol/sdk --watch",
     "build": "tsc -b && vite build && npm run build:server",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:hono --external:@hono/node-server && esbuild server/mcp-stdio.ts --bundle --platform=node --format=esm --outfile=dist/mcp-stdio.js --external:@modelcontextprotocol/sdk",
     "prepublishOnly": "npm run build",

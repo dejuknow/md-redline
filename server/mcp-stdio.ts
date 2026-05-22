@@ -7,9 +7,10 @@
 
 export { validateRequestReviewInput, validateContinueReviewInput, validateAskInput } from './mcp-stdio/validate';
 export { createMdrClient } from './mcp-stdio/client';
-export { handleRequestReviewToolCall, handleContinueReviewToolCall } from './mcp-stdio/handler';
+export { handleRequestReviewToolCall, handleContinueReviewToolCall, handleReviewToolCall } from './mcp-stdio/handler';
 export type { ContinueReviewInput } from './mcp-stdio/validate';
 export { runMcpServer } from './mcp-stdio/server';
+export { readPreferences } from './preferences';
 // handleContinueReviewToolCall and validateContinueReviewInput are still
 // exported for backward compatibility, but the continue behavior is now
 // handled by mdr_request_review with a sessionId parameter.
@@ -22,6 +23,7 @@ export type {
   MdrClient,
   PostAgentCommentsResult,
   RequestReviewInput,
+  ReviewInput,
   RunMcpServerOptions,
   ToolCallContext,
   ToolCallResult,

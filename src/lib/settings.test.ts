@@ -94,7 +94,23 @@ describe('parseSettings', () => {
       enableResolve: true,
       quickComment: true,
       mermaidFullscreenPanelCollapsed: false,
+      defaultAgentReviewWait: true,
     };
     expect(parseSettings(full)).toEqual(full);
+  });
+
+  it('parses defaultAgentReviewWait when provided as boolean', () => {
+    const parsed = parseSettings({ defaultAgentReviewWait: true });
+    expect(parsed.defaultAgentReviewWait).toBe(true);
+  });
+
+  it('defaults defaultAgentReviewWait to false when missing', () => {
+    const parsed = parseSettings({});
+    expect(parsed.defaultAgentReviewWait).toBe(false);
+  });
+
+  it('defaults defaultAgentReviewWait to false when invalid type', () => {
+    const parsed = parseSettings({ defaultAgentReviewWait: 'yes' });
+    expect(parsed.defaultAgentReviewWait).toBe(false);
   });
 });

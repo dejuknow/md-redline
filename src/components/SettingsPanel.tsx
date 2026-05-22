@@ -22,6 +22,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     updateShowTemplatesByDefault,
     updateEnableResolve,
     updateQuickComment,
+    updateDefaultAgentReviewWait,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -642,6 +643,43 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                     className="w-32 text-sm px-3 py-1.5 rounded-md border border-border-subtle bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
                   <span className="text-xs text-content-muted ml-2">characters</span>
+                </div>
+
+                {/* Agent reviews */}
+                <div>
+                  <h3 className="text-xs font-semibold text-content-muted uppercase tracking-wider mb-3">
+                    Agent reviews
+                  </h3>
+                  <label className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">
+                        Wait for my response by default
+                      </h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        When an agent leaves a review, pause and wait for your reply before the
+                        agent continues. Agents can override this per call.
+                      </p>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={settings.defaultAgentReviewWait}
+                      aria-label="Wait for my response by default"
+                      onClick={() =>
+                        updateDefaultAgentReviewWait(!settings.defaultAgentReviewWait)
+                      }
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                        settings.defaultAgentReviewWait ? 'bg-primary' : 'bg-border'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                          settings.defaultAgentReviewWait
+                            ? 'translate-x-[18px]'
+                            : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </button>
+                  </label>
                 </div>
               </div>
             )}

@@ -4,6 +4,8 @@
  * dependency cycle.
  */
 
+import type { AppSettings } from '../preferences';
+
 export type RequestReviewInput =
   | { mode: 'new'; filePaths: string[]; enableResolve: boolean }
   | { mode: 'continue'; sessionId: string };
@@ -28,6 +30,8 @@ export type WaitResult =
 export interface CreateSessionInput {
   filePaths: string[];
   enableResolve: boolean;
+  /** Origin of the session. Defaults to 'user' on the server when omitted. */
+  origin?: 'user' | 'agent';
 }
 
 export interface AskQuestion {
@@ -43,12 +47,54 @@ export interface AskInput {
   questions: AskQuestion[];
 }
 
+import type { AskNoReplyReason } from '../review-sessions';
+export type { AskNoReplyReason };
+
 export type AskWaitResult =
   | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }> }
-  | { status: 'aborted'; reason: 'session_cancelled' | 'browser_disconnected' };
+  | { status: 'no_reply'; reason: AskNoReplyReason };
 
 export interface PostAgentCommentsResult {
   askId: string;
+}
+
+export interface ReviewComment {
+  filePath: string;
+  anchor: string;
+  text: string;
+  author?: string;
+  contextBefore?: string;
+  contextAfter?: string;
+}
+
+export interface ReviewReply {
+  filePath: string;
+  commentId: string;
+  text: string;
+  author?: string;
+}
+
+export interface PostReviewArgs {
+  comments?: ReviewComment[];
+  replies?: ReviewReply[];
+  expectsReply: boolean;
+}
+
+export interface ReviewInput {
+  filePaths: string[];
+  comments?: Array<{ filePath: string; anchor: string; text: string; author?: string; contextBefore?: string; contextAfter?: string }>;
+  replies?: Array<{ filePath: string; commentId: string; text: string; author?: string }>;
+  waitForResponse?: boolean;
+  enableResolve?: boolean;
+}
+
+export interface PostReviewResult {
+  askId?: string;
+  commentIds?: string[];
+  commentsWritten: number;
+  repliesWritten: number;
+  failedComments?: number[];
+  failedReplies?: number[];
 }
 
 export interface MdrClient {
@@ -58,6 +104,8 @@ export interface MdrClient {
   abortSession(sessionId: string): Promise<void>;
   postAgentComments(sessionId: string, questions: AskQuestion[]): Promise<PostAgentCommentsResult>;
   waitForAsk(sessionId: string, askId: string): Promise<AskWaitResult>;
+  postReview(sessionId: string, args: PostReviewArgs): Promise<PostReviewResult>;
+  releaseAsk(sessionId: string, askId: string): Promise<void>;
 }
 
 export interface ToolCallContext {
@@ -77,6 +125,12 @@ export interface ToolCallContext {
    * so we don't leave a 30-second orphan waiting for the heartbeat sweep.
    */
   signal?: AbortSignal;
+  /**
+   * Read the current user settings (preferences). Used by handleReviewToolCall
+   * to resolve defaultAgentReviewWait when waitForResponse is omitted.
+   * Optional — if absent, defaults to fire-and-forget (expectsReply=false).
+   */
+  getUserSettings?: () => Promise<AppSettings>;
 }
 
 export interface ToolCallResult {
@@ -93,4 +147,10 @@ export interface RunMcpServerOptions {
   getBaseUrl: () => string;
   openInBrowser: (url: string) => Promise<void>;
   ensureServerRunning: () => Promise<void>;
+  /**
+   * Read the current user settings. If provided, handleReviewToolCall uses
+   * defaultAgentReviewWait to determine expectsReply when waitForResponse is
+   * omitted from the tool input. Defaults to fire-and-forget when absent.
+   */
+  getUserSettings?: () => Promise<AppSettings>;
 }

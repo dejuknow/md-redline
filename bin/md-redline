@@ -459,6 +459,38 @@ async function runMcpStdio() {
     throw new Error(`mdr mcp bundle missing at ${distMcp}. Run \`npm run build\`.`);
   }
 
+  // Refuse to start with a stale bundle. If any source file under
+  // server/mcp-stdio/ is newer than the bundle, we'd silently run pre-edit
+  // code (which is exactly what bit us when iterating on this tool).
+  // `npm run dev` watches and rebuilds the bundle automatically, so this
+  // only triggers when developing outside the dev script.
+  try {
+    const bundleMtime = statSync(distMcp).mtimeMs;
+    const sourceDir = join(APP_DIR, 'server', 'mcp-stdio');
+    const stack = [sourceDir, join(APP_DIR, 'server', 'mcp-stdio.ts')];
+    let newestSource = 0;
+    while (stack.length) {
+      const p = stack.pop();
+      let stat;
+      try { stat = statSync(p); } catch { continue; }
+      if (stat.isDirectory()) {
+        for (const entry of (await import('fs')).readdirSync(p)) stack.push(join(p, entry));
+      } else if (p.endsWith('.ts')) {
+        if (stat.mtimeMs > newestSource) newestSource = stat.mtimeMs;
+      }
+    }
+    if (newestSource > bundleMtime) {
+      const ageSec = Math.round((newestSource - bundleMtime) / 1000);
+      throw new Error(
+        `mdr mcp bundle is stale (source is ${ageSec}s newer than dist/mcp-stdio.js).\n` +
+        `Run \`npm run build\` (or \`npm run dev\` which rebuilds on save).`,
+      );
+    }
+  } catch (err) {
+    // Only re-throw our own staleness error. statSync failures on either side fall through.
+    if (err && err.message && err.message.startsWith('mdr mcp bundle is stale')) throw err;
+  }
+
   // Dynamic import so the SDK is only loaded when the mcp subcommand is invoked
   const mod = await import(pathToFileURL(distMcp).href);
 
@@ -473,6 +505,10 @@ async function runMcpStdio() {
       await ensureServerRunning();
       const port = (await findClientPort()) ?? (await findServerPort()) ?? DEFAULT_CLIENT_PORT;
       currentBaseUrl = `http://localhost:${port}`;
+    },
+    getUserSettings: async () => {
+      const prefs = await mod.readPreferences(homedir());
+      return prefs.settings ?? {};
     },
   });
 }

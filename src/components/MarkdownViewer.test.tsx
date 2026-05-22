@@ -58,6 +58,95 @@ describe('isInsideSvgTextContent', () => {
   });
 });
 
+describe('MarkdownViewer comment highlights — markdown-formatted anchor fallback', () => {
+  it('highlights a comment anchor that uses markdown bold formatting', async () => {
+    // The agent wrote the anchor as "**Hello world**" but the DOM renders it as
+    // plain text "Hello world" inside a <strong> element. wrapText must strip
+    // the markdown formatting and still find the match.
+    const markdown = '# Doc\n\n**Hello world** is the greeting.\n';
+    const html = renderMarkdown(markdown);
+
+    const comment = {
+      id: 'cmt_bold',
+      anchor: '**Hello world**',
+      text: 'Nice greeting',
+      author: 'Claude',
+      timestamp: new Date().toISOString(),
+      cleanOffset: 0,
+    };
+
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const mark = container.querySelector('mark.comment-highlight');
+      expect(mark).not.toBeNull();
+      expect(mark?.textContent).toBe('Hello world');
+    });
+  });
+});
+
+describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', () => {
+  it('highlights a comment anchor written in Mermaid node syntax by extracting the inner label', async () => {
+    // The agent wrote the anchor as "E[Clicks Discover Pages]" (Mermaid source syntax).
+    // The rendered SVG only contains the inner label text; wrapText must extract it
+    // and still place a highlight.
+    const markdown = [
+      '# Doc',
+      '',
+      '```mermaid',
+      'flowchart LR',
+      '  E[Clicks Discover Pages]',
+      '  F[Loads results]',
+      '  E --> F',
+      '```',
+    ].join('\n');
+    const html = renderMarkdown(markdown);
+
+    const comment = {
+      id: 'cmt_mermaid',
+      anchor: 'E[Clicks Discover Pages]',
+      text: 'Label is too long',
+      author: 'Claude',
+      timestamp: new Date().toISOString(),
+      cleanOffset: 0,
+    };
+
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      // The mark may land on either an HTML <mark> (foreignObject) or a mermaid SVG
+      // text element. Either way, the rendered label text must appear highlighted.
+      const htmlMark = container.querySelector('mark.comment-highlight, mark.comment-highlight-sent');
+      const svgMark = container.querySelector('.mermaid-comment-highlight');
+      // At least one highlight form must be present.
+      expect(htmlMark ?? svgMark).not.toBeNull();
+      if (htmlMark) {
+        expect(htmlMark.textContent).toContain('Clicks Discover Pages');
+      }
+    });
+  });
+});
+
 describe('MarkdownViewer selection highlights', () => {
   it('does not leave behind an empty inline code element when selection starts with inline code', async () => {
     const markdown =

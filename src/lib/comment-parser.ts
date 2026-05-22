@@ -787,6 +787,29 @@ export function addReply(
   return updateReplies(rawMarkdown, commentId, (replies) => [...replies, reply]);
 }
 
+/**
+ * Append a reply to an existing top-level comment by id.
+ * Returns `content` unchanged when the commentId is not found.
+ */
+export function appendReply(
+  content: string,
+  commentId: string,
+  reply: { id: string; text: string; author: string; timestamp: string },
+): string {
+  // Track whether the target comment was found so we can detect "not found".
+  let found = false;
+  const result = transformCommentMarkers(content, (comment) => {
+    if (comment?.id !== commentId) return { type: 'keep' };
+    found = true;
+    const existingReplies = comment.replies ?? [];
+    return {
+      type: 'replace',
+      comment: { ...comment, replies: [...existingReplies, reply] },
+    };
+  });
+  return found ? result : content;
+}
+
 export function editReply(
   rawMarkdown: string,
   commentId: string,
@@ -1531,20 +1554,38 @@ export function detectMissingAnchors(cleanMarkdown: string, comments: MdComment[
   const mermaidText = extractMermaidText(cleanMarkdown);
   for (const c of comments) {
     if (getEffectiveStatus(c) === 'resolved') continue;
-    if (!plain.includes(c.anchor)) {
-      const parts = c.anchor.split(/\s+/).filter(Boolean);
-      if (parts.length === 0) continue;
-      if (!partsAppearContiguously(plain, parts)) {
-        // Check mermaid rendered text as fallback
-        if (
-          mermaidText &&
-          (mermaidText.includes(c.anchor) || partsAppearContiguously(mermaidText, parts))
-        ) {
-          continue;
-        }
-        missing.add(c.id);
+    // First try matching the raw anchor against the stripped file content
+    // (the existing behavior that works for user-authored DOM-derived anchors).
+    if (plain.includes(c.anchor)) continue;
+    const parts = c.anchor.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) continue;
+    if (partsAppearContiguously(plain, parts)) continue;
+    // Mermaid fallback for raw anchor
+    if (
+      mermaidText &&
+      (mermaidText.includes(c.anchor) || partsAppearContiguously(mermaidText, parts))
+    ) {
+      continue;
+    }
+
+    // Secondary pass: strip inline formatting from the anchor too and retry.
+    // Agent-authored anchors may contain markdown markup (e.g. `**Metric**: 30%`)
+    // because the agent reads raw file content. Stripping symmetrically lets
+    // these anchors match the plain-text file content.
+    const { plain: anchorPlain } = stripInlineFormatting(c.anchor);
+    if (anchorPlain !== c.anchor) {
+      if (plain.includes(anchorPlain)) continue;
+      const strippedParts = anchorPlain.split(/\s+/).filter(Boolean);
+      if (strippedParts.length > 0 && partsAppearContiguously(plain, strippedParts)) continue;
+      if (
+        mermaidText &&
+        (mermaidText.includes(anchorPlain) || partsAppearContiguously(mermaidText, strippedParts))
+      ) {
+        continue;
       }
     }
+
+    missing.add(c.id);
   }
   return missing;
 }

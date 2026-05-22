@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import type { Hono } from 'hono';
 import { extname } from 'path';
-import type { ReviewSessionStore } from '../review-sessions';
-import { insertComment, removeComment } from '../../src/lib/comment-parser';
+import type { ReviewSessionStore, SessionOrigin } from '../review-sessions';
+import { appendReply, insertComment, removeComment } from '../../src/lib/comment-parser';
 
 /**
  * Register the seven HTTP endpoints that expose a ReviewSessionStore over
@@ -27,7 +27,7 @@ export function registerReviewSessionRoutes(
 ): void {
   const { resolveAndValidate, readFileText, writeFileText, notifyFileChanged } = deps;
   app.post('/api/review-sessions', async (c) => {
-    let body: { filePaths?: unknown; enableResolve?: unknown };
+    let body: { filePaths?: unknown; enableResolve?: unknown; origin?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -35,6 +35,7 @@ export function registerReviewSessionRoutes(
     }
 
     const { filePaths, enableResolve } = body;
+    const origin: SessionOrigin = body.origin === 'agent' ? 'agent' : 'user';
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       return c.json({ error: 'filePaths must be a non-empty array' }, 400);
     }
@@ -59,9 +60,12 @@ export function registerReviewSessionRoutes(
       }
     }
 
-    // Deduplicate: if an open session for the same files already exists,
+    // Deduplicate: if a recent open session for the same files already exists,
     // return it instead of creating a new one. This prevents double browser
-    // tabs when the tool is called twice for the same files.
+    // tabs when the tool is called twice for the same files (e.g. an agent
+    // batching its review work into multiple successive tool calls).
+    // Both user-origin and agent-origin sessions dedupe — the most common
+    // case for agent-origin is the same agent batching, not two distinct agents.
     const existing = reviewSessions.findOpenSession(resolved);
     if (existing) {
       console.log(
@@ -77,6 +81,7 @@ export function registerReviewSessionRoutes(
     const session = reviewSessions.createSession({
       filePaths: resolved,
       enableResolve: enableResolve === true,
+      origin,
     });
 
     console.log(
@@ -200,80 +205,128 @@ export function registerReviewSessionRoutes(
       return c.json({ error: 'session not found or already finished' }, 409);
     }
 
-    let body: { questions?: unknown };
+    let body: { comments?: unknown; questions?: unknown; replies?: unknown; expectsReply?: unknown };
     try {
       body = await c.req.json();
     } catch {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
-    const { questions } = body;
-    if (!Array.isArray(questions) || questions.length === 0) {
-      return c.json({ error: 'questions must be a non-empty array' }, 400);
+
+    // Accept `comments` as canonical; `questions` is a backward-compat alias for mdr_ask.
+    const rawComments = body.comments ?? body.questions;
+    const rawReplies = body.replies;
+    // Default expectsReply to true so mdr_ask (which never sends the field) still works.
+    const expectsReply = body.expectsReply !== false;
+
+    const commentsArr = Array.isArray(rawComments) ? rawComments : [];
+    const repliesArr = Array.isArray(rawReplies) ? rawReplies : [];
+
+    if (commentsArr.length === 0 && repliesArr.length === 0) {
+      return c.json({ error: 'at least one of comments or replies must be a non-empty array' }, 400);
     }
 
-    // Validate each question shape and resolve file paths against allowed roots.
-    const resolved: Array<{
+    // Validate and resolve each comment (new top-level marker).
+    type ResolvedComment = {
       originalIndex: number;
       commentId: string;
       filePath: string;
       anchor: string;
       text: string;
+      author: string;
       contextBefore?: string;
       contextAfter?: string;
-    }> = [];
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i] as {
+    };
+    const resolvedComments: ResolvedComment[] = [];
+    for (let i = 0; i < commentsArr.length; i++) {
+      const q = commentsArr[i] as {
         filePath?: unknown;
         anchor?: unknown;
         text?: unknown;
+        author?: unknown;
         contextBefore?: unknown;
         contextAfter?: unknown;
       };
       if (typeof q.filePath !== 'string' || typeof q.anchor !== 'string' || typeof q.text !== 'string') {
-        return c.json({ error: `question ${i}: filePath, anchor, text must be strings` }, 400);
+        return c.json({ error: `comment ${i}: filePath, anchor, text must be strings` }, 400);
       }
       let canonicalPath: string;
       try {
         canonicalPath = await resolveAndValidate(q.filePath);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'invalid path';
-        return c.json({ error: `question ${i}: ${msg}` }, 400);
+        return c.json({ error: `comment ${i}: ${msg}` }, 400);
       }
       if (!session.filePaths.includes(canonicalPath)) {
-        return c.json({ error: `question ${i}: filePath not part of this session` }, 400);
+        return c.json({ error: `comment ${i}: filePath not part of this session` }, 400);
       }
-      resolved.push({
+      resolvedComments.push({
         originalIndex: i,
         commentId: `cmt_${randomUUID()}`,
         filePath: canonicalPath,
         anchor: q.anchor,
         text: q.text,
+        author: typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : 'Agent',
         contextBefore: typeof q.contextBefore === 'string' ? q.contextBefore : undefined,
         contextAfter: typeof q.contextAfter === 'string' ? q.contextAfter : undefined,
       });
     }
 
-    // Group by file; insert all markers in a single read-write per file. If any
-    // anchor in a file is unresolvable, abort the whole call.
-    const byFile = new Map<string, typeof resolved>();
-    for (const q of resolved) {
-      const list = byFile.get(q.filePath) ?? [];
-      list.push(q);
-      byFile.set(q.filePath, list);
+    // Validate and resolve each reply (append to an existing marker).
+    type ResolvedReply = {
+      originalIndex: number;
+      filePath: string;
+      commentId: string;
+      text: string;
+      author: string;
+    };
+    const resolvedReplies: ResolvedReply[] = [];
+    for (let i = 0; i < repliesArr.length; i++) {
+      const r = repliesArr[i] as { filePath?: unknown; commentId?: unknown; text?: unknown; author?: unknown };
+      if (typeof r.filePath !== 'string' || typeof r.commentId !== 'string' || typeof r.text !== 'string') {
+        return c.json({ error: `reply ${i}: filePath, commentId, text must be strings` }, 400);
+      }
+      let canonicalPath: string;
+      try {
+        canonicalPath = await resolveAndValidate(r.filePath);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'invalid path';
+        return c.json({ error: `reply ${i}: ${msg}` }, 400);
+      }
+      if (!session.filePaths.includes(canonicalPath)) {
+        return c.json({ error: `reply ${i}: filePath not part of this session` }, 400);
+      }
+      resolvedReplies.push({
+        originalIndex: i,
+        filePath: canonicalPath,
+        commentId: r.commentId,
+        text: r.text,
+        author: typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : 'Agent',
+      });
     }
 
+    // Collect all unique file paths that need to be read and written.
+    const allFilePaths = new Set<string>([
+      ...resolvedComments.map((rc) => rc.filePath),
+      ...resolvedReplies.map((r) => r.filePath),
+    ]);
+
+    // Read each file once and apply all operations (comments then replies).
     type FileWrite = { filePath: string; updated: string };
     const writes: FileWrite[] = [];
-    const failedIndices: number[] = [];
-    for (const [filePath, qs] of byFile) {
+    const failedComments: number[] = [];
+    const failedReplies: number[] = [];
+
+    for (const filePath of allFilePaths) {
       let content = await readFileText(filePath);
-      for (const q of qs) {
+
+      // Insert new top-level comment markers.
+      for (const q of resolvedComments.filter((rc) => rc.filePath === filePath)) {
         const before = content;
         content = insertComment(
           content,
           q.anchor,
           q.text,
-          'Agent',
+          q.author,
           q.contextBefore,
           q.contextAfter,
           undefined,
@@ -282,32 +335,71 @@ export function registerReviewSessionRoutes(
         );
         if (content === before) {
           // insertComment returns input unchanged when anchor is not found.
-          failedIndices.push(q.originalIndex);
+          failedComments.push(q.originalIndex);
         }
       }
+
+      // Append replies to existing markers.
+      for (const r of resolvedReplies.filter((r) => r.filePath === filePath)) {
+        const before = content;
+        content = appendReply(content, r.commentId, {
+          id: `rep_${randomUUID()}`,
+          text: r.text,
+          author: r.author,
+          timestamp: new Date().toISOString(),
+        });
+        if (content === before) {
+          // appendReply returns input unchanged when commentId is not found.
+          failedReplies.push(r.originalIndex);
+        }
+      }
+
       writes.push({ filePath, updated: content });
     }
 
-    if (failedIndices.length > 0) {
+    if (failedComments.length > 0 || failedReplies.length > 0) {
       return c.json(
-        { error: 'one or more anchors could not be located', failedIndices },
+        {
+          error: 'one or more anchors or reply targets could not be located',
+          failedComments,
+          failedReplies,
+        },
         400,
       );
     }
 
-    // Apply writes; if any write fails, surface the error (no partial state
-    // beyond what insertComment already produced — for v1 we accept that a
-    // multi-file ask with one failed write leaves the earlier file written).
+    // Apply writes; if any write fails, surface the error.
     for (const w of writes) {
       await writeFileText(w.filePath, w.updated);
       notifyFileChanged(w.filePath);
     }
 
+    // Bump the agent comment counter so gcSilentAgentSessions won't abort
+    // this session for being silent — the agent has clearly started working.
+    if (resolvedComments.length > 0) {
+      reviewSessions.recordAgentComments(id, resolvedComments.length);
+    }
+
+    // When expectsReply=false (fire-and-forget mode), skip addAsk entirely.
+    if (!expectsReply) {
+      return c.json(
+        {
+          commentIds: resolvedComments.map((q) => q.commentId),
+          commentsWritten: resolvedComments.length,
+          repliesWritten: resolvedReplies.length,
+        },
+        201,
+      );
+    }
+
+    // expectsReply=true (default): create a pendingAsk for the new comments.
+    // Replies are not included in the ask payload — they're fire-and-forget by design
+    // (asks track only new comments awaiting a human reply, not append-only replies).
     let askId: string;
     try {
       askId = reviewSessions.addAsk(
         id,
-        resolved.map((q) => ({
+        resolvedComments.map((q) => ({
           commentId: q.commentId,
           filePath: q.filePath,
           anchor: q.anchor,
@@ -319,7 +411,14 @@ export function registerReviewSessionRoutes(
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'addAsk failed' }, 409);
     }
-    return c.json({ askId }, 201);
+    return c.json(
+      {
+        askId,
+        commentsWritten: resolvedComments.length,
+        repliesWritten: resolvedReplies.length,
+      },
+      201,
+    );
   });
 
   app.get('/api/review-sessions/:id/asks/:askId/wait', async (c) => {
@@ -406,6 +505,20 @@ export function registerReviewSessionRoutes(
       }
     }
 
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/review-sessions/:id/asks/:askId/release', (c) => {
+    const sessionId = c.req.param('id');
+    const askId = c.req.param('askId');
+    if (!reviewSessions.getSession(sessionId)) {
+      return c.json({ error: 'Session not found' }, 404);
+    }
+    const ok = reviewSessions.releaseAsk(sessionId, askId);
+    if (!ok) {
+      return c.json({ error: 'Ask not found' }, 404);
+    }
+    console.log(`[review-session] ask ${askId} released by user (session ${sessionId})`);
     return c.json({ ok: true });
   });
 

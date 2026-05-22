@@ -7,11 +7,16 @@ export interface ReviewSession {
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
   waitingForAgent: boolean;
+  origin: 'user' | 'agent';
+  /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
+  lastAgentActivityAt?: string | null;
 }
 
 const POLL_INTERVAL_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
+// `origin` is intentionally excluded from equality: it is set at session
+// creation and never mutates, so it cannot be the reason two fetches differ.
 function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -22,6 +27,7 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
       x.status !== y.status ||
       x.enableResolve !== y.enableResolve ||
       x.waitingForAgent !== y.waitingForAgent ||
+      x.lastAgentActivityAt !== y.lastAgentActivityAt ||
       x.filePaths.length !== y.filePaths.length ||
       x.sentCommentIds.length !== y.sentCommentIds.length
     ) {

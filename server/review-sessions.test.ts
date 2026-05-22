@@ -347,7 +347,7 @@ describe('ReviewSessionStore', () => {
       expect(store.getPendingAsks(session.id)).toHaveLength(0);
     });
 
-    it('abortAsks resolves pending ask waiters with aborted', async () => {
+    it('abortAsks resolves pending ask waiters with no_reply/cancelled', async () => {
       const store = new ReviewSessionStore();
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       const { askId, waiter } = store.addAsk(session.id, [
@@ -355,7 +355,7 @@ describe('ReviewSessionStore', () => {
       ]);
       store.abortAsks(session.id, 'session_cancelled');
       const result = await waiter;
-      expect(result).toEqual({ status: 'aborted', reason: 'session_cancelled' });
+      expect(result).toEqual({ status: 'no_reply', reason: 'cancelled' });
       expect(store.getPendingAsks(session.id)).toHaveLength(0);
       void askId;
     });
@@ -368,7 +368,7 @@ describe('ReviewSessionStore', () => {
       ]);
       store.abort(session.id, 'user_cancelled');
       const result = await waiter;
-      expect(result.status).toBe('aborted');
+      expect(result.status).toBe('no_reply');
     });
   });
 
@@ -386,11 +386,11 @@ describe('ReviewSessionStore', () => {
 
       // Force a stale heartbeat so the sweep aborts the session.
       const internal = (store as unknown as { sessions: Map<string, { lastHeartbeatAt: Date }> }).sessions.get(session.id)!;
-      internal.lastHeartbeatAt = new Date(Date.now() - 31_000);
+      internal.lastHeartbeatAt = new Date(Date.now() - 31 * 60_000);
       (store as unknown as { sweepStale: () => void }).sweepStale();
 
       expect(calls).toEqual([{ sessionId: session.id, askIds: [askId] }]);
-      expect(await waiter).toEqual({ status: 'aborted', reason: 'browser_disconnected' });
+      expect(await waiter).toEqual({ status: 'no_reply', reason: 'tab_closed' });
     });
 
     it('fires callback when abort() is called explicitly with pending asks', async () => {
@@ -405,7 +405,7 @@ describe('ReviewSessionStore', () => {
       ]);
       store.abort(session.id, 'user_cancelled');
       expect(calls).toEqual([{ sessionId: session.id, askIds: [askId] }]);
-      expect(await waiter).toEqual({ status: 'aborted', reason: 'session_cancelled' });
+      expect(await waiter).toEqual({ status: 'no_reply', reason: 'cancelled' });
     });
   });
 
@@ -469,6 +469,110 @@ describe('ReviewSessionStore', () => {
     });
   });
 
+  describe('releaseAsk', () => {
+    it('resolves the ask waiter with released status', async () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/test.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      const { askId } = store.addAsk(session.id, [
+        { commentId: 'cmt_1', filePath: '/tmp/test.md', anchor: 'hi', text: 'q1' },
+      ]);
+      const waiter = store.waitForAsk(askId)!;
+      const ok = store.releaseAsk(session.id, askId);
+      expect(ok).toBe(true);
+      const result = await waiter;
+      expect(result).toEqual({ status: 'no_reply', reason: 'released' });
+    });
+
+    it('returns false for unknown ask', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/test.md'],
+        enableResolve: false,
+      });
+      expect(store.releaseAsk(session.id, 'ask_unknown')).toBe(false);
+    });
+
+    it('is idempotent on second call', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/test.md'],
+        enableResolve: false,
+      });
+      const { askId } = store.addAsk(session.id, [
+        { commentId: 'cmt_1', filePath: '/tmp/test.md', anchor: 'hi', text: 'q1' },
+      ]);
+      expect(store.releaseAsk(session.id, askId)).toBe(true);
+      expect(store.releaseAsk(session.id, askId)).toBe(false);
+    });
+  });
+
+  describe('session origin', () => {
+    it('defaults origin to "user" when not specified', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+      });
+      expect(session.origin).toBe('user');
+    });
+
+    it('records origin "agent" when specified', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      expect(session.origin).toBe('agent');
+    });
+  });
+
+  describe('silent agent session GC', () => {
+    it('aborts agent-origin sessions with no comments after timeout', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1000);
+      store.gcSilentAgentSessions();
+      expect(store.getSession(session.id)?.status).toBe('aborted');
+      store.dispose();
+    });
+
+    it('does not abort user-origin sessions for being silent', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'user',
+      });
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1000);
+      store.gcSilentAgentSessions();
+      expect(store.getSession(session.id)?.status).toBe('open');
+      store.dispose();
+    });
+
+    it('does not abort agent sessions once comments have been posted', () => {
+      const store = new ReviewSessionStore();
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      store.recordAgentComments(session.id, 1); // simulate that agent has posted
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1000);
+      store.gcSilentAgentSessions();
+      expect(store.getSession(session.id)?.status).toBe('open');
+      store.dispose();
+    });
+  });
+
   describe('findOpenSession', () => {
     it('returns an open session with matching file paths', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
@@ -503,29 +607,71 @@ describe('ReviewSessionStore', () => {
     // The freshness gate offsets the long HEARTBEAT_TIMEOUT_MS backstop:
     // crash-leaked sessions sit in the open pool for up to 30 min before
     // being swept, so without this check, a fresh mdr_request_review for the
-    // same files would attach to the dead one. The threshold is 60s — well
-    // above the client's 10s heartbeat cadence.
+    // same files would attach to the dead one. The threshold is 5 minutes
+    // — well above the client's 10s heartbeat cadence and above the
+    // typical gap between batched agent tool calls.
     it('ignores open sessions whose last heartbeat is too stale to dedupe to', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
 
-      // 30s in — still fresh, should match.
-      vi.advanceTimersByTime(30_000);
+      // 4 minutes in — still fresh, should match.
+      vi.advanceTimersByTime(4 * 60_000);
       expect(store.findOpenSession(['/tmp/a.md'])?.id).toBe(session.id);
 
-      // 90s in — past the 60s freshness window, should not match.
-      vi.advanceTimersByTime(60_000);
+      // 6 minutes in — past the 5min freshness window, should not match.
+      vi.advanceTimersByTime(2 * 60_000);
       expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
     });
 
     it('matches stale-then-refreshed session once heartbeat lands', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
 
-      vi.advanceTimersByTime(90_000);
+      vi.advanceTimersByTime(6 * 60_000);
       expect(store.findOpenSession(['/tmp/a.md'])).toBeUndefined();
 
       // Browser came back from bfcache and fired a heartbeat — dedupe again.
       store.heartbeat(session.id);
       expect(store.findOpenSession(['/tmp/a.md'])?.id).toBe(session.id);
+    });
+  });
+
+  describe('recordAgentComments — lastAgentActivityAt', () => {
+    it('sets lastAgentActivityAt to the current time when comments are recorded', () => {
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      // Before any comments, lastAgentActivityAt is null
+      expect(store.getSession(session.id)?.lastAgentActivityAt).toBeNull();
+
+      const before = new Date();
+      store.recordAgentComments(session.id, 2);
+      const after = new Date();
+
+      const ts = store.getSession(session.id)?.lastAgentActivityAt;
+      expect(ts).not.toBeNull();
+      const recorded = new Date(ts!);
+      expect(recorded.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(recorded.getTime()).toBeLessThanOrEqual(after.getTime());
+    });
+
+    it('toPublic returns lastAgentActivityAt as an ISO string after recording', () => {
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
+      store.recordAgentComments(session.id, 1);
+      const pub = store.getSession(session.id)!;
+      expect(typeof pub.lastAgentActivityAt).toBe('string');
+      // Should be parseable as an ISO date
+      expect(isNaN(new Date(pub.lastAgentActivityAt!).getTime())).toBe(false);
+    });
+
+    it('toPublic returns null for lastAgentActivityAt before any comments are recorded', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      const pub = store.getSession(session.id)!;
+      expect(pub.lastAgentActivityAt).toBeNull();
     });
   });
 });

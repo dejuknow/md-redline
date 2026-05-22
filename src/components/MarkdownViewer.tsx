@@ -543,23 +543,155 @@ function wrapText(
       matchStart = best;
       matchEnd = best + text.length;
     } else {
-      // No exact match — try flexible whitespace search
-      const result = flexibleSearch(fullText, text);
-      if (!result) return;
-      matchStart = result.start;
-      matchEnd = result.end;
+      // No exact match — try stripped formatting fallback (agent anchors may include
+      // markdown markup like **bold** that the DOM strips to plain text).
+      const strippedText = stripInlineFormatting(text).plain;
+      if (strippedText !== text && strippedText.length > 0) {
+        const strippedOccs: number[] = [];
+        let sf = 0;
+        while (sf < fullText.length) {
+          const idx = fullText.indexOf(strippedText, sf);
+          if (idx === -1) break;
+          strippedOccs.push(idx);
+          sf = idx + 1;
+        }
+        if (strippedOccs.length > 0) {
+          const best = strippedOccs.reduce((b, idx) =>
+            Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
+          );
+          matchStart = best;
+          matchEnd = best + strippedText.length;
+        } else {
+          // Fallback to flexible whitespace search on the stripped text
+          const result = flexibleSearch(fullText, strippedText);
+          if (!result) return;
+          matchStart = result.start;
+          matchEnd = result.end;
+        }
+      } else {
+        // No exact match — try Mermaid node syntax fallback (e.g. "E[label]" → "label").
+        // The SVG renders only the inner label, not the node ID + brackets.
+        const mermaidMatch = text.match(/^[A-Za-z][A-Za-z0-9_]*\s*[\[\{\(>]+(.+?)[\]\}\)]+\s*$/s);
+        if (mermaidMatch) {
+          const mermaidLabel = mermaidMatch[1];
+          if (mermaidLabel && mermaidLabel !== text) {
+            // First try literal label, then stripped formatting of the label.
+            const mermaidOccs: number[] = [];
+            let sf = 0;
+            while (sf < fullText.length) {
+              const idx = fullText.indexOf(mermaidLabel, sf);
+              if (idx === -1) break;
+              mermaidOccs.push(idx);
+              sf = idx + 1;
+            }
+            if (mermaidOccs.length > 0) {
+              const best = mermaidOccs.reduce((b, idx) =>
+                Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
+              );
+              matchStart = best;
+              matchEnd = best + mermaidLabel.length;
+            } else {
+              const strippedMermaidLabel = stripInlineFormatting(mermaidLabel).plain;
+              if (strippedMermaidLabel && strippedMermaidLabel !== mermaidLabel) {
+                const idx = fullText.indexOf(strippedMermaidLabel);
+                if (idx !== -1) {
+                  matchStart = idx;
+                  matchEnd = idx + strippedMermaidLabel.length;
+                } else {
+                  const result = flexibleSearch(fullText, strippedMermaidLabel);
+                  if (!result) return;
+                  matchStart = result.start;
+                  matchEnd = result.end;
+                }
+              } else {
+                const result = flexibleSearch(fullText, mermaidLabel);
+                if (!result) return;
+                matchStart = result.start;
+                matchEnd = result.end;
+              }
+            }
+          } else {
+            // No exact match — try flexible whitespace search
+            const result = flexibleSearch(fullText, text);
+            if (!result) return;
+            matchStart = result.start;
+            matchEnd = result.end;
+          }
+        } else {
+          // No exact match — try flexible whitespace search
+          const result = flexibleSearch(fullText, text);
+          if (!result) return;
+          matchStart = result.start;
+          matchEnd = result.end;
+        }
+      }
     }
   } else {
-    // No offset — first occurrence (used for selection highlights)
+    // No offset — first occurrence (used for selection highlights and comment marks
+    // without a recorded offset). Try literal first, then stripped formatting fallback
+    // (agent anchors may include markdown markup like **bold** stripped in the DOM).
     const exactIdx = fullText.indexOf(text);
     if (exactIdx !== -1) {
       matchStart = exactIdx;
       matchEnd = exactIdx + text.length;
     } else {
-      const result = flexibleSearch(fullText, text);
-      if (!result) return;
-      matchStart = result.start;
-      matchEnd = result.end;
+      // Try stripped formatting fallback before flexible search
+      const strippedText = stripInlineFormatting(text).plain;
+      if (strippedText !== text && strippedText.length > 0) {
+        const strippedIdx = fullText.indexOf(strippedText);
+        if (strippedIdx !== -1) {
+          matchStart = strippedIdx;
+          matchEnd = strippedIdx + strippedText.length;
+        } else {
+          const result = flexibleSearch(fullText, strippedText);
+          if (!result) return;
+          matchStart = result.start;
+          matchEnd = result.end;
+        }
+      } else {
+        // Try Mermaid node syntax fallback (e.g. "E[label]" → "label").
+        // The SVG renders only the inner label, not the node ID + brackets.
+        const mermaidMatch = text.match(/^[A-Za-z][A-Za-z0-9_]*\s*[\[\{\(>]+(.+?)[\]\}\)]+\s*$/s);
+        if (mermaidMatch) {
+          const mermaidLabel = mermaidMatch[1];
+          if (mermaidLabel && mermaidLabel !== text) {
+            const labelIdx = fullText.indexOf(mermaidLabel);
+            if (labelIdx !== -1) {
+              matchStart = labelIdx;
+              matchEnd = labelIdx + mermaidLabel.length;
+            } else {
+              const strippedMermaidLabel = stripInlineFormatting(mermaidLabel).plain;
+              if (strippedMermaidLabel && strippedMermaidLabel !== mermaidLabel) {
+                const sIdx = fullText.indexOf(strippedMermaidLabel);
+                if (sIdx !== -1) {
+                  matchStart = sIdx;
+                  matchEnd = sIdx + strippedMermaidLabel.length;
+                } else {
+                  const result = flexibleSearch(fullText, strippedMermaidLabel);
+                  if (!result) return;
+                  matchStart = result.start;
+                  matchEnd = result.end;
+                }
+              } else {
+                const result = flexibleSearch(fullText, mermaidLabel);
+                if (!result) return;
+                matchStart = result.start;
+                matchEnd = result.end;
+              }
+            }
+          } else {
+            const result = flexibleSearch(fullText, text);
+            if (!result) return;
+            matchStart = result.start;
+            matchEnd = result.end;
+          }
+        } else {
+          const result = flexibleSearch(fullText, text);
+          if (!result) return;
+          matchStart = result.start;
+          matchEnd = result.end;
+        }
+      }
     }
   }
 

@@ -4,6 +4,8 @@ import type {
   CreateSessionInput,
   CreateSessionResult,
   MdrClient,
+  PostReviewArgs,
+  PostReviewResult,
   WaitResult,
 } from './types';
 
@@ -75,10 +77,10 @@ export function createMdrClient(baseUrl: string): MdrClient {
         body: JSON.stringify({ questions }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string; failedIndices?: number[] };
+        const body = (await res.json().catch(() => ({}))) as { error?: string; failedComments?: number[] };
         const err = new Error(body.error ?? `postAgentComments failed (HTTP ${res.status})`);
-        if (body.failedIndices) {
-          (err as Error & { failedIndices?: number[] }).failedIndices = body.failedIndices;
+        if (body.failedComments) {
+          (err as Error & { failedComments?: number[] }).failedComments = body.failedComments;
         }
         throw err;
       }
@@ -93,6 +95,33 @@ export function createMdrClient(baseUrl: string): MdrClient {
         throw new Error(`waitForAsk failed (HTTP ${res.status})`);
       }
       return (await res.json()) as AskWaitResult;
+    },
+
+    async postReview(sessionId: string, args: PostReviewArgs) {
+      const res = await fetch(url(`/api/review-sessions/${sessionId}/agent-comments`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(args),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          failedComments?: number[];
+          failedReplies?: number[];
+        };
+        const err = new Error(body.error ?? `postReview failed (HTTP ${res.status})`);
+        (err as Error & { failedComments?: number[] }).failedComments = body.failedComments;
+        (err as Error & { failedReplies?: number[] }).failedReplies = body.failedReplies;
+        throw err;
+      }
+      return (await res.json()) as PostReviewResult;
+    },
+
+    async releaseAsk(sessionId: string, askId: string) {
+      const res = await fetch(url(`/api/review-sessions/${sessionId}/asks/${askId}/release`), {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(`releaseAsk failed (HTTP ${res.status})`);
     },
   };
 }

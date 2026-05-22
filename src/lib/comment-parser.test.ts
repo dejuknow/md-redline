@@ -7,6 +7,7 @@ import {
   editReply,
   updateCommentAnchor,
   addReply,
+  appendReply,
   removeReply,
   serializeComment,
   detectMissingAnchors,
@@ -322,6 +323,49 @@ describe('addReply', () => {
     const raw = `${marker({ id: 'rp1' })}hello`;
     const result = addReply(raw, 'nonexistent', 'reply text', 'Bob');
     expect(result).toBe(raw);
+  });
+});
+
+describe('appendReply', () => {
+  it('appends a reply to an existing comment with no existing replies', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'hello', text: 'top comment' })}hello world`;
+    const reply = { id: 'r1', text: 'a reply', author: 'Agent', timestamp: '2026-01-01T00:00:00.000Z' };
+    const result = appendReply(raw, 'c1', reply);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies).toHaveLength(1);
+    expect(parsed.comments[0].replies![0].text).toBe('a reply');
+    expect(parsed.comments[0].replies![0].author).toBe('Agent');
+    expect(parsed.comments[0].replies![0].id).toBe('r1');
+    // Other fields must be preserved
+    expect(parsed.comments[0].text).toBe('top comment');
+    expect(parsed.comments[0].anchor).toBe('hello');
+  });
+
+  it('appends to an existing reply array', () => {
+    const raw = `${marker({ id: 'c1', replies: [{ id: 'r0', text: 'first', author: 'User', timestamp: '2026-01-01T00:00:00.000Z' }] })}hello`;
+    const reply = { id: 'r1', text: 'second', author: 'Agent', timestamp: '2026-01-02T00:00:00.000Z' };
+    const result = appendReply(raw, 'c1', reply);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].replies).toHaveLength(2);
+    expect(parsed.comments[0].replies![0].text).toBe('first');
+    expect(parsed.comments[0].replies![1].text).toBe('second');
+  });
+
+  it('returns unchanged content when commentId is not found', () => {
+    const raw = `${marker({ id: 'c1' })}hello`;
+    const reply = { id: 'r1', text: 'orphan', author: 'Agent', timestamp: '2026-01-01T00:00:00.000Z' };
+    const result = appendReply(raw, 'c_does_not_exist', reply);
+    expect(result).toBe(raw);
+  });
+
+  it('preserves contextBefore, contextAfter, and other fields', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'foo', contextBefore: 'pre', contextAfter: 'post' })}foo`;
+    const reply = { id: 'r1', text: 'reply', author: 'Agent', timestamp: '2026-01-01T00:00:00.000Z' };
+    const result = appendReply(raw, 'c1', reply);
+    const parsed = parseComments(result);
+    expect(parsed.comments[0].contextBefore).toBe('pre');
+    expect(parsed.comments[0].contextAfter).toBe('post');
+    expect(parsed.comments[0].replies).toHaveLength(1);
   });
 });
 
@@ -1170,6 +1214,46 @@ Final checklist is complete.
     const comments = [{ id: 'a', anchor: 'completely unrelated text' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(true);
+  });
+
+  // --- Agent anchor formatting symmetry ---
+  // Agent-authored anchors may contain markdown markup (e.g. **bold**) because
+  // the agent reads the raw file content. File content is stripped before
+  // comparison, so the anchor must be stripped too for a symmetric match.
+
+  it('does not flag agent anchor with **bold** when file has same bold text', () => {
+    // Agent selects `**Metric**: 30%` from the raw markdown and stores that
+    // as the anchor. The file plain text is `Metric: 30%` after stripping.
+    const clean = 'The **Metric**: 30% target is ambitious.';
+    const comments = [{ id: 'a', anchor: '**Metric**: 30%' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('does not flag agent anchor with **bold** markup when user anchor is already plain', () => {
+    // User-authored anchor from DOM textContent (already plain) still works.
+    const clean = 'The **Metric**: 30% target is ambitious.';
+    const comments = [{ id: 'a', anchor: 'Metric: 30%' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
+  });
+
+  it('flags agent anchor with **bold** markup when anchor text is genuinely absent', () => {
+    // Even after stripping, the anchor content must exist in the file.
+    const clean = 'The retention rate is unchanged.';
+    const comments = [{ id: 'a', anchor: '**Metric**: 30%' }] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(true);
+  });
+
+  it('does not flag agent anchor with mixed formatting markers', () => {
+    // `**Still selected + content changed**` → plain `Still selected + content changed`
+    const clean = 'State: **Still selected + content changed** triggers a diff.';
+    const comments = [
+      { id: 'a', anchor: '**Still selected + content changed**' },
+    ] as MdComment[];
+    const missing = detectMissingAnchors(clean, comments);
+    expect(missing.has('a')).toBe(false);
   });
 });
 

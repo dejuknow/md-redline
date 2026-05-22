@@ -7,9 +7,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { createMdrClient } from './client';
-import { handleAskToolCall, handleRequestReviewToolCall } from './handler';
+import { handleAskToolCall, handleRequestReviewToolCall, handleReviewToolCall } from './handler';
 import type { RunMcpServerOptions } from './types';
-import { validateAskInput, validateRequestReviewInput } from './validate';
+import { validateAskInput, validateRequestReviewInput, validateReviewInput } from './validate';
 
 /**
  * Wire the MCP SDK Server with stdio transport and register the
@@ -99,6 +99,66 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           },
         },
       },
+      {
+        name: 'mdr_review',
+        description:
+          'Review markdown files in md-redline (mdr) and leave inline feedback. ' +
+          'Use this when the user asks you to review a doc and drop comments. ' +
+          'The comments appear as inline markers anchored to specific text, which ' +
+          'the user can then address. Pass waitForResponse: true if you want to ' +
+          'block until the user replies to your comments (for example, you are ' +
+          'reviewing iteratively). Otherwise the tool returns once the comments ' +
+          'are written and you are done. ' +
+          'Include `author` on each comment/reply identifying yourself (e.g. ' +
+          '\'Claude\', \'Codex\', \'Gemini\'). This appears in the mdr UI so the ' +
+          'user knows which agent left the feedback.',
+        inputSchema: {
+          type: 'object',
+          required: ['filePaths'],
+          properties: {
+            filePaths: {
+              type: 'array',
+              minItems: 1,
+              items: { type: 'string' },
+              description: 'Absolute paths to markdown files to review.',
+            },
+            comments: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['filePath', 'anchor', 'text'],
+                properties: {
+                  filePath: { type: 'string' },
+                  anchor: { type: 'string', description: 'Exact text in the file the comment refers to.' },
+                  text: { type: 'string', description: 'The feedback.' },
+                  author: { type: 'string', description: 'Your agent name (e.g. "Claude"). Shown in the mdr UI.' },
+                  contextBefore: { type: 'string' },
+                  contextAfter: { type: 'string' },
+                },
+              },
+            },
+            replies: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['filePath', 'commentId', 'text'],
+                properties: {
+                  filePath: { type: 'string' },
+                  commentId: { type: 'string', description: 'ID of an existing top-level comment.' },
+                  text: { type: 'string' },
+                  author: { type: 'string', description: 'Your agent name (e.g. "Claude"). Shown in the mdr UI.' },
+                },
+              },
+            },
+            waitForResponse: {
+              type: 'boolean',
+              description:
+                "If true, block until the user replies. If omitted, the server uses the user's default setting.",
+            },
+            enableResolve: { type: 'boolean' },
+          },
+        },
+      },
     ],
   }));
 
@@ -139,6 +199,7 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         baseUrl,
         sendProgress,
         signal,
+        getUserSettings: opts.getUserSettings,
       });
       return result as CallToolResult;
     }
@@ -147,6 +208,20 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
       const validation = validateAskInput(request.params.arguments);
       if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
       const result = await handleAskToolCall(validation.value, { client, sendProgress, signal });
+      return result as CallToolResult;
+    }
+
+    if (request.params.name === 'mdr_review') {
+      const validation = validateReviewInput(request.params.arguments);
+      if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
+      const result = await handleReviewToolCall(validation.value, {
+        client,
+        openInBrowser: opts.openInBrowser,
+        baseUrl,
+        sendProgress,
+        signal,
+        getUserSettings: opts.getUserSettings,
+      });
       return result as CallToolResult;
     }
 

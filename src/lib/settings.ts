@@ -13,6 +13,8 @@ export interface AppSettings {
   quickComment: boolean;
   /** When true, the comment thread panel in the Mermaid fullscreen view starts collapsed. Persists across sessions. */
   mermaidFullscreenPanelCollapsed: boolean;
+  /** When an agent leaves a review without specifying waitForResponse, this default is applied. */
+  defaultAgentReviewWait: boolean;
 }
 
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
@@ -33,6 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableResolve: false,
   quickComment: false,
   mermaidFullscreenPanelCollapsed: false,
+  defaultAgentReviewWait: false,
 };
 
 /**
@@ -76,5 +79,9 @@ export function parseSettings(input: unknown): AppSettings {
       typeof parsed.mermaidFullscreenPanelCollapsed === 'boolean'
         ? parsed.mermaidFullscreenPanelCollapsed
         : DEFAULT_SETTINGS.mermaidFullscreenPanelCollapsed,
+    defaultAgentReviewWait:
+      typeof parsed.defaultAgentReviewWait === 'boolean'
+        ? parsed.defaultAgentReviewWait
+        : DEFAULT_SETTINGS.defaultAgentReviewWait,
   };
 }

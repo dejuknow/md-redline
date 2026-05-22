@@ -112,10 +112,11 @@ export function useComments(params: UseCommentsParams) {
   // Agent-initiated comments (mdr_ask questions) are excluded — they're tracked
   // and surfaced separately via the "Awaiting your reply" section, and they
   // must NOT be sent back to the agent as part of a user batch.
-  const { commentCounts, resolvedCommentCounts, commentIdsByFile } = useMemo(() => {
+  const { commentCounts, resolvedCommentCounts, commentIdsByFile, agentCommentCounts } = useMemo(() => {
     const counts = new Map<string, number>();
     const resolvedCounts = new Map<string, number>();
     const idsByFile = new Map<string, string[]>();
+    const agentCounts = new Map<string, number>();
     for (const tab of tabs) {
       if (tab.filePath === activeFilePath) {
         const userComments = comments.filter((c) => !c.agentInitiated);
@@ -130,6 +131,8 @@ export function useComments(params: UseCommentsParams) {
             userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
           );
         }
+        const agentComments = comments.filter((c) => c.agentInitiated);
+        agentCounts.set(tab.filePath, agentComments.length);
       } else {
         try {
           const { comments: tabComments } = parseComments(tab.rawMarkdown);
@@ -145,12 +148,14 @@ export function useComments(params: UseCommentsParams) {
               userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
             );
           }
+          const agentTabComments = tabComments.filter((c) => c.agentInitiated);
+          agentCounts.set(tab.filePath, agentTabComments.length);
         } catch {
           counts.set(tab.filePath, 0);
         }
       }
     }
-    return { commentCounts: counts, resolvedCommentCounts: resolvedCounts, commentIdsByFile: idsByFile };
+    return { commentCounts: counts, resolvedCommentCounts: resolvedCounts, commentIdsByFile: idsByFile, agentCommentCounts: agentCounts };
   }, [tabs, activeFilePath, comments, enableResolve]);
 
   const commentCount = enableResolve
@@ -355,6 +360,7 @@ export function useComments(params: UseCommentsParams) {
     commentCounts,
     resolvedCommentCounts,
     commentIdsByFile,
+    agentCommentCounts,
     commentCount,
     updateAndSave,
     handleAddComment,

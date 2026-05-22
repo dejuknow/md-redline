@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import type { ReviewSession } from '../hooks/useReviewSession';
@@ -13,6 +13,7 @@ export interface PendingAskSummary {
 interface ReviewBannerProps {
   sessions: ReviewSession[];
   commentCounts: Map<string, number>;
+  agentCommentCounts?: Map<string, number>;
   /** Called after a successful handoff so the parent can capture diff snapshots for the session's files. */
   onHandoffSuccess: (session: ReviewSession) => void;
   onResolved: () => void;
@@ -26,6 +27,10 @@ interface ReviewBannerProps {
   pendingAsksBySession?: Map<string, PendingAskSummary>;
   /** Called when the user clicks Send replies. Can be async; banner manages busy state during the call. */
   onSendReplies?: (sessionId: string, askId: string) => void | Promise<void>;
+  /** Called after the user successfully releases the agent so the parent can clear pending-ask UI state. */
+  onRelease?: (sessionId: string) => void;
+  /** Agent name per session id — used for the completion banner in fire-and-forget sessions. */
+  agentNamesBySession?: Map<string, string>;
 }
 
 // A session is ready to send only when we have an authoritative comment count
@@ -52,6 +57,7 @@ async function readErrorMessage(res: Response): Promise<string> {
 export function ReviewBanner({
   sessions,
   commentCounts,
+  agentCommentCounts,
   onHandoffSuccess,
   onResolved,
   onBatchSent,
@@ -59,8 +65,18 @@ export function ReviewBanner({
   commentIdsByFile,
   pendingAsksBySession,
   onSendReplies,
+  onRelease,
+  agentNamesBySession,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Self-ticking timer to drive the spinner/dot decision without relying on
+  // external polling cadence. Ticks every 5s to match the session poll interval.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, []);
 
   const buildPromptForSession = useCallback(
     (s: ReviewSession, ids?: string[]): string => {
@@ -176,6 +192,35 @@ export function ReviewBanner({
     [onSendReplies],
   );
 
+  const handleRelease = useCallback(
+    async (sessionId: string, askId: string) => {
+      setBusyId(sessionId);
+      try {
+        let res: Response;
+        try {
+          res = await fetch(`/api/review-sessions/${sessionId}/asks/${askId}/release`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'network error';
+          showToast?.(`Release failed: ${message}`);
+          return;
+        }
+        if (!res.ok) {
+          const detail = await readErrorMessage(res);
+          showToast?.(`Release failed: ${detail}`);
+          return;
+        }
+        showToast?.('Agent released. Comments stay in the file.');
+        onRelease?.(sessionId);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [showToast, onRelease],
+  );
+
   const handleCancel = useCallback(
     async (s: ReviewSession) => {
       setBusyId(s.id);
@@ -199,6 +244,36 @@ export function ReviewBanner({
         }
 
         showToast?.('Review cancelled');
+        onResolved();
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [onResolved, showToast],
+  );
+
+  const handleDismissAgentSession = useCallback(
+    async (s: ReviewSession) => {
+      setBusyId(s.id);
+      try {
+        let res: Response;
+        try {
+          res = await fetch(`/api/review-sessions/${s.id}/abort`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'network error';
+          showToast?.(`Dismiss failed: ${message}`);
+          return;
+        }
+
+        if (!res.ok) {
+          const detail = await readErrorMessage(res);
+          showToast?.(`Dismiss failed: ${detail}`);
+          return;
+        }
+
         onResolved();
       } finally {
         setBusyId(null);
@@ -259,12 +334,72 @@ export function ReviewBanner({
                 <button
                   type="button"
                   className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
+                  onClick={() => void handleRelease(s.id, ask.askId)}
+                  disabled={busyId === s.id}
+                >
+                  Release agent
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
                   onClick={() => void handleCancel(s)}
                   disabled={busyId === s.id}
                 >
                   Cancel review
                 </button>
               </span>
+            </div>
+          );
+        }
+
+        // Unified agent-reviewing banner: stays up for the entire active review,
+        // showing a live comment count as batches arrive. Clears only on Dismiss.
+        if (s.origin === 'agent') {
+          const agentName = agentNamesBySession?.get(s.id) ?? 'Agent';
+          const agentCommentCount = s.filePaths.reduce(
+            (sum, p) => sum + (agentCommentCounts?.get(p) ?? 0),
+            0,
+          );
+          const fileBasenames = s.filePaths.map((p, i) => (
+            <span key={p}>
+              {i > 0 && ', '}
+              <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
+            </span>
+          ));
+          const AGENT_ACTIVE_WINDOW_MS = 30_000;
+          const isAgentActive = s.lastAgentActivityAt
+            ? now - new Date(s.lastAgentActivityAt).getTime() < AGENT_ACTIVE_WINDOW_MS
+            : false;
+          return (
+            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
+              <span className="text-sm flex items-center">
+                {isAgentActive ? (
+                  <span
+                    role="status"
+                    className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent align-middle"
+                    aria-label="Agent is active"
+                  />
+                ) : (
+                  <span
+                    className="mr-2 inline-block h-2 w-2 rounded-full bg-primary align-middle"
+                    aria-hidden
+                  />
+                )}
+                <strong>{agentName} is reviewing {fileBasenames}</strong>
+                {agentCommentCount > 0 && (
+                  <span className="ml-2 text-secondary-text">
+                    — {agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'} so far
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
+                onClick={() => void handleDismissAgentSession(s)}
+                disabled={busyId === s.id}
+              >
+                Dismiss
+              </button>
             </div>
           );
         }

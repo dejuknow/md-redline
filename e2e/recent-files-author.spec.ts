@@ -91,11 +91,16 @@ test.describe('Recent files', () => {
 
   test('recent files persist across page reload', async ({ page }) => {
     await openFixture(page, FIXTURE_1);
-    await page.waitForTimeout(500);
+
+    // Wait until the file is recorded in recent files before navigating away.
+    await page.locator('button[title="Open file"]').click();
+    const opener0 = fileOpener(page);
+    await expect(opener0.getByText('test-doc.md').first()).toBeVisible({ timeout: 5000 });
+    await page.keyboard.press('Escape');
+    await expect(opener0).not.toBeVisible();
 
     // Navigate to a blank page, then back to the app
     await page.goto('/');
-    await page.waitForTimeout(500);
 
     // Open the file picker
     await page.locator('button[title="Open file"]').first().click();
@@ -150,7 +155,6 @@ test.describe('Author management', () => {
     await input.fill('TestReviewer');
     // Trigger onBlur to commit the change
     await input.blur();
-    await page.waitForTimeout(200);
 
     // Close settings
     await page.keyboard.press('Escape');
@@ -170,14 +174,14 @@ test.describe('Author management', () => {
     const input = authorInput(page);
     await input.fill('PersistentUser');
     await input.blur();
-    await page.waitForTimeout(200);
+    // Wait for the value to be committed before closing settings
+    await expect(input).toHaveValue('PersistentUser');
     await page.keyboard.press('Escape');
 
-    await page.waitForTimeout(500);
-
-    // Reload and verify
+    // Reload and verify — wait for the settings button (toolbar) to be ready,
+    // not .prose, because the file may not reopen automatically after reload.
     await page.reload();
-    await page.locator('.prose').waitFor({ timeout: 10_000 });
+    await expect(page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`)).toBeVisible({ timeout: 10_000 });
 
     await page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`).click();
     await expect(authorInput(page)).toHaveValue('PersistentUser');

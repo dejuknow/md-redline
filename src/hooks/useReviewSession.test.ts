@@ -273,6 +273,34 @@ describe('useReviewSession', () => {
     expect(result.current.sessions[0].sentCommentIds).toEqual(['c1']);
   });
 
+  it('exposes session.origin from GET /api/review-sessions response', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        sessions: [
+          {
+            id: 'rev_1',
+            filePaths: ['/tmp/a.md'],
+            enableResolve: false,
+            status: 'open',
+            sentCommentIds: [],
+            waitingForAgent: false,
+            origin: 'agent',
+          },
+        ],
+      }),
+    } as Response);
+
+    const { result } = renderHook(() => useReviewSession());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.sessions).toHaveLength(1);
+    expect(result.current.sessions[0].origin).toBe('agent');
+  });
+
   it('re-polls the session list when a heartbeat returns 404 (session swept server-side)', async () => {
     // First poll: session is open. Heartbeat returns 404 (server swept it).
     // Second poll must fire right after, returning an empty list so the

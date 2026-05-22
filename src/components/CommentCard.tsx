@@ -22,6 +22,14 @@ interface Props {
   anchorMissing?: boolean;
   sent?: boolean;
   agentQuestion?: boolean;
+  /**
+   * Controlled draft reply text for agent-question cards. When provided the
+   * card renders an always-visible reply textarea instead of the click-to-open
+   * compose flow used for regular comments.
+   */
+  draftReply?: string;
+  /** Called whenever the agent-question draft textarea value changes. */
+  onDraftReplyChange?: (commentId: string, text: string) => void;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
@@ -53,6 +61,8 @@ export const CommentCard = memo(function CommentCard({
   anchorMissing,
   sent,
   agentQuestion,
+  draftReply,
+  onDraftReplyChange,
   onActivate,
   onResolve,
   onUnresolve,
@@ -532,6 +542,21 @@ export const CommentCard = memo(function CommentCard({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Agent-question draft reply textarea — always visible, controlled by parent */}
+      {agentQuestion && !isResolved && draftReply !== undefined && (
+        <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
+          <textarea
+            data-testid="agent-reply-textarea"
+            value={draftReply}
+            onChange={(e) => onDraftReplyChange?.(comment.id, e.target.value)}
+            placeholder="Write a reply..."
+            maxLength={COMMENT_MAX_LENGTH}
+            className="w-full text-xs border border-border-subtle rounded-md px-2 py-1.5 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
+            rows={2}
+          />
         </div>
       )}
 

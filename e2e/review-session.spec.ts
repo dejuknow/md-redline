@@ -72,7 +72,7 @@ test.describe('Review session banner', () => {
 
     const waitPromise = request.get(`${baseURL}/api/review-sessions/${sessionId}/wait`);
 
-    await banner.getByRole('button', { name: 'Send & finish' }).click();
+    await banner.getByRole('button', { name: /Send \d+ & finish|Finish review/i }).click();
 
     const waitRes = await waitPromise;
     expect(waitRes.status()).toBe(200);
@@ -115,8 +115,8 @@ test.describe('Review session banner', () => {
     const banner = page.getByTestId('review-banner');
     await expect(banner).toBeVisible({ timeout: 12_000 });
 
-    // Wait for the file to load (Send batch should be enabled once files are ready)
-    const batchButton = banner.getByRole('button', { name: /send batch/i });
+    // Wait for the file to load (Send N comments button should be enabled once files are ready)
+    const batchButton = banner.getByRole('button', { name: /Send \d+ comments?/i });
     await expect(batchButton).toBeEnabled({ timeout: 10_000 });
 
     // Start /wait long-poll, then click Send batch

@@ -96,7 +96,89 @@ async function waitFor(
       expect(toolsResp, `tools/list response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(['mdr_ask', 'mdr_request_review']);
+      expect(names).toEqual(['mdr_ask', 'mdr_request_review', 'mdr_review']);
+    } finally {
+      child.kill();
+    }
+  }, 15_000);
+
+  it('lists mdr_review in tools list', async () => {
+    const child = spawn('node', [BIN, 'mcp'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_ENV: 'test' },
+    });
+
+    const stdoutRef = { current: '' };
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutRef.current += chunk.toString('utf8');
+    });
+
+    try {
+      child.stdin.write(
+        rpcRequest(1, 'initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '0' },
+        }),
+      );
+
+      await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 1), 5_000);
+
+      child.stdin.write(rpcRequest(2, 'tools/list'));
+
+      const afterList = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 2), 5_000);
+      const toolsResp = afterList.find((r) => r.id === 2);
+      expect(toolsResp, `tools/list response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
+      const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
+      expect(tools.find((t) => t.name === 'mdr_review')).toBeDefined();
+    } finally {
+      child.kill();
+    }
+  }, 15_000);
+
+  it('dispatches mdr_review to handleReviewToolCall', async () => {
+    const child = spawn('node', [BIN, 'mcp'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_ENV: 'test' },
+    });
+
+    const stdoutRef = { current: '' };
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutRef.current += chunk.toString('utf8');
+    });
+
+    try {
+      child.stdin.write(
+        rpcRequest(1, 'initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '0' },
+        }),
+      );
+
+      await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 1), 5_000);
+
+      child.stdin.write(
+        rpcRequest(2, 'tools/call', {
+          name: 'mdr_review',
+          arguments: {
+            filePaths: ['/tmp/test-fixture.md'],
+            comments: [{ filePath: '/tmp/test-fixture.md', anchor: 'hello', text: 'feedback' }],
+            waitForResponse: false,
+          },
+        }),
+      );
+
+      const afterCall = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 2), 10_000);
+      const callResp = afterCall.find((r) => r.id === 2);
+      expect(callResp, `tools/call response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
+      // Either a result or an error is acceptable — the key thing is the tool was dispatched
+      // (not "Unknown tool: mdr_review"). If there's an error, it should not be about unknown tool.
+      if (callResp?.error) {
+        expect(callResp.error.message).not.toMatch(/Unknown tool/);
+      } else {
+        expect(callResp?.result).toBeDefined();
+      }
     } finally {
       child.kill();
     }

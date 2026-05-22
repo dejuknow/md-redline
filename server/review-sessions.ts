@@ -17,10 +17,15 @@ const HEARTBEAT_TIMEOUT_MS = 30 * 60_000;
  * dedupe to it. Without this gate, a crash-leaked session can sit in the
  * "open" pool for up to HEARTBEAT_TIMEOUT_MS, and a fresh
  * `mdr_request_review` for the same files would attach to it instead of
- * creating a new one. 60s is well above the client's 10s heartbeat cadence
- * (so live sessions always pass) and well below HEARTBEAT_TIMEOUT_MS.
+ * creating a new one.
+ *
+ * 5 minutes is well above the client's 10s heartbeat cadence (so live
+ * sessions always pass, even when Chrome throttles background tabs to ~1
+ * heartbeat per minute) and well below HEARTBEAT_TIMEOUT_MS. Set high
+ * enough to accommodate agents that batch their work across multiple
+ * `mdr_review` tool calls separated by minutes of LLM thinking time.
  */
-const FIND_OPEN_FRESHNESS_MS = 60_000;
+const FIND_OPEN_FRESHNESS_MS = 5 * 60_000;
 
 /**
  * How long to keep a terminal (done / aborted) session in memory after
@@ -37,10 +42,18 @@ const TERMINAL_RETENTION_MS = 5 * 60_000;
  */
 const WAITING_FOR_AGENT_TIMEOUT_MS = 60_000;
 
+/**
+ * How long an agent session can exist without posting any comments before
+ * it is considered silent and aborted. 5 minutes is generous enough to
+ * accommodate slow LLM tool calls while still giving users timely feedback
+ * if the agent hangs.
+ */
+const AGENT_SILENT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export type ReviewResult =
   | { status: 'batch'; prompt: string; commentIds: string[] }
   | { status: 'done'; prompt?: string }
-  | { status: 'aborted'; reason: 'user_cancelled' | 'browser_disconnected' };
+  | { status: 'aborted'; reason: 'user_cancelled' | 'browser_disconnected' | 'agent_silent' };
 
 export interface AskQuestion {
   commentId: string;
@@ -51,9 +64,24 @@ export interface AskQuestion {
   contextAfter?: string;
 }
 
+/**
+ * Reasons for a no_reply ask result.
+ * - released: user explicitly clicked "Release agent"
+ * - tab_closed: browser disconnected before user replied
+ * - cancelled: user explicitly cancelled the review
+ * - timeout: reserved for future session-timeout mechanism (not yet emitted)
+ * - agent_silent: agent session created but no comments posted in time (see Task 16, not yet emitted)
+ */
+export type AskNoReplyReason =
+  | 'released'
+  | 'tab_closed'
+  | 'cancelled'
+  | 'timeout'
+  | 'agent_silent';
+
 export type AskResult =
   | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }> }
-  | { status: 'aborted'; reason: 'session_cancelled' | 'browser_disconnected' };
+  | { status: 'no_reply'; reason: AskNoReplyReason };
 
 export interface PendingAsk {
   askId: string;
@@ -66,18 +94,23 @@ interface InternalPendingAsk extends PendingAsk {
   waiter: Promise<AskResult>;
 }
 
+export type SessionOrigin = 'user' | 'agent';
+
 export interface ReviewSession {
   id: string;
   filePaths: string[];
   enableResolve: boolean;
+  origin: SessionOrigin;
   createdAt: Date;
   lastHeartbeatAt: Date;
+  /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
+  lastAgentActivityAt: string | null;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
   waitingForAgent: boolean;
 }
 
-interface InternalSession extends ReviewSession {
+interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
   resolver: (result: ReviewResult) => void;
   waiter: Promise<ReviewResult>;
   /** Set when the session transitions to a terminal state. Used for retention cleanup. */
@@ -86,11 +119,26 @@ interface InternalSession extends ReviewSession {
   waitingForAgentSince: Date | null;
   /** Batch queued while waitingForAgent was true. Delivered on the next agent poll. */
   queuedBatch: { prompt: string; commentIds: string[] } | null;
+  /**
+   * Total number of comments posted by the agent to this session.
+   * Used by gcSilentAgentSessions to distinguish sessions where the agent has
+   * already started working (and should not be GC'd) from ones that are truly
+   * silent.
+   */
+  agentCommentCount: number;
+  /**
+   * The last time the agent successfully posted comments. Distinct from
+   * lastHeartbeatAt (which is bumped by browser heartbeats too). Used by the
+   * UI to show a spinner while the agent is actively posting and a static dot
+   * when idle.
+   */
+  lastAgentActivityAt: Date | null;
 }
 
 export interface CreateSessionInput {
   filePaths: string[];
   enableResolve: boolean;
+  origin?: SessionOrigin; // defaults to 'user'
 }
 
 export class ReviewSessionStore {
@@ -116,6 +164,7 @@ export class ReviewSessionStore {
       id,
       filePaths: [...input.filePaths],
       enableResolve: input.enableResolve,
+      origin: input.origin ?? 'user',
       createdAt: now,
       lastHeartbeatAt: now,
       status: 'open',
@@ -126,6 +175,8 @@ export class ReviewSessionStore {
       terminalAt: null,
       waitingForAgentSince: null,
       queuedBatch: null,
+      agentCommentCount: 0,
+      lastAgentActivityAt: null,
     };
 
     this.sessions.set(id, session);
@@ -294,7 +345,7 @@ export class ReviewSessionStore {
     return true;
   }
 
-  abort(id: string, reason: 'user_cancelled' | 'browser_disconnected'): boolean {
+  abort(id: string, reason: 'user_cancelled' | 'browser_disconnected' | 'agent_silent'): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
     const askReason = reason === 'user_cancelled' ? 'session_cancelled' : 'browser_disconnected';
@@ -364,14 +415,56 @@ export class ReviewSessionStore {
   }
 
   abortAsks(sessionId: string, reason: 'session_cancelled' | 'browser_disconnected'): PendingAsk[] {
+    const noReplyReason: AskNoReplyReason = reason === 'browser_disconnected' ? 'tab_closed' : 'cancelled';
     const removed: PendingAsk[] = [];
     for (const [id, ask] of this.pendingAsks.entries()) {
       if (ask.sessionId !== sessionId) continue;
-      ask.resolver({ status: 'aborted', reason });
+      ask.resolver({ status: 'no_reply', reason: noReplyReason });
       removed.push({ askId: ask.askId, sessionId: ask.sessionId, questions: ask.questions });
       this.pendingAsks.delete(id);
     }
     return removed;
+  }
+
+  releaseAsk(sessionId: string, askId: string): boolean {
+    const ask = this.pendingAsks.get(askId);
+    if (!ask || ask.sessionId !== sessionId) return false;
+    this.pendingAsks.delete(askId);
+    ask.resolver({ status: 'no_reply', reason: 'released' });
+    return true;
+  }
+
+  /**
+   * Increment the agent comment counter for a session. Call this after
+   * comments are successfully written so gcSilentAgentSessions knows the
+   * agent is active.
+   */
+  recordAgentComments(sessionId: string, count: number): void {
+    const s = this.sessions.get(sessionId);
+    if (!s) return;
+    s.agentCommentCount += count;
+    const now = new Date();
+    s.lastAgentActivityAt = now;
+    // Treat an agent POST as a heartbeat so subsequent batched calls keep
+    // finding this session via findOpenSession even if the browser tab is
+    // backgrounded and Chrome throttles its setInterval-based heartbeats.
+    s.lastHeartbeatAt = now;
+  }
+
+  /**
+   * Abort any open agent-origin sessions that have not posted any comments
+   * within AGENT_SILENT_TIMEOUT_MS. Called periodically to clean up hanging
+   * sessions from agents that failed before posting.
+   */
+  gcSilentAgentSessions(): void {
+    const now = Date.now();
+    for (const s of this.sessions.values()) {
+      if (s.status !== 'open') continue;
+      if (s.origin !== 'agent') continue;
+      if (s.agentCommentCount > 0) continue;
+      if (now - s.createdAt.getTime() < AGENT_SILENT_TIMEOUT_MS) continue;
+      this.abort(s.id, 'agent_silent');
+    }
   }
 
   getPendingAsks(sessionId: string): PendingAsk[] {
@@ -400,6 +493,7 @@ export class ReviewSessionStore {
   }
 
   private sweepStale(): void {
+    this.gcSilentAgentSessions();
     const now = Date.now();
     const heartbeatCutoff = now - HEARTBEAT_TIMEOUT_MS;
     const retentionCutoff = now - TERMINAL_RETENTION_MS;
@@ -454,8 +548,10 @@ export class ReviewSessionStore {
       id: s.id,
       filePaths: [...s.filePaths],
       enableResolve: s.enableResolve,
+      origin: s.origin,
       createdAt: s.createdAt,
       lastHeartbeatAt: s.lastHeartbeatAt,
+      lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,
       status: s.status,
       sentCommentIds: [...s.sentCommentIds],
       waitingForAgent: s.waitingForAgent,

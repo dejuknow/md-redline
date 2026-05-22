@@ -460,6 +460,7 @@ export default function App() {
     commentCounts,
     resolvedCommentCounts,
     commentIdsByFile,
+    agentCommentCounts,
     commentCount,
     handleAddComment,
     handleResolve,
@@ -580,6 +581,23 @@ export default function App() {
 
   const [activeAskId, setActiveAskId] = useState<string | null>(null);
 
+  // Draft reply text keyed by commentId for the current agent ask.
+  // Updated as the user types in the always-visible agent-question textareas.
+  const [agentDrafts, setAgentDrafts] = useState<Map<string, string>>(new Map());
+
+  const handleAgentDraftChange = useCallback((commentId: string, text: string) => {
+    setAgentDrafts((prev) => {
+      const next = new Map(prev);
+      next.set(commentId, text);
+      return next;
+    });
+  }, []);
+
+  // Reset drafts when the set of agent asks changes (new ask or ask resolved)
+  useEffect(() => {
+    setAgentDrafts(new Map());
+  }, [activeAskId]);
+
   useEffect(() => {
     if (!activeSession || agentAsks.length === 0) {
       setActiveAskId(null);
@@ -609,7 +627,10 @@ export default function App() {
   const pendingAsksBySession = useMemo(() => {
     const map = new Map<string, PendingAskSummary>();
     if (activeSession && agentAsks.length > 0 && activeAskId) {
-      const readyCount = agentAsks.filter((c) => (c.replies?.length ?? 0) > 0).length;
+      // readyCount: number of ask cards with a non-empty draft reply
+      const readyCount = agentAsks.filter((c) =>
+        (agentDrafts.get(c.id) ?? '').trim().length > 0,
+      ).length;
       map.set(activeSession.id, {
         askId: activeAskId,
         commentIds: agentAsks.map((c) => c.id),
@@ -618,14 +639,14 @@ export default function App() {
       });
     }
     return map;
-  }, [activeSession, agentAsks, activeAskId]);
+  }, [activeSession, agentAsks, activeAskId, agentDrafts]);
 
   const handleSendReplies = useCallback(
     async (sessionId: string, askId: string) => {
       const replies = agentAsks
         .map((c) => {
-          const lastReply = c.replies?.[c.replies.length - 1];
-          return lastReply ? { commentId: c.id, text: lastReply.text } : null;
+          const draft = (agentDrafts.get(c.id) ?? '').trim();
+          return draft ? { commentId: c.id, text: draft } : null;
         })
         .filter((r): r is { commentId: string; text: string } => r !== null);
       if (replies.length === 0) return;
@@ -645,8 +666,15 @@ export default function App() {
         showToast(`Send replies failed: ${err instanceof Error ? err.message : 'network error'}`);
       }
     },
-    [agentAsks, showToast],
+    [agentAsks, agentDrafts, showToast],
   );
+
+  // Called by ReviewBanner after the user releases the agent so the
+  // pending-ask UI state is cleared immediately (without waiting for the
+  // agentAsks.length change that would normally trigger the re-fetch).
+  const handleReleaseAsk = useCallback(() => {
+    setActiveAskId(null);
+  }, []);
 
   // Toast on new agent ask (debounced)
   const lastSeenAskIdsRef = useRef<Set<string>>(new Set());
@@ -670,13 +698,52 @@ export default function App() {
     }
 
     if (!hasNew) return;
+    // Only fire when there's actually a pending ask on the server side.
+    // In fire-and-forget mode, agentAsks includes the agent-initiated comments
+    // but activeAskId stays null because no pendingAsk exists.
+    if (!activeAskId) return;
+
     if (askToastTimerRef.current) clearTimeout(askToastTimerRef.current);
     askToastTimerRef.current = setTimeout(() => {
       const author = agentAsks[0]?.author ?? 'Agent';
       const fileBase = activeFilePath ? activeFilePath.split('/').pop() : '';
       showToast(`${author} has a question${fileBase ? ` on ${fileBase}` : ''}`);
     }, 500);
-  }, [agentAsks, activeFilePath, showToast]);
+  }, [agentAsks, activeFilePath, activeAskId, showToast]);
+
+
+  // Derive agentName (first agent-initiated comment author) per review session.
+  // Used by ReviewBanner to render the completion banner for fire-and-forget reviews.
+  const agentNamesBySession = useMemo(() => {
+    const map = new Map<string, string>();
+    const agentSessions = reviewSessions.filter((s) => s.origin === 'agent');
+    if (agentSessions.length === 0) return map;
+
+    const commentsByFile = new Map<string, typeof comments>();
+    if (activeFilePath) commentsByFile.set(activeFilePath, comments);
+    for (const tab of tabs) {
+      if (commentsByFile.has(tab.filePath)) continue;
+      try {
+        commentsByFile.set(tab.filePath, parseComments(tab.rawMarkdown).comments);
+      } catch { /* skip */ }
+    }
+
+    for (const session of agentSessions) {
+      let firstAuthor: string | undefined;
+      outer: for (const filePath of session.filePaths) {
+        const fileParsedComments = commentsByFile.get(filePath);
+        if (!fileParsedComments) continue;
+        for (const c of fileParsedComments) {
+          if (c.agentInitiated === true && c.sessionId === session.id && c.author) {
+            firstAuthor = c.author;
+            break outer;
+          }
+        }
+      }
+      map.set(session.id, firstAuthor ?? 'Agent');
+    }
+    return map;
+  }, [reviewSessions, comments, tabs, activeFilePath]);
 
   const handleDiffToggle = useCallback(() => {
     if (!diffEnabled) {
@@ -1845,6 +1912,7 @@ export default function App() {
       <ReviewBanner
         sessions={reviewSessions}
         commentCounts={commentCounts}
+        agentCommentCounts={agentCommentCounts}
         onHandoffSuccess={handleReviewHandoffSuccess}
         onResolved={handleReviewResolved}
         onBatchSent={handleBatchSent}
@@ -1852,6 +1920,8 @@ export default function App() {
         commentIdsByFile={commentIdsByFile}
         pendingAsksBySession={pendingAsksBySession}
         onSendReplies={handleSendReplies}
+        onRelease={handleReleaseAsk}
+        agentNamesBySession={agentNamesBySession}
       />
       <Toolbar
         error={error}
@@ -2218,6 +2288,9 @@ export default function App() {
                   requestedFocus={requestedCommentFocus}
                   onFocusHandled={() => setRequestedCommentFocus(null)}
                   sentCommentIds={sentCommentIds}
+                  agentAskCommentIds={activeAskId && agentAsks.length > 0 ? new Set(agentAsks.map((c) => c.id)) : undefined}
+                  agentDrafts={agentDrafts}
+                  onAgentDraftChange={handleAgentDraftChange}
                 />
               </div>
             </div>

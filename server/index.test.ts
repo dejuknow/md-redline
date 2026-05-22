@@ -1959,6 +1959,71 @@ describe('review sessions API', () => {
     const { response } = await requestJson(app, '/api/review-sessions/rev_nope/wait');
     expect(response.status).toBe(404);
   });
+
+  it('GET /api/review-sessions/:id returns origin field', async () => {
+    // Abort any lingering docsFile session first, then create a fresh user-origin
+    // session. Finish it immediately so it doesn't block the agent-origin tests below.
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile] }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+    const { body } = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect((body as { origin: string }).origin).toBe('user');
+    // Close the session so it is no longer open; agent-origin tests start fresh.
+    await requestJson(app, `/api/review-sessions/${sessionId}/abort`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+
+  it('POST accepts origin=agent and stores it', async () => {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], origin: 'agent' }),
+    });
+    const sessionId = (create.body as { sessionId: string }).sessionId;
+    const { body } = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect((body as { origin: string }).origin).toBe('agent');
+  });
+
+  it('agent-origin POST also dedupes (batched agent calls reuse the same session)', async () => {
+    const a = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], origin: 'agent' }),
+    });
+    const idA = (a.body as { sessionId: string }).sessionId;
+
+    const b = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], origin: 'agent' }),
+    });
+    const idB = (b.body as { sessionId: string }).sessionId;
+
+    expect(idA).toBe(idB);
+  });
+
+  it('user-origin POST still dedupes (existing behavior)', async () => {
+    const a = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [rootFile] }),
+    });
+    const idA = (a.body as { sessionId: string }).sessionId;
+
+    const b = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [rootFile] }),
+    });
+    const idB = (b.body as { sessionId: string }).sessionId;
+
+    expect(idA).toBe(idB);
+  });
 });
 
 async function buildTestApp(options: { allowedRoots: string[] }) {
@@ -2026,8 +2091,8 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
       }),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string; failedIndices: number[] };
-    expect(body.failedIndices).toEqual([0]);
+    const body = (await res.json()) as { error: string; failedComments: number[] };
+    expect(body.failedComments).toEqual([0]);
 
     const after = await readFile(filePath, 'utf8');
     expect(after).not.toMatch(/agentInitiated/);
@@ -2087,6 +2152,190 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
 
     const pending = reviewSessions.getPendingAsks(sessionId);
     expect(pending[0].questions[0].filePath).toBe(filePath); // canonical path stored
+  });
+});
+
+describe('POST /agent-comments author field', () => {
+  it('uses provided author name when agent sends author: "Claude"', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-author-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nSome text here.\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        comments: [{ filePath, anchor: 'Some text', text: 'feedback', author: 'Claude' }],
+        expectsReply: false,
+      }),
+    });
+    expect(res.status).toBe(201);
+
+    const updated = await readFile(filePath, 'utf8');
+    expect(updated).toMatch(/"author":"Claude"/);
+    expect(updated).not.toMatch(/"author":"Agent"/);
+  });
+
+  it('falls back to "Agent" when author is omitted', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-author-fallback-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nSome text here.\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        comments: [{ filePath, anchor: 'Some text', text: 'feedback' }],
+        expectsReply: false,
+      }),
+    });
+    expect(res.status).toBe(201);
+
+    const updated = await readFile(filePath, 'utf8');
+    expect(updated).toMatch(/"author":"Agent"/);
+  });
+});
+
+describe('POST /agent-comments with replies and expectsReply=false', () => {
+  it('writes comments and replies and does not create pendingAsk when expectsReply=false', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-replies-')));
+    const tempFile = join(tmp, 'spec.md');
+    await writeFile(tempFile, '# Title\n\nHello world\n', 'utf8');
+    const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [tempFile] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // Seed an existing top-level comment so we can reply to it.
+    const seed = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        comments: [{ filePath: tempFile, anchor: 'Hello', text: 'seed' }],
+        expectsReply: false,
+      }),
+    });
+    expect(seed.status).toBe(201);
+    const seedBody = (await seed.json()) as { askId?: string; commentIds: string[] };
+    expect(seedBody.askId).toBeUndefined();
+    const seedCommentId = seedBody.commentIds[0];
+
+    const res = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        comments: [{ filePath: tempFile, anchor: 'world', text: 'a question' }],
+        replies: [{ filePath: tempFile, commentId: seedCommentId, text: 'a reply' }],
+        expectsReply: false,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { askId?: string; commentsWritten: number; repliesWritten: number };
+    expect(body.askId).toBeUndefined();
+    expect(body.commentsWritten).toBe(1);
+    expect(body.repliesWritten).toBe(1);
+    // Verify no pendingAsks created for this session
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
+  });
+
+  it('still creates pendingAsk when expectsReply=true (default for backward compat)', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-bwcompat-')));
+    const tempFile = join(tmp, 'spec.md');
+    await writeFile(tempFile, '# Title\n\nHello world\n', 'utf8');
+    const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [tempFile] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [{ filePath: tempFile, anchor: 'Hello', text: 'q1' }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { askId?: string };
+    expect(body.askId).toMatch(/^ask_/);
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(1);
+  });
+
+  it('returns 400 with failedReplies for unknown reply commentId', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-failedreplies-')));
+    const tempFile = join(tmp, 'spec.md');
+    await writeFile(tempFile, '# Title\n\nHello world\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [tempFile] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    const res = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        replies: [{ filePath: tempFile, commentId: 'cmt_does_not_exist', text: 'orphan' }],
+        expectsReply: false,
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { failedReplies: number[] };
+    expect(body.failedReplies).toEqual([0]);
+  });
+
+  it('returns 400 with both failedComments and failedReplies when both fail in one request', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-mixedfail-')));
+    const tempFile = join(tmp, 'spec.md');
+    await writeFile(tempFile, '# Title\n\nHello world\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [tempFile] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    // Send one comment with an unresolvable anchor AND one reply with an unknown commentId.
+    const res = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        comments: [{ filePath: tempFile, anchor: 'anchor_does_not_exist', text: 'fail comment' }],
+        replies: [{ filePath: tempFile, commentId: 'cmt_does_not_exist', text: 'fail reply' }],
+        expectsReply: false,
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: string;
+      failedComments: number[];
+      failedReplies: number[];
+    };
+    expect(body.error).toMatch(/anchors or reply targets/);
+    expect(body.failedComments).toEqual([0]);
+    expect(body.failedReplies).toEqual([0]);
   });
 });
 
@@ -2245,6 +2494,68 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
       body: JSON.stringify({ replies: [{ commentId: pending[0].commentId, text: 'r1' }] }),
     });
     expect(reply.status).toBe(400);
+  });
+});
+
+describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
+  it('releases the ask and resolves the waiter', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-release-'));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, 'Some text here.\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ questions: [{ filePath, anchor: 'Some text', text: 'q1' }] }),
+    });
+    const { askId } = (await post.json()) as { askId: string };
+
+    const waiterPromise = app.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+
+    const res = await app.request(`/api/review-sessions/${sessionId}/asks/${askId}/release`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const wait = await waiterPromise;
+    const result = (await wait.json()) as { status: string; reason: string };
+    expect(result).toEqual({ status: 'no_reply', reason: 'released' });
+  });
+
+  it('404s on unknown session', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-release-'));
+    await writeFile(join(tmp, 'a.md'), '# x\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const res = await app.request('/api/review-sessions/rev_nope/asks/ask_x/release', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('404s on unknown ask', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'mdr-release-'));
+    await writeFile(join(tmp, 'a.md'), '# x\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [join(tmp, 'a.md')] }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const res = await app.request(`/api/review-sessions/${sessionId}/asks/ask_nope/release`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(res.status).toBe(404);
   });
 });
 
