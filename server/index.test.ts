@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } fr
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createApp, createAppFull, isPathInsideRoot, type CreateAppOptions } from './index';
+import { addReply, parseComments } from '../src/lib/comment-parser';
 
 type AppInstance = ReturnType<typeof createApp>;
 
@@ -3183,6 +3184,175 @@ describe('Done-with-pending-ask preserves marker and clears expectsReply on disk
     expect(afterDone).toMatch(/"text":"q\?"/); // marker preserved
     expect(afterDone).toMatch(/"agentInitiated":true/); // attribution preserved
     expect(afterDone).not.toMatch(/"expectsReply":true/); // flag cleared
+  });
+});
+
+describe('Inline reply delivery to pending asks', () => {
+  it('PUT /api/file with every question answered resolves the ask immediately', async () => {
+    // The reply happy path: the user answers via the comment sidebar, which
+    // writes the reply into the marker (addReply) and saves the file. The
+    // ask waiter must resolve with the reply text at save time — no Done
+    // click required.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-inline-reply-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nFirst anchor sentence.\n', 'utf8');
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const askRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'First anchor', text: 'Is this section final?' }],
+      }),
+    });
+    expect(askRes.status).toBe(201);
+    const { askId } = (await askRes.json()) as { askId: string };
+
+    const raw = await readFile(filePath, 'utf8');
+    const { comments } = parseComments(raw);
+    expect(comments).toHaveLength(1);
+    const commentId = comments[0].id;
+
+    // Start the agent's long-poll BEFORE the user replies.
+    const waitPromise = testApp.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // User replies via the sidebar: addReply + save.
+    const replied = addReply(raw, commentId, 'Yes, final as of Friday.', 'Dennis');
+    const put = await testApp.request('/api/file', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content: replied }),
+    });
+    expect(put.status).toBe(200);
+
+    const waitRes = await waitPromise;
+    expect(waitRes.status).toBe(200);
+    const body = (await waitRes.json()) as {
+      status: string;
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    };
+    expect(body.status).toBe('reply');
+    expect(body.totalQuestions).toBe(1);
+    expect(body.replies).toEqual([{ questionIndex: 0, text: 'Yes, final as of Friday.' }]);
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
+  });
+
+  it('partially answered ask stays pending on save, then /agent-done delivers the partial replies', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-partial-reply-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nFirst anchor sentence.\n\nSecond anchor sentence.\n', 'utf8');
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const askRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [
+          { filePath, anchor: 'First anchor', text: 'Q1?' },
+          { filePath, anchor: 'Second anchor', text: 'Q2?' },
+        ],
+      }),
+    });
+    expect(askRes.status).toBe(201);
+    const { askId } = (await askRes.json()) as { askId: string };
+
+    const raw = await readFile(filePath, 'utf8');
+    const { comments } = parseComments(raw);
+    expect(comments).toHaveLength(2);
+    const q1 = comments.find((c) => c.text === 'Q1?');
+    expect(q1).toBeDefined();
+
+    // Reply to ONLY the first question and save. The ask must stay pending —
+    // the user may still be typing the second answer.
+    const replied = addReply(raw, q1!.id, 'Answer to Q1.', 'Dennis');
+    const put = await testApp.request('/api/file', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content: replied }),
+    });
+    expect(put.status).toBe(200);
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(1);
+
+    // Start the agent's long-poll, then the user clicks Done. The partial
+    // reply must be delivered (not reported as done_without_reply).
+    const waitPromise = testApp.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    await new Promise((r) => setTimeout(r, 10));
+    const done = await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(done.status).toBe(200);
+
+    const waitRes = await waitPromise;
+    const body = (await waitRes.json()) as {
+      status: string;
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    };
+    expect(body.status).toBe('reply');
+    expect(body.totalQuestions).toBe(2);
+    expect(body.replies).toEqual([{ questionIndex: 0, text: 'Answer to Q1.' }]);
+
+    // The unanswered Q2 marker bypasses onAsksClosedOnDone (the ask was
+    // resolved, not aborted), so the route's own cleanup must clear its
+    // expectsReply flag. Q2's marker stays as a record of "asked, no answer."
+    let afterDone = '';
+    for (let attempt = 0; attempt < 20; attempt++) {
+      afterDone = await readFile(filePath, 'utf8');
+      if (!afterDone.includes('"expectsReply":true')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(afterDone).toMatch(/"text":"Q2\?"/);
+    expect(afterDone).not.toMatch(/"expectsReply":true/);
+  });
+
+  it('agent-done with no inline replies still resolves done_without_reply', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-no-reply-done-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nAn anchor sentence.\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const askRes = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'An anchor', text: 'Unanswered?' }],
+      }),
+    });
+    const { askId } = (await askRes.json()) as { askId: string };
+
+    const waitPromise = testApp.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    await new Promise((r) => setTimeout(r, 10));
+    await testApp.request(`/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    const waitRes = await waitPromise;
+    const body = (await waitRes.json()) as { status: string; reason?: string };
+    expect(body).toEqual({ status: 'no_reply', reason: 'done_without_reply' });
   });
 });
 

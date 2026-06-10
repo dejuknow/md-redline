@@ -60,7 +60,7 @@ test.describe('Agent asks', () => {
     }
   });
 
-  test('user receives an ask, drafts a reply, sends, and section clears', async ({
+  test('user replies inline and the agent receives the reply', async ({
     page,
     request,
     baseURL,
@@ -110,6 +110,12 @@ test.describe('Agent asks', () => {
     // The comment card shows the agent question text.
     await expect(page.getByText('per-user or per-tenant?')).toBeVisible({ timeout: 5_000 });
 
+    // Start the agent's long-poll for the reply BEFORE the user answers.
+    // This is the same request handleAskToolCall makes while blocking.
+    const waitPromise = request.get(
+      `${baseURL}/api/review-sessions/${sessionId}/asks/${askId}/wait`,
+    );
+
     // Reply to the ask via the standard Reply button on the comment card.
     await commentCards.first().click(); // activate
     // Open the reply form
@@ -119,9 +125,27 @@ test.describe('Agent asks', () => {
     // Submit the reply (the primary/highlighted Reply button)
     await commentCards.first().getByRole('button', { name: /^reply$/i }).last().click();
 
-    // After the reply is submitted, the server should process it.
-    // askId is still valid for correlation if needed.
-    void askId;
+    // The inline reply saves the file, and the save resolves the pending ask
+    // immediately (every question now has an answer). The agent's long-poll
+    // must return the reply text — no Done click required.
+    const waitRes = await waitPromise;
+    expect(waitRes.status()).toBe(200);
+    const waitBody = (await waitRes.json()) as {
+      status: string;
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    };
+    expect(waitBody.status).toBe('reply');
+    expect(waitBody.replies).toEqual([
+      { questionIndex: 0, text: 'per-tenant, see section 4.2' },
+    ]);
+
+    // The marker on disk keeps the question and the reply as a record, with
+    // the pending flag cleared.
+    await expect
+      .poll(() => readFileSync(file, 'utf8'), { timeout: 5_000 })
+      .toContain('per-tenant, see section 4.2');
+    expect(readFileSync(file, 'utf8')).not.toContain('"expectsReply":true');
   });
 
   test('Send batch and Send & finish are hidden while in awaiting-reply state', async ({

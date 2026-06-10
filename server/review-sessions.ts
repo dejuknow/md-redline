@@ -839,6 +839,19 @@ export class ReviewSessionStore {
     return result;
   }
 
+  /**
+   * All pending asks across every session. Used by the file-save hook to
+   * find asks whose questions may have just been answered inline, without
+   * the caller having to know which session owns the file.
+   */
+  listPendingAsks(): PendingAsk[] {
+    const result: PendingAsk[] = [];
+    for (const ask of this.pendingAsks.values()) {
+      result.push({ askId: ask.askId, sessionId: ask.sessionId, questions: ask.questions });
+    }
+    return result;
+  }
+
   heartbeat(id: string): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;

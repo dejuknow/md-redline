@@ -19,7 +19,7 @@ import {
 } from './preferences';
 import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
-import { registerReviewSessionRoutes } from './routes/review-sessions';
+import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
 import { removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 
 const require = createRequire(import.meta.url);
@@ -695,6 +695,23 @@ export function createAppFull(options: CreateAppOptions = {}) {
       writeLocks.set(resolved, currentWrite);
       await currentWrite;
       if (conflictResponse) return conflictResponse;
+      // If this save answered every question of a pending agent ask (the
+      // user replied via the sidebar, which stores replies inside the
+      // markers), resolve the ask now so the agent unblocks immediately
+      // instead of waiting for Done. Partially-answered asks stay pending:
+      // the user may still be typing the remaining replies, and /agent-done
+      // delivers partials when they explicitly finish.
+      try {
+        await deliverInlineAskReplies({
+          reviewSessions,
+          readFileText: (p) => readFile(p, 'utf-8'),
+          filePath: resolved,
+          knownContent: new Map([[resolved, body.content]]),
+          requireComplete: true,
+        });
+      } catch (err) {
+        console.warn(`[review-session] inline-reply sweep after save failed for ${resolved}:`, err);
+      }
       const newStat = await stat(resolved);
       return c.json({ success: true, path: resolved, mtime: newStat.mtimeMs });
     } catch (err) {

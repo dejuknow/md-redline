@@ -1,8 +1,106 @@
 import { randomUUID } from 'crypto';
 import type { Hono } from 'hono';
 import { extname } from 'path';
-import type { ReviewSessionStore, SessionOrigin } from '../review-sessions';
+import type { PendingAsk, ReviewSessionStore, SessionOrigin } from '../review-sessions';
 import { appendReply, insertComment, parseComments, removeComment, removeReply, transformCommentMarkers } from '../../src/lib/comment-parser';
+
+/**
+ * Deliver inline replies to pending asks.
+ *
+ * When the user answers an agent question via the comment sidebar, addReply
+ * stores the reply inside the marker on disk (and clears expectsReply), but
+ * nothing resolves the in-memory ask waiter: the agent would keep blocking
+ * and eventually be told "no reply" even though the answer is sitting in the
+ * file. This helper closes that gap by reading the markers back and resolving
+ * asks whose questions now carry replies.
+ *
+ * Two call sites with different strictness:
+ * - file-save hook (`requireComplete: true`): resolve only asks where EVERY
+ *   question has a reply. The user may still be answering the rest; a partial
+ *   eager resolve would cut them off mid-batch.
+ * - /agent-done (`requireComplete: false`): the user explicitly finished, so
+ *   deliver whatever replies exist. Questions without replies surface to the
+ *   agent as unanswered ("N of M").
+ *
+ * Best-effort by design: a file that fails to read or parse skips its ask
+ * (the ask then falls through to the normal done/abort paths).
+ *
+ * Returns one entry per resolved ask. `unanswered` lists the questions that
+ * had no reply at delivery time (only possible with requireComplete: false):
+ * their markers still carry expectsReply:true on disk and bypass the
+ * onAsksClosedOnDone cleanup (resolveReplies already removed the ask), so
+ * the caller is responsible for clearing those flags.
+ */
+export interface DeliveredAsk {
+  askId: string;
+  sessionId: string;
+  unanswered: PendingAsk['questions'];
+}
+
+export async function deliverInlineAskReplies(opts: {
+  reviewSessions: ReviewSessionStore;
+  readFileText: (resolvedPath: string) => Promise<string>;
+  /** Limit to one session's asks (the /agent-done path). */
+  sessionId?: string;
+  /** Limit to asks with at least one question in this file (the save path). */
+  filePath?: string;
+  /** Pre-read contents, keyed by resolved path. Avoids re-reading a file the caller just wrote. */
+  knownContent?: ReadonlyMap<string, string>;
+  requireComplete: boolean;
+}): Promise<DeliveredAsk[]> {
+  const { reviewSessions, readFileText, sessionId, filePath, knownContent, requireComplete } = opts;
+  const asks: PendingAsk[] = sessionId
+    ? reviewSessions.getPendingAsks(sessionId)
+    : reviewSessions.listPendingAsks();
+  const candidates = filePath
+    ? asks.filter((a) => a.questions.some((q) => q.filePath === filePath))
+    : asks;
+  if (candidates.length === 0) return [];
+
+  // Parse each file at most once across all candidate asks. `null` marks a
+  // file that failed to read/parse so we don't retry it per question.
+  const parsedByFile = new Map<string, ReturnType<typeof parseComments>['comments'] | null>();
+  const delivered: DeliveredAsk[] = [];
+  for (const ask of candidates) {
+    const replies: Array<{ commentId: string; text: string }> = [];
+    const unanswered: PendingAsk['questions'] = [];
+    let readFailed = false;
+    for (const q of ask.questions) {
+      let comments = parsedByFile.get(q.filePath);
+      if (comments === undefined) {
+        try {
+          const content = knownContent?.get(q.filePath) ?? (await readFileText(q.filePath));
+          comments = parseComments(content).comments;
+        } catch {
+          comments = null;
+        }
+        parsedByFile.set(q.filePath, comments);
+      }
+      if (comments === null) {
+        readFailed = true;
+        break;
+      }
+      const marker = comments.find((c) => c.id === q.commentId);
+      const replyTexts = (marker?.replies ?? [])
+        .map((r) => r.text)
+        .filter((t) => t.trim().length > 0);
+      if (replyTexts.length > 0) {
+        replies.push({ commentId: q.commentId, text: replyTexts.join('\n\n') });
+      } else {
+        unanswered.push(q);
+      }
+    }
+    if (readFailed || replies.length === 0) continue;
+    if (requireComplete && unanswered.length > 0) continue;
+    if (reviewSessions.resolveReplies(ask.sessionId, ask.askId, replies)) {
+      console.log(
+        `[review-session] delivered ${replies.length}/${ask.questions.length} inline reply(ies) for ask ${ask.askId} (session ${ask.sessionId})`,
+      );
+      delivered.push({ askId: ask.askId, sessionId: ask.sessionId, unanswered });
+    }
+  }
+  return delivered;
+}
 
 /**
  * Register the seven HTTP endpoints that expose a ReviewSessionStore over
@@ -39,6 +137,7 @@ export function registerReviewSessionRoutes(
 ): void {
   const {
     resolveAndValidate,
+    readFileText,
     transformFile,
     notifyFileChanged,
   } = deps;
@@ -1075,7 +1174,7 @@ export function registerReviewSessionRoutes(
   // signal. It is restricted to agent-origin sessions — user-origin sessions
   // close via /finish or /abort, which carry richer payloads (final prompt,
   // commentIds). Calling /agent-done on a user-origin session returns 409.
-  app.post('/api/review-sessions/:id/agent-done', (c) => {
+  app.post('/api/review-sessions/:id/agent-done', async (c) => {
     const id = c.req.param('id');
     const session = reviewSessions.getSession(id);
     if (!session) {
@@ -1086,6 +1185,50 @@ export function registerReviewSessionRoutes(
         { error: '/agent-done only applies to agent-origin sessions; use /finish or /abort' },
         409,
       );
+    }
+    // Done is the user's "I'm finished" signal. Before closing pending asks
+    // as done_without_reply, read the markers back from disk and deliver any
+    // inline replies the user typed in the sidebar. Without this, answers
+    // written into the markers would be reported to the agent as "the user
+    // clicked Done without replying." Partial replies are delivered as-is
+    // (the user explicitly finished; unanswered questions stay unanswered).
+    try {
+      const delivered = await deliverInlineAskReplies({
+        reviewSessions,
+        readFileText,
+        sessionId: id,
+        requireComplete: false,
+      });
+      // Unanswered questions in a partial delivery bypass the
+      // onAsksClosedOnDone cleanup (resolveReplies already removed the ask
+      // before setSessionDone runs), so clear their on-disk expectsReply
+      // flags here. Answered markers were already cleared by addReply.
+      const flagsToClearByFile = new Map<string, Set<string>>();
+      for (const d of delivered) {
+        for (const q of d.unanswered) {
+          const ids = flagsToClearByFile.get(q.filePath) ?? new Set<string>();
+          ids.add(q.commentId);
+          flagsToClearByFile.set(q.filePath, ids);
+        }
+      }
+      for (const [filePath, ids] of flagsToClearByFile) {
+        try {
+          const { original, updated } = await transformFile(filePath, (current) =>
+            transformCommentMarkers(current, (cm) => {
+              if (!cm?.id || !ids.has(cm.id)) return { type: 'keep' };
+              if (!cm.expectsReply) return { type: 'keep' };
+              const cleared = { ...cm };
+              delete cleared.expectsReply;
+              return { type: 'replace', comment: cleared };
+            }),
+          );
+          if (updated !== null && updated !== original) notifyFileChanged(filePath);
+        } catch (err) {
+          console.warn(`[review-session] agent-done expectsReply-cleanup failed for ${filePath}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn(`[review-session] inline-reply delivery on agent-done failed for ${id}:`, err);
     }
     try {
       reviewSessions.setSessionDone(id);

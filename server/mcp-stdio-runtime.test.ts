@@ -476,6 +476,23 @@ describe('handleAskToolCall', () => {
     expect(result.content[0].text).toContain('cancelled');
   });
 
+  it('hints re-reading the file on done_without_reply (user may have replied or edited inline)', async () => {
+    const client = makeMockClient({
+      waitForAsk: vi.fn().mockResolvedValue({ status: 'no_reply', reason: 'done_without_reply' }),
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    const text = result.content[0].text;
+    expect(text).toContain('clicked Done without replying');
+    expect(text).toContain('Re-read the file');
+    // Regression: the old template composed "...without replying without a
+    // reply via the structured channel" — garbled copy that also told the
+    // agent to skip re-reading exactly where inline replies could exist.
+    expect(text).not.toContain('without replying without a reply');
+  });
+
   it('surfaces postAgentComments failedComments in the error message', async () => {
     const err = new Error('one or more anchors could not be located') as Error & {
       failedComments?: number[];

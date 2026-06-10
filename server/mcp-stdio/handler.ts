@@ -404,19 +404,21 @@ export async function handleAskToolCall(
     };
   }
 
-  // status === 'no_reply'. The user may still have replied via the sidebar
-  // (writes the reply text into the marker's `replies` array on disk). The
-  // agent should re-read the file to see those replies rather than treat
-  // every no_reply as "user ignored my questions."
+  // status === 'no_reply'. Even on these paths the user may have engaged
+  // another way (edited the document directly, or left a reply the server
+  // could not match to the ask), so every reason except agent_silent tells
+  // the agent to re-read the file before concluding the questions went
+  // unanswered. agent_silent means no comments were ever posted, so there
+  // is nothing in the file to read back.
   const READ_FILE_HINT =
-    'Re-read the file(s) — the user may have answered by replying to the comment markers inline.';
+    'Re-read the file(s) to pick up any inline replies or edits the user made, then continue with your plan.';
   const reasonDetails: Record<string, { text: string; hintReadFile: boolean }> = {
     released: { text: 'your tool call was cancelled before the user could reply', hintReadFile: true },
-    tab_closed: { text: 'the mdr browser tab was closed', hintReadFile: true },
-    cancelled: { text: 'the user cancelled the review', hintReadFile: false },
-    done_without_reply: { text: 'the user clicked Done without replying', hintReadFile: false },
-    timeout: { text: 'the review session timed out', hintReadFile: false },
-    agent_silent: { text: 'no comments were posted in time', hintReadFile: false },
+    tab_closed: { text: 'the mdr browser tab was closed before the user replied', hintReadFile: true },
+    cancelled: { text: 'the user cancelled the review session before replying', hintReadFile: true },
+    done_without_reply: { text: 'the user clicked Done without replying to your questions', hintReadFile: true },
+    timeout: { text: 'the review session timed out before the user replied', hintReadFile: true },
+    agent_silent: { text: 'the session was closed because no comments were posted in time', hintReadFile: false },
   };
   const detail = reasonDetails[askResult.reason] ?? { text: askResult.reason, hintReadFile: true };
   const tail = detail.hintReadFile
@@ -426,7 +428,7 @@ export async function handleAskToolCall(
     content: [
       {
         type: 'text',
-        text: `mdr_ask: ${detail.text} without a reply via the structured channel.${tail}`,
+        text: `mdr_ask: no reply received. Reason: ${detail.text}.${tail}`,
       },
     ],
   };
@@ -443,9 +445,9 @@ const WAIT_ABORTED_TEXT: Record<
   string
 > = {
   user_cancelled:
-    'Review session was cancelled by the user before they engaged with your comments. Continue with your original plan.',
+    'Review session was cancelled by the user. Re-read the file(s) to pick up any replies or edits they made before cancelling, then continue with your plan.',
   browser_disconnected:
-    'The mdr browser tab was closed before the user engaged with your comments. Continue with your original plan.',
+    'The mdr browser tab was closed. Closing the tab is a common way to finish a review: re-read the file(s) to pick up any replies or edits the user made before closing, then continue with your plan.',
   agent_silent:
     'The session timed out because no further activity was detected. No user feedback to apply.',
   finished:
