@@ -627,6 +627,22 @@ describe('handleWaitToolCall', () => {
     );
     expect(sendProgress).toHaveBeenCalledWith(expect.stringContaining('rev_1'));
   });
+
+  it('maps HTTP 404 to a graceful restart message instead of throwing', async () => {
+    // Sessions are memory-only. After an mdr server restart, a parked
+    // mdr_wait re-poll hits an unknown sessionId; the agent should get a
+    // typed "re-read the file" result, not a raw HTTP error.
+    const client = makeWaitClient({
+      waitForReview: vi.fn().mockRejectedValue(new Error('waitForReview failed (HTTP 404)')),
+    });
+    const result = await handleWaitToolCall(
+      { sessionId: 'rev_gone' },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain('rev_gone');
+    expect(result.content[0].text).toContain('Re-read');
+  });
 });
 
 describe('handleReviewToolCall (fire-and-forget)', () => {

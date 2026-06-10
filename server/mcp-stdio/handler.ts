@@ -514,6 +514,23 @@ export async function handleWaitToolCall(
         ],
       };
     }
+    // 404 = the server does not know this session. Most likely the mdr
+    // server restarted (sessions are memory-only). The comments are still
+    // in the file; there is just no live session to wait on.
+    if (msg.includes('HTTP 404')) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              `mdr_wait: session ${input.sessionId} is unknown to the server ` +
+              '(it may have restarted; sessions do not survive restarts). ' +
+              'Your comments are still in the file(s). Re-read them to pick up ' +
+              'any replies or edits, then continue with your plan.',
+          },
+        ],
+      };
+    }
     throw err;
   }
   if (progressTimer) clearInterval(progressTimer);

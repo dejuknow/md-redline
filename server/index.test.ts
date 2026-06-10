@@ -3285,6 +3285,75 @@ describe('Done-with-pending-ask preserves marker and clears expectsReply on disk
   });
 });
 
+describe('Stranded expectsReply marker sweep', () => {
+  it('GET /api/file clears expectsReply for markers whose session no longer exists', async () => {
+    // Sessions are memory-only; markers persist on disk. Simulate a server
+    // restart by replaying the ask flow on one app instance, then reading
+    // the file through a SECOND instance with a fresh (empty) session store.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-stranded-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nAn anchor sentence.\n', 'utf8');
+    const { app: firstApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await firstApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    await firstApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'An anchor', text: 'stranded?' }],
+      }),
+    });
+    expect(await readFile(filePath, 'utf8')).toContain('"expectsReply":true');
+
+    // "Restart": a fresh app whose session store has never seen sessionId.
+    const { app: restartedApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const res = await restartedApp.request(`/api/file?path=${encodeURIComponent(filePath)}`);
+    expect(res.status).toBe(200);
+
+    // The sweep is async; poll the file for the cleared flag.
+    let after = '';
+    for (let attempt = 0; attempt < 40; attempt++) {
+      after = await readFile(filePath, 'utf8');
+      if (!after.includes('"expectsReply":true')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(after).toMatch(/"text":"stranded\?"/); // marker preserved as a record
+    expect(after).not.toMatch(/"expectsReply":true/); // pending flag cleared
+  });
+
+  it('GET /api/file leaves markers of open sessions untouched', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-live-ask-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nAn anchor sentence.\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'An anchor', text: 'live?' }],
+      }),
+    });
+
+    // Same app instance: the session is open, so the sweep must keep the flag.
+    const res = await testApp.request(`/api/file?path=${encodeURIComponent(filePath)}`);
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await readFile(filePath, 'utf8')).toContain('"expectsReply":true');
+  });
+});
+
 describe('Inline reply delivery to pending asks', () => {
   it('PUT /api/file with every question answered resolves the ask immediately', async () => {
     // The reply happy path: the user answers via the comment sidebar, which

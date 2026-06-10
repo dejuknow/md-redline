@@ -20,7 +20,7 @@ import {
 import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
-import { removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
+import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION } = require('../package.json') as { version: string };
@@ -483,6 +483,56 @@ export function createAppFull(options: CreateAppOptions = {}) {
     await rename(tmpPath, resolved);
   }
 
+  /**
+   * Clear expectsReply flags whose owning session is no longer open.
+   *
+   * Sessions and pending asks are memory-only, but the question markers
+   * persist on disk. After a server restart (or a session GC'd past
+   * terminal retention) a marker can carry expectsReply:true with a dead
+   * sessionId forever: it never surfaces in the UI (selectAgentAsks
+   * filters by live session) and the agent that asked is gone, so the
+   * honest on-disk state is "asked, no answer." Fired on file read,
+   * async and best-effort: the read response is never delayed or failed
+   * by the sweep.
+   */
+  function sweepStrandedAskMarkers(resolved: string, content: string): void {
+    let foundStranded = false;
+    try {
+      const { comments } = parseComments(content);
+      for (const cm of comments) {
+        if (cm.expectsReply !== true) continue;
+        const session = cm.sessionId ? reviewSessions.getSession(cm.sessionId) : undefined;
+        if (!session || session.status !== 'open') {
+          foundStranded = true;
+          break;
+        }
+      }
+    } catch {
+      return; // unparseable content — leave it alone
+    }
+    if (!foundStranded) return;
+    void withFileLock(resolved, async () => {
+      // Re-read under the lock: the content we sniffed may be stale by now.
+      const current = await fsPromises.readFile(resolved, 'utf8');
+      const updated = transformCommentMarkers(current, (cm) => {
+        if (!cm?.expectsReply) return { type: 'keep' };
+        const sid = typeof cm.sessionId === 'string' ? cm.sessionId : undefined;
+        const session = sid ? reviewSessions.getSession(sid) : undefined;
+        if (session && session.status === 'open') return { type: 'keep' };
+        const cleared = { ...cm };
+        delete cleared.expectsReply;
+        return { type: 'replace', comment: cleared };
+      });
+      if (updated !== current) {
+        await atomicWriteFile(resolved, updated);
+        notifyFileChanged(resolved);
+        console.log(`[review-session] cleared stranded expectsReply marker(s) in ${resolved}`);
+      }
+    }).catch((err) => {
+      console.warn(`[review-session] stranded-marker sweep failed for ${resolved}:`, err);
+    });
+  }
+
   registerReviewSessionRoutes(app, reviewSessions, {
     resolveAndValidate,
     // Combined read-modify-write under the per-file lock. `transform` may
@@ -607,6 +657,10 @@ export function createAppFull(options: CreateAppOptions = {}) {
           );
         }
         const content = await fd.readFile('utf-8');
+        // Restart recovery: clear pending-question flags whose session no
+        // longer exists. Async; this response returns the as-read content
+        // and the SSE broadcast delivers the corrected version.
+        sweepStrandedAskMarkers(resolved, content);
         return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
       } finally {
         await fd.close();
