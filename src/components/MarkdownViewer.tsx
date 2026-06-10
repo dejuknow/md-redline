@@ -767,7 +767,7 @@ function pickClosestOccurrence(occs: number[], hintOffset?: number): number {
 // bracket classes is the textbook ReDoS shape — pathological inputs like
 // `A[xxxxxxxx...]` failing the final bracket would force catastrophic
 // backtracking on every iteration.
-const MERMAID_NODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*\s*[\[\{\(>]+([^\]\}\)]*[A-Za-z][^\]\}\)]*)[\]\}\)]+\s*$/s;
+const MERMAID_NODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*\s*[[{(>]+([^\]})]*[A-Za-z][^\]})]*)[\]})]+\s*$/s;
 
 // Hard bound on input length before invoking MERMAID_NODE_PATTERN. Real
 // Mermaid node anchors are short ("E[Clicks Discover Pages]"); anything
