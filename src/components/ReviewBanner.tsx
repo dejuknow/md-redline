@@ -18,6 +18,10 @@ interface ReviewBannerProps {
   commentIdsByFile: Map<string, string[]>;
   /** Agent name per session id — used for the completion banner in fire-and-forget sessions. */
   agentNamesBySession?: Map<string, string>;
+  /** Count of agent questions awaiting a reply, per session id. */
+  pendingAskCountsBySession?: Map<string, number>;
+  /** Scroll/focus the session's first pending agent question. */
+  onJumpToAsk?: (sessionId: string) => void;
 }
 
 // A session is ready to send only when we have an authoritative comment count
@@ -51,6 +55,8 @@ export function ReviewBanner({
   showToast,
   commentIdsByFile,
   agentNamesBySession,
+  pendingAskCountsBySession,
+  onJumpToAsk,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -178,12 +184,12 @@ export function ReviewBanner({
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Done failed: ${message}`);
+          showToast?.(`Couldn't end review: ${message}`);
           return;
         }
         if (!res.ok) {
           const detail = await readErrorMessage(res);
-          showToast?.(`Done failed: ${detail}`);
+          showToast?.(`Couldn't end review: ${detail}`);
           return;
         }
         onResolved();
@@ -247,8 +253,10 @@ export function ReviewBanner({
               session={s}
               agentName={agentName}
               agentCommentCount={agentCommentCount}
+              pendingAskCount={pendingAskCountsBySession?.get(s.id) ?? 0}
               busy={busyId === s.id}
               onDone={handleDone}
+              onJumpToAsk={onJumpToAsk}
             />
           );
         }
@@ -257,6 +265,7 @@ export function ReviewBanner({
         const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
         const unsentIds = sessionIds.filter((id) => !s.sentCommentIds.includes(id));
         const disabled = busyId === s.id || !ready;
+        const userSessionAskCount = pendingAskCountsBySession?.get(s.id) ?? 0;
         return (
           <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
             <span className="text-sm">
@@ -274,6 +283,12 @@ export function ReviewBanner({
                 </span>
               ))}
               .
+              {userSessionAskCount > 0 && (
+                <PendingAskChip
+                  count={userSessionAskCount}
+                  onJump={onJumpToAsk ? () => onJumpToAsk(s.id) : undefined}
+                />
+              )}
             </span>
             <span className="flex gap-2">
               <button
@@ -329,12 +344,40 @@ interface AgentSessionRowProps {
   session: ReviewSession;
   agentName: string;
   agentCommentCount: number;
+  pendingAskCount: number;
   busy: boolean;
   onDone: (s: ReviewSession) => void;
+  onJumpToAsk?: (sessionId: string) => void;
 }
 
 const AGENT_ACTIVE_WINDOW_MS = 30_000;
 const AGENT_TICK_MS = 5_000;
+
+/**
+ * Warning-palette chip surfacing "the agent is blocked on your answer."
+ * Rendered in both banner row variants; this is the persistent cue that
+ * outlives the toast.
+ */
+function PendingAskChip({ count, onJump }: { count: number; onJump?: () => void }) {
+  const label = `${count} question${count === 1 ? '' : 's'} awaiting your reply`;
+  if (!onJump) {
+    return (
+      <span className="ml-2 rounded bg-warning-bg px-2 py-0.5 text-xs font-semibold text-warning-text">
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ml-2 rounded bg-warning-bg px-2 py-0.5 text-xs font-semibold text-warning-text hover:underline"
+      onClick={onJump}
+      aria-label={`${label}. Jump to the first question.`}
+    >
+      {label} &rarr;
+    </button>
+  );
+}
 
 /**
  * Agent-origin banner row. Owns its own 5s ticking timer so the spinner-vs-dot
@@ -346,8 +389,10 @@ function AgentSessionRow({
   session,
   agentName,
   agentCommentCount,
+  pendingAskCount,
   busy,
   onDone,
+  onJumpToAsk,
 }: AgentSessionRowProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -355,14 +400,45 @@ function AgentSessionRow({
     return () => clearInterval(id);
   }, []);
 
+  // A session with no agent activity yet is one the agent just opened and is
+  // about to post into — show the spinner, not the idle dot. The idle dot
+  // means "the agent posted a while ago and has gone quiet."
   const isAgentActive = session.lastAgentActivityAt
     ? now - new Date(session.lastAgentActivityAt).getTime() < AGENT_ACTIVE_WINDOW_MS
-    : false;
+    : true;
+  const awaitingReply = pendingAskCount > 0;
+
+  const handleEndReview = () => {
+    if (awaitingReply) {
+      const confirmed = window.confirm(
+        `${agentName} has ${pendingAskCount} unanswered question${pendingAskCount === 1 ? '' : 's'}. ` +
+          'End the review anyway? Unanswered questions will be reported back as unanswered.',
+      );
+      if (!confirmed) return;
+    }
+    onDone(session);
+  };
+
+  const fileList = (
+    <>
+      {session.filePaths.map((p, i) => (
+        <span key={p}>
+          {i > 0 && ', '}
+          <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
+        </span>
+      ))}
+    </>
+  );
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 py-1">
       <span className="text-sm flex items-center">
-        {isAgentActive ? (
+        {awaitingReply ? (
+          <span
+            className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-warning align-middle"
+            aria-hidden
+          />
+        ) : isAgentActive ? (
           <span
             role="status"
             className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent align-middle"
@@ -374,28 +450,32 @@ function AgentSessionRow({
             aria-hidden
           />
         )}
-        <strong>
-          {agentName} is reviewing{' '}
-          {session.filePaths.map((p, i) => (
-            <span key={p}>
-              {i > 0 && ', '}
-              <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
+        {awaitingReply ? (
+          <strong>{agentName} is waiting on your reply.</strong>
+        ) : (
+          <strong>{agentName} is reviewing {fileList}.</strong>
+        )}
+        {awaitingReply ? (
+          <PendingAskChip
+            count={pendingAskCount}
+            onJump={onJumpToAsk ? () => onJumpToAsk(session.id) : undefined}
+          />
+        ) : (
+          agentCommentCount > 0 && (
+            <span className="ml-2 text-secondary-text">
+              ({agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'})
             </span>
-          ))}
-        </strong>
-        {agentCommentCount > 0 && (
-          <span className="ml-2 text-secondary-text">
-            — {agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'}
-          </span>
+          )
         )}
       </span>
       <button
         type="button"
         className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
-        onClick={() => onDone(session)}
+        onClick={handleEndReview}
         disabled={busy}
+        aria-label={`End review with ${agentName}`}
       >
-        Done
+        End review
       </button>
     </div>
   );

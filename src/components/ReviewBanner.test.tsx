@@ -509,9 +509,59 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
     return render(<ReviewBanner {...{ ...defaultProps, ...overrides }} />);
   }
 
-  it('shows "Done" button for agent sessions', () => {
+  it('shows "End review" button for agent sessions', () => {
     renderAgentBanner();
-    expect(screen.getByRole('button', { name: /^done$/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /end review/i })).not.toBeNull();
+  });
+
+  // ─── Awaiting-reply state ────────────────────────────────────────────────
+
+  it('switches to awaiting-reply copy with a question chip when asks are pending', () => {
+    const onJumpToAsk = vi.fn();
+    renderAgentBanner({
+      pendingAskCountsBySession: new Map([['rev_agent', 2]]),
+      onJumpToAsk,
+    });
+    const banner = screen.getByTestId('review-banner');
+    expect(banner.textContent).toContain('Claude is waiting on your reply');
+    const chip = screen.getByRole('button', { name: /2 questions awaiting your reply/i });
+    fireEvent.click(chip);
+    expect(onJumpToAsk).toHaveBeenCalledWith('rev_agent');
+  });
+
+  it('End review asks for confirmation while questions are pending', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+      renderAgentBanner({ pendingAskCountsBySession: new Map([['rev_agent', 1]]) });
+      fireEvent.click(screen.getByRole('button', { name: /end review/i }));
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      confirmSpy.mockReturnValue(true);
+      fireEvent.click(screen.getByRole('button', { name: /end review/i }));
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/api/review-sessions/rev_agent/agent-done',
+          expect.objectContaining({ method: 'POST' }),
+        );
+      });
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  it('does not ask for confirmation when no questions are pending', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    try {
+      renderAgentBanner();
+      fireEvent.click(screen.getByRole('button', { name: /end review/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      expect(confirmSpy).not.toHaveBeenCalled();
+    } finally {
+      confirmSpy.mockRestore();
+    }
   });
 
   it('shows "is reviewing" copy in the banner', () => {
@@ -525,7 +575,7 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
     const onResolved = vi.fn();
     renderAgentBanner({ onResolved });
 
-    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /end review/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -545,12 +595,12 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
     const showToast = vi.fn();
     renderAgentBanner({ showToast });
 
-    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /end review/i }));
 
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
     });
-    expect((showToast.mock.calls[0][0] as string).toLowerCase()).toContain('done failed');
+    expect((showToast.mock.calls[0][0] as string).toLowerCase()).toContain("couldn't end review");
   });
 
   it('button is disabled while request is in flight', async () => {
@@ -560,9 +610,9 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
     );
     renderAgentBanner();
 
-    const btn = screen.getByRole('button', { name: /^done$/i });
+    const btn = screen.getByRole('button', { name: /end review/i });
     fireEvent.click(btn);
-    expect((screen.getByRole('button', { name: /^done$/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /end review/i }) as HTMLButtonElement).disabled).toBe(true);
     resolveDone({ ok: true, json: async () => ({ ok: true }) } as Response);
   });
 
@@ -592,11 +642,13 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
     expect(banner.querySelector('[aria-hidden]')).not.toBeNull();
   });
 
-  it('shows static dot when lastAgentActivityAt is null', () => {
+  it('shows spinner when lastAgentActivityAt is null (just-started session)', () => {
+    // A session with no activity yet is one the agent just opened and is
+    // about to post into. The idle dot is reserved for "posted a while ago
+    // and gone quiet" — showing it at session start misread as "finished".
     renderAgentBanner();
     const banner = screen.getByTestId('review-banner');
-    expect(banner.querySelector('[role="status"]')).toBeNull();
-    expect(banner.querySelector('[aria-hidden]')).not.toBeNull();
+    expect(banner.querySelector('[role="status"]')).not.toBeNull();
   });
 
   // ─── Comment count ──────────────────────────────────────────────────────
@@ -681,7 +733,7 @@ describe('Agent session Done button', () => {
         agentCommentCounts={new Map([['/tmp/prd.md', 2]])}
       />,
     );
-    expect(screen.getByRole('button', { name: /^done$/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /end review/i })).not.toBeNull();
   });
 
   it('Done button POSTs to /agent-done then calls onResolved', async () => {
@@ -699,7 +751,7 @@ describe('Agent session Done button', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /end review/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

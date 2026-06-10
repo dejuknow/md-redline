@@ -43,6 +43,8 @@ export function Toast({ message, visible, onDismiss, action }: Props) {
 
   return (
     <div
+      role="status"
+      aria-live="polite"
       className={`fixed bottom-12 right-4 z-50 transition-all duration-200 ${
         show ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
@@ -82,6 +84,7 @@ export function Toast({ message, visible, onDismiss, action }: Props) {
             fadeTimerRef.current = setTimeout(onDismiss, 200);
           }}
           className="ml-2 opacity-70 hover:opacity-100 transition-opacity"
+          aria-label="Dismiss notification"
         >
           <svg
             className="w-3.5 h-3.5"

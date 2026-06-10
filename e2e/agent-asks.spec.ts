@@ -177,16 +177,19 @@ test.describe('Agent asks', () => {
     // Wait for the ask comment card to appear in the sidebar.
     await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 10_000 });
 
-    // Cancel review button should still be visible.
-    await expect(page.getByRole('button', { name: /Cancel review/i })).toBeVisible();
+    // The agent row shows the awaiting-reply state with End review; the
+    // user-batch buttons (Send comments / finish) never render for it.
+    await expect(page.getByRole('button', { name: /end review/i })).toBeVisible();
+    await expect(page.getByTestId('review-banner')).toContainText(/waiting on your reply/i);
+    await expect(page.getByRole('button', { name: /send \d+ comment/i })).toHaveCount(0);
   });
 
-  test('cancel review aborts pending asks and clears markers', async ({
+  test('End review with a pending question confirms, closes the ask, and preserves the marker', async ({
     page,
     request,
     baseURL,
   }) => {
-    fixtureDir = makeFixtureDir('cancel');
+    fixtureDir = makeFixtureDir('end-review');
     const file = resolve(fixtureDir, 'spec.md');
     writeFileSync(file, '# Spec\n\nSome unique anchor text here.\n', 'utf8');
 
@@ -201,34 +204,67 @@ test.describe('Agent asks', () => {
     await expect(page.getByRole('heading', { name: 'Spec' })).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(500);
 
-    await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+    const ask = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
       data: {
         questions: [{ filePath: file, anchor: 'unique anchor text', text: 'q?' }],
       },
     });
+    const { askId } = (await ask.json()) as { askId: string };
 
     // Wait for the ask comment card to appear.
     await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 10_000 });
 
-    // Cancel the review — this aborts the session (status → aborted).
-    await page.getByRole('button', { name: /Cancel review/i }).click();
+    // Ending the review with an unanswered question requires confirmation.
+    page.once('dialog', (dialog) => void dialog.accept());
+    await page.getByRole('button', { name: /end review/i }).click();
 
-    // The banner should disappear after cancellation.
+    // The banner clears, the ask resolves as done_without_reply, and the
+    // marker stays on disk as a record with expectsReply cleared.
     await expect(page.getByTestId('review-banner')).toHaveCount(0, { timeout: 10_000 });
-
-    // The file should no longer contain the agentInitiated marker (the abort
-    // call itself does not strip markers, but the session is gone so the ask
-    // is no longer tracked — we verify the marker was written by checking the
-    // raw file content that the server tracks).
-    //
-    // Note: the abort endpoint does NOT currently strip markers from disk.
-    // This assertion checks that the session state is cleared from the UI;
-    // if the product later adds disk cleanup on abort it will still pass.
+    const waitRes = await request.get(
+      `${baseURL}/api/review-sessions/${sessionId}/asks/${askId}/wait`,
+    );
+    // The ask is already resolved at this point; the wait route 404s for
+    // resolved asks, which is fine — what matters is the on-disk state.
+    void waitRes;
+    await expect
+      .poll(() => readFileSync(file, 'utf8'), { timeout: 5_000 })
+      .not.toContain('"expectsReply":true');
     const after = readFileSync(file, 'utf8');
-    // The marker should still be in the file (abort doesn't clean disk),
-    // but the session is aborted so the UI no longer shows any ask UI.
-    // We just verify the file still exists and the banner is gone.
-    expect(after).toBeTruthy();
+    expect(after).toContain('"text":"q?"');
+  });
+
+  test('End review confirm can be declined, keeping the session open', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    fixtureDir = makeFixtureDir('end-decline');
+    const file = resolve(fixtureDir, 'spec.md');
+    writeFileSync(file, '# Spec\n\nAnother unique anchor sentence.\n', 'utf8');
+
+    const create = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [file], origin: 'agent' },
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+    await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
+    await page.waitForTimeout(500);
+
+    await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        questions: [{ filePath: file, anchor: 'unique anchor sentence', text: 'sure?' }],
+      },
+    });
+    await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 10_000 });
+
+    page.once('dialog', (dialog) => void dialog.dismiss());
+    await page.getByRole('button', { name: /end review/i }).click();
+
+    // Declined: banner stays, session stays open.
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('review-banner')).toBeVisible();
   });
 
   test('agent question stays in awaiting-reply section when its anchor text disappears', async ({

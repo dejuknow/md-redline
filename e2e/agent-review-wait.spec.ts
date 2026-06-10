@@ -73,12 +73,12 @@ test.describe('Agent review mdr_wait flow', () => {
     // 4. Start /agent-wait long-poll
     const waitPromise = request.get(`${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=30`);
 
-    // 5. Banner shows "Done" button (no pending ask)
+    // 5. Banner shows "End review" button (no pending ask)
     const banner = page.getByTestId('review-banner');
-    await expect(banner.getByRole('button', { name: /^done$/i })).toBeVisible({ timeout: 10_000 });
+    await expect(banner.getByRole('button', { name: /end review/i })).toBeVisible({ timeout: 10_000 });
 
     // 6. Click Done
-    await banner.getByRole('button', { name: /^done$/i }).click();
+    await banner.getByRole('button', { name: /end review/i }).click();
 
     // 7. /agent-wait should return { status: 'done' }
     const waitRes = await waitPromise;
@@ -150,8 +150,10 @@ test.describe('Agent review mdr_wait flow', () => {
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
     await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
 
-    // Before any comments: dot (not spinner)
-    await expect(page.locator('[aria-label="Agent is active"]')).toHaveCount(0);
+    // A just-started session shows the spinner: the agent opened it and is
+    // about to post. The idle dot is reserved for "posted a while ago and
+    // gone quiet" (>30s after the last activity).
+    await expect(page.locator('[aria-label="Agent is active"]')).toBeVisible({ timeout: 5_000 });
 
     // Post a comment
     await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
@@ -160,7 +162,7 @@ test.describe('Agent review mdr_wait flow', () => {
       },
     });
 
-    // Shortly after: spinner appears (lastAgentActivityAt is within 30s window)
+    // Still spinning (lastAgentActivityAt is within the 30s window)
     await expect(page.locator('[aria-label="Agent is active"]')).toBeVisible({ timeout: 10_000 });
   });
 });

@@ -119,8 +119,8 @@ test.describe('Agent review fire-and-forget', () => {
     // 5. No awaiting-reply section — fire-and-forget does not create pendingAsks.
     await expect(page.getByTestId('awaiting-reply-section')).toHaveCount(0);
 
-    // 6. Banner shows "Done" button (fire-and-forget mode).
+    // 6. Banner shows "End review" button (fire-and-forget mode).
     const banner = page.getByTestId('review-banner');
-    await expect(banner.getByRole('button', { name: /^done$/i })).toBeVisible({ timeout: 5_000 });
+    await expect(banner.getByRole('button', { name: /end review/i })).toBeVisible({ timeout: 5_000 });
   });
 });

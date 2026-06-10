@@ -579,6 +579,88 @@ export default function App() {
   );
 
 
+  // Derive per-session agent metadata from comment markers across all open
+  // tabs (not just the active file):
+  // - agentNamesBySession: first agent-initiated comment author. Used by
+  //   ReviewBanner for the agent-row label.
+  // - pendingAsksBySession: agent questions still awaiting a reply, for ANY
+  //   open session (mdr_ask works on both origins). Drives the banner's
+  //   awaiting-reply state, the toast, and the tab-title badge.
+  const { agentNamesBySession, pendingAsksBySession } = useMemo(() => {
+    const names = new Map<string, string>();
+    const pending = new Map<
+      string,
+      Array<{ commentId: string; filePath: string; author: string }>
+    >();
+    if (reviewSessions.length === 0) return { agentNamesBySession: names, pendingAsksBySession: pending };
+
+    const commentsByFile = new Map<string, typeof comments>();
+    if (activeFilePath) commentsByFile.set(activeFilePath, comments);
+    for (const tab of tabs) {
+      if (commentsByFile.has(tab.filePath)) continue;
+      try {
+        commentsByFile.set(tab.filePath, parseComments(tab.rawMarkdown).comments);
+      } catch { /* skip */ }
+    }
+
+    for (const session of reviewSessions) {
+      let firstAuthor: string | undefined;
+      const sessionAsks: Array<{ commentId: string; filePath: string; author: string }> = [];
+      for (const filePath of session.filePaths) {
+        const fileParsedComments = commentsByFile.get(filePath);
+        if (!fileParsedComments) continue;
+        for (const c of fileParsedComments) {
+          if (c.agentInitiated !== true || c.sessionId !== session.id) continue;
+          if (!firstAuthor && c.author) firstAuthor = c.author;
+        }
+        for (const ask of selectAgentAsks(fileParsedComments, session.id)) {
+          sessionAsks.push({ commentId: ask.id, filePath, author: ask.author ?? 'Agent' });
+        }
+      }
+      if (session.origin === 'agent') names.set(session.id, firstAuthor ?? 'Agent');
+      if (sessionAsks.length > 0) pending.set(session.id, sessionAsks);
+    }
+    return { agentNamesBySession: names, pendingAsksBySession: pending };
+  }, [reviewSessions, comments, tabs, activeFilePath]);
+
+  // Jump to a session's first pending agent question, switching tabs first
+  // when the question lives on a non-active file.
+  const handleJumpToAsk = useCallback(
+    (sessionId: string) => {
+      const asks = pendingAsksBySession.get(sessionId);
+      if (!asks || asks.length === 0) return;
+      const target = asks.find((a) => a.filePath === activeFilePath) ?? asks[0];
+      if (target.filePath !== activeFilePath) {
+        switchTab(target.filePath);
+        // Let the tab's comments render before requesting card focus.
+        setTimeout(() => requestCommentFocus(target.commentId), 150);
+      } else {
+        requestCommentFocus(target.commentId);
+      }
+    },
+    [pendingAsksBySession, activeFilePath, switchTab, requestCommentFocus],
+  );
+
+  // Pending-question count per session for the banner; total for the title.
+  const pendingAskCountsBySession = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [sid, asks] of pendingAsksBySession) map.set(sid, asks.length);
+    return map;
+  }, [pendingAsksBySession]);
+
+  // Tab-title badge: surface pending agent questions to a user who has the
+  // tab backgrounded (the in-page toast and banner are invisible there).
+  const baseTitleRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (baseTitleRef.current === null) baseTitleRef.current = document.title;
+    let total = 0;
+    for (const asks of pendingAsksBySession.values()) total += asks.length;
+    document.title =
+      total > 0
+        ? `(${total} question${total === 1 ? '' : 's'}) ${baseTitleRef.current}`
+        : baseTitleRef.current;
+  }, [pendingAsksBySession]);
+
   // Toast on new agent ask (debounced). `lastSeenAskIdsRef` accumulates all
   // ask IDs seen for the entire browser-tab lifetime (across file tabs and
   // sessions), so switching to a tab whose asks were already seen earlier
@@ -589,12 +671,19 @@ export default function App() {
   const didMountRef = useRef(false);
 
   useEffect(() => {
-    let hasNew = false;
+    let newSessionId: string | null = null;
+    let newCount = 0;
+    let author = 'Agent';
+    let fileBase = '';
     const newlySeen: string[] = [];
-    for (const ask of agentAsks) {
-      if (!lastSeenAskIdsRef.current.has(ask.id)) {
-        hasNew = true;
-        newlySeen.push(ask.id);
+    for (const [sid, asks] of pendingAsksBySession) {
+      for (const ask of asks) {
+        if (lastSeenAskIdsRef.current.has(ask.commentId)) continue;
+        newlySeen.push(ask.commentId);
+        newSessionId = sid;
+        newCount += 1;
+        author = ask.author;
+        fileBase = ask.filePath.split('/').pop() ?? '';
       }
     }
     // Union (not replace) so cross-tab visits don't reset the seen set and
@@ -606,49 +695,20 @@ export default function App() {
       return; // first run — populate the ref but do not toast
     }
 
-    if (!hasNew) return;
+    if (!newSessionId) return;
 
     if (askToastTimerRef.current) clearTimeout(askToastTimerRef.current);
+    const sessionId = newSessionId;
+    const count = newCount;
     askToastTimerRef.current = setTimeout(() => {
-      const author = agentAsks[0]?.author ?? 'Agent';
-      const fileBase = activeFilePath ? activeFilePath.split('/').pop() : '';
-      showToast(`${author} has a question${fileBase ? ` on ${fileBase}` : ''}`);
+      showToast(
+        count === 1
+          ? `${author} has a question${fileBase ? ` on ${fileBase}` : ''}`
+          : `${author} has ${count} questions${fileBase ? ` on ${fileBase}` : ''}`,
+        { label: 'View', onClick: () => handleJumpToAsk(sessionId) },
+      );
     }, 500);
-  }, [agentAsks, activeFilePath, showToast]);
-
-
-  // Derive agentName (first agent-initiated comment author) per review session.
-  // Used by ReviewBanner to render the completion banner for fire-and-forget reviews.
-  const agentNamesBySession = useMemo(() => {
-    const map = new Map<string, string>();
-    const agentSessions = reviewSessions.filter((s) => s.origin === 'agent');
-    if (agentSessions.length === 0) return map;
-
-    const commentsByFile = new Map<string, typeof comments>();
-    if (activeFilePath) commentsByFile.set(activeFilePath, comments);
-    for (const tab of tabs) {
-      if (commentsByFile.has(tab.filePath)) continue;
-      try {
-        commentsByFile.set(tab.filePath, parseComments(tab.rawMarkdown).comments);
-      } catch { /* skip */ }
-    }
-
-    for (const session of agentSessions) {
-      let firstAuthor: string | undefined;
-      outer: for (const filePath of session.filePaths) {
-        const fileParsedComments = commentsByFile.get(filePath);
-        if (!fileParsedComments) continue;
-        for (const c of fileParsedComments) {
-          if (c.agentInitiated === true && c.sessionId === session.id && c.author) {
-            firstAuthor = c.author;
-            break outer;
-          }
-        }
-      }
-      map.set(session.id, firstAuthor ?? 'Agent');
-    }
-    return map;
-  }, [reviewSessions, comments, tabs, activeFilePath]);
+  }, [pendingAsksBySession, showToast, handleJumpToAsk]);
 
   const handleDiffToggle = useCallback(() => {
     if (!diffEnabled) {
@@ -1726,15 +1786,22 @@ export default function App() {
     [tocHeadings, handleHeadingNavigate],
   );
 
+  // Cycles through pending questions on repeat invocations instead of
+  // always landing on the first one.
+  const askCycleIndexRef = useRef(0);
   const agentAskCommands = useMemo((): Command[] => {
     const cmds: Command[] = [];
     if (agentAsks.length > 0) {
       cmds.push({
         id: 'jump-next-agent-question',
-        label: 'Jump to next agent question',
+        label:
+          agentAsks.length === 1
+            ? 'Jump to agent question'
+            : `Jump to next agent question (${agentAsks.length} pending)`,
         section: 'Comments',
         onExecute: () => {
-          const ask = agentAsks[0];
+          const ask = agentAsks[askCycleIndexRef.current % agentAsks.length];
+          askCycleIndexRef.current = (askCycleIndexRef.current + 1) % agentAsks.length;
           if (ask) requestCommentFocus(ask.id);
         },
       });
@@ -1811,6 +1878,8 @@ export default function App() {
         showToast={showToast}
         commentIdsByFile={commentIdsByFile}
         agentNamesBySession={agentNamesBySession}
+        pendingAskCountsBySession={pendingAskCountsBySession}
+        onJumpToAsk={handleJumpToAsk}
       />
       <Toolbar
         error={error}
