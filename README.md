@@ -90,6 +90,28 @@ Once registered, ask your agent to request a review:
 
 The agent calls `mdr_request_review`, mdr opens the file, you highlight text and leave comments, then click **Send review**. The agent receives your feedback as a structured prompt and starts addressing your comments. The review is opt-in per request. The agent only pauses when you ask for it.
 
+### Agents can ask, review, and wait
+
+The MCP server exposes three more tools that make the file a two-way channel:
+
+- **`mdr_ask`**: the agent posts anchored questions into your doc and blocks until
+  you answer. The questions show up as comment cards in the mdr UI (plus a toast,
+  a banner chip, and a tab-title badge so you notice even from another window).
+  Reply on the card like any other comment; the moment every question has an
+  answer, the agent unblocks with your reply text. Great mid-task: "Should
+  pricing tiers come from the PRD or the billing spec?" anchored to the exact
+  sentence it is about.
+- **`mdr_review`**: the reverse of `mdr_request_review`. The agent reviews YOUR
+  doc and leaves inline comments. Ask your agent to "review prd.md for gaps using
+  mdr" and its findings land as anchored comments you can read, reply to, and
+  dismiss in the UI.
+- **`mdr_wait`**: after `mdr_review`, the agent calls this to block until you
+  click **End review** in the banner. Your replies and edits are then in the
+  file for the agent to pick up.
+
+Questions and reviews survive in the file as ordinary comment markers, so nothing
+is lost if a session ends early: the agent is always told to re-read the file.
+
 ### Without MCP
 
 1. Open a markdown file with `mdr /path/to/spec.md`.
