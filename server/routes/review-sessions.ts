@@ -141,6 +141,39 @@ export function registerReviewSessionRoutes(
     transformFile,
     notifyFileChanged,
   } = deps;
+
+  /**
+   * Clear the on-disk `expectsReply` flag on the given questions' markers,
+   * preserving the markers themselves (Done/Finish semantics: the question
+   * stays in the file as a record of "asked, no answer", but must stop
+   * reading as pending). Best-effort per file; failures are logged.
+   */
+  async function clearExpectsReplyFlags(
+    questions: ReadonlyArray<{ filePath: string; commentId: string }>,
+  ): Promise<void> {
+    const byFile = new Map<string, Set<string>>();
+    for (const q of questions) {
+      const ids = byFile.get(q.filePath) ?? new Set<string>();
+      ids.add(q.commentId);
+      byFile.set(q.filePath, ids);
+    }
+    for (const [filePath, ids] of byFile) {
+      try {
+        const { original, updated } = await transformFile(filePath, (current) =>
+          transformCommentMarkers(current, (cm) => {
+            if (!cm?.id || !ids.has(cm.id)) return { type: 'keep' };
+            if (!cm.expectsReply) return { type: 'keep' };
+            const cleared = { ...cm };
+            delete cleared.expectsReply;
+            return { type: 'replace', comment: cleared };
+          }),
+        );
+        if (updated !== null && updated !== original) notifyFileChanged(filePath);
+      } catch (err) {
+        console.warn(`[review-session] expectsReply-cleanup failed for ${filePath}:`, err);
+      }
+    }
+  }
   app.post('/api/review-sessions', async (c) => {
     let body: { filePaths?: unknown; enableResolve?: unknown; origin?: unknown };
     try {
@@ -317,12 +350,26 @@ export function registerReviewSessionRoutes(
     if (!reviewSessions.getSession(id)) {
       return c.json({ error: 'Session not found' }, 404);
     }
-    const pending = reviewSessions.getPendingAsks(id);
-    if (pending.length > 0) {
-      return c.json(
-        { error: 'cannot finish review while agent questions are pending; reply or cancel first' },
-        409,
-      );
+    // Finish is the user-origin "I'm finished" signal, so pending asks get
+    // the same treatment as /agent-done: deliver any inline replies first,
+    // then close whatever is still unanswered as done_without_reply with the
+    // markers preserved on disk (flags cleared). Without this, finish()'s
+    // defensive abortAsks would mis-report the asks as session_cancelled and
+    // onSessionAborted would strip the markers, erasing the question record.
+    if (reviewSessions.getPendingAsks(id).length > 0) {
+      try {
+        const delivered = await deliverInlineAskReplies({
+          reviewSessions,
+          readFileText,
+          sessionId: id,
+          requireComplete: false,
+        });
+        await clearExpectsReplyFlags(delivered.flatMap((d) => d.unanswered));
+        const closed = reviewSessions.abortAsks(id, 'done_without_reply');
+        await clearExpectsReplyFlags(closed.flatMap((a) => a.questions));
+      } catch (err) {
+        console.warn(`[review-session] inline-reply delivery on finish failed for ${id}:`, err);
+      }
     }
     const prompt = typeof body.prompt === 'string' && body.prompt.length > 0 ? body.prompt : undefined;
     const commentIds = Array.isArray(body.commentIds)
@@ -448,23 +495,14 @@ export function registerReviewSessionRoutes(
       );
     }
 
-    // mdr_ask requires an agent-origin session. User-origin sessions have no
-    // UI affordance to reply/release a pending ask — the user can only
-    // Cancel the whole review, which is a confusing escape hatch. Surface a
-    // clean 409 so the agent can route through mdr_review (which creates an
-    // agent-origin session) before asking.
-    if (isAskRequest && session.origin !== 'agent') {
-      return c.json(
-        {
-          error:
-            'mdr_ask requires an agent-origin session (created via mdr_review). ' +
-            'The user-origin banner does not surface a Reply/Release affordance, ' +
-            'so a pending ask on a user-origin session can only be resolved by ' +
-            'cancelling the whole review.',
-        },
-        409,
-      );
-    }
+    // Ask-mode is allowed on BOTH origins. User-origin sessions are in fact
+    // the flagship use case: an agent addressing the user's review comments
+    // (mdr_request_review handoff) hits an ambiguity and asks a clarifying
+    // question mid-task. The question surfaces as a normal comment card in
+    // the sidebar; the user's inline reply resolves the ask via the
+    // file-save sweep (deliverInlineAskReplies), and /finish delivers any
+    // remaining inline replies before closing leftovers as
+    // done_without_reply. No dedicated Reply/Release affordance is needed.
 
     // Reject the contradictory combination of "ask request" + expectsReply:false,
     // whether the ask mode is explicit OR inferred from shape. mdr_ask's contract
@@ -1203,30 +1241,7 @@ export function registerReviewSessionRoutes(
       // onAsksClosedOnDone cleanup (resolveReplies already removed the ask
       // before setSessionDone runs), so clear their on-disk expectsReply
       // flags here. Answered markers were already cleared by addReply.
-      const flagsToClearByFile = new Map<string, Set<string>>();
-      for (const d of delivered) {
-        for (const q of d.unanswered) {
-          const ids = flagsToClearByFile.get(q.filePath) ?? new Set<string>();
-          ids.add(q.commentId);
-          flagsToClearByFile.set(q.filePath, ids);
-        }
-      }
-      for (const [filePath, ids] of flagsToClearByFile) {
-        try {
-          const { original, updated } = await transformFile(filePath, (current) =>
-            transformCommentMarkers(current, (cm) => {
-              if (!cm?.id || !ids.has(cm.id)) return { type: 'keep' };
-              if (!cm.expectsReply) return { type: 'keep' };
-              const cleared = { ...cm };
-              delete cleared.expectsReply;
-              return { type: 'replace', comment: cleared };
-            }),
-          );
-          if (updated !== null && updated !== original) notifyFileChanged(filePath);
-        } catch (err) {
-          console.warn(`[review-session] agent-done expectsReply-cleanup failed for ${filePath}:`, err);
-        }
-      }
+      await clearExpectsReplyFlags(delivered.flatMap((d) => d.unanswered));
     } catch (err) {
       console.warn(`[review-session] inline-reply delivery on agent-done failed for ${id}:`, err);
     }

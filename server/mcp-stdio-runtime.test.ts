@@ -485,7 +485,7 @@ describe('handleAskToolCall', () => {
       { client, sendProgress: undefined, signal: undefined },
     );
     const text = result.content[0].text;
-    expect(text).toContain('clicked Done without replying');
+    expect(text).toContain('finished the review without replying');
     expect(text).toContain('Re-read the file');
     // Regression: the old template composed "...without replying without a
     // reply via the structured channel" — garbled copy that also told the

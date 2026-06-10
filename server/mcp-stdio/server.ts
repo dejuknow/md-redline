@@ -69,10 +69,12 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         description:
           'Ask the user one or more questions anchored to specific text in a file ' +
           'inside an active review session. Each question becomes an inline marker the user ' +
-          'sees and can reply to in the md-redline UI. Returns when the user clicks Done or ' +
-          'the session aborts. The user typically writes their reply directly into the ' +
-          "marker's reply thread in the file, so when this tool returns you MUST re-read the " +
-          'file(s) to see the user\'s answer. Use this when a comment is unclear, or when ' +
+          'sees and can reply to in the md-redline UI. Returns with the reply text as soon ' +
+          'as the user has answered every question, or with whatever partial replies exist ' +
+          'when they finish the review (Done / Finish review), or empty-handed if the ' +
+          'session ends another way. Replies also land in the marker threads on disk, so ' +
+          'when this tool returns without reply text you should re-read the file(s) before ' +
+          'concluding the user did not answer. Use this when a comment is unclear, or when ' +
           'you hit a planning fork while editing. Prefer asking over guessing when the right ' +
           'answer would meaningfully change your edit.\n\n' +
           'Only one mdr_ask can be pending per session at a time. If this returns ' +
@@ -86,10 +88,10 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
             sessionId: {
               type: 'string',
               description:
-                'Session ID from a previous mdr_review call. The session must be ' +
-                'agent-origin — mdr_ask cannot run against the user-driven flow ' +
-                'created by mdr_request_review (that banner has no Reply/Release ' +
-                'affordance for pending asks).',
+                'Session ID from a previous mdr_review call, or the sessionId of an ' +
+                'active mdr_request_review handoff. Both work: asking a clarifying ' +
+                'question about a comment the user left during their own review is ' +
+                'the primary use case.',
             },
             questions: {
               type: 'array',

@@ -2310,14 +2310,15 @@ describe('POST /agent-comments mode rejection contracts', () => {
     expect(body.error).toMatch(/contradictory/i);
   });
 
-  it('rejects inferred-ask payload on user-origin session with 409', async () => {
-    // Inferred ask (no explicit mode, questions:[], no comments:[]) on a
-    // user-origin session must also be gated to agent-origin — otherwise
-    // legacy callers using the shape-inference path bypass the L2 guard.
+  it('accepts inferred-ask payload on user-origin session', async () => {
+    // Asking on a user-origin session is the flagship use case: an agent
+    // addressing the user's review comments (mdr_request_review handoff)
+    // asks a clarifying question mid-task. The shape-inference path must
+    // accept it the same as explicit mode:'ask'.
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-inferred-user-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
-    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
     const create = await testApp.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2333,9 +2334,8 @@ describe('POST /agent-comments mode rejection contracts', () => {
         questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
       }),
     });
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/agent-origin/i);
+    expect(res.status).toBe(201);
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(1);
   });
 
   it('rejects review-mode with expectsReply:true as a reverse contradiction', async () => {
@@ -2367,11 +2367,14 @@ describe('POST /agent-comments mode rejection contracts', () => {
     expect(body.error).toMatch(/contradictory/i);
   });
 
-  it("rejects mdr_ask payload on user-origin session with 409", async () => {
+  it('accepts mdr_ask on a user-origin session and delivers the inline reply', async () => {
+    // Full parity with the agent-origin happy path: question posted on a
+    // user-origin session, user replies via the sidebar (addReply + save),
+    // the ask waiter resolves with the reply text.
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-user-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Title\n\nHello world\n', 'utf8');
-    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
     const create = await testApp.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2387,9 +2390,33 @@ describe('POST /agent-comments mode rejection contracts', () => {
         questions: [{ filePath, anchor: 'Hello', text: 'q1' }],
       }),
     });
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/agent-origin/i);
+    expect(res.status).toBe(201);
+    const { askId } = (await res.json()) as { askId: string };
+
+    const raw = await readFile(filePath, 'utf8');
+    const { comments } = parseComments(raw);
+    const commentId = comments[0].id;
+
+    const waitPromise = testApp.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    await new Promise((r) => setTimeout(r, 10));
+    const replied = addReply(raw, commentId, 'Inline answer on a user session.', 'Dennis');
+    const put = await testApp.request('/api/file', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content: replied }),
+    });
+    expect(put.status).toBe(200);
+
+    const waitRes = await waitPromise;
+    const body = (await waitRes.json()) as {
+      status: string;
+      replies: Array<{ questionIndex: number; text: string }>;
+    };
+    expect(body.status).toBe('reply');
+    expect(body.replies).toEqual([
+      { questionIndex: 0, text: 'Inline answer on a user session.' },
+    ]);
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
   });
 
   it("accepts mode:'ask' without expectsReply (default to true)", async () => {
@@ -3108,36 +3135,107 @@ describe('rollback path when addAsk throws after marker write', () => {
   });
 });
 
-describe('POST /api/review-sessions/:id/finish (pending ask guard)', () => {
-  it('rejects finish while agent asks are pending', async () => {
-    // mdr_ask now requires an agent-origin session, so the only way the
-    // pending-ask guard on /finish can fire today is when /finish is mis-
-    // directed at an agent-origin session that has an open ask. Confirms the
-    // server still defends that path even though the unified UX routes
-    // agent sessions through /agent-done.
-    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
+describe('POST /api/review-sessions/:id/finish (pending asks)', () => {
+  it('finish with an unanswered ask closes it as done_without_reply and preserves the marker', async () => {
+    // Finish is the user-origin "I'm finished" signal. A pending ask must
+    // not block it (the old 409 guard made the agent's question a hostage);
+    // instead the ask resolves done_without_reply and the marker stays on
+    // disk with expectsReply cleared, mirroring /agent-done semantics.
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-finish-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'Anchor here.\n', 'utf8');
     const { app } = await buildTestApp({ allowedRoots: [tmp] });
     const create = await app.request('/api/review-sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+      body: JSON.stringify({ filePaths: [filePath] /* user origin */ }),
     });
     const { sessionId } = (await create.json()) as { sessionId: string };
-    await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+    const askRes = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ questions: [{ filePath, anchor: 'Anchor', text: 'q?' }] }),
     });
+    expect(askRes.status).toBe(201);
+    const { askId } = (await askRes.json()) as { askId: string };
 
+    const waitPromise = app.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    await new Promise((r) => setTimeout(r, 10));
     const finish = await app.request(`/api/review-sessions/${sessionId}/finish`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
     });
-    expect(finish.status).toBe(409);
-    const body = (await finish.json()) as { error: string };
-    expect(body.error).toMatch(/pending/i);
+    expect(finish.status).toBe(200);
+
+    const waitRes = await waitPromise;
+    const waitBody = (await waitRes.json()) as { status: string; reason?: string };
+    expect(waitBody).toEqual({ status: 'no_reply', reason: 'done_without_reply' });
+
+    // Marker preserved as a record, pending flag cleared.
+    let after = '';
+    for (let attempt = 0; attempt < 20; attempt++) {
+      after = await readFile(filePath, 'utf8');
+      if (!after.includes('"expectsReply":true')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(after).toMatch(/"text":"q\?"/);
+    expect(after).not.toMatch(/"expectsReply":true/);
+  });
+
+  it('finish with an inline-answered ask delivers the reply', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-finish-replied-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, 'First anchor here.\n\nSecond anchor here.\n', 'utf8');
+    const { app } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath] /* user origin */ }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const askRes = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [
+          { filePath, anchor: 'First anchor', text: 'Q1?' },
+          { filePath, anchor: 'Second anchor', text: 'Q2?' },
+        ],
+      }),
+    });
+    const { askId } = (await askRes.json()) as { askId: string };
+
+    // Answer only Q1 inline (partial — the save sweep leaves the ask pending),
+    // then finish. The partial reply must be delivered, not dropped.
+    const raw = await readFile(filePath, 'utf8');
+    const { comments } = parseComments(raw);
+    const q1 = comments.find((c) => c.text === 'Q1?');
+    const replied = addReply(raw, q1!.id, 'Answer before finishing.', 'Dennis');
+    await app.request('/api/file', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content: replied }),
+    });
+
+    const waitPromise = app.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    await new Promise((r) => setTimeout(r, 10));
+    const finish = await app.request(`/api/review-sessions/${sessionId}/finish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(finish.status).toBe(200);
+
+    const waitRes = await waitPromise;
+    const waitBody = (await waitRes.json()) as {
+      status: string;
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    };
+    expect(waitBody.status).toBe('reply');
+    expect(waitBody.totalQuestions).toBe(2);
+    expect(waitBody.replies).toEqual([
+      { questionIndex: 0, text: 'Answer before finishing.' },
+    ]);
   });
 });
 

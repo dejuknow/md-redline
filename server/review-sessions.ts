@@ -567,11 +567,12 @@ export class ReviewSessionStore {
     if (!s || s.status !== 'open') return false;
 
     // Defensive: if anyone called finish while asks were pending, abort them.
-    // Today the route layer's pending-ask 409 guard at POST /finish
-    // unconditionally intercepts this, so the path is unreachable via HTTP.
-    // It still runs for programmatic in-process callers (tests, internal
-    // helpers) so stranded `agentInitiated` markers don't sit in the file —
-    // same behavior as abort() / setSessionDone.
+    // The POST /finish route resolves pending asks BEFORE calling this method
+    // (inline-reply delivery, then done_without_reply closure with markers
+    // preserved), so via HTTP this path finds nothing. It still runs for
+    // programmatic in-process callers (tests, internal helpers) so stranded
+    // `agentInitiated` markers don't sit in the file — same behavior as
+    // abort() / setSessionDone.
     const aborted = this.abortAsks(id, 'session_cancelled');
 
     if (commentIds) {

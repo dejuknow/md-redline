@@ -416,7 +416,7 @@ export async function handleAskToolCall(
     released: { text: 'your tool call was cancelled before the user could reply', hintReadFile: true },
     tab_closed: { text: 'the mdr browser tab was closed before the user replied', hintReadFile: true },
     cancelled: { text: 'the user cancelled the review session before replying', hintReadFile: true },
-    done_without_reply: { text: 'the user clicked Done without replying to your questions', hintReadFile: true },
+    done_without_reply: { text: 'the user finished the review without replying to your questions', hintReadFile: true },
     timeout: { text: 'the review session timed out before the user replied', hintReadFile: true },
     agent_silent: { text: 'the session was closed because no comments were posted in time', hintReadFile: false },
   };
