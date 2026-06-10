@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type {
   AskQuestion,
   AskWaitResult,
@@ -8,6 +9,14 @@ import type {
   PostReviewResult,
   WaitResult,
 } from './types';
+
+/**
+ * Process-scoped caller identity. One MCP server process serves one agent
+ * session (one Claude/Codex conversation), so a per-process UUID is exactly
+ * "which agent is this." Sent on createSession so the server's dedupe never
+ * merges two different agents reviewing the same files into one session.
+ */
+const PROCESS_CLIENT_ID = `mcp_${randomUUID()}`;
 
 /**
  * HTTP client for the mdr web server. Used by the tool-call handler to
@@ -36,7 +45,7 @@ export function createMdrClient(baseUrl: string): MdrClient {
       const res = await fetch(url('/api/review-sessions'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(input),
+        body: JSON.stringify({ clientId: PROCESS_CLIENT_ID, ...input }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };

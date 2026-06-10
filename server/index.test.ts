@@ -3285,6 +3285,116 @@ describe('Done-with-pending-ask preserves marker and clears expectsReply on disk
   });
 });
 
+describe('Distinct agents on the same files', () => {
+  it('different clientIds get distinct sessions; same clientId dedupes', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-two-agents-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+
+    const createAs = (clientId: string) =>
+      testApp.request('/api/review-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePaths: [filePath], origin: 'agent', clientId }),
+      });
+
+    const claude = (await (await createAs('mcp_claude')).json()) as {
+      sessionId: string;
+      created?: boolean;
+    };
+    const codex = (await (await createAs('mcp_codex')).json()) as {
+      sessionId: string;
+      created?: boolean;
+    };
+    expect(codex.sessionId).not.toBe(claude.sessionId);
+
+    // Same agent calling again reuses its own session.
+    const claudeAgain = (await (await createAs('mcp_claude')).json()) as {
+      sessionId: string;
+      created?: boolean;
+    };
+    expect(claudeAgain.sessionId).toBe(claude.sessionId);
+    expect(claudeAgain.created).toBe(false);
+  });
+
+  it('rejects malformed clientId with 400', async () => {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-bad-client-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Spec\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const res = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent', clientId: 42 }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Agent-comments server-side length caps', () => {
+  async function setupAgentSession() {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-caps-')));
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, '# Title\n\nAn anchor sentence.\n', 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    return { testApp, filePath, sessionId };
+  }
+
+  it('rejects oversize comment anchor at the HTTP layer', async () => {
+    // The MCP client validates lengths too, but the HTTP endpoint is
+    // reachable by any local process; the caps must hold here as well.
+    const { testApp, filePath, sessionId } = await setupAgentSession();
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'review',
+        comments: [{ filePath, anchor: 'x'.repeat(8 * 1024 + 1), text: 'hi' }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/anchor.*maximum/);
+  });
+
+  it('rejects oversize comment text at the HTTP layer', async () => {
+    const { testApp, filePath, sessionId } = await setupAgentSession();
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'review',
+        comments: [{ filePath, anchor: 'An anchor', text: 'x'.repeat(64 * 1024 + 1) }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/text.*maximum/);
+  });
+
+  it('rejects oversize reply text at the HTTP layer', async () => {
+    const { testApp, filePath, sessionId } = await setupAgentSession();
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'review',
+        replies: [{ filePath, commentId: 'cmt_x', text: 'x'.repeat(64 * 1024 + 1) }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/text.*maximum/);
+  });
+});
+
 describe('Stranded expectsReply marker sweep', () => {
   it('GET /api/file clears expectsReply for markers whose session no longer exists', async () => {
     // Sessions are memory-only; markers persist on disk. Simulate a server

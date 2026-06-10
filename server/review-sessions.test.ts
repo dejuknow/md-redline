@@ -692,6 +692,32 @@ describe('ReviewSessionStore', () => {
       expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
     });
 
+    it('does not match across distinct clientIds (two different agents)', () => {
+      // Claude and Codex (two MCP server processes) reviewing the same file
+      // must each get their own session — sharing one would merge their
+      // banners, serialize their asks, and resolve both mdr_waits on one
+      // Done click.
+      const claude = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+        clientId: 'mcp_claude',
+      });
+      expect(store.findOpenSession(['/tmp/a.md'], 'agent', 'mcp_claude')?.id).toBe(claude.id);
+      expect(store.findOpenSession(['/tmp/a.md'], 'agent', 'mcp_codex')).toBeUndefined();
+      expect(store.findOpenSession(['/tmp/a.md'], 'agent')).toBeUndefined();
+    });
+
+    it('matches same clientId (same agent batching successive calls)', () => {
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+        clientId: 'mcp_claude',
+      });
+      expect(store.findOpenSession(['/tmp/a.md'], 'agent', 'mcp_claude')?.id).toBe(session.id);
+    });
+
     it('ignores aborted sessions', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       store.abort(session.id, 'user_cancelled');

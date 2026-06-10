@@ -39,6 +39,12 @@ export interface CreateSessionInput {
   enableResolve: boolean;
   /** Origin of the session. Defaults to 'user' on the server when omitted. */
   origin?: 'user' | 'agent';
+  /**
+   * Opaque caller identity scoping server-side dedupe. The client fills
+   * this with a process-scoped UUID so two different agents (two MCP
+   * server processes) reviewing the same files get distinct sessions.
+   */
+  clientId?: string;
 }
 
 export interface AskQuestion {

@@ -108,6 +108,13 @@ export interface ReviewSession {
   filePaths: string[];
   enableResolve: boolean;
   origin: SessionOrigin;
+  /**
+   * Opaque caller identity used to scope dedupe. Two MCP server processes
+   * (e.g. Claude and Codex reviewing the same file) send distinct clientIds
+   * and get distinct sessions; without this they would merge into one
+   * session and a single Done would resolve both agents' mdr_wait polls.
+   */
+  clientId?: string;
   createdAt: Date;
   lastHeartbeatAt: Date;
   /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
@@ -178,6 +185,7 @@ export interface CreateSessionInput {
   filePaths: string[];
   enableResolve: boolean;
   origin?: SessionOrigin; // defaults to 'user'
+  clientId?: string;
 }
 
 export class ReviewSessionStore {
@@ -216,6 +224,7 @@ export class ReviewSessionStore {
       filePaths: [...input.filePaths],
       enableResolve: input.enableResolve,
       origin: input.origin ?? 'user',
+      clientId: input.clientId,
       createdAt: now,
       lastHeartbeatAt: now,
       status: 'open',
@@ -261,12 +270,21 @@ export class ReviewSessionStore {
    * agent's mdr_wait poll when the user clicks Finish or Cancel (those paths
    * never resolve `doneResolver`). Filter callers to match-on-origin.
    */
-  findOpenSession(filePaths: string[], origin: SessionOrigin): ReviewSession | undefined {
+  findOpenSession(
+    filePaths: string[],
+    origin: SessionOrigin,
+    clientId?: string,
+  ): ReviewSession | undefined {
     const sorted = [...filePaths].sort();
     const freshCutoff = Date.now() - FIND_OPEN_FRESHNESS_MS;
     for (const s of this.sessions.values()) {
       if (s.status !== 'open') continue;
       if (s.origin !== origin) continue;
+      // Dedupe only within the same caller identity. Distinct agents (each
+      // MCP server process sends its own clientId) must not merge into one
+      // session: the banner would name only one of them, the single ask
+      // slot would serialize them, and one Done would resolve both waits.
+      if ((s.clientId ?? null) !== (clientId ?? null)) continue;
       if (s.lastHeartbeatAt.getTime() < freshCutoff) continue;
       const existing = [...s.filePaths].sort();
       if (
@@ -935,6 +953,7 @@ export class ReviewSessionStore {
       filePaths: [...s.filePaths],
       enableResolve: s.enableResolve,
       origin: s.origin,
+      clientId: s.clientId,
       createdAt: s.createdAt,
       lastHeartbeatAt: s.lastHeartbeatAt,
       lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,

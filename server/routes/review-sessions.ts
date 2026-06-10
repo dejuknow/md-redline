@@ -130,6 +130,24 @@ export interface ReviewSessionRoutesDeps {
   notifyFileChanged: (resolvedPath: string) => void;
 }
 
+/**
+ * Hard caps on agent-controlled string fields, mirrored from
+ * server/mcp-stdio/validate.ts. The MCP client enforces them first, but the
+ * HTTP endpoint is reachable by any local process (the dev simulators prove
+ * the path), so the caps must hold at this layer too — otherwise a buggy or
+ * adversarial caller could persist megabyte-scale strings into the user's
+ * markdown and freeze the renderer.
+ */
+const MAX_ANCHOR_LEN = 8 * 1024;
+const MAX_TEXT_LEN = 64 * 1024;
+const MAX_CONTEXT_LEN = 8 * 1024;
+
+function fieldTooLong(field: string, value: string, max: number): string | null {
+  return value.length > max
+    ? `${field} exceeds maximum length of ${max} chars (got ${value.length})`
+    : null;
+}
+
 export function registerReviewSessionRoutes(
   app: Hono,
   reviewSessions: ReviewSessionStore,
@@ -175,7 +193,7 @@ export function registerReviewSessionRoutes(
     }
   }
   app.post('/api/review-sessions', async (c) => {
-    let body: { filePaths?: unknown; enableResolve?: unknown; origin?: unknown };
+    let body: { filePaths?: unknown; enableResolve?: unknown; origin?: unknown; clientId?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -194,6 +212,16 @@ export function registerReviewSessionRoutes(
       } else {
         return c.json({ error: "origin must be 'user' or 'agent'" }, 400);
       }
+    }
+    // clientId is an optional opaque caller identity (each MCP server
+    // process sends its own) that scopes dedupe so two distinct agents on
+    // the same files get distinct sessions.
+    let clientId: string | undefined;
+    if (body.clientId !== undefined) {
+      if (typeof body.clientId !== 'string' || body.clientId.length === 0 || body.clientId.length > 256) {
+        return c.json({ error: 'clientId must be a non-empty string of at most 256 chars' }, 400);
+      }
+      clientId = body.clientId;
     }
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       return c.json({ error: 'filePaths must be a non-empty array' }, 400);
@@ -229,7 +257,7 @@ export function registerReviewSessionRoutes(
     // sessions have divergent terminal-state contracts (setSessionDone vs
     // finish/abort), and attaching an agent to a user-origin session would
     // deadlock the agent's mdr_wait when the user clicks Finish/Cancel.
-    const existing = reviewSessions.findOpenSession(resolved, origin);
+    const existing = reviewSessions.findOpenSession(resolved, origin, clientId);
     if (existing) {
       console.log(
         `[review-session] reusing ${existing.id} for ${resolved.length} file(s): ${resolved.join(', ')}`,
@@ -246,6 +274,7 @@ export function registerReviewSessionRoutes(
       filePaths: resolved,
       enableResolve: enableResolve === true,
       origin,
+      clientId,
     });
 
     console.log(
@@ -572,6 +601,16 @@ export function registerReviewSessionRoutes(
       if (typeof q.filePath !== 'string' || typeof q.anchor !== 'string' || typeof q.text !== 'string') {
         return c.json({ error: `comment ${i}: filePath, anchor, text must be strings` }, 400);
       }
+      const oversize =
+        fieldTooLong(`comment ${i}: anchor`, q.anchor, MAX_ANCHOR_LEN) ||
+        fieldTooLong(`comment ${i}: text`, q.text, MAX_TEXT_LEN) ||
+        (typeof q.contextBefore === 'string' &&
+          fieldTooLong(`comment ${i}: contextBefore`, q.contextBefore, MAX_CONTEXT_LEN)) ||
+        (typeof q.contextAfter === 'string' &&
+          fieldTooLong(`comment ${i}: contextAfter`, q.contextAfter, MAX_CONTEXT_LEN));
+      if (oversize) {
+        return c.json({ error: oversize }, 400);
+      }
       let canonicalPath: string;
       try {
         canonicalPath = await resolveAndValidate(q.filePath);
@@ -607,6 +646,10 @@ export function registerReviewSessionRoutes(
       const r = repliesArr[i] as { filePath?: unknown; commentId?: unknown; text?: unknown; author?: unknown };
       if (typeof r.filePath !== 'string' || typeof r.commentId !== 'string' || typeof r.text !== 'string') {
         return c.json({ error: `reply ${i}: filePath, commentId, text must be strings` }, 400);
+      }
+      const oversizeReply = fieldTooLong(`reply ${i}: text`, r.text, MAX_TEXT_LEN);
+      if (oversizeReply) {
+        return c.json({ error: oversizeReply }, 400);
       }
       let canonicalPath: string;
       try {
