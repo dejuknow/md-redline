@@ -37,6 +37,8 @@ mdr --stop                   # Stop the running server
 
 `md-redline` also works as an alias for `mdr`.
 
+That gives you the viewer and commenting. The agent integration (reviews in both directions, anchored questions) comes from the MCP server, registered in the next section.
+
 ## MCP setup
 
 Register the MCP server with your agent so it can request reviews mid-task.
@@ -79,6 +81,8 @@ Add this server entry to your client's MCP config file:
 ```
 
 Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
+
+After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_review`, `mdr_ask`, and `mdr_wait`.
 
 ## Review workflow
 
@@ -172,6 +176,7 @@ This makes feedback:
 ### Review and commenting
 
 - Inline comments anchored to rendered text, including overlapping comments
+- Two-way agent review over MCP: agents request your review, review your docs, and ask anchored questions
 - Threaded replies and optional `open` / `resolved` review states
 - Adjustable anchors with drag handles
 - Rendered, raw, and diff views
@@ -207,6 +212,13 @@ By default, md-redline can read any markdown file in your home directory. The fi
 To use the strict per-folder model instead, run `mdr --restrict` once after install. This creates a `~/.md-redline.json` with no default trust, and you'll grant each folder explicitly the first time you open a file in it.
 
 File saves use atomic write-then-rename and mtime-based conflict detection to prevent data loss from concurrent edits. Mermaid SVG output is sanitized via DOMPurify before rendering. Only run md-redline in environments you trust.
+
+## Troubleshooting
+
+- **The agent says it has no mdr tools.** Restart your MCP client after `mdr mcp install`; most clients only discover new servers at launch. For non-Claude clients, confirm `mdr` is on the `PATH` the client actually uses (see MCP setup above).
+- **The browser opened but the page will not load.** A stale server may be holding the port. Run `mdr --stop`, then reopen your file.
+- **A review banner is stuck on screen.** Click **End review** (agent reviews) or **Cancel review** (your reviews). Sessions do not survive a server restart, but comments do.
+- **Something went wrong mid-session.** The file is always the source of truth. Comments and agent questions live in the markdown itself as `<!-- @comment{...} -->` markers, so you can read, edit, or delete them in any editor, and the agent is always told to re-read the file when a session ends unexpectedly.
 
 ## Development
 
