@@ -6,7 +6,7 @@ Inline review comments for markdown specs, prompts, and design docs.
 
 Highlight text in a rendered document, leave comments, and your AI agent can read and address them directly. Comments are stored as invisible HTML markers in the `.md` file itself. No sidecar files, no database, no external service. The markdown file stays the source of truth.
 
-With the built-in MCP server, your agent can request a review mid-task and pause until you click **Send review**. You leave your feedback, the agent picks up where it left off. No copy-paste, no context switching.
+With the built-in MCP server, review runs in both directions. Your agent can request your review mid-task and pause until you send your feedback, or review a doc you wrote and leave anchored comments for you. Either way: no copy-paste, no context switching.
 
 ![md-redline screenshot](https://raw.githubusercontent.com/dejuknow/md-redline/main/public/screenshot.png)
 
@@ -82,35 +82,44 @@ Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`
 
 ## Review workflow
 
-### With MCP (recommended)
+With MCP registered, review runs in both directions. Pick by who is giving the feedback:
 
-Once registered, ask your agent to request a review:
+| | You review the agent's doc | The agent reviews your doc |
+|---|---|---|
+| Typical moment | The agent just drafted or edited a spec; you want to mark it up before it continues | You wrote a PRD (or received one) and want a critique |
+| What you say | "Let me review specs/feature-x.md in mdr before you continue." | "Use mdr to review prd.md and leave comments." |
+| Who comments | You | The agent |
+| How it ends | You click **Send & finish** | You click **End review** |
+
+### 1. You review the agent's doc
+
+The common flow right after an agent drafts a document. Tell the agent:
 
 > "Let me review docs/specs/feature-x.md in mdr before you continue."
 
-The agent calls `mdr_request_review`, mdr opens the file, you highlight text and leave comments, then click **Send review**. The agent receives your feedback as a structured prompt and starts addressing your comments. The review is opt-in per request. The agent only pauses when you ask for it.
+The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlight text and leave comments, then click **Send N comments**. The agent receives your feedback as a structured prompt and starts addressing your comments. You can keep sending follow-up batches while it works; **Send N & finish** sends the last batch and closes the loop. The review is opt-in per request. The agent only pauses when you ask for it.
 
-### Agents can ask, review, and wait
+### 2. The agent reviews your doc
 
-The MCP server exposes three more tools that make the file a two-way channel:
+The reverse direction, for docs the agent did not just write: your own draft, a teammate's PRD, a spec from another repo. Tell the agent:
 
-- **`mdr_ask`**: the agent posts anchored questions into your doc and blocks until
-  you answer. The questions show up as comment cards in the mdr UI (plus a toast,
-  a banner chip, and a tab-title badge so you notice even from another window).
-  Reply on the card like any other comment; the moment every question has an
-  answer, the agent unblocks with your reply text. Great mid-task: "Should
-  pricing tiers come from the PRD or the billing spec?" anchored to the exact
-  sentence it is about.
-- **`mdr_review`**: the reverse of `mdr_request_review`. The agent reviews YOUR
-  doc and leaves inline comments. Ask your agent to "review prd.md for gaps using
-  mdr" and its findings land as anchored comments you can read, reply to, and
-  dismiss in the UI.
-- **`mdr_wait`**: after `mdr_review`, the agent calls this to block until you
-  click **End review** in the banner. Your replies and edits are then in the
-  file for the agent to pick up.
+> "Use mdr to review prd.md and leave comments."
 
-Questions and reviews survive in the file as ordinary comment markers, so nothing
-is lost if a session ends early: the agent is always told to re-read the file.
+The agent calls `mdr_review`. Its findings land as inline comments anchored to the exact text, and the browser opens so you can read them as they arrive. The agent then waits (via `mdr_wait`) while you work through the feedback: reply on any card, edit the doc, delete comments you disagree with. When you are done, click **End review** in the banner. That click is the signal for the agent to re-read the file and pick up your replies and edits, so the session stays open until you press it. The agent is not stuck; it is listening.
+
+### Either direction: the agent can ask you questions
+
+Inside any active session, the agent can hit a fork where your answer changes what it should do next. Rather than guessing, it can call `mdr_ask` to post anchored questions into the doc and block until you answer:
+
+- You get a toast with a **View** button, a banner chip ("N questions awaiting your reply"), and a "(N questions)" tab title, so you notice even from another window.
+- Each question is a normal comment card anchored to the sentence it is about. Reply right on the card.
+- The moment every question has an answer, the agent unblocks with your reply text. No **End review** needed.
+
+This shines during hand-offs. Leave a comment like "this conflicts with what we decided, fix it," and instead of guessing, the agent asks "which decision: per-seat or flat-rate?" anchored where it matters. You can also request the pattern directly:
+
+> "Review prd.md with mdr. For your top 2 open questions, use mdr_ask and incorporate my answers before summarizing."
+
+Questions and reviews survive in the file as ordinary comment markers, so nothing is lost if a session ends early: the agent is always told to re-read the file.
 
 ### Without MCP
 
