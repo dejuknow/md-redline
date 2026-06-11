@@ -662,8 +662,8 @@ test.describe.serial('Demo recording', () => {
     await addCommentAnimated(page, 'valid 1 hour', 'Is this too short? Other suggestions?');
     await page.waitForTimeout(T.POST_COMMENT_HOLD);
 
-    // Click "Send & finish"
-    const sendBtn = banner.getByRole('button', { name: 'Send & finish' });
+    // Click "Send 2 & finish" (the button label includes the unsent count)
+    const sendBtn = banner.getByRole('button', { name: 'Send 2 & finish' });
     const sendBox = await sendBtn.boundingBox();
     if (sendBox) {
       await slowMove(page, sendBox.x + sendBox.width / 2, sendBox.y + sendBox.height / 2, T.CURSOR_TO_SEND);
