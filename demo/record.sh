@@ -27,6 +27,8 @@ echo "==> Recording terminal scenes with VHS..."
 cd "$REPO_ROOT"
 vhs "$DEMO_DIR/demo-terminal-1.tape"
 vhs "$DEMO_DIR/demo-terminal-2.tape"
+vhs "$DEMO_DIR/demo-terminal-3.tape"
+vhs "$DEMO_DIR/demo-terminal-4.tape"
 
 echo "==> Recording browser scenes with Playwright..."
 cd "$REPO_ROOT"
@@ -37,7 +39,7 @@ npx playwright test --config "$DEMO_DIR/playwright.demo.config.ts"
 # so no ffmpeg framing needed. Output is 1920x1080.
 # ---------------------------------------------------------------------------
 echo "==> Stitching browser frames..."
-for clip in clip-02 clip-04; do
+for clip in clip-02 clip-04 clip-06; do
   frame_count=$(ls "$FRAMES_DIR/$clip"/*.jpg 2>/dev/null | wc -l | tr -d ' ')
   if [ "$frame_count" -eq 0 ]; then
     echo "Error: No frames found for $clip"
@@ -46,6 +48,8 @@ for clip in clip-02 clip-04; do
 
   if [ "$clip" = "clip-02" ]; then
     OUT="$CLIPS_DIR/02-browser-comments.mp4"
+  elif [ "$clip" = "clip-06" ]; then
+    OUT="$CLIPS_DIR/06-browser-agent-review.mp4"
   else
     OUT="$CLIPS_DIR/04-browser-results.mp4"
   fi
@@ -143,6 +147,12 @@ done
 for clip in "$CLIPS_DIR"/03-*.mp4; do
   frame_terminal_clip "$clip"
 done
+for clip in "$CLIPS_DIR"/05-*.mp4; do
+  frame_terminal_clip "$clip"
+done
+for clip in "$CLIPS_DIR"/07-*.mp4; do
+  frame_terminal_clip "$clip"
+done
 
 # CLI zoom currently skipped — zoompan with complex expressions on video input
 # is unreliable across ffmpeg versions. The VHS font is sized so the typed
@@ -186,6 +196,31 @@ ffmpeg -y \
   -pix_fmt yuv420p -movflags +faststart -r 60 \
   "$OUTPUT_DIR/demo.mp4" 2>/dev/null
 
+# ---------------------------------------------------------------------------
+# Flow-2 video: agent reviews YOUR doc (terminal -> browser -> terminal)
+# ---------------------------------------------------------------------------
+echo "==> Stitching flow-2 clips with crossfade transitions..."
+
+D5=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$CLIPS_DIR/05-terminal-review-prompt.mp4")
+D6=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$CLIPS_DIR/06-browser-agent-review.mp4")
+
+ROFF1=$(awk "BEGIN { print $D5 - $XF }")
+ROFF2=$(awk "BEGIN { print $D5 + $D6 - 2 * $XF }")
+
+ffmpeg -y \
+  -i 05-terminal-review-prompt.mp4 \
+  -i 06-browser-agent-review.mp4 \
+  -i 07-terminal-review-done.mp4 \
+  -filter_complex "
+    [0:v][1:v]xfade=transition=fade:duration=${XF}:offset=${ROFF1}[v01];
+    [v01][2:v]xfade=transition=fade:duration=${XF}:offset=${ROFF2}[vout]
+  " -map "[vout]" \
+  -c:v libx264 -preset slow -crf 8 -profile:v high -level 5.0 \
+  -pix_fmt yuv420p -movflags +faststart -r 60 \
+  "$OUTPUT_DIR/demo-review.mp4" 2>/dev/null
+
 echo ""
-echo "✓ Demo video saved to demo/output/demo.mp4"
-echo "  Upload to GitHub and update the README link."
+echo "✓ Demo videos saved:"
+echo "    demo/output/demo.mp4         (hero: you review the agent's doc)"
+echo "    demo/output/demo-review.mp4  (flow 2: the agent reviews your doc)"
+echo "  Upload to GitHub and update the README links."

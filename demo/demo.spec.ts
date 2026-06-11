@@ -25,7 +25,9 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_BEFORE = resolve(__dirname, 'fixtures/sample-before.md');
+const FIXTURE_PRD = resolve(__dirname, 'fixtures/prd-sample.md');
 const DEMO_FILE = resolve(__dirname, '..', 'demo-sample.md');
+const REVIEW_DEMO_FILE = resolve(__dirname, '..', 'demo-prd.md');
 const FRAMES_DIR = resolve(__dirname, 'frames');
 const WALLPAPER = resolve(__dirname, 'assets/background.png');
 
@@ -125,6 +127,39 @@ const T = {
   CURSOR_TO_HIDEDIFF: 260,
   CURSOR_PARK: 220,
   FINAL_HOLD: 550,
+
+  // -------------------------------------------------------------------------
+  // Flow-2 video (clip-06: agent reviews YOUR doc). Target ~10s browser clip
+  // inside an ~18s total: 05-terminal (~5s) + 06-browser + 07-terminal (~4s)
+  // minus two 0.5s crossfades.
+  // -------------------------------------------------------------------------
+
+  // Dwell on the "Agent is reviewing" banner + spinner + empty sidebar before
+  // any comments arrive. Shorter than MDR_INITIAL_DWELL: the empty state is
+  // the setup beat, not the ta-da.
+  REVIEW_INITIAL_DWELL: 1500,
+
+  // Gap between staggered agent-comment batches so cards visibly pop in
+  // one after another instead of all at once.
+  REVIEW_BATCH_GAP: 650,
+
+  // Hold after the last comment lands, letting the viewer take in the
+  // populated sidebar before any cursor motion.
+  REVIEW_COMMENTS_HOLD: 900,
+
+  // Cursor glides for the reply interaction on a comment card.
+  CURSOR_TO_CARD: 320,
+  POST_CARD_CLICK: 240,
+  CURSOR_TO_REPLY: 240,
+  POST_REPLY_OPEN: 200,
+
+  // Hold after the reply is submitted so the threaded reply reads on screen.
+  REVIEW_POST_REPLY_HOLD: 800,
+
+  // Cursor glide to End review, and the hold on the cleared banner at the
+  // end of the clip (>=1.3s so the click reads before the xfade).
+  CURSOR_TO_END: 360,
+  REVIEW_FINAL_HOLD: 1500,
 };
 
 // ---------------------------------------------------------------------------
@@ -612,6 +647,7 @@ test.describe.serial('Demo recording', () => {
 
   test.beforeAll(() => {
     copyFileSync(FIXTURE_BEFORE, DEMO_FILE);
+    copyFileSync(FIXTURE_PRD, REVIEW_DEMO_FILE);
   });
 
   test('record browser clips', async ({ page, request, baseURL }) => {
@@ -771,7 +807,168 @@ test.describe.serial('Demo recording', () => {
     await capture04.stop();
   });
 
+  // ===========================================================================
+  // FLOW-2 VIDEO — CLIP 06: the agent reviews YOUR doc.
+  // Terminal scenes (clips 05 and 07) come from demo-terminal-3/4.tape; this
+  // records the browser scene between them: agent comments pop in live, the
+  // user replies on one card, then clicks End review.
+  // ===========================================================================
+  test('record agent-review browser clip', async ({ page, request, baseURL }) => {
+    await setupDemoPage(page);
+
+    await request.put(`${baseURL}/api/preferences`, {
+      data: {
+        author: 'Dennis',
+        settings: {
+          enableResolve: false,
+          quickComment: true,
+          showTemplatesByDefault: false,
+        },
+      },
+    });
+
+    const res = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [REVIEW_DEMO_FILE], origin: 'agent' },
+    });
+    expect(res.status()).toBe(201);
+    const { sessionId } = await res.json() as { sessionId: string };
+
+    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+    await expect(page.locator('.prose')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-theme="nord"]')).toBeVisible();
+
+    const banner = page.getByTestId('review-banner');
+    await expect(banner).toBeVisible({ timeout: 12_000 });
+    // Let the SSE file-watcher connection establish before agent posts start
+    // (same guard the e2e specs use).
+    await page.waitForTimeout(500);
+
+    const postComments = (
+      comments: Array<{ anchor: string; text: string }>,
+    ) =>
+      request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+        data: {
+          mode: 'review',
+          comments: comments.map((c) => ({
+            filePath: REVIEW_DEMO_FILE,
+            anchor: c.anchor,
+            text: c.text,
+            author: 'Claude',
+          })),
+        },
+      });
+
+    const capture06 = startScreenCapture(page, 'clip-06');
+
+    // Setup beat: "Agent is reviewing" banner with spinner, empty sidebar.
+    await page.waitForTimeout(T.REVIEW_INITIAL_DWELL);
+
+    // Agent comments arrive in staggered batches via SSE.
+    await postComments([
+      {
+        anchor: 'launch in all markets simultaneously',
+        text: 'Scope risk: a simultaneous global launch makes the press window the constraint, not readiness. Recommend US-only for v1.',
+      },
+    ]);
+    await page.waitForTimeout(T.REVIEW_BATCH_GAP);
+    await postComments([
+      {
+        anchor: 'total signups in the first 90 days',
+        text: 'Install count is a vanity metric here. Consider activation (first task created on mobile) as the primary metric.',
+      },
+      {
+        anchor: 'Push notifications keep users engaged',
+        text: 'No opt-in flow is specified. App stores will reject mention-based pushes without one.',
+      },
+    ]);
+    await page.waitForTimeout(T.REVIEW_BATCH_GAP);
+    await postComments([
+      {
+        anchor: 'synced in real time',
+        text: 'Real-time sync is a big lift for v1. Would eventual consistency (under 30 seconds) be acceptable?',
+      },
+    ]);
+
+    await expect(page.locator('[data-comment-card-id]')).toHaveCount(4, { timeout: 10_000 });
+    await page.waitForTimeout(T.REVIEW_COMMENTS_HOLD);
+
+    // Bring the sync question into view and reply to it on the card.
+    await smoothScrollTargetInto(page, 'synced in real time', 0.3, T.SMOOTH_SCROLL);
+    await page.waitForTimeout(T.POST_SCROLL_SETTLE);
+
+    const syncCard = page.locator('[data-comment-card-id]', { hasText: 'eventual consistency' });
+    await expect(syncCard).toBeVisible();
+    const cardBox = await syncCard.boundingBox();
+    if (cardBox) {
+      await slowMove(page, cardBox.x + cardBox.width / 2, cardBox.y + 24, T.CURSOR_TO_CARD);
+    }
+    await syncCard.click();
+    await page.waitForTimeout(T.POST_CARD_CLICK);
+
+    const replyOpenBtn = syncCard.getByRole('button', { name: /^reply$/i }).first();
+    const replyOpenBox = await replyOpenBtn.boundingBox();
+    if (replyOpenBox) {
+      await slowMove(
+        page,
+        replyOpenBox.x + replyOpenBox.width / 2,
+        replyOpenBox.y + replyOpenBox.height / 2,
+        T.CURSOR_TO_REPLY,
+      );
+    }
+    await replyOpenBtn.click();
+    await page.waitForTimeout(T.POST_REPLY_OPEN);
+
+    const replyInput = syncCard.getByPlaceholder('Write a reply...');
+    await expect(replyInput).toBeVisible({ timeout: 5000 });
+    const inputBox = await replyInput.boundingBox();
+    if (inputBox) {
+      await slowMove(
+        page,
+        inputBox.x + inputBox.width / 2,
+        inputBox.y + inputBox.height / 2,
+        T.CURSOR_TO_INPUT,
+      );
+      await page.waitForTimeout(T.PRE_INPUT_CLICK);
+    }
+    await replyInput.click();
+    await page.waitForTimeout(T.POST_INPUT_CLICK);
+    await page.keyboard.type('Eventual consistency is fine for v1.', { delay: T.TYPE_DELAY });
+    await page.waitForTimeout(T.POST_TYPE);
+
+    // Submit with the split-click ripple pattern (see settled decisions).
+    const replySubmitBtn = syncCard.getByRole('button', { name: /^reply$/i }).last();
+    const submitBox = await replySubmitBtn.boundingBox();
+    if (submitBox) {
+      const cx = submitBox.x + submitBox.width / 2;
+      const cy = submitBox.y + submitBox.height / 2;
+      await slowMove(page, cx, cy, T.CURSOR_TO_SUBMIT);
+      await page.waitForTimeout(T.PRE_SUBMIT_CLICK);
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.waitForTimeout(T.SUBMIT_RIPPLE_DWELL);
+      await page.mouse.up();
+    } else {
+      await replySubmitBtn.click();
+    }
+    await page.waitForTimeout(T.REVIEW_POST_REPLY_HOLD);
+
+    // End the review from the banner.
+    const endBtn = banner.getByRole('button', { name: /end review/i });
+    const endBox = await endBtn.boundingBox();
+    if (endBox) {
+      await slowMove(page, endBox.x + endBox.width / 2, endBox.y + endBox.height / 2, T.CURSOR_TO_END);
+      await page.waitForTimeout(T.PRE_SEND_CLICK);
+    }
+    await endBtn.click();
+    await expect(banner).not.toBeVisible({ timeout: 5000 });
+    await slowMove(page, 500, 450, T.CURSOR_PARK);
+    await page.waitForTimeout(T.REVIEW_FINAL_HOLD);
+
+    await capture06.stop();
+  });
+
   test.afterAll(() => {
     if (existsSync(DEMO_FILE)) unlinkSync(DEMO_FILE);
+    if (existsSync(REVIEW_DEMO_FILE)) unlinkSync(REVIEW_DEMO_FILE);
   });
 });

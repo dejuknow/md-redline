@@ -1,7 +1,9 @@
 #!/bin/bash
 # mock-claude.sh — Simulates Claude Code CLI for demo recording.
-# Usage: ./mock-claude.sh prompt   (scenes 1-3)
-#        ./mock-claude.sh review   (scene 7)
+# Usage: ./mock-claude.sh prompt             (hero video, scenes 1-3)
+#        ./mock-claude.sh review             (hero video, scene 7)
+#        ./mock-claude.sh agent-review       (flow-2 video, scene 1)
+#        ./mock-claude.sh agent-review-done  (flow-2 video, scene 4)
 
 set -e
 
@@ -163,8 +165,83 @@ review_mode() {
   sleep 30
 }
 
+agent_review_mode() {
+  # Claude Code startup banner (matches real CLI format)
+  echo ""
+  echo -e "  ${BOLD}Claude Code${RESET} ${DIM}v2.1.108${RESET}"
+  echo -e "  ${DIM}Opus 4.6 (1M context) with high effort · Claude Max${RESET}"
+  echo -e "  ${DIM}~/dev/myapp${RESET}"
+  echo ""
+  hr 76
+  echo ""
+  printf "  ${BOLD}❯${RESET} "
+
+  # Wait for VHS to type the review request
+  read -r _
+
+  echo ""
+  hr 76
+  echo ""
+  echo -e "  ${BOLD}⏺${RESET} I'll review the PRD in mdr and leave inline comments"
+  echo -e "    anchored to the relevant sections."
+  echo ""
+
+  # Tool call: mdr_review posts the comments and returns immediately
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_review${RESET}${DIM}({\"filePaths\": [\"prd.md\"], \"comments\": [...4]})${RESET}"
+  sleep 0.4
+  echo -e "    ${GREEN}✓${RESET} ${DIM}Posted 4 comments. Review open in md-redline.${RESET}"
+  echo ""
+  sleep 0.3
+
+  # Tool call: mdr_wait blocks until the user clicks End review
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_wait${RESET}${DIM}({\"sessionId\": \"rev_7f3a\"})${RESET}"
+  echo -e "    ${DIM}⎿ Waiting for you to finish (click End review)...${RESET}"
+  echo ""
+
+  # Hold until VHS ends the recording
+  sleep 30
+}
+
+agent_review_done_mode() {
+  # Reproduce the tail of agent_review_mode so the clip reads as a
+  # continuation — the CLI is still blocked on the mdr_wait tool call.
+  echo ""
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_review${RESET}${DIM}({\"filePaths\": [\"prd.md\"], \"comments\": [...4]})${RESET}"
+  echo -e "    ${GREEN}✓${RESET} ${DIM}Posted 4 comments. Review open in md-redline.${RESET}"
+  echo ""
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_wait${RESET}${DIM}({\"sessionId\": \"rev_7f3a\"})${RESET}"
+  echo -e "    ${DIM}⎿ Waiting for you to finish (click End review)...${RESET}"
+  # Beat so viewers register the waiting state before it flips.
+  sleep 1.2
+
+  # Overwrite the "Waiting..." line with the resolution
+  printf "\033[1A\033[2K"
+  echo -e "    ${GREEN}✓${RESET} ${DIM}User finished review${RESET}"
+  echo ""
+  hr 76
+  echo ""
+  sleep 0.2
+
+  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Read${RESET}${DIM}(prd.md)${RESET}"
+  echo -e "    ${DIM}⎿ Read 52 lines${RESET}"
+  echo ""
+  sleep 0.15
+
+  echo -e "  ${BOLD}⏺${RESET} You replied to my sync question: eventual consistency is" | stream
+  echo -e "    fine for v1. The other 3 comments are still open in the doc" | stream
+  echo -e "    whenever you want to address them." | stream
+  echo ""
+  hr 76
+  echo ""
+  # Show the ❯ prompt so viewers see the CLI is ready for the next input
+  printf "  ${BOLD}❯${RESET} "
+  sleep 30
+}
+
 case "${1:-prompt}" in
   prompt) prompt_mode ;;
   review) review_mode ;;
-  *) echo "Usage: $0 {prompt|review}" && exit 1 ;;
+  agent-review) agent_review_mode ;;
+  agent-review-done) agent_review_done_mode ;;
+  *) echo "Usage: $0 {prompt|review|agent-review|agent-review-done}" && exit 1 ;;
 esac
