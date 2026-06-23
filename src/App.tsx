@@ -649,17 +649,19 @@ export default function App() {
   }, [pendingAsksBySession]);
 
   // Tab-title badge: surface pending agent questions to a user who has the
-  // tab backgrounded (the in-page toast and banner are invisible there).
+  // tab backgrounded (the in-page toast and banner are invisible there), and
+  // show the open file name so multiple md-redline tabs are distinguishable.
   const baseTitleRef = useRef<string | null>(null);
   useEffect(() => {
     if (baseTitleRef.current === null) baseTitleRef.current = document.title;
+    const appName = baseTitleRef.current;
+    const fileName = activeFilePath ? (activeFilePath.split('/').pop() ?? '') : '';
+    const base = fileName ? `${fileName} · ${appName}` : appName;
     let total = 0;
     for (const asks of pendingAsksBySession.values()) total += asks.length;
     document.title =
-      total > 0
-        ? `(${total} question${total === 1 ? '' : 's'}) ${baseTitleRef.current}`
-        : baseTitleRef.current;
-  }, [pendingAsksBySession]);
+      total > 0 ? `(${total} question${total === 1 ? '' : 's'}) ${base}` : base;
+  }, [pendingAsksBySession, activeFilePath]);
 
   // Toast on new agent ask (debounced). `lastSeenAskIdsRef` accumulates all
   // ask IDs seen for the entire browser-tab lifetime (across file tabs and
