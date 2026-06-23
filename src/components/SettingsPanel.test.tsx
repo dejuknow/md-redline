@@ -64,4 +64,3 @@ describe('SettingsPanel', () => {
     expect(screen.queryByText(/agent reviews/i)).toBeNull();
   });
 });
-
