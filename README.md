@@ -111,6 +111,8 @@ The reverse direction, for docs the agent did not just write: your own draft, a 
 
 The agent calls `mdr_review`. Its findings land as inline comments anchored to the exact text, and the browser opens so you can read them as they arrive. The agent then waits (via `mdr_wait`) while you work through the feedback: reply on any card, edit the doc, delete comments you disagree with. When you are done, click **End review** in the banner. That click is the signal for the agent to re-read the file and pick up your replies and edits, so the session stays open until you press it. The agent is not stuck; it is listening.
 
+https://github.com/user-attachments/assets/39a53685-cdac-4251-b75d-52cad6996b37
+
 ### Either direction: the agent can ask you questions
 
 Inside any active session, the agent can hit a fork where your answer changes what it should do next. Rather than guessing, it can call `mdr_ask` to post anchored questions into the doc and block until you answer:
