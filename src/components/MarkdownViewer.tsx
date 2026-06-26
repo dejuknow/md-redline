@@ -1,9 +1,9 @@
 import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react';
-import DOMPurify from 'dompurify';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 import { assignHeadingIds } from '../lib/heading-slugs';
+import { sanitizeRenderedMarkdown } from '../lib/sanitize-html';
 import { useMermaidRenderer, type MermaidResult } from '../hooks/useMermaidRenderer';
 import { collectVisibleTextNodes } from '../lib/visible-text';
 import {
@@ -167,11 +167,7 @@ export const MarkdownViewer = memo(
       // Set innerHTML from scratch — guarantees a clean starting state
       // Defense-in-depth: rehype-sanitize is the primary sanitizer, but
       // DOMPurify provides a second layer in case of a remark/rehype bypass.
-      container.innerHTML = DOMPurify.sanitize(html, {
-        USE_PROFILES: { html: true },
-        ADD_TAGS: ['mark'],
-        ADD_ATTR: ['data-comment-ids', 'data-mdr-local-md', 'data-mdr-fragment'],
-      });
+      container.innerHTML = sanitizeRenderedMarkdown(html);
 
       // --- Heading IDs ---
       assignHeadingIds(container);
