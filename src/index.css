@@ -147,8 +147,10 @@ body {
   --theme-scrollbar-thumb: #cdc7ba;
   --theme-scrollbar-thumb-hover: #b3ac9d;
   --theme-scrollbar-track: #edeae2;
+  --theme-sheet-shadow: 0 1px 2px rgba(35, 30, 24, 0.05), 0 6px 20px rgba(35, 30, 24, 0.06);
 }
 
+/* ========== Dark Theme ========== */
 [data-theme="dark"] {
   color-scheme: dark;
   --theme-bg: #1d1b18;
@@ -211,6 +213,7 @@ body {
   --theme-scrollbar-thumb: #45403a;
   --theme-scrollbar-thumb-hover: #57524a;
   --theme-scrollbar-track: #1d1b18;
+  --theme-sheet-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
 /* ========== Sepia Theme ========== */
@@ -276,6 +279,7 @@ body {
   --theme-scrollbar-thumb: #c4b8a6;
   --theme-scrollbar-thumb-hover: #a89880;
   --theme-scrollbar-track: #f0e8db;
+  --theme-sheet-shadow: 0 1px 2px rgba(61, 50, 41, 0.06), 0 6px 20px rgba(61, 50, 41, 0.07);
 }
 
 /* ========== Nord Theme ========== */
@@ -341,6 +345,7 @@ body {
   --theme-scrollbar-thumb: #4c566a;
   --theme-scrollbar-thumb-hover: #5e6a82;
   --theme-scrollbar-track: #3b4252;
+  --theme-sheet-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
 /* ========== Rosé Pine Theme ========== */
@@ -406,6 +411,7 @@ body {
   --theme-scrollbar-thumb: #403d52;
   --theme-scrollbar-thumb-hover: #524f67;
   --theme-scrollbar-track: #1f1d2e;
+  --theme-sheet-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
 /* ========== Solarized Light Theme ========== */
@@ -471,6 +477,7 @@ body {
   --theme-scrollbar-thumb: #c0c4bb;
   --theme-scrollbar-thumb-hover: #a5a99e;
   --theme-scrollbar-track: #eee8d5;
+  --theme-sheet-shadow: 0 1px 2px rgba(7, 54, 66, 0.06), 0 6px 20px rgba(7, 54, 66, 0.07);
 }
 
 /* ========== GitHub Theme ========== */
@@ -536,6 +543,7 @@ body {
   --theme-scrollbar-thumb: #c8cdd2;
   --theme-scrollbar-thumb-hover: #a8b0b8;
   --theme-scrollbar-track: #f6f8fa;
+  --theme-sheet-shadow: 0 1px 2px rgba(31, 35, 40, 0.05), 0 6px 20px rgba(31, 35, 40, 0.06);
 }
 
 /* ========== Catppuccin Mocha Theme ========== */
@@ -601,6 +609,7 @@ body {
   --theme-scrollbar-thumb: #45475a;
   --theme-scrollbar-thumb-hover: #585b70;
   --theme-scrollbar-track: #313244;
+  --theme-sheet-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
 /* ========== Scrollbar Styles ========== */
@@ -923,21 +932,14 @@ body {
   white-space: pre-wrap;
 }
 
-/* ========== Panel Edge Shadows ========== */
-/* Inset shadows on the center content area create depth against side panels */
-.panel-center {
-  box-shadow:
-    inset 6px 0 8px -6px rgba(0, 0, 0, 0.08),
-    inset -6px 0 8px -6px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme="dark"] .panel-center,
-[data-theme="nord"] .panel-center,
-[data-theme="rose-pine"] .panel-center,
-[data-theme="catppuccin"] .panel-center {
-  box-shadow:
-    inset 6px 0 8px -6px rgba(0, 0, 0, 0.3),
-    inset -6px 0 8px -6px rgba(0, 0, 0, 0.3);
+/* ========== Document Sheet ========== */
+/* The center panel reads as a raised sheet of paper on the app canvas. */
+.doc-sheet {
+  border: 1px solid var(--theme-border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  box-shadow: var(--theme-sheet-shadow);
+  overflow: hidden;
 }
 
 /* ========== Raw View Styles ========== */

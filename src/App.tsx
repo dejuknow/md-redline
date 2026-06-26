@@ -1869,7 +1869,7 @@ export default function App() {
   }, [reviewSessions, optimisticSentIds]);
 
   return (
-    <div className="h-screen flex flex-col bg-surface">
+    <div className="h-screen flex flex-col bg-surface-secondary">
       <ReviewBanner
         sessions={reviewSessions}
         commentCounts={commentCounts}
@@ -2022,7 +2022,7 @@ export default function App() {
           )}
 
           {/* Markdown viewer */}
-          <div className="flex-1 min-h-0 min-w-0 relative bg-surface panel-center">
+          <div className="flex-1 min-h-0 min-w-0 relative bg-surface panel-center mx-3 mt-3 doc-sheet">
             {showSearch && (
               <SearchBar
                 query={searchQuery}
@@ -2403,7 +2403,7 @@ export default function App() {
       />
 
       {/* Keyboard shortcuts hint */}
-      <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-muted shrink-0">
+      <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-secondary shrink-0">
         <span>
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
             {modKey}+K

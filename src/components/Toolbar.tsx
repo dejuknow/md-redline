@@ -62,7 +62,7 @@ export function Toolbar({
   };
 
   return (
-    <div className="h-12 border-b border-border bg-surface flex items-center px-4 gap-3 shrink-0">
+    <div className="h-12 border-b border-border bg-surface-secondary flex items-center px-4 gap-3 shrink-0">
       {/* Explorer toggle (far left) */}
       <IconButton
         variant="active"
