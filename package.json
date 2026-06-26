@@ -61,6 +61,9 @@
     "demo:record": "bash demo/record.sh"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/source-serif-4": "^5.2.9",
     "@hono/node-server": "^1.19.11",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dompurify": "^3.3.3",

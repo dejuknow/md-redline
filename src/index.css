@@ -3,6 +3,11 @@
 
 /* ========== Semantic Color Tokens ========== */
 @theme {
+  /* Typefaces */
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Source Serif 4 Variable', Charter, Georgia, serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
   /* Surfaces */
   --color-surface: var(--theme-bg);
   --color-surface-secondary: var(--theme-bg-secondary);
@@ -70,6 +75,10 @@
   /* Gradient */
   --color-gradient-from: var(--theme-gradient-from);
   --color-gradient-to: var(--theme-gradient-to);
+}
+
+body {
+  font-family: var(--font-sans);
 }
 
 /* ========== Light Theme (default) ========== */
@@ -911,7 +920,7 @@ body {
   background-color: var(--theme-danger-bg);
   border-radius: 8px;
   font-size: 0.8rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   white-space: pre-wrap;
 }
 
@@ -938,7 +947,7 @@ body {
 }
 
 .raw-view-table {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
   line-height: 1.625;
 }

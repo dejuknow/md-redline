@@ -5,6 +5,9 @@ import { SettingsProvider } from './contexts/SettingsContext';
 import { ThemePersistenceProvider } from './contexts/ThemePersistenceContext';
 import { ALL_THEMES } from './lib/themes';
 import App from './App';
+import '@fontsource-variable/inter/index.css';
+import '@fontsource-variable/source-serif-4/index.css';
+import '@fontsource-variable/jetbrains-mono/index.css';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
