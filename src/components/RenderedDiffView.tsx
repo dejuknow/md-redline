@@ -411,8 +411,8 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
     return (
       <div
         ref={containerRef}
-        className="prose max-w-none prose-headings:scroll-mt-4
-          prose-h1:text-2xl prose-h1:font-bold prose-h1:border-b prose-h1:pb-2
+        className="prose max-w-none prose-headings:scroll-mt-4 prose-headings:tracking-tight
+          prose-h1:text-2xl prose-h1:font-bold
           prose-h2:text-xl prose-h2:font-semibold prose-h2:mt-8
           prose-h3:text-lg prose-h3:font-medium
           prose-p:leading-relaxed
