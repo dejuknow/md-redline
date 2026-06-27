@@ -22,6 +22,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     updateShowTemplatesByDefault,
     updateEnableResolve,
     updateQuickComment,
+    updateProseFont,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -616,6 +617,34 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       />
                     </button>
                   </label>
+                </div>
+
+                {/* Prose Typeface */}
+                <div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Prose typeface</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Typeface for rendered document text.
+                      </p>
+                    </div>
+                    <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+                      {(['serif', 'sans'] as const).map((font) => (
+                        <button
+                          key={font}
+                          onClick={() => updateProseFont(font)}
+                          aria-pressed={settings.proseFont === font}
+                          className={`px-3 py-1 text-xs font-medium transition-colors ${
+                            settings.proseFont === font
+                              ? 'bg-primary text-on-primary'
+                              : 'bg-surface text-content-secondary hover:bg-tint'
+                          }`}
+                        >
+                          {font === 'serif' ? 'Serif' : 'Sans'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Comment Max Length */}

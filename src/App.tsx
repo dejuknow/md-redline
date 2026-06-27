@@ -2022,7 +2022,10 @@ export default function App() {
           )}
 
           {/* Markdown viewer */}
-          <div className="flex-1 min-h-0 min-w-0 relative bg-surface panel-center mx-3 mt-3 doc-sheet">
+          <div
+            className="flex-1 min-h-0 min-w-0 relative bg-surface panel-center mx-3 mt-3 doc-sheet"
+            data-prose-font={settings.proseFont}
+          >
             {showSearch && (
               <SearchBar
                 query={searchQuery}
@@ -2098,7 +2101,7 @@ export default function App() {
                   ref={containerRef}
                   className="flex-1 overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
                 >
-                  <div className="max-w-3xl mx-auto">
+                  <div className="max-w-[42rem] mx-auto">
                     {diffEnabled && currentSnapshot && diffLines ? (
                       // key on activeFilePath forces a remount when the user
                       // switches files while the diff overlay is on, so the
