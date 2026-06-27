@@ -116,4 +116,24 @@ describe('SettingsContext hydrate race', () => {
     // No mutation happened, so no replay-persist either.
     expect(savePreferencesToDisk).not.toHaveBeenCalled();
   });
+
+  it('updateProseFont persists the new value after hydration', async () => {
+    fetchPreferences.mockResolvedValue({ settings: {} });
+
+    const { result } = renderHook(() => useSettings(), { wrapper });
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+    expect(result.current.settings.proseFont).toBe('serif');
+
+    act(() => {
+      result.current.updateProseFont('sans');
+    });
+
+    expect(result.current.settings.proseFont).toBe('sans');
+    expect(savePreferencesToDisk).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({ proseFont: 'sans' }),
+      }),
+    );
+  });
 });

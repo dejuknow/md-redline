@@ -13,6 +13,8 @@ export interface AppSettings {
   quickComment: boolean;
   /** When true, the comment thread panel in the Mermaid fullscreen view starts collapsed. Persists across sessions. */
   mermaidFullscreenPanelCollapsed: boolean;
+  /** Typeface for rendered document prose. UI chrome always uses the sans face. */
+  proseFont: 'serif' | 'sans';
 }
 
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
@@ -33,6 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableResolve: false,
   quickComment: false,
   mermaidFullscreenPanelCollapsed: false,
+  proseFont: 'serif',
 };
 
 /**
@@ -76,5 +79,9 @@ export function parseSettings(input: unknown): AppSettings {
       typeof parsed.mermaidFullscreenPanelCollapsed === 'boolean'
         ? parsed.mermaidFullscreenPanelCollapsed
         : DEFAULT_SETTINGS.mermaidFullscreenPanelCollapsed,
+    proseFont:
+      parsed.proseFont === 'sans' || parsed.proseFont === 'serif'
+        ? parsed.proseFont
+        : DEFAULT_SETTINGS.proseFont,
   };
 }

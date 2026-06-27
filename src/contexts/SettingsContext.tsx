@@ -25,6 +25,7 @@ interface SettingsContextValue {
   updateEnableResolve: (enable: boolean) => void;
   updateQuickComment: (quick: boolean) => void;
   updateMermaidFullscreenPanelCollapsed: (collapsed: boolean) => void;
+  updateProseFont: (font: 'serif' | 'sans') => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -116,6 +117,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
+  const updateProseFont = useCallback(
+    (proseFont: 'serif' | 'sans') => update({ proseFont }),
+    [update],
+  );
+
   const resetTemplates = useCallback(() => update({ templates: DEFAULT_TEMPLATES }), [update]);
 
   const resetAll = useCallback(() => {
@@ -139,6 +145,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateEnableResolve,
         updateQuickComment,
         updateMermaidFullscreenPanelCollapsed,
+        updateProseFont,
         resetTemplates,
         resetAll,
       }}

@@ -94,7 +94,25 @@ describe('parseSettings', () => {
       enableResolve: true,
       quickComment: true,
       mermaidFullscreenPanelCollapsed: false,
+      proseFont: 'serif',
     };
     expect(parseSettings(full)).toEqual(full);
+  });
+});
+
+describe('parseSettings proseFont', () => {
+  it('defaults to serif when absent', () => {
+    expect(parseSettings({}).proseFont).toBe('serif');
+    expect(DEFAULT_SETTINGS.proseFont).toBe('serif');
+  });
+
+  it('accepts sans and serif', () => {
+    expect(parseSettings({ proseFont: 'sans' }).proseFont).toBe('sans');
+    expect(parseSettings({ proseFont: 'serif' }).proseFont).toBe('serif');
+  });
+
+  it('falls back to serif on invalid values', () => {
+    expect(parseSettings({ proseFont: 'comic-sans' }).proseFont).toBe('serif');
+    expect(parseSettings({ proseFont: 42 }).proseFont).toBe('serif');
   });
 });
