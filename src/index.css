@@ -683,10 +683,6 @@ body {
   border-color: var(--theme-border);
 }
 
-.prose :where(h1):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  border-color: var(--theme-border);
-}
-
 .prose :where(hr):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   border-color: var(--theme-border);
 }
@@ -923,8 +919,8 @@ body {
 .mermaid-block-expand:focus-visible { opacity: 1; }
 
 .mermaid-block-expand:hover {
-  background: var(--theme-bg-inset, #f1f5f9);
-  color: var(--theme-text, #1e293b);
+  background: var(--theme-bg-inset, #edeae2);
+  color: var(--theme-text, #24211c);
 }
 
 .mermaid-error {
