@@ -201,7 +201,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               />
             </svg>
             Comment
-            <span className="font-mono text-[10px] text-content-muted border border-border-subtle rounded px-1">
+            <span aria-hidden="true" className="font-mono text-[10px] text-content-muted border border-border-subtle rounded px-1">
               {modLabel}+Enter
             </span>
           </button>

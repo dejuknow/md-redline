@@ -298,7 +298,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       Show templates by default
                     </h3>
                     <p className="text-xs text-content-muted mt-0.5">
-                      Automatically show the template picker when adding a new comment.
+                      Show the template picker when Quick comment opens the form.
                     </p>
                   </div>
                   <button
