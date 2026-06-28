@@ -81,9 +81,9 @@ test.describe('Selection pill', () => {
     await expect(textarea).toBeVisible();
     await expect(textarea).toHaveValue(/Rewrite/);
     // Grid stays hidden when a pill template was tapped
-    await expect(page.getByText('Quick templates:')).not.toBeVisible();
+    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).not.toBeVisible();
 
-    await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment', exact: true }).click();
+    await pill.getByRole('button', { name: 'Comment', exact: true }).click();
 
     await expect(page.locator('mark.comment-highlight')).toBeVisible();
     await expect
@@ -98,19 +98,20 @@ test.describe('Selection pill', () => {
     await selectText(page, 'valid credentials');
 
     const pill = page.locator('[data-comment-form]');
-    await pill.getByRole('button', { name: /Comment/ }).first().click();
+    await pill.getByRole('button', { name: /Comment/ }).click();
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible();
-    await expect(page.getByText('Quick templates:')).not.toBeVisible();
+    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).not.toBeVisible();
 
     // The footer toggle still summons the grid on demand
     await page.locator('[data-comment-form] button[title="Quick templates"]').click();
-    await expect(page.getByText('Quick templates:')).toBeVisible();
+    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).toBeVisible();
 
     // Dismiss, reselect, take the overflow path
     await page.keyboard.press('Escape');
+    await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
     await selectText(page, 'validates all inputs');
     await pill.getByRole('button', { name: 'More templates' }).click();
-    await expect(page.getByText('Quick templates:')).toBeVisible();
+    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).toBeVisible();
     await expect(page.getByPlaceholder('Add your comment...')).toHaveValue('');
   });
 });
