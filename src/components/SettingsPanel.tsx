@@ -241,12 +241,12 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onClose}>
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
 
       {/* Panel */}
       <div
         ref={panelRef}
-        className="relative w-full max-w-3xl max-h-[85vh] bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col"
+        className="relative w-full max-w-3xl max-h-[85vh] bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

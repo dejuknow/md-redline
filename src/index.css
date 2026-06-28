@@ -947,6 +947,23 @@ body {
   overflow: hidden;
 }
 
+/* ========== Overlay Enter Motion ========== */
+/* One motion spec for all modal surfaces: 140ms enter, instant exit. */
+@media (prefers-reduced-motion: no-preference) {
+  .overlay-backdrop-enter {
+    animation: overlay-fade 140ms ease-out;
+  }
+  .overlay-panel-enter {
+    animation: overlay-pop 140ms ease-out;
+  }
+  @keyframes overlay-fade {
+    from { opacity: 0; }
+  }
+  @keyframes overlay-pop {
+    from { opacity: 0; transform: scale(0.98); }
+  }
+}
+
 /* ========== Raw View Styles ========== */
 .raw-view {
   position: relative;

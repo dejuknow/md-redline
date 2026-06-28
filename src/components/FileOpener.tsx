@@ -139,10 +139,10 @@ export function FileOpener({
       className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]"
       onClick={onClose}
     >
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
 
       <div
-        className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden"
+        className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Input */}

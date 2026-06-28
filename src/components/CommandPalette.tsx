@@ -116,11 +116,11 @@ export function CommandPalette({ commands, open, onClose }: Props) {
       onClick={onClose}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
 
       {/* Palette */}
       <div
-        className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden"
+        className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}

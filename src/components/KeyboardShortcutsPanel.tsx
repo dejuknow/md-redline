@@ -79,9 +79,9 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
       <div
-        className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden"
+        className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

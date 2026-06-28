@@ -40,11 +40,11 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onCancel}>
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
 
       {/* Dialog */}
       <div
-        className="relative w-full max-w-sm bg-surface-raised rounded-xl shadow-2xl border border-border p-5"
+        className="relative w-full max-w-sm bg-surface-raised rounded-xl shadow-2xl border border-border p-5 overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-content mb-1">{title}</h3>
