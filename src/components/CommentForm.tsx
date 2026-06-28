@@ -25,7 +25,9 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const modLabel = getPrimaryModifierLabel();
   const [isExpanded, setIsExpanded] = useState(!!settings.quickComment);
   const [text, setText] = useState('');
-  const [showTemplates, setShowTemplates] = useState(settings.showTemplatesByDefault);
+  const [showTemplates, setShowTemplates] = useState(
+    settings.quickComment ? settings.showTemplatesByDefault : false,
+  );
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
   const [formSize, setFormSize] = useState<{ height: number; width: number } | null>(null);
@@ -33,7 +35,10 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   useEffect(() => {
     if (isExpanded && inputRef.current) {
-      inputRef.current.focus();
+      const el = inputRef.current;
+      el.focus();
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
     }
   }, [isExpanded]);
 
@@ -74,7 +79,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       prevSelectionKeyRef.current = selectionKey;
       if (!settings.quickComment) setIsExpanded(false);
       setText('');
-      setShowTemplates(settings.showTemplatesByDefault);
+      setShowTemplates(settings.quickComment ? settings.showTemplatesByDefault : false);
       setFormSize(null);
     }
   }, [selectionKey, settings.quickComment, settings.showTemplatesByDefault]);
@@ -99,7 +104,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const viewportHeight = window.innerHeight;
   const viewportWidth = window.innerWidth;
   const formHeight = formSize?.height ?? (isExpanded ? (showTemplates ? 280 : 220) : 44);
-  const formWidth = formSize?.width ?? (isExpanded ? 320 : 120);
+  const formWidth = formSize?.width ?? (isExpanded ? 320 : 300);
   const belowTop = selection.rect.bottom + 8;
   const aboveTop = selection.rect.top - formHeight - 8;
   const showAbove =
@@ -159,25 +164,69 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     inputRef.current?.focus();
   };
 
+  const handlePillTemplate = (templateText: string) => {
+    onLock();
+    setText(templateText);
+    setShowTemplates(false);
+    setIsExpanded(true);
+  };
+
+  const handlePillOverflow = () => {
+    onLock();
+    setShowTemplates(true);
+    setIsExpanded(true);
+  };
+
   if (!isExpanded) {
+    const pillTemplates = TEMPLATES.slice(0, 2);
     return (
       <div ref={formRef} style={style} data-comment-form>
-        <button
-          onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
-          onClick={handleExpand}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-on-primary text-sm font-medium rounded-lg shadow-lg hover:bg-primary-hover transition-colors"
-        >
-          <svg
-            className="w-3.5 h-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
+        <div className="selection-pill-enter flex items-center gap-0.5 px-1.5 py-1 bg-surface-raised border border-border rounded-full shadow-lg">
+          <button
+            onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
+            onClick={handleExpand}
+            className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full text-sm font-medium text-primary-text hover:bg-tint-primary transition-colors"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Comment
-        </button>
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M20 4H4a1 1 0 00-1 1v11a1 1 0 001 1h3v4l5-4h8a1 1 0 001-1V5a1 1 0 00-1-1z"
+              />
+            </svg>
+            Comment
+            <span className="font-mono text-[10px] text-content-muted border border-border-subtle rounded px-1">
+              {modLabel}+Enter
+            </span>
+          </button>
+          {pillTemplates.length > 0 && <span className="w-px self-stretch my-1 bg-border" />}
+          {pillTemplates.map((t) => (
+            <button
+              key={t.label}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handlePillTemplate(t.text)}
+              className="px-2.5 py-1 rounded-full text-xs text-content-secondary hover:bg-tint transition-colors max-w-36 truncate"
+            >
+              {t.label}
+            </button>
+          ))}
+          {TEMPLATES.length > 2 && (
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handlePillOverflow}
+              aria-label="More templates"
+              className="px-2 py-1 rounded-full text-xs text-content-secondary hover:bg-tint transition-colors"
+            >
+              &#8943;
+            </button>
+          )}
+        </div>
       </div>
     );
   }

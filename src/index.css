@@ -958,6 +958,15 @@ body {
   @keyframes overlay-pop {
     from { opacity: 0; transform: scale(0.98); }
   }
+  .selection-pill-enter {
+    animation: pill-rise 140ms ease-out;
+  }
+  @keyframes pill-rise {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
 }
 
 /* ========== Raw View Styles ========== */
