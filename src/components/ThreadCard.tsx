@@ -31,6 +31,8 @@ export interface ThreadCardProps {
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
+  /** Compact rendering for margin notes; forwarded to CommentCard. */
+  compact?: boolean;
 }
 
 /**
@@ -64,6 +66,7 @@ export function ThreadCard({
   selectionText,
   selectionOffset,
   onReanchorToSelection,
+  compact,
 }: ThreadCardProps) {
   // Internal editor state used when no external editor management is provided.
   const [internalEditor, setInternalEditor] = useState<SidebarCommentEditorState>(null);
@@ -120,6 +123,7 @@ export function ThreadCard({
         selectionText={selectionText}
         selectionOffset={selectionOffset}
         onReanchorToSelection={onReanchorToSelection}
+        compact={compact}
       />
     </div>
   );

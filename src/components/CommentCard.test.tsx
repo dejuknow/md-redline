@@ -103,3 +103,43 @@ describe('CommentCard — user-authored comment', () => {
     expect(screen.queryByRole('button', { name: /^reply$/i })).not.toBeNull();
   });
 });
+
+describe('CommentCard — compact mode', () => {
+  it('compact hides the replies thread and shows a count line', async () => {
+    const withReplies: MdComment = {
+      ...baseComment,
+      replies: [
+        { id: 'r1', text: 'First reply', author: 'Dennis', timestamp: new Date().toISOString() },
+        { id: 'r2', text: 'Second reply', author: 'Dennis', timestamp: new Date().toISOString() },
+      ],
+    };
+    renderCard({ comment: withReplies, compact: true });
+    expect(await screen.findByText('2 replies')).toBeTruthy();
+    expect(screen.queryByText('First reply')).toBeNull();
+    expect(screen.queryByText('Second reply')).toBeNull();
+  });
+
+  it('compact uses singular for one reply', async () => {
+    const oneReply: MdComment = {
+      ...baseComment,
+      replies: [
+        { id: 'r1', text: 'Only reply', author: 'Dennis', timestamp: new Date().toISOString() },
+      ],
+    };
+    renderCard({ comment: oneReply, compact: true });
+    expect(await screen.findByText('1 reply')).toBeTruthy();
+    expect(screen.queryByText('Only reply')).toBeNull();
+  });
+
+  it('non-compact renders replies as before', async () => {
+    const withReplies: MdComment = {
+      ...baseComment,
+      replies: [
+        { id: 'r1', text: 'First reply', author: 'Dennis', timestamp: new Date().toISOString() },
+      ],
+    };
+    renderCard({ comment: withReplies });
+    expect(await screen.findByText('First reply')).toBeTruthy();
+    expect(screen.queryByText('1 reply')).toBeNull();
+  });
+});

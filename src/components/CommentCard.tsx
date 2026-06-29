@@ -39,6 +39,8 @@ interface Props {
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
+  /** Margin-notes compact rendering: replies collapse to a count line and the composer is hidden. */
+  compact?: boolean;
 }
 
 const STATUS_CONFIG: Record<CommentStatus, { label: string; className: string }> = {
@@ -69,6 +71,7 @@ export const CommentCard = memo(function CommentCard({
   selectionText,
   selectionOffset,
   onReanchorToSelection,
+  compact = false,
 }: Props) {
   const { settings } = useSettings();
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
@@ -421,7 +424,7 @@ export const CommentCard = memo(function CommentCard({
       </div>
 
       {/* Replies thread */}
-      {replies.length > 0 && (
+      {!compact && replies.length > 0 && (
         <div className="mx-3 mb-2 border-l-2 border-border-subtle pl-3 space-y-2">
           {replies.map((reply) => {
             const replyTimeAgo = timeAgo(reply.timestamp);
@@ -518,8 +521,14 @@ export const CommentCard = memo(function CommentCard({
         </div>
       )}
 
+      {compact && replies.length > 0 && (
+        <div className="px-3 pb-2 text-xs text-content-muted">
+          {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+        </div>
+      )}
+
       {/* Reply input (shown when replying — trigger is in the action bar above) */}
-      {!isResolved && isReplying && (
+      {!compact && !isResolved && isReplying && (
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
           <textarea
             ref={replyRef}
