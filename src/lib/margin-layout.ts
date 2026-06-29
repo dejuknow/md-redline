@@ -13,9 +13,11 @@ export const MARGIN_GAP = 8;
  *
  * Orphans stack in a block from 0. Anchored cards sort by anchor position and
  * resolve top-down (push-down on overlap). The active card gets best-effort
- * priority: it pins at its anchor, cards above compress upward toward the
- * orphan-block floor, and if they cannot free enough room the active card and
- * everything below shift down by the remaining overflow. No two cards overlap.
+ * priority: it pins at its anchor and cards above attempt to pack upward
+ * toward the orphan-block floor. That attempt is all-or-nothing: if the chain
+ * would cross the floor, the cards above fall back to their downward-pass
+ * positions and the active card is placed below them instead. No two cards
+ * overlap either way.
  */
 export function resolveCollisions(
   entries: MarginEntry[],
@@ -45,40 +47,40 @@ export function resolveCollisions(
     prevBottom = top + e.height;
   }
 
-  // Active priority.
+  // Active priority: try to pin the active card at its anchor by packing the
+  // cards above it upward. The attempt is all-or-nothing: if the chain would
+  // need to cross the orphan-block floor, the cards above keep their
+  // downward-pass positions and the active card shifts below them instead.
+  // Either way, no two cards ever overlap.
   const idx = activeId ? anchored.findIndex((e) => e.id === activeId) : -1;
   if (idx >= 0) {
     const active = anchored[idx];
     const pinned = Math.max(active.anchorTop, floor);
 
-    // Compress the cards above toward the floor to make room for the pin.
+    const attempt = new Map<string, number>();
     let nextTop = pinned;
-    let overflow = 0;
-    const above = new Map<string, number>();
+    let feasible = true;
     for (let i = idx - 1; i >= 0; i--) {
       const e = anchored[i];
-      let top = Math.min(e.anchorTop, nextTop - e.height - gap);
+      const top = Math.min(e.anchorTop, nextTop - e.height - gap);
       if (top < floor) {
-        // Cannot compress past the floor; accumulate how much room is missing.
-        top = floor;
-        overflow = Math.max(overflow, floor + e.height + gap - nextTop);
+        feasible = false;
+        break;
       }
-      above.set(e.id, top);
+      attempt.set(e.id, top);
       nextTop = top;
     }
-    // A floor collision above means the pin cannot be fully honored: the
-    // active card and everything below shift down by the overflow instead
-    // of overlapping.
-    for (const [id, top] of above) tops.set(id, top);
-    let bottom = -Infinity;
-    for (let i = 0; i < idx; i++) {
-      bottom = Math.max(bottom, tops.get(anchored[i].id)! + anchored[i].height);
-    }
-    const activeTop = Math.max(pinned + overflow, bottom === -Infinity ? floor : bottom + gap);
-    tops.set(active.id, activeTop);
 
-    // Re-run the downward pass below the active card.
-    let pb = activeTop + active.height;
+    if (feasible) {
+      for (const [id, top] of attempt) tops.set(id, top);
+      tops.set(active.id, pinned);
+    } else {
+      const prev = idx > 0 ? anchored[idx - 1] : null;
+      const prevBottom = prev ? tops.get(prev.id)! + prev.height : floor - gap;
+      tops.set(active.id, Math.max(pinned, prevBottom + gap));
+    }
+
+    let pb = tops.get(active.id)! + active.height;
     for (let i = idx + 1; i < anchored.length; i++) {
       const e = anchored[i];
       const top = Math.max(e.anchorTop, pb + gap);

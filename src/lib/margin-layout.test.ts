@@ -92,4 +92,32 @@ describe('resolveCollisions', () => {
   it('returns an empty map for no entries', () => {
     expect(resolveCollisions([], null).size).toBe(0);
   });
+
+  it('never overlaps when several cards above the active card hit the floor', () => {
+    const entries = [entry('c0', 0), entry('c1', 0), entry('c2', 0)];
+    const tops = resolveCollisions(entries, 'c2');
+    expect(tops.get('c0')).toBe(0);
+    expect(tops.get('c1')).toBe(108);
+    expect(tops.get('c2')).toBe(216);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('floor-blocked chains above an orphan block keep downward positions', () => {
+    const entries = [entry('o', null, 60), entry('a', 70), entry('b', 80), entry('c', 90)];
+    const tops = resolveCollisions(entries, 'c');
+    expect(tops.get('o')).toBe(0);
+    expect(tops.get('a')).toBe(70);
+    expect(tops.get('b')).toBe(178);
+    expect(tops.get('c')).toBe(286);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('upward packing succeeds when there is room for the whole chain', () => {
+    const entries = [entry('a', 100, 50), entry('b', 200, 50), entry('c', 210, 50)];
+    const tops = resolveCollisions(entries, 'c');
+    expect(tops.get('a')).toBe(94);
+    expect(tops.get('b')).toBe(152);
+    expect(tops.get('c')).toBe(210);
+    assertNoOverlap(entries, tops);
+  });
 });
