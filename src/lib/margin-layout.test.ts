@@ -102,13 +102,13 @@ describe('resolveCollisions', () => {
     assertNoOverlap(entries, tops);
   });
 
-  it('floor-blocked chains above an orphan block keep downward positions', () => {
+  it('floor-blocked chains compress to the floor and shift the active card by the overflow', () => {
     const entries = [entry('o', null, 60), entry('a', 70), entry('b', 80), entry('c', 90)];
     const tops = resolveCollisions(entries, 'c');
     expect(tops.get('o')).toBe(0);
-    expect(tops.get('a')).toBe(70);
-    expect(tops.get('b')).toBe(178);
-    expect(tops.get('c')).toBe(286);
+    expect(tops.get('a')).toBe(68);
+    expect(tops.get('b')).toBe(176);
+    expect(tops.get('c')).toBe(284);
     assertNoOverlap(entries, tops);
   });
 
@@ -118,6 +118,15 @@ describe('resolveCollisions', () => {
     expect(tops.get('a')).toBe(94);
     expect(tops.get('b')).toBe(152);
     expect(tops.get('c')).toBe(210);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('compresses a dense cluster toward the floor instead of abandoning the pin', () => {
+    const entries = [entry('o', null, 60), entry('a', 200), entry('b', 250), entry('c', 260)];
+    const tops = resolveCollisions(entries, 'c');
+    expect(tops.get('a')).toBe(68);
+    expect(tops.get('b')).toBe(176);
+    expect(tops.get('c')).toBe(284);
     assertNoOverlap(entries, tops);
   });
 });

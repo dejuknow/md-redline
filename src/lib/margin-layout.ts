@@ -13,11 +13,10 @@ export const MARGIN_GAP = 8;
  *
  * Orphans stack in a block from 0. Anchored cards sort by anchor position and
  * resolve top-down (push-down on overlap). The active card gets best-effort
- * priority: it pins at its anchor and cards above attempt to pack upward
- * toward the orphan-block floor. That attempt is all-or-nothing: if the chain
- * would cross the floor, the cards above fall back to their downward-pass
- * positions and the active card is placed below them instead. No two cards
- * overlap either way.
+ * priority: it pins at its anchor when possible, and cards above compress
+ * upward toward the orphan-block floor. When they cannot free enough room,
+ * the active card shifts down by exactly the residual overflow instead. No
+ * two cards ever overlap.
  */
 export function resolveCollisions(
   entries: MarginEntry[],
@@ -47,40 +46,38 @@ export function resolveCollisions(
     prevBottom = top + e.height;
   }
 
-  // Active priority: try to pin the active card at its anchor by packing the
-  // cards above it upward. The attempt is all-or-nothing: if the chain would
-  // need to cross the orphan-block floor, the cards above keep their
-  // downward-pass positions and the active card shifts below them instead.
-  // Either way, no two cards ever overlap.
+  // Active priority: pin the active card at its anchor when possible. Cards
+  // above compress upward toward the orphan-block floor (two passes: desired
+  // tops walking up, then floor and stacking enforcement walking down). When
+  // they cannot free enough room, the active card shifts down by exactly the
+  // residual overflow. No two cards ever overlap.
   const idx = activeId ? anchored.findIndex((e) => e.id === activeId) : -1;
   if (idx >= 0) {
     const active = anchored[idx];
     const pinned = Math.max(active.anchorTop, floor);
 
-    const attempt = new Map<string, number>();
+    // Pass 1 (walking up from the active card): desired tops, ignoring the floor.
+    const desired = new Array<number>(idx);
     let nextTop = pinned;
-    let feasible = true;
     for (let i = idx - 1; i >= 0; i--) {
-      const e = anchored[i];
-      const top = Math.min(e.anchorTop, nextTop - e.height - gap);
-      if (top < floor) {
-        feasible = false;
-        break;
-      }
-      attempt.set(e.id, top);
-      nextTop = top;
+      desired[i] = Math.min(anchored[i].anchorTop, nextTop - anchored[i].height - gap);
+      nextTop = desired[i];
     }
 
-    if (feasible) {
-      for (const [id, top] of attempt) tops.set(id, top);
-      tops.set(active.id, pinned);
-    } else {
-      const prev = idx > 0 ? anchored[idx - 1] : null;
-      const prevBottom = prev ? tops.get(prev.id)! + prev.height : floor - gap;
-      tops.set(active.id, Math.max(pinned, prevBottom + gap));
+    // Pass 2 (walking down): enforce the floor and re-stack without overlap.
+    let prevBottom = floor - gap;
+    for (let i = 0; i < idx; i++) {
+      const top = Math.max(desired[i], prevBottom + gap);
+      tops.set(anchored[i].id, top);
+      prevBottom = top + anchored[i].height;
     }
 
-    let pb = tops.get(active.id)! + active.height;
+    // The active card sits at its pin unless the group above still intrudes.
+    const activeTop = Math.max(pinned, prevBottom + gap);
+    tops.set(active.id, activeTop);
+
+    // Re-run the downward pass below the active card.
+    let pb = activeTop + active.height;
     for (let i = idx + 1; i < anchored.length; i++) {
       const e = anchored[i];
       const top = Math.max(e.anchorTop, pb + gap);
