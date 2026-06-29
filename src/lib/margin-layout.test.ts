@@ -1,0 +1,95 @@
+import { describe, expect, it } from 'vitest';
+import { resolveCollisions, type MarginEntry } from './margin-layout';
+
+function entry(id: string, anchorTop: number | null, height = 100): MarginEntry {
+  return { id, anchorTop, height };
+}
+
+/** Assert no two cards overlap and none sits above the top floor. */
+function assertNoOverlap(entries: MarginEntry[], tops: Map<string, number>, gap = 8) {
+  const placed = entries
+    .map((e) => ({ top: tops.get(e.id)!, bottom: tops.get(e.id)! + e.height }))
+    .sort((a, b) => a.top - b.top);
+  for (let i = 1; i < placed.length; i++) {
+    expect(placed[i].top).toBeGreaterThanOrEqual(placed[i - 1].bottom + gap);
+  }
+  for (const p of placed) expect(p.top).toBeGreaterThanOrEqual(0);
+}
+
+describe('resolveCollisions', () => {
+  it('passes through non-overlapping cards at their anchors', () => {
+    const entries = [entry('a', 0), entry('b', 300), entry('c', 700)];
+    const tops = resolveCollisions(entries, null);
+    expect(tops.get('a')).toBe(0);
+    expect(tops.get('b')).toBe(300);
+    expect(tops.get('c')).toBe(700);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('pushes overlapping cards down in a chain', () => {
+    const entries = [entry('a', 100), entry('b', 120), entry('c', 140)];
+    const tops = resolveCollisions(entries, null);
+    expect(tops.get('a')).toBe(100);
+    expect(tops.get('b')).toBe(208); // 100 + 100 + 8
+    expect(tops.get('c')).toBe(316); // 208 + 100 + 8
+    assertNoOverlap(entries, tops);
+  });
+
+  it('sorts by anchor position regardless of array order', () => {
+    const entries = [entry('late', 500), entry('early', 50)];
+    const tops = resolveCollisions(entries, null);
+    expect(tops.get('early')).toBe(50);
+    expect(tops.get('late')).toBe(500);
+  });
+
+  it('pins the active card at its anchor and pushes the card above upward', () => {
+    // Without priority, b would be pushed to 208. With b active, b pins at 120
+    // and a must move up to 120 - 100 - 8 = 12.
+    const entries = [entry('a', 100), entry('b', 120)];
+    const tops = resolveCollisions(entries, 'b');
+    expect(tops.get('b')).toBe(120);
+    expect(tops.get('a')).toBe(12);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('shifts the active card down when cards above hit the floor', () => {
+    // a wants 0 already; b active wants 40 but a occupies 0..100, so even at
+    // the floor a cannot free room: b lands at 108 (best effort), not 40.
+    const entries = [entry('a', 0), entry('b', 40)];
+    const tops = resolveCollisions(entries, 'b');
+    expect(tops.get('a')).toBe(0);
+    expect(tops.get('b')).toBe(108);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('stacks orphans in a block at the top and floors anchored cards below it', () => {
+    const entries = [entry('orphan1', null, 60), entry('orphan2', null, 60), entry('a', 10)];
+    const tops = resolveCollisions(entries, null);
+    expect(tops.get('orphan1')).toBe(0);
+    expect(tops.get('orphan2')).toBe(68); // 60 + 8
+    expect(tops.get('a')).toBe(136); // orphan block bottom 128 + 8
+    assertNoOverlap(entries, tops);
+  });
+
+  it('upward push respects the orphan-block floor', () => {
+    // Orphan occupies 0..60, floor = 68. Active b pins at 200; a wants
+    // min(180, 200 - 100 - 8) = 92, which is above the floor 68, fine.
+    const entries = [entry('o', null, 60), entry('a', 180), entry('b', 200)];
+    const tops = resolveCollisions(entries, 'b');
+    expect(tops.get('o')).toBe(0);
+    expect(tops.get('b')).toBe(200);
+    expect(tops.get('a')).toBe(92);
+    assertNoOverlap(entries, tops);
+  });
+
+  it('respects a custom gap', () => {
+    const entries = [entry('a', 0), entry('b', 0)];
+    const tops = resolveCollisions(entries, null, 20);
+    expect(tops.get('a')).toBe(0);
+    expect(tops.get('b')).toBe(120); // 100 + 20
+  });
+
+  it('returns an empty map for no entries', () => {
+    expect(resolveCollisions([], null).size).toBe(0);
+  });
+});
