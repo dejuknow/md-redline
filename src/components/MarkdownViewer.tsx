@@ -41,6 +41,8 @@ interface Props {
   theme?: string;
   mermaidSvgMap?: Map<string, MermaidResult>;
   onOpenMermaidFullscreen?: (source: string, blockIndex: number) => void;
+  /** Called after each imperative highlight paint so overlays can re-measure anchors. */
+  onHighlightsPainted?: () => void;
 }
 
 export interface TocHeading {
@@ -80,6 +82,7 @@ export const MarkdownViewer = memo(
       theme,
       mermaidSvgMap: mermaidSvgMapProp,
       onOpenMermaidFullscreen,
+      onHighlightsPainted,
     },
     ref,
   ) {
@@ -361,6 +364,8 @@ export const MarkdownViewer = memo(
         '.comment-highlight-active, .mermaid-comment-highlight-active',
       ) as HTMLElement | null;
 
+      onHighlightsPainted?.();
+
       return cleanupMermaidLayout;
     }, [
       html,
@@ -374,6 +379,7 @@ export const MarkdownViewer = memo(
       searchQuery,
       searchActiveIndex,
       mermaidSvgMap,
+      onHighlightsPainted,
     ]);
 
     const handleClick = (e: React.MouseEvent) => {
