@@ -90,6 +90,10 @@ export const MarkdownViewer = memo(
     const activeMarkRef = useRef<HTMLElement | null>(null);
     const searchCountCb = useRef(onSearchCount);
     searchCountCb.current = onSearchCount;
+    // Ref (not a dep) so an unstable onHighlightsPainted identity from the
+    // caller doesn't re-trigger the highlight effect below.
+    const highlightsPaintedCb = useRef(onHighlightsPainted);
+    highlightsPaintedCb.current = onHighlightsPainted;
 
     // Mermaid rendering. When App hoists useMermaidRenderer and passes the map
     // as a prop, we use that (so both the viewer and fullscreen modal share the
@@ -364,7 +368,7 @@ export const MarkdownViewer = memo(
         '.comment-highlight-active, .mermaid-comment-highlight-active',
       ) as HTMLElement | null;
 
-      onHighlightsPainted?.();
+      highlightsPaintedCb.current?.();
 
       return cleanupMermaidLayout;
     }, [
@@ -379,7 +383,6 @@ export const MarkdownViewer = memo(
       searchQuery,
       searchActiveIndex,
       mermaidSvgMap,
-      onHighlightsPainted,
     ]);
 
     const handleClick = (e: React.MouseEvent) => {
