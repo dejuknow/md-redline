@@ -773,6 +773,13 @@ mark.comment-highlight-active {
   scroll-behavior: smooth;
 }
 
+/* ========== Margin Notes ========== */
+.margin-connector {
+  background: var(--theme-comment-underline);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 /* Pending selection highlight */
 .prose mark.selection-highlight,
 mark.selection-highlight {
@@ -965,6 +972,14 @@ body {
     from {
       opacity: 0;
       transform: translateY(4px);
+    }
+  }
+  .margin-note-enter {
+    animation: margin-note-fade 140ms ease-out;
+  }
+  @keyframes margin-note-fade {
+    from {
+      opacity: 0;
     }
   }
 }

@@ -79,6 +79,8 @@ import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 import { selectAgentAsks } from './lib/agent-asks';
+import { MarginNotes } from './components/MarginNotes';
+import { useMarginLayout } from './hooks/useMarginLayout';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -311,6 +313,7 @@ export default function App() {
 
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
+  const [highlightPaintTick, setHighlightPaintTick] = useState(0);
   const [requestedCommentFocus, setRequestedCommentFocus] =
     useState<SidebarCommentFocusRequest | null>(null);
 
@@ -495,6 +498,16 @@ export default function App() {
     setAutoExpandForm,
     requestCommentFocus,
   });
+
+  const marginNotesEnabled =
+    viewMode === 'rendered' && !sidebarVisible && !(diffEnabled && currentSnapshot);
+  const marginLayout = useMarginLayout(
+    containerRef as RefObject<HTMLElement | null>,
+    comments,
+    activeCommentId,
+    marginNotesEnabled,
+    highlightPaintTick,
+  );
 
   // Toast when an agent rewrite (or any edit) orphans comments. Debounce so
   // rapid successive edits collapse into one notification. Use refs — not
@@ -2101,7 +2114,7 @@ export default function App() {
                   ref={containerRef}
                   className="flex-1 overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
                 >
-                  <div className="max-w-[42rem] mx-auto">
+                  <div className={marginLayout.active ? 'max-w-[42rem] ml-12' : 'max-w-[42rem] mx-auto'}>
                     {diffEnabled && currentSnapshot && diffLines ? (
                       // key on activeFilePath forces a remount when the user
                       // switches files while the diff overlay is on, so the
@@ -2138,6 +2151,7 @@ export default function App() {
                             sentCommentIds={sentCommentIds}
                             mermaidSvgMap={mermaidSvgMap}
                             onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                            onHighlightsPainted={() => setHighlightPaintTick((t) => t + 1)}
                           />
                         ) : (
                           <MarkdownViewer
@@ -2160,6 +2174,7 @@ export default function App() {
                             sentCommentIds={sentCommentIds}
                             mermaidSvgMap={mermaidSvgMap}
                             onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                            onHighlightsPainted={() => setHighlightPaintTick((t) => t + 1)}
                           />
                         )}
                         <DragHandles
@@ -2170,6 +2185,21 @@ export default function App() {
                       </>
                     )}
                   </div>
+                  <MarginNotes
+                    layout={marginLayout}
+                    comments={comments}
+                    activeCommentId={activeCommentId}
+                    missingAnchors={missingAnchors}
+                    sentCommentIds={sentCommentIds}
+                    onActivate={handleSidebarActivate}
+                    onReply={handleReply}
+                    onResolve={settings.enableResolve ? handleResolve : undefined}
+                    onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                    onDelete={handleDelete}
+                    onEdit={handleEdit}
+                    onEditReply={handleEditReply}
+                    onDeleteReply={handleDeleteReply}
+                  />
                 </div>
               )}
             </div>
