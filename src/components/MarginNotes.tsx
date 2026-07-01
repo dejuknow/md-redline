@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { MdComment } from '../types';
 import type { MarginLayout } from '../hooks/useMarginLayout';
 import { ThreadCard } from './ThreadCard';
@@ -40,6 +40,22 @@ export function MarginNotes({
   onDeleteReply,
 }: MarginNotesProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Stable per-card ref callbacks. An inline arrow gets a new identity every
+  // render, which makes React detach (null) and reattach (node) the ref on
+  // every render; registerCardRef updates state on both paths, so that would
+  // loop forever. Memoizing one closure per comment id keeps ref identity
+  // stable across renders. Safe because layout.registerCardRef is guaranteed
+  // stable for the app's lifetime (useCallback with an empty deps array).
+  const refCallbacks = useRef(new Map<string, (node: HTMLDivElement | null) => void>());
+  const getCardRef = (id: string) => {
+    let cb = refCallbacks.current.get(id);
+    if (!cb) {
+      cb = (node) => layout.registerCardRef(id, node);
+      refCallbacks.current.set(id, cb);
+    }
+    return cb;
+  };
 
   if (!layout.active) return null;
 
@@ -91,7 +107,7 @@ export function MarginNotes({
           <div
             key={comment.id}
             data-margin-card-id={comment.id}
-            ref={(node) => layout.registerCardRef(comment.id, node)}
+            ref={getCardRef(comment.id)}
             onMouseEnter={() => setHoveredId(comment.id)}
             onMouseLeave={() => setHoveredId((prev) => (prev === comment.id ? null : prev))}
             className={`margin-note-enter absolute left-0 right-0 bg-surface-raised border rounded-lg shadow-sm transition-shadow ${

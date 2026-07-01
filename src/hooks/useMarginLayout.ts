@@ -77,8 +77,10 @@ export function useMarginLayout(
       cardNodes.current.set(id, node);
       heightObserver.current?.observe(node);
       setHeights((prev) => {
+        const h = node.offsetHeight;
+        if (prev.get(id) === h) return prev;
         const next = new Map(prev);
-        next.set(id, node.offsetHeight);
+        next.set(id, h);
         return next;
       });
     } else {
