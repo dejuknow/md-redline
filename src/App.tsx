@@ -81,6 +81,8 @@ import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 import { selectAgentAsks } from './lib/agent-asks';
 import { MarginNotes } from './components/MarginNotes';
 import { useMarginLayout } from './hooks/useMarginLayout';
+import { DensityStrip } from './components/DensityStrip';
+import { useCommentTicks } from './hooks/useCommentTicks';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -515,6 +517,9 @@ export default function App() {
     marginNotesEnabled,
     highlightPaintTick,
   );
+
+  const densityEnabled = viewMode === 'rendered' && !(diffEnabled && currentSnapshot);
+  const commentTicks = useCommentTicks(containerRef, comments, densityEnabled, highlightPaintTick);
 
   // Toast when an agent rewrite (or any edit) orphans comments. Debounce so
   // rapid successive edits collapse into one notification. Use refs — not
@@ -2117,96 +2122,99 @@ export default function App() {
                   newCleanToRawLine={newCleanToRawLine}
                 />
               ) : (
-                <div
-                  ref={containerRef}
-                  className="flex-1 overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
-                >
-                  <div className={marginLayout.active ? 'max-w-[42rem] ml-12' : 'max-w-[42rem] mx-auto'}>
-                    {diffEnabled && currentSnapshot && diffLines ? (
-                      // key on activeFilePath forces a remount when the user
-                      // switches files while the diff overlay is on, so the
-                      // mount-time auto-scroll-to-first-chunk fires for each
-                      // file's diff. Without this, the [] effect in
-                      // RenderedDiffView only runs for the first file viewed.
-                      <RenderedDiffView
-                        key={activeFilePath ?? ''}
-                        ref={renderedDiffRef}
-                        rawMarkdown={rawMarkdown}
-                        diffSnapshot={currentSnapshot}
-                        diffLines={diffLines}
-                      />
-                    ) : (
-                      <>
-                        {viewerNeedsTheme ? (
-                          <ThemedMarkdownViewer
-                            ref={viewerRef}
-                            html={html}
-                            cleanMarkdown={cleanMarkdown}
-                            comments={comments}
-                            activeCommentId={activeCommentId}
-                            selectionText={selection?.text ?? null}
-                            selectionOffset={selection?.offset ?? null}
-                            onHighlightClick={handleHighlightClick}
-                            // Fragment arg is intentionally ignored in v1; openTab
-                            // takes only the path. See spec §3 non-goals.
-                            onLocalLinkClick={openTab}
-                            onContextMenu={handleViewerContextMenu}
-                            enableResolve={settings.enableResolve}
-                            searchQuery={showSearch ? searchQuery : undefined}
-                            searchActiveIndex={activeSearchIndex}
-                            onSearchCount={handleSearchCount}
-                            sentCommentIds={sentCommentIds}
-                            mermaidSvgMap={mermaidSvgMap}
-                            onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                            onHighlightsPainted={handleHighlightsPainted}
-                          />
-                        ) : (
-                          <MarkdownViewer
-                            ref={viewerRef}
-                            html={html}
-                            cleanMarkdown={cleanMarkdown}
-                            comments={comments}
-                            activeCommentId={activeCommentId}
-                            selectionText={selection?.text ?? null}
-                            selectionOffset={selection?.offset ?? null}
-                            onHighlightClick={handleHighlightClick}
-                            // Fragment arg is intentionally ignored in v1; openTab
-                            // takes only the path. See spec §3 non-goals.
-                            onLocalLinkClick={openTab}
-                            onContextMenu={handleViewerContextMenu}
-                            enableResolve={settings.enableResolve}
-                            searchQuery={showSearch ? searchQuery : undefined}
-                            searchActiveIndex={activeSearchIndex}
-                            onSearchCount={handleSearchCount}
-                            sentCommentIds={sentCommentIds}
-                            mermaidSvgMap={mermaidSvgMap}
-                            onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                            onHighlightsPainted={handleHighlightsPainted}
-                          />
-                        )}
-                        <DragHandles
-                          startPos={handlePositions?.start ?? null}
-                          endPos={handlePositions?.end ?? null}
-                          onMouseDown={onHandleMouseDown}
+                <div className="relative flex-1 min-h-0">
+                  <div
+                    ref={containerRef}
+                    className="h-full overflow-y-auto px-8 pt-6 pb-[50vh] lg:px-12 xl:px-16 relative"
+                  >
+                    <div className={marginLayout.active ? 'max-w-[42rem] ml-12' : 'max-w-[42rem] mx-auto'}>
+                      {diffEnabled && currentSnapshot && diffLines ? (
+                        // key on activeFilePath forces a remount when the user
+                        // switches files while the diff overlay is on, so the
+                        // mount-time auto-scroll-to-first-chunk fires for each
+                        // file's diff. Without this, the [] effect in
+                        // RenderedDiffView only runs for the first file viewed.
+                        <RenderedDiffView
+                          key={activeFilePath ?? ''}
+                          ref={renderedDiffRef}
+                          rawMarkdown={rawMarkdown}
+                          diffSnapshot={currentSnapshot}
+                          diffLines={diffLines}
                         />
-                      </>
-                    )}
+                      ) : (
+                        <>
+                          {viewerNeedsTheme ? (
+                            <ThemedMarkdownViewer
+                              ref={viewerRef}
+                              html={html}
+                              cleanMarkdown={cleanMarkdown}
+                              comments={comments}
+                              activeCommentId={activeCommentId}
+                              selectionText={selection?.text ?? null}
+                              selectionOffset={selection?.offset ?? null}
+                              onHighlightClick={handleHighlightClick}
+                              // Fragment arg is intentionally ignored in v1; openTab
+                              // takes only the path. See spec §3 non-goals.
+                              onLocalLinkClick={openTab}
+                              onContextMenu={handleViewerContextMenu}
+                              enableResolve={settings.enableResolve}
+                              searchQuery={showSearch ? searchQuery : undefined}
+                              searchActiveIndex={activeSearchIndex}
+                              onSearchCount={handleSearchCount}
+                              sentCommentIds={sentCommentIds}
+                              mermaidSvgMap={mermaidSvgMap}
+                              onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                              onHighlightsPainted={handleHighlightsPainted}
+                            />
+                          ) : (
+                            <MarkdownViewer
+                              ref={viewerRef}
+                              html={html}
+                              cleanMarkdown={cleanMarkdown}
+                              comments={comments}
+                              activeCommentId={activeCommentId}
+                              selectionText={selection?.text ?? null}
+                              selectionOffset={selection?.offset ?? null}
+                              onHighlightClick={handleHighlightClick}
+                              // Fragment arg is intentionally ignored in v1; openTab
+                              // takes only the path. See spec §3 non-goals.
+                              onLocalLinkClick={openTab}
+                              onContextMenu={handleViewerContextMenu}
+                              enableResolve={settings.enableResolve}
+                              searchQuery={showSearch ? searchQuery : undefined}
+                              searchActiveIndex={activeSearchIndex}
+                              onSearchCount={handleSearchCount}
+                              sentCommentIds={sentCommentIds}
+                              mermaidSvgMap={mermaidSvgMap}
+                              onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                              onHighlightsPainted={handleHighlightsPainted}
+                            />
+                          )}
+                          <DragHandles
+                            startPos={handlePositions?.start ?? null}
+                            endPos={handlePositions?.end ?? null}
+                            onMouseDown={onHandleMouseDown}
+                          />
+                        </>
+                      )}
+                    </div>
+                    <MarginNotes
+                      layout={marginLayout}
+                      comments={marginComments}
+                      activeCommentId={activeCommentId}
+                      missingAnchors={missingAnchors}
+                      sentCommentIds={sentCommentIds}
+                      onActivate={handleSidebarActivate}
+                      onReply={handleReply}
+                      onResolve={settings.enableResolve ? handleResolve : undefined}
+                      onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                      onDelete={handleDelete}
+                      onEdit={handleEdit}
+                      onEditReply={handleEditReply}
+                      onDeleteReply={handleDeleteReply}
+                    />
                   </div>
-                  <MarginNotes
-                    layout={marginLayout}
-                    comments={marginComments}
-                    activeCommentId={activeCommentId}
-                    missingAnchors={missingAnchors}
-                    sentCommentIds={sentCommentIds}
-                    onActivate={handleSidebarActivate}
-                    onReply={handleReply}
-                    onResolve={settings.enableResolve ? handleResolve : undefined}
-                    onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-                    onDelete={handleDelete}
-                    onEdit={handleEdit}
-                    onEditReply={handleEditReply}
-                    onDeleteReply={handleDeleteReply}
-                  />
+                  <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />
                 </div>
               )}
             </div>
