@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MdComment } from '../types';
 import { resolveCollisions, type MarginEntry } from '../lib/margin-layout';
+import { measureAnchorTops } from '../lib/anchor-measure';
 
 const COLUMN = 672;
 const LEFT_OFFSET = 48;
@@ -75,16 +76,7 @@ export function useMarginLayout(
     if (!active) return;
     const container = containerRef.current;
     if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-    const next = new Map<string, number>();
-    for (const el of container.querySelectorAll<HTMLElement>('[data-comment-ids]')) {
-      const ids = el.dataset.commentIds?.split(',') ?? [];
-      const top = el.getBoundingClientRect().top - containerRect.top + container.scrollTop;
-      for (const id of ids) {
-        const existing = next.get(id);
-        if (existing === undefined || top < existing) next.set(id, top);
-      }
-    }
+    const next = measureAnchorTops(container);
     setAnchorTops((prev) => {
       if (prev.size === next.size) {
         let same = true;
