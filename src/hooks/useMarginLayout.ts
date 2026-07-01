@@ -5,9 +5,7 @@ import { resolveCollisions, type MarginEntry } from '../lib/margin-layout';
 const COLUMN = 672;
 const LEFT_OFFSET = 48;
 const GUTTER = 24;
-const RIGHT_PAD = 24;
 const CARD_MAX = 280;
-export const MIN_CONTAINER_WIDTH = 1048;
 
 export interface MarginLayout {
   active: boolean;
@@ -20,9 +18,10 @@ export interface MarginLayout {
 }
 
 /**
- * Owns all DOM measurement for margin notes: container width (activation),
- * anchor positions (from painted highlight marks), and card heights.
- * Pure layout math lives in resolveCollisions.
+ * Owns all DOM measurement for margin notes: content width (activation,
+ * measured inside the container's own padding since the layer lives in the
+ * content box, not the border box), anchor positions (from painted highlight
+ * marks), and card heights. Pure layout math lives in resolveCollisions.
  */
 export function useMarginLayout(
   containerRef: React.RefObject<HTMLElement | null>,
@@ -31,27 +30,47 @@ export function useMarginLayout(
   enabled: boolean,
   paintTick: number,
 ): MarginLayout {
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
   const [anchorTops, setAnchorTops] = useState<Map<string, number>>(new Map());
   const [heights, setHeights] = useState<Map<string, number>>(new Map());
   const cardNodes = useRef(new Map<string, HTMLDivElement>());
   const heightObserver = useRef<ResizeObserver | null>(null);
+  const [remeasureTick, setRemeasureTick] = useState(0);
+  const lastProseHeightRef = useRef<number | null>(null);
 
-  // Container width via ResizeObserver (activation + margin width).
+  // Content width via ResizeObserver (activation + margin width). Content
+  // width excludes the container's own horizontal padding (px-8/lg:px-12/
+  // xl:px-16), which otherwise overstates how much room the margin layer
+  // actually has beside the prose column. Recomputed on every resize because
+  // the padding itself changes across breakpoints.
   useEffect(() => {
+    if (!enabled) {
+      setContentWidth(0);
+      return;
+    }
     const container = containerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(() => setContainerWidth(container.clientWidth));
+    const measure = () => {
+      const cs = getComputedStyle(container);
+      const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      setContentWidth(container.clientWidth - pad);
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(container);
-    setContainerWidth(container.clientWidth);
+    measure();
     return () => ro.disconnect();
   }, [containerRef, enabled]);
 
-  const freeMargin = containerWidth - COLUMN - LEFT_OFFSET - GUTTER - RIGHT_PAD;
-  const active = enabled && containerWidth >= MIN_CONTAINER_WIDTH;
+  // Free margin is the content width left over after the prose column, its
+  // left offset, and the gutter between prose and the margin layer. The
+  // layer's own `right: 24` inset already sits inside the container's right
+  // padding, so it isn't subtracted again here.
+  const freeMargin = contentWidth - COLUMN - LEFT_OFFSET - GUTTER;
+  const active = enabled && freeMargin >= CARD_MAX;
   const marginWidth = Math.min(CARD_MAX, Math.max(0, freeMargin));
 
-  // Anchor measurement: one pass over painted marks per trigger.
+  // Anchor measurement: one pass over painted marks per trigger (paint tick,
+  // comment set change, or a late-reflow remeasure tick).
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current;
@@ -66,8 +85,39 @@ export function useMarginLayout(
         if (existing === undefined || top < existing) next.set(id, top);
       }
     }
-    setAnchorTops(next);
-  }, [active, containerRef, comments, paintTick]);
+    setAnchorTops((prev) => {
+      if (prev.size === next.size) {
+        let same = true;
+        for (const [k, v] of next) {
+          if (prev.get(k) !== v) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return prev;
+      }
+      return next;
+    });
+  }, [active, containerRef, comments, paintTick, remeasureTick]);
+
+  // Mermaid stabilization and image loads can shift prose height after the
+  // paint signal already fired. Watch the prose wrapper itself and bump a
+  // tick when its height actually changes, so the anchor-measurement effect
+  // above re-runs and catches the late reflow.
+  useEffect(() => {
+    if (!active) return;
+    const container = containerRef.current;
+    const prose = container?.firstElementChild;
+    if (!prose) return;
+    const ro = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height;
+      if (height === undefined || height === lastProseHeightRef.current) return;
+      lastProseHeightRef.current = height;
+      setRemeasureTick((t) => t + 1);
+    });
+    ro.observe(prose);
+    return () => ro.disconnect();
+  }, [active, containerRef]);
 
   // Card height measurement via one ResizeObserver over registered card nodes.
   const registerCardRef = useCallback((id: string, node: HTMLDivElement | null) => {

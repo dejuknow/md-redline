@@ -104,7 +104,7 @@ describe('CommentCard — user-authored comment', () => {
   });
 });
 
-describe('CommentCard — compact mode', () => {
+describe('CommentCard: compact mode', () => {
   it('compact hides the replies thread and shows a count line', async () => {
     const withReplies: MdComment = {
       ...baseComment,

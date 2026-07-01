@@ -314,6 +314,7 @@ export default function App() {
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
   const [highlightPaintTick, setHighlightPaintTick] = useState(0);
+  const handleHighlightsPainted = useCallback(() => setHighlightPaintTick((t) => t + 1), []);
   const [requestedCommentFocus, setRequestedCommentFocus] =
     useState<SidebarCommentFocusRequest | null>(null);
 
@@ -501,9 +502,15 @@ export default function App() {
 
   const marginNotesEnabled =
     viewMode === 'rendered' && !sidebarVisible && !(diffEnabled && currentSnapshot);
+  // Resolved comments have no highlight marks and would render as fake
+  // orphans in the margin; they live in the sidebar's Resolved filter instead.
+  const marginComments = useMemo(
+    () => comments.filter((c) => getEffectiveStatus(c) !== 'resolved'),
+    [comments],
+  );
   const marginLayout = useMarginLayout(
     containerRef as RefObject<HTMLElement | null>,
-    comments,
+    marginComments,
     activeCommentId,
     marginNotesEnabled,
     highlightPaintTick,
@@ -2151,7 +2158,7 @@ export default function App() {
                             sentCommentIds={sentCommentIds}
                             mermaidSvgMap={mermaidSvgMap}
                             onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                            onHighlightsPainted={() => setHighlightPaintTick((t) => t + 1)}
+                            onHighlightsPainted={handleHighlightsPainted}
                           />
                         ) : (
                           <MarkdownViewer
@@ -2174,7 +2181,7 @@ export default function App() {
                             sentCommentIds={sentCommentIds}
                             mermaidSvgMap={mermaidSvgMap}
                             onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                            onHighlightsPainted={() => setHighlightPaintTick((t) => t + 1)}
+                            onHighlightsPainted={handleHighlightsPainted}
                           />
                         )}
                         <DragHandles
@@ -2187,7 +2194,7 @@ export default function App() {
                   </div>
                   <MarginNotes
                     layout={marginLayout}
-                    comments={comments}
+                    comments={marginComments}
                     activeCommentId={activeCommentId}
                     missingAnchors={missingAnchors}
                     sentCommentIds={sentCommentIds}
