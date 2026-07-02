@@ -127,7 +127,7 @@ test.describe('Context menu on tab', () => {
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
 
-    const tab = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await expect(tab).toBeVisible();
     await tab.click({ button: 'right' });
 
@@ -147,7 +147,7 @@ test.describe('Context menu on tab', () => {
     if (initialCls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
 
-    const tab = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await tab.click({ button: 'right' });
 
     const menu = page.locator('.context-menu-enter');
@@ -173,15 +173,15 @@ test.describe('Context menu on tab', () => {
     if (cls.includes('bg-primary-bg')) await explorerBtn.click();
     await page.waitForTimeout(300);
 
-    const tab1 = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab1 = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await tab1.click({ button: 'right' });
 
     const menu = page.locator('.context-menu-enter');
     await expect(menu).toBeVisible();
     await menu.getByText('Close Others').click();
 
-    await expect(page.locator('.h-9 button', { hasText: 'test-doc-2.md' })).not.toBeVisible();
-    await expect(page.locator('.h-9 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    await expect(page.locator('.h-11 button', { hasText: 'test-doc-2.md' })).not.toBeVisible();
+    await expect(page.locator('.h-11 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
   });
 });
 

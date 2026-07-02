@@ -283,7 +283,7 @@ test.describe('Middle-click tab close', () => {
     });
 
     // Both tabs visible
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     const tab1 = tabBar.locator('button', { hasText: 'test-doc.md' }).first();
     const tab2 = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     await expect(tab1).toBeVisible();

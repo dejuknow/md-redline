@@ -140,7 +140,7 @@ test.describe('File opening', () => {
   test('opens a file via URL query param', async ({ page }) => {
     await openFixture(page);
     // Tab shows filename
-    await expect(page.locator('.h-9 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    await expect(page.locator('.h-11 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
     // Rendered content visible
     await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();
   });

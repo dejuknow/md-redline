@@ -95,7 +95,7 @@ test.describe('Multi-tab comment isolation', () => {
     await expect(getCard(page, 'Tab 1 only comment')).not.toBeVisible();
 
     // Switch back to tab 1
-    const tab1 = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab1 = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await tab1.click();
     await page.locator('.prose').waitFor({ timeout: 5000 });
 
@@ -111,13 +111,13 @@ test.describe('Multi-tab comment isolation', () => {
     await addComment(page, 'additional information', 'Tab 2 comment');
 
     // Switch to tab 1
-    const tab1 = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab1 = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await tab1.click();
     await page.locator('.prose').waitFor({ timeout: 5000 });
     await expect(getCard(page, 'Tab 2 comment')).not.toBeVisible();
 
     // Switch back to tab 2
-    const tab2 = page.locator('.h-9 button', { hasText: 'test-doc-2.md' });
+    const tab2 = page.locator('.h-11 button', { hasText: 'test-doc-2.md' });
     await tab2.click();
     await page.locator('.prose').waitFor({ timeout: 5000 });
     await expect(getCard(page, 'Tab 2 comment')).toBeVisible();
@@ -133,8 +133,8 @@ test.describe('Multi-tab comment isolation', () => {
 
     // Locate each tab button precisely, then find badge within it
     // tab-1 has "test-doc.md" + badge "2"; tab-2 has "test-doc-2.md" + badge "1"
-    const tab1Btn = page.locator('.h-9 button').filter({ hasText: /^test-doc\.md/ });
-    const tab2Btn = page.locator('.h-9 button', { hasText: 'test-doc-2.md' });
+    const tab1Btn = page.locator('.h-11 button').filter({ hasText: /^test-doc\.md/ });
+    const tab2Btn = page.locator('.h-11 button', { hasText: 'test-doc-2.md' });
 
     await expect(tab1Btn.locator('span.rounded-full')).toContainText('2');
     await expect(tab2Btn.locator('span.rounded-full')).toContainText('1');
@@ -181,13 +181,13 @@ test.describe('Tab switching content integrity', () => {
     await expect(page.getByRole('heading', { name: 'Section One' })).not.toBeVisible();
 
     // Switch to tab 1
-    const tab1 = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab1 = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await tab1.click();
     await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Introduction' })).not.toBeVisible();
 
     // Switch back to tab 2
-    const tab2 = page.locator('.h-9 button', { hasText: 'test-doc-2.md' });
+    const tab2 = page.locator('.h-11 button', { hasText: 'test-doc-2.md' });
     await tab2.click();
     await expect(page.getByRole('heading', { name: 'Introduction' })).toBeVisible();
   });
@@ -205,7 +205,7 @@ test.describe('Tab switching content integrity', () => {
     await openSecondFile(page);
 
     // Switch back to tab 1
-    const tab1 = page.locator('.h-9 button', { hasText: 'test-doc.md' }).first();
+    const tab1 = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
     await tab1.click();
     await page.locator('.prose').waitFor({ timeout: 5000 });
 

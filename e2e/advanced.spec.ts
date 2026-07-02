@@ -123,7 +123,7 @@ test.describe('Multi-tab support', () => {
     await openSecondFile(page);
 
     // Both tabs should be visible in the tab bar
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     const tab1 = tabBar.locator('button', { hasText: 'test-doc.md' }).first();
     const tab2 = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     await expect(tab1).toBeVisible();
@@ -158,7 +158,7 @@ test.describe('Multi-tab support', () => {
     await fileInput.press('Enter');
 
     await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
-    await expect(page.locator('.h-9 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    await expect(page.locator('.h-11 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
   });
 
   test('closing a tab switches to an adjacent tab', async ({ page }) => {
@@ -166,7 +166,7 @@ test.describe('Multi-tab support', () => {
     await openSecondFile(page);
 
     // Close the active (second) tab — the X is a span with an SVG inside
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     const tab2 = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     // Click the close span (the one with the SVG X icon)
     await tab2.locator('svg').click();
@@ -190,7 +190,7 @@ test.describe('Multi-tab support', () => {
 
     await openSecondFile(page);
 
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     const loadingTab = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     await expect(loadingTab).toBeVisible();
     await loadingTab.click({ button: 'middle' });
@@ -212,7 +212,7 @@ test.describe('Multi-tab support', () => {
 
     await addComment(page, 'valid credentials', 'Tab badge test comment');
 
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     const tab1 = tabBar.locator('button', { hasText: 'test-doc.md' }).first();
     const badge = tab1.locator('span.rounded-full');
     await expect(badge).toHaveText('1');
@@ -364,7 +364,7 @@ test.describe('Session persistence', () => {
     await page.reload();
 
     // Both tabs should still be open
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
       timeout: 10_000,
     });
@@ -427,7 +427,7 @@ test.describe('Session persistence', () => {
 
     await page.goto(`/?file=${FIXTURE_1}`);
 
-    const tabBar = page.locator('.h-9');
+    const tabBar = page.locator('.h-11');
     await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
       timeout: 10_000,
     });
