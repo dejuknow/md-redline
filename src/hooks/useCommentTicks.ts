@@ -52,11 +52,26 @@ export function useCommentTicks(
         label: c.text.slice(0, 60),
       });
     }
-    setTicks(next);
+    setTicks((prev) => {
+      if (
+        prev.length === next.length &&
+        prev.every(
+          (p, i) =>
+            p.id === next[i].id &&
+            p.y01 === next[i].y01 &&
+            p.kind === next[i].kind &&
+            p.label === next[i].label,
+        )
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, [containerRef, comments, enabled, paintTick, remeasureTick]);
 
   // Late reflow (mermaid stabilization, image loads) shifts anchors after the
-  // paint signal; watch the prose wrapper's height, same idiom as margin notes.
+  // paint signal; watch the prose wrapper's height and retrigger measurement
+  // with equality guard to preserve array reference when nothing changed.
   useEffect(() => {
     if (!enabled) return;
     const prose = containerRef.current?.firstElementChild as HTMLElement | null;
