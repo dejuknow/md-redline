@@ -982,6 +982,14 @@ body {
       opacity: 0;
     }
   }
+  .breadcrumb-enter {
+    animation: breadcrumb-fade 140ms ease-out;
+  }
+  @keyframes breadcrumb-fade {
+    from {
+      opacity: 0;
+    }
+  }
 }
 
 /* ========== Raw View Styles ========== */

@@ -83,6 +83,8 @@ import { MarginNotes } from './components/MarginNotes';
 import { useMarginLayout } from './hooks/useMarginLayout';
 import { DensityStrip } from './components/DensityStrip';
 import { useCommentTicks } from './hooks/useCommentTicks';
+import { SectionBreadcrumb } from './components/SectionBreadcrumb';
+import { headingChain } from './lib/heading-chain';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -843,6 +845,11 @@ export default function App() {
       el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
     [setActiveHeadingId, viewMode, scrollSpyRafRef, spyDisabledRef],
+  );
+
+  const breadcrumbChain = useMemo(
+    () => headingChain(tocHeadings, activeHeadingId),
+    [tocHeadings, activeHeadingId],
   );
 
   // Clear transient state on tab switch
@@ -2215,6 +2222,13 @@ export default function App() {
                     />
                   </div>
                   <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />
+                  {!(diffEnabled && currentSnapshot) && (
+                    <SectionBreadcrumb
+                      chain={breadcrumbChain}
+                      containerRef={containerRef}
+                      onJump={handleHeadingNavigate}
+                    />
+                  )}
                 </div>
               )}
             </div>
