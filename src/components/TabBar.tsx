@@ -21,6 +21,7 @@ interface Props {
   onCloseTab: (path: string) => void;
   onOpenFile: () => void;
   onTabContextMenu?: (info: TabContextMenuInfo) => void;
+  embedded?: boolean;
 }
 
 const tabControlButtonClass =
@@ -38,6 +39,7 @@ export function TabBar({
   onCloseTab,
   onOpenFile,
   onTabContextMenu,
+  embedded = false,
 }: Props) {
   const tabsViewportRef = useRef<HTMLDivElement>(null);
   const tabsContentRef = useRef<HTMLDivElement>(null);
@@ -131,7 +133,13 @@ export function TabBar({
   }, [isOverflowing]);
 
   return (
-    <div className="h-9 bg-surface-secondary border-b border-border flex items-stretch shrink-0">
+    <div
+      className={
+        embedded
+          ? 'h-full flex items-stretch min-w-0'
+          : 'h-9 bg-surface-secondary border-b border-border flex items-stretch shrink-0'
+      }
+    >
       <div className="min-w-0 flex-1 flex items-stretch">
         {isOverflowing && (
           <button
@@ -183,7 +191,9 @@ export function TabBar({
                   }}
                   className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-r border-border border-b-2 shrink-0 max-w-[200px] transition-colors ${
                     isActive
-                      ? 'bg-surface text-content font-medium border-b-primary'
+                      ? embedded
+                        ? 'bg-surface text-content font-medium rounded-t-md border-b-transparent shadow-[inset_0_2px_0_var(--theme-accent)]'
+                        : 'bg-surface text-content font-medium border-b-primary'
                       : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
                   }`}
                   title={tab.filePath}

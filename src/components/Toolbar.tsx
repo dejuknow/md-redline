@@ -22,6 +22,7 @@ interface Props {
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
   onTrustFolder: () => void;
+  tabs?: React.ReactNode;
 }
 
 export function Toolbar({
@@ -38,6 +39,7 @@ export function Toolbar({
   onToggleSidebar,
   onOpenSettings,
   onTrustFolder,
+  tabs,
 }: Props) {
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft] = useState(author);
@@ -62,7 +64,7 @@ export function Toolbar({
   };
 
   return (
-    <div className="h-12 border-b border-border bg-surface-secondary flex items-center px-4 gap-3 shrink-0">
+    <div className="h-11 border-b border-border bg-surface-secondary flex items-center px-4 gap-3 shrink-0">
       {/* Explorer toggle (far left) */}
       <IconButton
         variant="active"
@@ -82,8 +84,8 @@ export function Toolbar({
 
       <Separator />
 
-      {/* App logo + name — keep in sync with public/favicon.svg */}
-      <div className="flex items-center gap-2">
+      {/* App logo — keep in sync with public/favicon.svg */}
+      <span title="md-redline" className="flex items-center shrink-0">
         <svg className="w-5 h-5" viewBox="0 0 100 116" style={{ fillRule: 'evenodd', clipRule: 'evenodd', strokeLinejoin: 'round', strokeMiterlimit: 2 }}>
           <g transform="matrix(1,0,0,1,-10,-2)">
             <path d="M100,18L100,102C100,107.519 95.519,112 90,112L30,112C24.481,112 20,107.519 20,102L20,18C20,12.481 24.481,8 30,8L90,8C95.519,8 100,12.481 100,18Z" style={{ fill: 'white', stroke: 'currentColor', strokeWidth: 4, opacity: 0.8 }} />
@@ -98,11 +100,12 @@ export function Toolbar({
             <path d="M77,76.125L77,79.875C77,81.6 74.556,83 71.545,83L34.455,83C31.444,83 29,81.6 29,79.875L29,76.125C29,74.4 31.444,73 34.455,73L71.545,73C74.556,73 77,74.4 77,76.125Z" style={{ fill: 'rgb(55,55,55)' }} />
           </g>
         </svg>
-        <span className="text-sm font-semibold text-content">md-redline</span>
-      </div>
+      </span>
+
+      {tabs && <div className="flex-1 min-w-0 self-stretch flex items-end">{tabs}</div>}
 
       {/* Center spacer with status */}
-      <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 shrink">
         {error && (
           <span className="text-xs text-danger font-medium flex items-center gap-2 min-w-0">
             <span className="truncate" title={accessDeniedDir ?? undefined}>

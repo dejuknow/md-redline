@@ -1929,16 +1929,19 @@ export default function App() {
         onToggleSidebar={() => setSidebarVisible((p) => !p)}
         onOpenSettings={() => setActiveModal('settings')}
         onTrustFolder={handleTrustFolder}
-      />
-      <TabBar
-        tabs={tabs}
-        activeFilePath={activeFilePath}
-        commentCounts={commentCounts}
-        resolvedCommentCounts={resolvedCommentCounts}
-        onSwitchTab={switchTab}
-        onCloseTab={closeTab}
-        onOpenFile={openFilePicker}
-        onTabContextMenu={handleTabContextMenu}
+        tabs={
+          <TabBar
+            embedded
+            tabs={tabs}
+            activeFilePath={activeFilePath}
+            commentCounts={commentCounts}
+            resolvedCommentCounts={resolvedCommentCounts}
+            onSwitchTab={switchTab}
+            onCloseTab={closeTab}
+            onOpenFile={openFilePicker}
+            onTabContextMenu={handleTabContextMenu}
+          />
+        }
       />
 
       <>
