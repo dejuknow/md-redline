@@ -293,8 +293,13 @@ export default function App() {
       exitFocusMode();
       return;
     }
-    setExplorerVisible((p) => !p);
-  }, [focusMode, exitFocusMode, setExplorerVisible]);
+    if (explorerVisible && leftPanelView === 'explorer') {
+      setExplorerVisible(false);
+    } else {
+      setExplorerVisible(true);
+      setLeftPanelView('explorer');
+    }
+  }, [focusMode, exitFocusMode, explorerVisible, leftPanelView, setExplorerVisible, setLeftPanelView]);
 
   const toggleSidebarPane = useCallback(() => {
     if (focusMode) {
