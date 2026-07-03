@@ -288,6 +288,22 @@ export default function App() {
     else enterFocusMode();
   }, [focusMode, enterFocusMode, exitFocusMode]);
 
+  const toggleExplorerPane = useCallback(() => {
+    if (focusMode) {
+      exitFocusMode();
+      return;
+    }
+    setExplorerVisible((p) => !p);
+  }, [focusMode, exitFocusMode, setExplorerVisible]);
+
+  const toggleSidebarPane = useCallback(() => {
+    if (focusMode) {
+      exitFocusMode();
+      return;
+    }
+    setSidebarVisible((p) => !p);
+  }, [focusMode, exitFocusMode, setSidebarVisible]);
+
   // One-time migration of localStorage preferences to disk
   useEffect(() => {
     migrateLocalStorageToDisk();
@@ -1389,16 +1405,7 @@ export default function App() {
       // Cmd+B : Toggle file explorer
       if (mod && e.key === 'b') {
         e.preventDefault();
-        if (focusMode) {
-          exitFocusMode();
-          return;
-        }
-        if (explorerVisible && leftPanelView === 'explorer') {
-          setExplorerVisible(false);
-        } else {
-          setExplorerVisible(true);
-          setLeftPanelView('explorer');
-        }
+        toggleExplorerPane();
         return;
       }
 
@@ -1413,11 +1420,7 @@ export default function App() {
       // Cmd+\ : Toggle sidebar
       if (mod && e.key === '\\') {
         e.preventDefault();
-        if (focusMode) {
-          exitFocusMode();
-          return;
-        }
-        setSidebarVisible((prev) => !prev);
+        toggleSidebarPane();
         return;
       }
 
@@ -1555,14 +1558,13 @@ export default function App() {
     openFilePicker,
     setExplorerVisible,
     setLeftPanelView,
-    setSidebarVisible,
     switchTabByOffset,
     showSearch,
     setActiveModal,
     setSearchFocusTrigger,
-    focusMode,
+    toggleExplorerPane,
+    toggleSidebarPane,
     toggleFocusMode,
-    exitFocusMode,
   ]);
 
   useEffect(() => {
@@ -1637,7 +1639,7 @@ export default function App() {
         label: 'Toggle comment sidebar',
         shortcut: `${modKey}+\\`,
         section: 'View',
-        onExecute: () => setSidebarVisible((p) => !p),
+        onExecute: () => toggleSidebarPane(),
       },
       {
         id: 'toggle-focus-mode',
@@ -1663,14 +1665,7 @@ export default function App() {
         label: 'Toggle file explorer sidebar',
         shortcut: `${modKey}+B`,
         section: 'View',
-        onExecute: () => {
-          if (explorerVisible && leftPanelView === 'explorer') {
-            setExplorerVisible(false);
-          } else {
-            setExplorerVisible(true);
-            setLeftPanelView('explorer');
-          }
-        },
+        onExecute: () => toggleExplorerPane(),
       },
       {
         id: 'toggle-outline',
@@ -1723,7 +1718,6 @@ export default function App() {
     });
     return cmds;
   }, [
-    setSidebarVisible,
     setViewMode,
     setExplorerVisible,
     setLeftPanelView,
@@ -1734,6 +1728,8 @@ export default function App() {
     handleDiffToggle,
     handleOpenMermaidFullscreen,
     toggleFocusMode,
+    toggleExplorerPane,
+    toggleSidebarPane,
   ]);
 
   const fileCommands = useMemo((): Command[] => {
@@ -1978,8 +1974,8 @@ export default function App() {
         sidebarVisible={sidebarVisible}
         author={author}
         onAuthorChange={setAuthor}
-        onToggleExplorer={() => setExplorerVisible((p) => !p)}
-        onToggleSidebar={() => setSidebarVisible((p) => !p)}
+        onToggleExplorer={toggleExplorerPane}
+        onToggleSidebar={toggleSidebarPane}
         onOpenSettings={() => setActiveModal('settings')}
         onTrustFolder={handleTrustFolder}
         tabs={
