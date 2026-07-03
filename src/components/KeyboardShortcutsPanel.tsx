@@ -50,6 +50,7 @@ const sections: Section[] = [
       { keys: `${mod}\\`, label: 'Toggle comment sidebar' },
       { keys: `${mod}B`, label: 'Toggle file explorer sidebar' },
       { keys: `${mod}${shift}O`, label: 'Toggle document outline sidebar' },
+      { keys: `${mod}.`, label: 'Toggle focus mode' },
     ],
   },
   {

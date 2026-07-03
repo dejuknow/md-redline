@@ -261,6 +261,33 @@ export default function App() {
     setDiffEnabled,
   } = usePaneLayout();
 
+  const [focusMode, setFocusMode] = useState(false);
+  const focusSnapshotRef = useRef<{ explorerVisible: boolean; sidebarVisible: boolean } | null>(
+    null,
+  );
+
+  const enterFocusMode = useCallback(() => {
+    focusSnapshotRef.current = { explorerVisible, sidebarVisible };
+    setExplorerVisible(false);
+    setSidebarVisible(false);
+    setFocusMode(true);
+  }, [explorerVisible, sidebarVisible, setExplorerVisible, setSidebarVisible]);
+
+  const exitFocusMode = useCallback(() => {
+    const snap = focusSnapshotRef.current;
+    if (snap) {
+      setExplorerVisible(snap.explorerVisible);
+      setSidebarVisible(snap.sidebarVisible);
+    }
+    focusSnapshotRef.current = null;
+    setFocusMode(false);
+  }, [setExplorerVisible, setSidebarVisible]);
+
+  const toggleFocusMode = useCallback(() => {
+    if (focusMode) exitFocusMode();
+    else enterFocusMode();
+  }, [focusMode, enterFocusMode, exitFocusMode]);
+
   // One-time migration of localStorage preferences to disk
   useEffect(() => {
     migrateLocalStorageToDisk();
@@ -505,7 +532,7 @@ export default function App() {
   });
 
   const marginNotesEnabled =
-    viewMode === 'rendered' && !sidebarVisible && !(diffEnabled && currentSnapshot);
+    viewMode === 'rendered' && !sidebarVisible && !(diffEnabled && currentSnapshot) && !focusMode;
   // Resolved comments have no highlight marks and would render as fake
   // orphans in the margin; they live in the sidebar's Resolved filter instead.
   const marginComments = useMemo(
@@ -1362,6 +1389,10 @@ export default function App() {
       // Cmd+B : Toggle file explorer
       if (mod && e.key === 'b') {
         e.preventDefault();
+        if (focusMode) {
+          exitFocusMode();
+          return;
+        }
         if (explorerVisible && leftPanelView === 'explorer') {
           setExplorerVisible(false);
         } else {
@@ -1382,7 +1413,18 @@ export default function App() {
       // Cmd+\ : Toggle sidebar
       if (mod && e.key === '\\') {
         e.preventDefault();
+        if (focusMode) {
+          exitFocusMode();
+          return;
+        }
         setSidebarVisible((prev) => !prev);
+        return;
+      }
+
+      // Cmd+. : Toggle focus mode
+      if (mod && e.key === '.') {
+        e.preventDefault();
+        toggleFocusMode();
         return;
       }
 
@@ -1518,6 +1560,9 @@ export default function App() {
     showSearch,
     setActiveModal,
     setSearchFocusTrigger,
+    focusMode,
+    toggleFocusMode,
+    exitFocusMode,
   ]);
 
   useEffect(() => {
@@ -1593,6 +1638,13 @@ export default function App() {
         shortcut: `${modKey}+\\`,
         section: 'View',
         onExecute: () => setSidebarVisible((p) => !p),
+      },
+      {
+        id: 'toggle-focus-mode',
+        label: 'Toggle focus mode',
+        shortcut: `${modKey}+.`,
+        section: 'View',
+        onExecute: () => toggleFocusMode(),
       },
       {
         id: 'view-rendered',
@@ -1681,6 +1733,7 @@ export default function App() {
     diffEnabled,
     handleDiffToggle,
     handleOpenMermaidFullscreen,
+    toggleFocusMode,
   ]);
 
   const fileCommands = useMemo((): Command[] => {
@@ -2475,6 +2528,16 @@ export default function App() {
           </kbd>{' '}
           Commands
         </span>
+        {focusMode && (
+          <button
+            data-focus-chip
+            onClick={exitFocusMode}
+            title="Exit focus mode"
+            className="px-2 py-0.5 rounded-full bg-primary-bg text-primary-text text-[10px] font-medium hover:bg-primary-bg-strong transition-colors cursor-pointer"
+          >
+            Focus
+          </button>
+        )}
         <span className="ml-auto">
           <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
             ?
