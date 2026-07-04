@@ -3,7 +3,7 @@ import type { ContextMenuEntry, ContextMenuItem } from '../components/ContextMen
 import type { ViewerContextMenuInfo, MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { ExplorerContextMenuInfo } from '../components/FileExplorer';
 import type { TabContextMenuInfo } from '../components/TabBar';
-import type { SidebarContextMenuInfo } from '../components/CommentSidebar';
+import type { SidebarContextMenuInfo } from '../components/CommentListSurface';
 import type { MdComment, SelectionInfo } from '../types';
 import { getEffectiveStatus } from '../types';
 import { getPathBasename } from '../lib/path-utils';

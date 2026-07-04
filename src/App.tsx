@@ -26,7 +26,7 @@ import {
 import { getEffectiveStatus } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
-import { CommentSidebar } from './components/CommentSidebar';
+import { CommentListSurface, type SidebarContextMenuInfo, type SidebarCommentFocusRequest } from './components/CommentListSurface';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
@@ -77,7 +77,6 @@ import { getCopySelectionFallbackText } from './lib/copy-selection';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
-import type { SidebarCommentFocusRequest } from './components/CommentSidebar';
 import { selectAgentAsks } from './lib/agent-asks';
 import { MarginNotes } from './components/MarginNotes';
 import { useMarginLayout } from './hooks/useMarginLayout';
@@ -2362,7 +2361,7 @@ export default function App() {
                 </button>
               </div>
               <div className="flex-1 min-h-0">
-                <CommentSidebar
+                <CommentListSurface
                   comments={comments}
                   activeCommentId={activeCommentId}
                   missingAnchors={missingAnchors}

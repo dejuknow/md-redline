@@ -45,7 +45,7 @@ interface Props {
 
 type FilterMode = 'all' | 'open' | 'resolved';
 
-export function CommentSidebar({
+export function CommentListSurface({
   comments,
   activeCommentId,
   missingAnchors,
