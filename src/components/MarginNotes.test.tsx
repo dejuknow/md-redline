@@ -37,7 +37,6 @@ const comments: MdComment[] = [
 function layout(overrides: Partial<MarginLayout> = {}): MarginLayout {
   return {
     active: true,
-    marginWidth: 280,
     tops: new Map([
       ['c1', 100],
       ['c2', 0],

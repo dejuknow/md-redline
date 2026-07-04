@@ -16,3 +16,22 @@ export function measureAnchorTops(container: HTMLElement): Map<string, number> {
   }
   return tops;
 }
+
+/**
+ * Page-relative variant: measures painted marks against an element that
+ * scrolls together with them, so no scrollTop term is needed. Used by the
+ * margin layer now that it lives inside the page.
+ */
+export function measureAnchorTopsWithin(scope: HTMLElement): Map<string, number> {
+  const scopeRect = scope.getBoundingClientRect();
+  const tops = new Map<string, number>();
+  for (const el of scope.querySelectorAll<HTMLElement>('[data-comment-ids]')) {
+    const ids = el.dataset.commentIds?.split(',') ?? [];
+    const top = el.getBoundingClientRect().top - scopeRect.top;
+    for (const id of ids) {
+      const existing = tops.get(id);
+      if (existing === undefined || top < existing) tops.set(id, top);
+    }
+  }
+  return tops;
+}

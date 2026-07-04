@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { MdComment } from '../types';
 import type { MarginLayout } from '../hooks/useMarginLayout';
 import { ThreadCard } from './ThreadCard';
+import { RAIL, PAD_R } from '../lib/page-geometry';
 
 interface MarginNotesProps {
   layout: MarginLayout;
@@ -70,7 +71,7 @@ export function MarginNotes({
     <div
       data-margin-notes
       className="absolute top-0"
-      style={{ right: 24, width: layout.marginWidth, height: layout.layerHeight }}
+      style={{ right: PAD_R, width: RAIL, height: layout.layerHeight }}
     >
       {/* Connector: horizontal at the anchor line, vertical along the layer's
           left edge, horizontal into the card. Full opacity when active,

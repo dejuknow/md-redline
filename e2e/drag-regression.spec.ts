@@ -112,7 +112,7 @@ test.describe('Drag start handle backwards - regression', () => {
     await card.click();
     await expect(page.locator('[data-drag-handle]')).toHaveCount(2);
 
-    // Drag the start handle far left — past multiple formatting boundaries
+    // Drag the start handle far left, past multiple formatting boundaries.
     await dragStartHandleLeft(page, 300);
 
     // The highlight MUST still exist after the state update and re-render

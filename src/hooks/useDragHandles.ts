@@ -18,6 +18,8 @@ interface HandlePositions {
 interface UseDragHandlesOptions {
   viewerRef: React.RefObject<MarkdownViewerHandle | null>;
   scrollContainerRef: React.RefObject<HTMLElement | null>;
+  /** The page sheet: the drag handles' actual CSS positioning ancestor. */
+  pageRef: React.RefObject<HTMLElement | null>;
   activeCommentId: string | null;
   comments: MdComment[];
   onAnchorChange: (commentIds: string[], newAnchor: string) => void;
@@ -56,9 +58,17 @@ export function isSvgTextMark(markEl: Element): boolean {
   return markEl.namespaceURI === SVG_NS_DRAG && markEl.tagName.toLowerCase() === 'text';
 }
 
+/**
+ * Handle positions are relative to `positionRoot`, the page sheet, because
+ * that's the drag handle's actual CSS positioning ancestor (the page has
+ * `position: relative` so the margin layer can anchor to it; the column
+ * wrapper in between has none). The page scrolls together with its marks —
+ * unlike the old scroll-container-relative calc, no scrollTop/scrollLeft
+ * term is needed here.
+ */
 function computePositions(
   markEls: Element[],
-  scrollContainer: HTMLElement,
+  positionRoot: HTMLElement,
 ): HandlePositions | null {
   const draggable = markEls.filter((el) => !isSvgTextMark(el));
   if (draggable.length === 0) return null;
@@ -72,19 +82,19 @@ function computePositions(
   }
   if (allRects.length === 0) return null;
 
-  const containerRect = scrollContainer.getBoundingClientRect();
+  const rootRect = positionRoot.getBoundingClientRect();
   const firstRect = allRects[0];
   const lastRect = allRects[allRects.length - 1];
 
   return {
     start: {
-      top: firstRect.top - containerRect.top + scrollContainer.scrollTop,
-      left: firstRect.left - containerRect.left + scrollContainer.scrollLeft,
+      top: firstRect.top - rootRect.top,
+      left: firstRect.left - rootRect.left,
       height: firstRect.height,
     },
     end: {
-      top: lastRect.top - containerRect.top + scrollContainer.scrollTop,
-      left: lastRect.right - containerRect.left + scrollContainer.scrollLeft,
+      top: lastRect.top - rootRect.top,
+      left: lastRect.right - rootRect.left,
       height: lastRect.height,
     },
   };
@@ -107,6 +117,7 @@ function getContainerTextOffset(container: HTMLElement, targetNode: Node, offset
 export function useDragHandles({
   viewerRef,
   scrollContainerRef,
+  pageRef,
   activeCommentId,
   comments,
   onAnchorChange,
@@ -136,13 +147,13 @@ export function useDragHandles({
   // Compute handle positions when active comment changes
   const updatePositions = useCallback(() => {
     const markEls = viewerRef.current?.getActiveMarks() || [];
-    const scrollContainer = scrollContainerRef.current;
-    if (markEls.length === 0 || !scrollContainer) {
+    const page = pageRef.current;
+    if (markEls.length === 0 || !page) {
       setHandlePositions(null);
       return;
     }
-    setHandlePositions(computePositions(markEls, scrollContainer));
-  }, [viewerRef, scrollContainerRef]);
+    setHandlePositions(computePositions(markEls, page));
+  }, [viewerRef, pageRef]);
 
   // Recalculate positions when activeCommentId or comments change
   useEffect(() => {
@@ -349,9 +360,9 @@ export function useDragHandles({
         }
 
         // Update handle positions
-        const scrollContainer = scrollContainerRef.current;
-        if (scrollContainer && drag.markEls.length > 0) {
-          const positions = computePositions(drag.markEls, scrollContainer);
+        const page = pageRef.current;
+        if (page && drag.markEls.length > 0) {
+          const positions = computePositions(drag.markEls, page);
           if (positions) setHandlePositions(positions);
         }
       };
@@ -413,7 +424,7 @@ export function useDragHandles({
         dragRef.current = null;
       };
     },
-    [viewerRef, scrollContainerRef, onAnchorChange, updatePositions],
+    [viewerRef, pageRef, onAnchorChange, updatePositions],
   );
 
   // Clean up drag listeners on unmount

@@ -118,10 +118,16 @@ export function Tooltip({ text, children, delay = 600, side = 'bottom' }: Props)
     }
     setVisible(false);
     const stash = stashedTitleRef.current;
-    if (stash) {
+    // Only restore if the attribute is still absent. A click inside the
+    // hover window (e.g. a toggle button whose own label/title changes on
+    // click, or whose layout shift moves it out from under a stationary
+    // pointer and triggers a synthetic leave) can make React set a fresh
+    // title in between the stash and this restore; blindly overwriting that
+    // with the pre-click value would leave the DOM showing stale text.
+    if (stash && !stash.el.hasAttribute('title')) {
       stash.el.setAttribute('title', stash.title);
-      stashedTitleRef.current = null;
     }
+    stashedTitleRef.current = null;
   }, [cancelTimer, visible]);
 
   // Drop any pending reveal AND restore the trigger's stashed title if the
@@ -132,7 +138,7 @@ export function Tooltip({ text, children, delay = 600, side = 'bottom' }: Props)
     return () => {
       cancelTimer();
       const stash = stashedTitleRef.current;
-      if (stash && stash.el.isConnected) {
+      if (stash && stash.el.isConnected && !stash.el.hasAttribute('title')) {
         stash.el.setAttribute('title', stash.title);
       }
       stashedTitleRef.current = null;

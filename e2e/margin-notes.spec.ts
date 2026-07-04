@@ -24,6 +24,10 @@ test.beforeEach(async ({ page }, testInfo) => {
   fixturePath = resolve(fixtureDir, 'test-doc.md');
   writeFileSync(fixturePath, TEST_DOC_BASELINE);
   await resetTestAppState(page);
+  // The page/column width change (rail showing/hiding, or the column
+  // resizing across viewport widths) is a motion-safe CSS transition; disable
+  // it so geometry assertions read the settled width, not a mid-animation one.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
 });
 
 test.afterEach(async () => {
@@ -33,6 +37,25 @@ test.afterEach(async () => {
 async function openFixture(page: Page) {
   await page.goto(`/?file=${fixturePath}`);
   await page.locator('.prose').waitFor({ timeout: 10_000 });
+}
+
+/**
+ * The column's width follows the container's ResizeObserver, which fires
+ * asynchronously after a viewport resize (and, unlike the margin layer's
+ * mere visibility, isn't something `expect(locator).toBeVisible()` waits
+ * on). Poll until two consecutive reads agree so callers see the settled
+ * width, not a transient one still mid-recalculation.
+ */
+async function stableColumnWidth(page: Page): Promise<number> {
+  let previous: number | null = null;
+  await expect(async () => {
+    const box = await page.locator('[data-doc-page] > div').first().boundingBox();
+    const width = box?.width ?? null;
+    const stable = width !== null && width === previous;
+    previous = width;
+    expect(stable).toBe(true);
+  }).toPass({ timeout: 2000 });
+  return previous!;
 }
 
 async function closeSidebar(page: Page) {
@@ -64,6 +87,16 @@ test.describe('Margin notes', () => {
     expect(markBox).not.toBeNull();
     expect(cardBox).not.toBeNull();
     expect(Math.abs(cardBox!.y - markBox!.y)).toBeLessThanOrEqual(24);
+
+    // The rail sits exactly GAP (56px) from the column: card left edge minus
+    // column right edge is 56 +- 2px.
+    const pageLocator = page.locator('[data-doc-page]');
+    const pageBox = await pageLocator.boundingBox();
+    const col = await pageLocator.locator(':scope > div').first().boundingBox();
+    expect(pageBox).not.toBeNull();
+    expect(col).not.toBeNull();
+    expect(cardBox!.x - (col!.x + col!.width)).toBeGreaterThan(40);
+    expect(cardBox!.x - (col!.x + col!.width)).toBeLessThan(70);
   });
 
   test('clicking the anchor activates the margin card and replying lands in the file', async ({
@@ -101,5 +134,24 @@ test.describe('Margin notes', () => {
     await expect(page.locator('[data-margin-notes]')).not.toBeVisible();
     // Highlights are still there.
     await expect(page.locator('mark.comment-highlight').first()).toBeVisible();
+  });
+
+  test('column shrinks and re-wraps before the margin layer hides', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Margin note four');
+    await closeSidebar(page);
+
+    await page.setViewportSize({ width: 1240, height: 900 });
+    await expect(page.locator('[data-margin-notes]')).toBeVisible();
+    const colWide = await stableColumnWidth(page);
+
+    await page.setViewportSize({ width: 1120, height: 900 });
+    await expect(page.locator('[data-margin-notes]')).toBeVisible();
+    const colNarrow = await stableColumnWidth(page);
+
+    expect(colNarrow).toBeLessThan(colWide);
+
+    await page.setViewportSize({ width: 900, height: 900 });
+    await expect(page.locator('[data-margin-notes]')).toHaveCount(0);
   });
 });
