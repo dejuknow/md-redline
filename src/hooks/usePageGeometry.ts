@@ -14,7 +14,10 @@ export function usePageGeometry(
   const [contentWidth, setContentWidth] = useState(0);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setContentWidth(0);
+      return;
+    }
     const container = containerRef.current;
     if (!container) return;
     const measure = () => {
