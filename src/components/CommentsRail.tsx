@@ -171,8 +171,48 @@ function AnchoredCards({
   onEdit,
   onEditReply,
   onDeleteReply,
+  onContextMenu,
+  requestedEditor,
 }: CommentsRailProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Anchored cards share one active editor at a time, mirroring the List
+  // surface: this is what lets an externally requested edit (context menu,
+  // agent-ask flow) land on the right card, and what keeps opening one
+  // card's editor from leaving another card's editor open underneath it.
+  const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
+
+  useEffect(() => {
+    if (requestedEditor) setActiveEditor(requestedEditor);
+  }, [requestedEditor]);
+
+  useEffect(() => {
+    if (!activeEditor) return;
+    const comment = anchoredComments.find((candidate) => candidate.id === activeEditor.commentId);
+    if (!comment) {
+      setActiveEditor(null);
+      return;
+    }
+    if (
+      activeEditor.mode === 'reply-edit' &&
+      !comment.replies?.some((reply) => reply.id === activeEditor.replyId)
+    ) {
+      setActiveEditor(null);
+    }
+  }, [anchoredComments, activeEditor]);
+
+  const openCommentEdit = (commentId: string) => {
+    setActiveEditor({ mode: 'comment-edit', commentId, token: Date.now() });
+  };
+  const openReplyCompose = (commentId: string) => {
+    setActiveEditor({ mode: 'reply-compose', commentId, token: Date.now() });
+  };
+  const openReplyEdit = (commentId: string, replyId: string) => {
+    setActiveEditor({ mode: 'reply-edit', commentId, replyId, token: Date.now() });
+  };
+  const closeEditor = () => {
+    setActiveEditor(null);
+  };
 
   // Stable per-card ref callbacks. An inline arrow gets a new identity every
   // render, which makes React detach (null) and reattach (node) the ref on
@@ -269,6 +309,14 @@ function AnchoredCards({
               onEdit={onEdit}
               onEditReply={onEditReply}
               onDeleteReply={onDeleteReply}
+              onContextMenu={
+                onContextMenu ? (id, x, y) => onContextMenu({ commentId: id, x, y }) : undefined
+              }
+              editor={activeEditor}
+              onRequestCommentEdit={openCommentEdit}
+              onRequestReplyCompose={openReplyCompose}
+              onRequestReplyEdit={openReplyEdit}
+              onCloseEditor={closeEditor}
             />
           </div>
         );

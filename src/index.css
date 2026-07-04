@@ -947,7 +947,11 @@ body {
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
   box-shadow: var(--theme-sheet-shadow);
-  overflow: hidden;
+  /* clip, not hidden: both crop content to the rounded corners, but hidden
+     turns the sheet into a scroll container, which captures position: sticky
+     descendants (the rail header) so they never pin against the real
+     scroller. clip clips without creating a scrollport. */
+  overflow: clip;
 }
 
 /* ========== Overlay Enter Motion ========== */

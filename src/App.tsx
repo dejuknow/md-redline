@@ -26,7 +26,7 @@ import {
 import { getEffectiveStatus } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
-import { CommentListSurface, type SidebarContextMenuInfo, type SidebarCommentFocusRequest } from './components/CommentListSurface';
+import type { SidebarCommentFocusRequest } from './components/CommentListSurface';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
@@ -246,8 +246,7 @@ export default function App() {
   const { author, setAuthor } = useAuthor();
   const { settings } = useSettings();
   const setTheme = useSetPersistedTheme();
-  const { explorerWidth, sidebarWidth, mermaidPanelWidth, onResizeStart, isDragging } =
-    useResizablePanel();
+  const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();
   const pageVisible = usePageVisible();
   const {
     explorerVisible,
@@ -575,13 +574,21 @@ export default function App() {
   });
 
   const railAllowed =
-    viewMode === 'rendered' && !sidebarVisible && !(diffEnabled && currentSnapshot) && !focusMode;
+    viewMode === 'rendered' && sidebarVisible && !(diffEnabled && currentSnapshot) && !focusMode;
   const geometry = usePageGeometry(
     containerRef as RefObject<HTMLElement | null>,
     railAllowed,
     viewMode === 'rendered',
   );
   const railShown = geometry.railShown;
+
+  // In Anchored density the new comment's card is already at its anchor and
+  // active; the List-surface focus dance does not apply. Consume the request.
+  useEffect(() => {
+    if (!requestedCommentFocus) return;
+    if (railShown && railDensity === 'anchored') setRequestedCommentFocus(null);
+  }, [requestedCommentFocus, railShown, railDensity]);
+
   // Resolved comments have no highlight marks and would render as fake
   // orphans in the margin; they live in the List surface instead.
   const marginComments = useMemo(
@@ -1671,7 +1678,7 @@ export default function App() {
     const cmds: Command[] = [
       {
         id: 'toggle-sidebar',
-        label: 'Toggle comment sidebar',
+        label: 'Toggle comments rail',
         shortcut: `${modKey}+\\`,
         section: 'View',
         onExecute: () => toggleSidebarPane(),
@@ -2336,6 +2343,9 @@ export default function App() {
                           selectionText={selection?.text ?? null}
                           selectionOffset={selection?.offset ?? null}
                           onReanchorToSelection={handleReanchorToSelection}
+                          requestedEditor={requestedEditor}
+                          requestedFocus={requestedCommentFocus}
+                          onFocusHandled={() => setRequestedCommentFocus(null)}
                         />
                       )}
                     </div>
@@ -2350,87 +2360,6 @@ export default function App() {
                   )}
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Comment sidebar */}
-          {sidebarVisible && (
-            <div
-              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-              onMouseDown={(e) => onResizeStart('sidebar', e)}
-            >
-              <div className="absolute inset-y-0 -left-1 -right-1" />
-            </div>
-          )}
-          <div
-            className={`border-l border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
-              sidebarVisible ? '' : 'w-0 border-l-0'
-            } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
-            style={sidebarVisible ? { width: sidebarWidth } : undefined}
-          >
-            <div className="h-full flex flex-col min-w-0">
-              <div className="h-10 flex items-center justify-between pl-1 pr-2 shrink-0">
-                <div className="flex items-center gap-0.5">
-                  <h2 className="px-2.5 py-1.5 rounded text-xs font-medium text-content flex items-center gap-1">
-                    <svg
-                      className="w-3.5 h-3.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
-                      />
-                    </svg>
-                    Comments
-                  </h2>
-                </div>
-                <button
-                  onClick={() => setSidebarVisible(false)}
-                  className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                  title="Close comments panel"
-                  aria-label="Close comments panel"
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div className="flex-1 min-h-0">
-                <CommentListSurface
-                  comments={comments}
-                  activeCommentId={activeCommentId}
-                  missingAnchors={missingAnchors}
-                  selectionText={selection?.text ?? null}
-                  selectionOffset={selection?.offset ?? null}
-                  onReanchorToSelection={handleReanchorToSelection}
-                  onActivate={handleSidebarActivate}
-                  onResolve={handleResolve}
-                  onUnresolve={handleUnresolve}
-                  onDelete={handleDelete}
-                  onEdit={handleEdit}
-                  onReply={handleReply}
-                  onEditReply={handleEditReply}
-                  onDeleteReply={handleDeleteReply}
-                  onBulkDelete={handleBulkDelete}
-                  onBulkResolve={handleBulkResolve}
-                  onBulkDeleteResolved={handleBulkDeleteResolved}
-                  onContextMenu={handleSidebarContextMenu}
-                  requestedEditor={requestedEditor}
-                  requestedFocus={requestedCommentFocus}
-                  onFocusHandled={() => setRequestedCommentFocus(null)}
-                  sentCommentIds={sentCommentIds}
-                />
-              </div>
             </div>
           </div>
         </div>

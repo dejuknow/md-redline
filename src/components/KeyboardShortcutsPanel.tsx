@@ -47,7 +47,7 @@ const sections: Section[] = [
   {
     title: 'View',
     shortcuts: [
-      { keys: `${mod}\\`, label: 'Toggle comment sidebar' },
+      { keys: `${mod}\\`, label: 'Toggle comments rail' },
       { keys: `${mod}B`, label: 'Toggle file explorer sidebar' },
       { keys: `${mod}${shift}O`, label: 'Toggle document outline sidebar' },
       { keys: `${mod}.`, label: 'Toggle focus mode' },

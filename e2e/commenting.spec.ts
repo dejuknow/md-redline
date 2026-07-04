@@ -132,6 +132,14 @@ async function clickReplyAction(reply: Locator, actionName: string) {
   await reply.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
+/**
+ * Bulk actions (Delete All) and search live on the List surface only; the
+ * default Anchored density renders margin cards without that chrome.
+ */
+async function switchToListDensity(page: Page) {
+  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -162,13 +170,15 @@ test.describe('Adding comments', () => {
     await addComment(page, 'valid credentials', 'This needs more detail about what valid means.');
   });
 
-  test('newly added comment becomes focused in the sidebar', async ({ page }) => {
+  test('newly added comment becomes the active margin card', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Focus this new comment');
 
-    await expect(
-      page.locator('[data-comment-card-id]', { hasText: 'Focus this new comment' }),
-    ).toBeFocused();
+    // Default density is Anchored: the new comment's card sits at its anchor
+    // in the margin and is marked active, rather than focused in a list.
+    const card = page.locator('[data-margin-card-id]', { hasText: 'Focus this new comment' });
+    await expect(card).toBeVisible();
+    await expect(card).toHaveClass(/border-primary-border/);
   });
 
   test('comment is persisted to the markdown file', async ({ page }) => {
@@ -199,7 +209,8 @@ test.describe('Comment lifecycle', () => {
     await addComment(page, 'valid credentials', 'First comment');
     await addComment(page, 'brute force attacks', 'Second comment');
 
-    // Click Delete All in sidebar
+    // Delete All lives on the List surface; switch density first.
+    await switchToListDensity(page);
     await page.getByRole('button', { name: 'Delete All' }).click();
 
     // Confirm dialog should appear
@@ -218,6 +229,7 @@ test.describe('Comment lifecycle', () => {
     await addComment(page, 'valid credentials', 'Comment A');
     await addComment(page, 'brute force attacks', 'Comment B');
 
+    await switchToListDensity(page);
     await page.getByRole('button', { name: 'Delete All' }).click();
 
     // Confirm deletion
@@ -232,6 +244,7 @@ test.describe('Comment lifecycle', () => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Escape test comment');
 
+    await switchToListDensity(page);
     await page.getByRole('button', { name: 'Delete All' }).click();
     await expect(page.getByText('This will permanently delete all comments.')).toBeVisible();
 
@@ -339,6 +352,8 @@ test.describe('Sidebar filtering', () => {
     await addComment(page, 'valid credentials', 'Fix authentication flow');
     await addComment(page, 'brute force attacks', 'Improve rate limiting');
 
+    // Search lives on the List surface; switch density first.
+    await switchToListDensity(page);
     await page.getByPlaceholder('Search comments...').fill('rate');
 
     await expect(page.getByText('Improve rate limiting')).toBeVisible();
@@ -398,8 +413,8 @@ test.describe('Comment form click-outside dismiss', () => {
     const textarea = page.getByPlaceholder('Add your comment...');
     await expect(textarea).toBeVisible();
 
-    // Click outside the form on the sidebar heading (not prose, not form)
-    await page.locator('h2', { hasText: 'Comments' }).click({ force: true });
+    // Click outside the form on the toolbar logo (not prose, not form)
+    await page.locator('span[title="md-redline"]').click({ force: true });
 
     // Form should be dismissed
     await expect(textarea).not.toBeVisible();
@@ -435,8 +450,8 @@ test.describe('Comment form click-outside dismiss', () => {
     await expect(textarea).toBeVisible();
     await textarea.fill('Some draft text');
 
-    // Click outside the form on the sidebar heading
-    await page.locator('h2', { hasText: 'Comments' }).click({ force: true });
+    // Click outside the form on the toolbar logo
+    await page.locator('span[title="md-redline"]').click({ force: true });
 
     // Form should still be visible because it has text
     await expect(textarea).toBeVisible();
@@ -444,23 +459,81 @@ test.describe('Comment form click-outside dismiss', () => {
 });
 
 test.describe('Sidebar toggle', () => {
-  test('sidebar toggle button hides and shows sidebar', async ({ page }) => {
+  test.use({ viewport: { width: 1600, height: 900 } });
+
+  test('sidebar toggle button hides and shows the rail', async ({ page }) => {
     await openFixture(page);
 
-    const toggleBtn = page.locator('button[title*="Toggle comment sidebar"]');
+    const toggleBtn = page.locator('button[title*="Toggle comments rail"]');
+    const rail = page.locator('[data-comments-rail]');
 
-    // Sidebar is open: toggle button has active state
+    // Rail is shown by default at a viewport wide enough to fit it.
+    await expect(rail).toBeVisible();
     let cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).toContain('bg-primary-bg');
 
     // Toggle off
     await toggleBtn.click();
+    await expect(rail).not.toBeVisible();
     cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
 
     // Toggle on
     await toggleBtn.click();
+    await expect(rail).toBeVisible();
     cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).toContain('bg-primary-bg');
+  });
+});
+
+test.describe('List density scroll isolation', () => {
+  test.use({ viewport: { width: 1600, height: 900 } });
+
+  test('List density pins and scrolls independently of the document', async ({ page }) => {
+    await openFixture(page);
+
+    // Enough comments to overflow both the pinned list's viewport height and
+    // (via the Anchored layout's stacked card heights, which drive the page's
+    // minHeight regardless of density) the document itself.
+    const anchors = [
+      'valid credentials',
+      'brute force attacks',
+      'tracked per IP address',
+      'hashed with bcrypt',
+      'double-submit cookie pattern',
+      'temporarily locked',
+      'HTTP-only cookies',
+      'email and password login',
+      'multiple paragraphs',
+      'validates all inputs',
+    ];
+    for (const [i, anchor] of anchors.entries()) {
+      await addComment(page, anchor, `List overflow comment ${i + 1}`);
+    }
+
+    await switchToListDensity(page);
+
+    const railHeader = page.locator('[data-rail-header]');
+    const before = await railHeader.boundingBox();
+
+    // Scroll the document deep; the pinned rail must not move.
+    await page.locator('[data-doc-page]').hover();
+    await page.mouse.wheel(0, 2000);
+    await page.waitForTimeout(200);
+    const after = await railHeader.boundingBox();
+    expect(Math.abs(after!.y - before!.y)).toBeLessThan(4);
+
+    // The list scrolls on its own without moving the document.
+    const scrollTopBefore = await page
+      .locator('[data-doc-page]')
+      .evaluate((el) => el.parentElement!.scrollTop);
+    const list = page.locator('[data-comments-rail] .overflow-y-auto').first();
+    await list.hover();
+    await page.mouse.wheel(0, 300);
+    await page.waitForTimeout(100);
+    const scrollTopAfter = await page
+      .locator('[data-doc-page]')
+      .evaluate((el) => el.parentElement!.scrollTop);
+    expect(scrollTopAfter).toBe(scrollTopBefore);
   });
 });

@@ -78,6 +78,14 @@ async function clickCardAction(page: Page, commentText: string, actionName: stri
   await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
+/**
+ * Resolved comments leave the Anchored margin (they have no highlight to
+ * anchor to) and live on the List surface instead; switch density to see them.
+ */
+async function switchToListDensity(page: Page) {
+  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+}
+
 /** Enable a boolean setting via the Settings panel toggle */
 async function toggleSetting(page: Page, settingName: string) {
   // Open settings via the toolbar gear button
@@ -124,7 +132,10 @@ test.describe('Resolve workflow toggle', () => {
 
     await clickCardAction(page, 'Will be resolved', 'Resolve');
 
-    // The card should show a "Resolved" badge
+    // Resolved comments move off the Anchored margin to the List surface,
+    // where the card shows a "Resolved" badge.
+    await expect(page.locator('[data-margin-card-id]')).toHaveCount(0);
+    await switchToListDensity(page);
     const card = getCard(page, 'Will be resolved');
     await expect(card.getByText('Resolved', { exact: true })).toBeVisible();
   });
@@ -173,8 +184,10 @@ test.describe('Resolve workflow toggle', () => {
     await reply.hover();
     await expect(reply.getByRole('button', { name: 'Edit' })).toBeVisible();
 
-    // Resolve the comment
+    // Resolve the comment. It leaves the Anchored margin; the card and reply
+    // locators re-resolve against the List surface after the density switch.
     await clickCardAction(page, 'Resolved reply test', 'Resolve');
+    await switchToListDensity(page);
     await expect(card.getByText('Resolved', { exact: true })).toBeVisible();
 
     // After resolving, reply edit/delete should be hidden
@@ -226,8 +239,8 @@ test.describe('Quick comment mode', () => {
     await selectText(page, 'valid credentials');
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
 
-    // Click on an area outside the form and outside the prose (e.g., the toolbar area)
-    await page.locator('h2', { hasText: 'Comments' }).click();
+    // Click on an area outside the form and outside the prose (the toolbar logo)
+    await page.locator('span[title="md-redline"]').click();
 
     // Form should be dismissed
     await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
@@ -244,7 +257,7 @@ test.describe('Quick comment mode', () => {
     await textarea.fill('Important feedback');
 
     // Click outside
-    await page.locator('h2', { hasText: 'Comments' }).click();
+    await page.locator('span[title="md-redline"]').click();
 
     // Form should still be visible since it has text
     await expect(textarea).toBeVisible();

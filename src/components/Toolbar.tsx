@@ -173,13 +173,13 @@ export function Toolbar({
 
       <Separator />
 
-      {/* Comments sidebar toggle (far right, mirrors explorer) */}
+      {/* Comments rail toggle (far right, mirrors explorer) */}
       <IconButton
         variant="active"
         active={sidebarVisible}
         size="md"
         onClick={onToggleSidebar}
-        title={`Toggle comment sidebar (${modLabel}+\\)`}
+        title={`Toggle comments rail (${modLabel}+\\)`}
       >
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path

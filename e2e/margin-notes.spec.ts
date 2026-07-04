@@ -58,22 +58,16 @@ async function stableColumnWidth(page: Page): Promise<number> {
   return previous!;
 }
 
-async function closeSidebar(page: Page) {
+/** Cmd+\ toggles the rail. Direction depends on the current state, so
+ * callers assert the resulting visibility themselves. */
+async function toggleRail(page: Page) {
   await page.keyboard.press(withMod('\\'));
-  // The collapsed sidebar panel still reports a non-empty bounding box for
-  // its search input (a nested flex min-width quirk clips it offscreen
-  // without zeroing its own layout box), so checking that input's visibility
-  // is not a reliable signal here. Assert the margin layer directly instead.
-  await expect(page.locator('[data-margin-notes]')).toBeVisible();
 }
 
 test.describe('Margin notes', () => {
-  test('cards appear in the margin near their anchors when the sidebar closes', async ({
-    page,
-  }) => {
+  test('cards appear in the margin near their anchors by default', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Margin note one');
-    await closeSidebar(page);
 
     const layer = page.locator('[data-margin-notes]');
     await expect(layer).toBeVisible();
@@ -81,11 +75,10 @@ test.describe('Margin notes', () => {
     await expect(card).toHaveCount(1);
     await expect(card).toContainText('Margin note one');
 
-    // Closing the sidebar triggers a panel-width transition on the
-    // container; wait for the column width to settle before taking any
-    // position measurements below, or a card box captured mid-transition
-    // compared against a page/column box captured after it settles produces
-    // a bogus delta.
+    // Wait for the column width to settle before taking any position
+    // measurements below, or a card box captured mid-transition compared
+    // against a page/column box captured after it settles produces a bogus
+    // delta.
     await stableColumnWidth(page);
 
     // Vertical alignment: card top within 24px of the anchor mark's top.
@@ -111,7 +104,7 @@ test.describe('Margin notes', () => {
   }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Margin note two');
-    await closeSidebar(page);
+    await expect(page.locator('[data-margin-notes]')).toBeVisible();
 
     await page.locator('mark.comment-highlight').first().click();
     const card = page.locator('[data-margin-card-id]');
@@ -125,18 +118,18 @@ test.describe('Margin notes', () => {
       .toContain('Reply from the margin');
   });
 
-  test('opening the sidebar hides the layer; narrow windows never show it', async ({ page }) => {
+  test('hiding the rail hides the layer; narrow windows never show it', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Margin note three');
-    await closeSidebar(page);
+    // Shown by default.
     await expect(page.locator('[data-margin-notes]')).toBeVisible();
 
-    // Reopen sidebar: layer goes away.
-    await page.keyboard.press(withMod('\\'));
+    // Hide the rail: layer goes away.
+    await toggleRail(page);
     await expect(page.locator('[data-margin-notes]')).not.toBeVisible();
 
-    // Close sidebar but shrink the window below the threshold: layer stays away.
-    await page.keyboard.press(withMod('\\'));
+    // Show the rail again but shrink the window below the threshold: layer stays away.
+    await toggleRail(page);
     await page.setViewportSize({ width: 1000, height: 950 });
     await expect(page.locator('[data-margin-notes]')).not.toBeVisible();
     // Highlights are still there.
@@ -146,7 +139,7 @@ test.describe('Margin notes', () => {
   test('column shrinks and re-wraps before the margin layer hides', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Margin note four');
-    await closeSidebar(page);
+    await expect(page.locator('[data-margin-notes]')).toBeVisible();
 
     await page.setViewportSize({ width: 1240, height: 900 });
     await expect(page.locator('[data-margin-notes]')).toBeVisible();

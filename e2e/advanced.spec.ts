@@ -376,24 +376,26 @@ test.describe('Session persistence', () => {
     });
   });
 
-  test('sidebar visibility persists across reload', async ({ page }) => {
+  test('rail visibility persists across reload', async ({ page }) => {
     await openFixture(page);
-    await expect(page.locator('h2', { hasText: 'Comments' })).toBeVisible();
+    await expect(page.locator('[data-comments-rail]')).toBeVisible();
 
     // Use the toolbar button instead of keyboard shortcut (unreliable in headless)
-    const toggleBtn = page.locator('button[title*="Toggle comment sidebar"]');
+    const toggleBtn = page.locator('button[title*="Toggle comments rail"]');
     await toggleBtn.click();
     let cls = (await toggleBtn.getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
+    await expect(page.locator('[data-comments-rail]')).not.toBeVisible();
 
     await page.waitForTimeout(1000);
     await page.reload();
     await page.locator('.prose').waitFor({ timeout: 10_000 });
 
-    // Sidebar should still be hidden after reload (toggle not active)
+    // Rail should still be hidden after reload (toggle not active)
     cls =
-      (await page.locator('button[title*="Toggle comment sidebar"]').getAttribute('class')) ?? '';
+      (await page.locator('button[title*="Toggle comments rail"]').getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
+    await expect(page.locator('[data-comments-rail]')).not.toBeVisible();
   });
 
   test('view mode persists across reload', async ({ page }) => {

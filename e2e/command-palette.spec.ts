@@ -90,7 +90,7 @@ test.describe('Command palette', () => {
     await openPalette(page);
 
     const input = page.getByPlaceholder('Type a command...');
-    await input.fill('toggle comment sidebar');
+    await input.fill('toggle comments rail');
     await page.waitForTimeout(100);
 
     const selectedItem = page.locator('button[data-selected="true"]').first();
