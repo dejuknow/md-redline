@@ -53,6 +53,7 @@ export function SectionBreadcrumb({ chain, containerRef, onJump, initialVisible 
         <span key={h.id} className="flex items-center gap-1 min-w-0">
           {i > 0 && <span className="text-content-faint text-xs shrink-0">&rsaquo;</span>}
           <button
+            type="button"
             onClick={() => onJump(h.id)}
             title={h.text}
             className="text-xs text-content-secondary hover:text-content truncate max-w-[28ch] cursor-pointer transition-colors"

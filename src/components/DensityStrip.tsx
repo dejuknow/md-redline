@@ -25,6 +25,7 @@ export function DensityStrip({ ticks, onJump }: Props) {
         return (
           <button
             key={t.id}
+            type="button"
             data-tick-id={t.id}
             // jsdom's CSSOM has no grammar for the CSS min() function and
             // silently drops the whole `top` declaration rather than

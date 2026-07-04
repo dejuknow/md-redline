@@ -283,6 +283,24 @@ export default function App() {
     setFocusMode(false);
   }, [setExplorerVisible, setSidebarVisible]);
 
+  // Force-open paths (context menu reveals, outline toggle) exit focus mode
+  // and then apply, unlike the plain pane toggles which exit and stop.
+  const setExplorerVisibleGuarded = useCallback(
+    (visible: boolean | ((p: boolean) => boolean)) => {
+      if (focusMode) exitFocusMode();
+      setExplorerVisible(visible);
+    },
+    [focusMode, exitFocusMode, setExplorerVisible],
+  );
+
+  const setSidebarVisibleGuarded = useCallback(
+    (visible: boolean | ((p: boolean) => boolean)) => {
+      if (focusMode) exitFocusMode();
+      setSidebarVisible(visible);
+    },
+    [focusMode, exitFocusMode, setSidebarVisible],
+  );
+
   const toggleFocusMode = useCallback(() => {
     if (focusMode) exitFocusMode();
     else enterFocusMode();
@@ -1334,7 +1352,7 @@ export default function App() {
     handleDelete,
     handleAddComment,
     setActiveCommentId,
-    setSidebarVisible,
+    setSidebarVisible: setSidebarVisibleGuarded,
     selectionRef,
     lockSelection,
     setAutoExpandForm,
@@ -1347,7 +1365,7 @@ export default function App() {
     revealInFinder,
     revealLabel,
     setExplorerDir,
-    setExplorerVisible,
+    setExplorerVisible: setExplorerVisibleGuarded,
     tabs,
     closeTab,
     closeOtherTabs,
@@ -1392,9 +1410,9 @@ export default function App() {
       if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         if (explorerVisible && leftPanelView === 'outline') {
-          setExplorerVisible(false);
+          setExplorerVisibleGuarded(false);
         } else {
-          setExplorerVisible(true);
+          setExplorerVisibleGuarded(true);
           setLeftPanelView('outline');
         }
         return;
@@ -1561,7 +1579,7 @@ export default function App() {
     explorerVisible,
     leftPanelView,
     openFilePicker,
-    setExplorerVisible,
+    setExplorerVisibleGuarded,
     setLeftPanelView,
     switchTabByOffset,
     showSearch,
@@ -1679,9 +1697,9 @@ export default function App() {
         section: 'View',
         onExecute: () => {
           if (explorerVisible && leftPanelView === 'outline') {
-            setExplorerVisible(false);
+            setExplorerVisibleGuarded(false);
           } else {
-            setExplorerVisible(true);
+            setExplorerVisibleGuarded(true);
             setLeftPanelView('outline');
           }
         },
@@ -1724,7 +1742,7 @@ export default function App() {
     return cmds;
   }, [
     setViewMode,
-    setExplorerVisible,
+    setExplorerVisibleGuarded,
     setLeftPanelView,
     explorerVisible,
     leftPanelView,
@@ -2531,6 +2549,7 @@ export default function App() {
         </span>
         {focusMode && (
           <button
+            type="button"
             data-focus-chip
             onClick={exitFocusMode}
             title="Exit focus mode"
