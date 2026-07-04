@@ -79,6 +79,7 @@ import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import { selectAgentAsks } from './lib/agent-asks';
 import { CommentsRail } from './components/CommentsRail';
+import { CommentsDrawer } from './components/CommentsDrawer';
 import { useMarginLayout } from './hooks/useMarginLayout';
 import { DensityStrip } from './components/DensityStrip';
 import { useCommentTicks } from './hooks/useCommentTicks';
@@ -582,6 +583,16 @@ export default function App() {
   );
   const railShown = geometry.railShown;
 
+  // The comments drawer is the fallback comment surface wherever the rail
+  // cannot show: raw view, diff mode, or a rendered view too narrow to fit
+  // it. Close it automatically once the rail becomes available again, so
+  // the two surfaces never show at the same time.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const fabVisible = !railShown && !focusMode && comments.length > 0;
+  useEffect(() => {
+    if (railShown) setDrawerOpen(false);
+  }, [railShown]);
+
   // In Anchored density the new comment's card is already at its anchor and
   // active; the List-surface focus dance does not apply. Consume the request.
   useEffect(() => {
@@ -623,8 +634,8 @@ export default function App() {
       orphanToastCountRef.current = 0;
       showToast(
         count === 1
-          ? '1 comment lost its anchor. See "Needs re-anchoring" in the sidebar.'
-          : `${count} comments lost their anchor. See "Needs re-anchoring" in the sidebar.`,
+          ? '1 comment lost its anchor. See "Needs re-anchoring" in Comments.'
+          : `${count} comments lost their anchor. See "Needs re-anchoring" in Comments.`,
       );
     }, 500);
   }, [newOrphanIds, showToast]);
@@ -1459,10 +1470,15 @@ export default function App() {
         return;
       }
 
-      // Cmd+\ : Toggle sidebar
+      // Cmd+\ : Toggle the rail where it can show; otherwise fall back to
+      // the comments drawer, since that is the only comment surface left.
       if (mod && e.key === '\\') {
         e.preventDefault();
-        toggleSidebarPane();
+        if (viewMode !== 'rendered' || (diffEnabled && currentSnapshot) || !geometry.railFits) {
+          setDrawerOpen((p) => !p);
+        } else {
+          toggleSidebarPane();
+        }
         return;
       }
 
@@ -1607,6 +1623,9 @@ export default function App() {
     toggleExplorerPane,
     toggleSidebarPane,
     toggleFocusMode,
+    diffEnabled,
+    currentSnapshot,
+    geometry.railFits,
   ]);
 
   useEffect(() => {
@@ -2361,6 +2380,19 @@ export default function App() {
                 </div>
               )}
             </div>
+            {fabVisible && (
+              <button
+                data-comments-fab
+                onClick={() => setDrawerOpen(true)}
+                className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 px-3 py-2 rounded-full bg-surface-raised border border-border shadow-md text-xs font-medium text-content hover:bg-tint transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                aria-label={`Open comments (${commentCount} open)`}
+              >
+                Comments
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary-bg-strong text-primary-text tabular-nums">
+                  {commentCount}
+                </span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -2388,6 +2420,34 @@ export default function App() {
         visible={toast.visible}
         onDismiss={dismissToast}
         action={toast.action}
+      />
+
+      {/* Comments drawer: the comment surface wherever the rail can't show */}
+      <CommentsDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        comments={comments}
+        activeCommentId={activeCommentId}
+        missingAnchors={missingAnchors}
+        selectionText={selection?.text ?? null}
+        selectionOffset={selection?.offset ?? null}
+        onReanchorToSelection={handleReanchorToSelection}
+        onActivate={handleSidebarActivate}
+        onResolve={handleResolve}
+        onUnresolve={handleUnresolve}
+        onDelete={handleDelete}
+        onEdit={handleEdit}
+        onReply={handleReply}
+        onEditReply={handleEditReply}
+        onDeleteReply={handleDeleteReply}
+        onBulkDelete={handleBulkDelete}
+        onBulkResolve={handleBulkResolve}
+        onBulkDeleteResolved={handleBulkDeleteResolved}
+        onContextMenu={handleSidebarContextMenu}
+        requestedEditor={requestedEditor}
+        requestedFocus={drawerOpen ? requestedCommentFocus : null}
+        onFocusHandled={() => setRequestedCommentFocus(null)}
+        sentCommentIds={sentCommentIds}
       />
 
       {/* Command palette */}

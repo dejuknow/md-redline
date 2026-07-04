@@ -41,3 +41,22 @@ export async function addComment(page: Page, anchorText: string, commentText: st
   // Wait for the comment form to close (confirms save completed)
   await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible({ timeout: 5000 });
 }
+
+/**
+ * Comments access when the rail can't show (raw view, diff mode, or a
+ * rendered view too narrow to fit it): a FAB opens a right-side drawer
+ * hosting the same comment list surface. See CommentsDrawer.tsx / the
+ * `fabVisible` and `drawerOpen` state in App.tsx.
+ */
+export function commentsFab(page: Page) {
+  return page.locator('[data-comments-fab]');
+}
+
+export function commentsDrawer(page: Page) {
+  return page.locator('[data-comments-drawer]');
+}
+
+export async function openCommentsDrawer(page: Page) {
+  await commentsFab(page).click();
+  await expect(commentsDrawer(page)).toBeVisible();
+}

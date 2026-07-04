@@ -391,7 +391,7 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
               <p className="text-xs text-center leading-relaxed max-w-xs">
                 Comment threads were updated since your snapshot.
                 <br />
-                Open the comments sidebar to review.
+                Open Comments to review.
               </p>
             </>
           ) : (

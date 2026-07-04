@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { commentsDrawer, openCommentsDrawer } from './helpers/comments';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -145,14 +146,19 @@ test.describe('Comment markers in raw view', () => {
     await expect(markers.first()).toContainText('@comment');
   });
 
-  test('active comment marker gets active class when sidebar comment clicked', async ({ page }) => {
+  test('active comment marker gets active class when a drawer comment is clicked', async ({
+    page,
+  }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Marker active test');
 
     await switchToRaw(page);
 
-    // Click the comment in sidebar
-    const card = page.locator('.group.rounded-lg', { hasText: 'Marker active test' });
+    // Raw view has no rail; open the comments drawer and click the card there.
+    await openCommentsDrawer(page);
+    const card = commentsDrawer(page).locator('.group.rounded-lg', {
+      hasText: 'Marker active test',
+    });
     await card.click();
 
     // The marker should have the active class
@@ -217,18 +223,19 @@ test.describe('Copy button', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Sidebar-to-raw-view linking
+// 5. Comments drawer-to-raw-view linking
 // ---------------------------------------------------------------------------
 
-test.describe('Sidebar to raw view linking', () => {
-  test('clicking sidebar comment scrolls raw view to the marker', async ({ page }) => {
+test.describe('Comments drawer to raw view linking', () => {
+  test('clicking a drawer comment scrolls raw view to the marker', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Scroll target');
 
     await switchToRaw(page);
 
-    // Click the comment in sidebar
-    const card = page.locator('.group.rounded-lg', { hasText: 'Scroll target' });
+    // Raw view has no rail; open the comments drawer and click the card there.
+    await openCommentsDrawer(page);
+    const card = commentsDrawer(page).locator('.group.rounded-lg', { hasText: 'Scroll target' });
     await card.click();
 
     // The marker should be visible (scrolled into view)
