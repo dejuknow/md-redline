@@ -2,12 +2,14 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import type { ViewMode } from '../components/Toolbar';
 
 export type LeftPanelView = 'explorer' | 'outline';
+export type RailDensity = 'anchored' | 'list';
 
 interface PaneLayout {
   explorerVisible: boolean;
   sidebarVisible: boolean;
   leftPanelView: LeftPanelView;
   viewMode: ViewMode;
+  railDensity: RailDensity;
 }
 
 const STORAGE_KEY = 'md-redline-pane-layout';
@@ -17,6 +19,7 @@ const DEFAULTS: PaneLayout = {
   sidebarVisible: true,
   leftPanelView: 'explorer',
   viewMode: 'rendered',
+  railDensity: 'anchored',
 };
 
 export function load(): PaneLayout {
@@ -35,6 +38,7 @@ export function load(): PaneLayout {
           : DEFAULTS.sidebarVisible,
       leftPanelView: parsed.leftPanelView === 'outline' ? 'outline' : 'explorer',
       viewMode: parsed.viewMode === 'raw' || parsed.viewMode === 'diff' ? 'raw' : 'rendered',
+      railDensity: parsed.railDensity === 'list' ? 'list' : 'anchored',
     };
   } catch {
     return DEFAULTS;
@@ -84,6 +88,10 @@ export function usePaneLayout() {
     });
   }, []);
 
+  const setRailDensity = useCallback((v: RailDensity) => {
+    setLayout((prev) => ({ ...prev, railDensity: v }));
+  }, []);
+
   // Diff overlay is transient — not persisted to localStorage
   const [diffEnabled, setDiffEnabled] = useState(false);
 
@@ -92,11 +100,13 @@ export function usePaneLayout() {
     sidebarVisible: layout.sidebarVisible,
     leftPanelView: layout.leftPanelView,
     viewMode: layout.viewMode,
+    railDensity: layout.railDensity,
     diffEnabled,
     setExplorerVisible,
     setSidebarVisible,
     setLeftPanelView,
     setViewMode,
+    setRailDensity,
     setDiffEnabled,
   };
 }

@@ -25,6 +25,7 @@ const DEFAULTS = {
   sidebarVisible: true,
   leftPanelView: 'explorer' as const,
   viewMode: 'rendered' as const,
+  railDensity: 'anchored' as const,
 };
 
 beforeEach(() => {
@@ -78,6 +79,14 @@ describe('load', () => {
     store['md-redline-pane-layout'] = JSON.stringify({ viewMode: 'invalid' });
     expect(load().viewMode).toBe('rendered');
   });
+
+  it('only accepts "anchored" or "list" for railDensity', () => {
+    store['md-redline-pane-layout'] = JSON.stringify({ railDensity: 'list' });
+    expect(load().railDensity).toBe('list');
+
+    store['md-redline-pane-layout'] = JSON.stringify({ railDensity: 'invalid' });
+    expect(load().railDensity).toBe('anchored');
+  });
 });
 
 describe('save', () => {
@@ -87,6 +96,7 @@ describe('save', () => {
       sidebarVisible: true,
       leftPanelView: 'outline' as const,
       viewMode: 'raw' as const,
+      railDensity: 'list' as const,
     };
     save(layout);
     expect(localStorageMock.setItem).toHaveBeenCalledWith(
@@ -101,6 +111,7 @@ describe('save', () => {
       sidebarVisible: false,
       leftPanelView: 'outline' as const,
       viewMode: 'raw' as const,
+      railDensity: 'list' as const,
     };
     save(layout);
     expect(load()).toEqual(layout);

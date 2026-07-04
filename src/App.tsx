@@ -78,7 +78,7 @@ import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSes
 import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import { selectAgentAsks } from './lib/agent-asks';
-import { MarginNotes } from './components/MarginNotes';
+import { CommentsRail } from './components/CommentsRail';
 import { useMarginLayout } from './hooks/useMarginLayout';
 import { DensityStrip } from './components/DensityStrip';
 import { useCommentTicks } from './hooks/useCommentTicks';
@@ -258,6 +258,8 @@ export default function App() {
     setLeftPanelView,
     viewMode,
     setViewMode,
+    railDensity,
+    setRailDensity,
     diffEnabled,
     setDiffEnabled,
   } = usePaneLayout();
@@ -2224,8 +2226,14 @@ export default function App() {
                     <div
                       ref={pageRef}
                       data-doc-page
-                      className="doc-sheet bg-surface mx-auto relative min-h-full pt-6 pb-[50vh] motion-safe:transition-[width] motion-safe:duration-150"
-                      style={{ width: geometry.pageWidth, maxWidth: 'calc(100% - 24px)' }}
+                      className="doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] motion-safe:transition-[width] motion-safe:duration-150"
+                      style={{
+                        width: geometry.pageWidth,
+                        maxWidth: 'calc(100% - 24px)',
+                        minHeight: railShown
+                          ? `max(100%, ${marginLayout.layerHeight + 120}px)`
+                          : '100%',
+                      }}
                     >
                       <div
                         className="motion-safe:transition-[width] motion-safe:duration-150"
@@ -2301,21 +2309,35 @@ export default function App() {
                           </>
                         )}
                       </div>
-                      <MarginNotes
-                        layout={marginLayout}
-                        comments={marginComments}
-                        activeCommentId={activeCommentId}
-                        missingAnchors={missingAnchors}
-                        sentCommentIds={sentCommentIds}
-                        onActivate={handleSidebarActivate}
-                        onReply={handleReply}
-                        onResolve={settings.enableResolve ? handleResolve : undefined}
-                        onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-                        onDelete={handleDelete}
-                        onEdit={handleEdit}
-                        onEditReply={handleEditReply}
-                        onDeleteReply={handleDeleteReply}
-                      />
+                      {railShown && (
+                        <CommentsRail
+                          density={railDensity}
+                          onDensityChange={setRailDensity}
+                          scrollRef={containerRef as RefObject<HTMLElement | null>}
+                          layout={marginLayout}
+                          anchoredComments={marginComments}
+                          allComments={comments}
+                          activeCommentId={activeCommentId}
+                          missingAnchors={missingAnchors}
+                          sentCommentIds={sentCommentIds}
+                          openCount={commentCount}
+                          onActivate={handleSidebarActivate}
+                          onReply={handleReply}
+                          onResolve={settings.enableResolve ? handleResolve : undefined}
+                          onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                          onDelete={handleDelete}
+                          onEdit={handleEdit}
+                          onEditReply={handleEditReply}
+                          onDeleteReply={handleDeleteReply}
+                          onBulkDelete={handleBulkDelete}
+                          onBulkResolve={handleBulkResolve}
+                          onBulkDeleteResolved={handleBulkDeleteResolved}
+                          onContextMenu={handleSidebarContextMenu}
+                          selectionText={selection?.text ?? null}
+                          selectionOffset={selection?.offset ?? null}
+                          onReanchorToSelection={handleReanchorToSelection}
+                        />
+                      )}
                     </div>
                   </div>
                   <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />

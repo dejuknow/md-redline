@@ -81,6 +81,13 @@ test.describe('Margin notes', () => {
     await expect(card).toHaveCount(1);
     await expect(card).toContainText('Margin note one');
 
+    // Closing the sidebar triggers a panel-width transition on the
+    // container; wait for the column width to settle before taking any
+    // position measurements below, or a card box captured mid-transition
+    // compared against a page/column box captured after it settles produces
+    // a bogus delta.
+    await stableColumnWidth(page);
+
     // Vertical alignment: card top within 24px of the anchor mark's top.
     const markBox = await page.locator('mark.comment-highlight').first().boundingBox();
     const cardBox = await card.boundingBox();
