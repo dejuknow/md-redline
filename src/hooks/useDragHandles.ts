@@ -62,8 +62,8 @@ export function isSvgTextMark(markEl: Element): boolean {
  * Handle positions are relative to `positionRoot`, the page sheet, because
  * that's the drag handle's actual CSS positioning ancestor (the page has
  * `position: relative` so the margin layer can anchor to it; the column
- * wrapper in between has none). The page scrolls together with its marks —
- * unlike the old scroll-container-relative calc, no scrollTop/scrollLeft
+ * wrapper in between has none). The page scrolls together with its marks,
+ * so unlike the old scroll-container-relative calc, no scrollTop/scrollLeft
  * term is needed here.
  */
 function computePositions(
