@@ -27,6 +27,7 @@ import { getEffectiveStatus } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import type { SidebarCommentFocusRequest } from './components/CommentListSurface';
+import { CommentPopover } from './components/CommentPopover';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
@@ -593,12 +594,55 @@ export default function App() {
     if (railShown) setDrawerOpen(false);
   }, [railShown]);
 
+  // The highlight popover is the single-thread comment surface for
+  // rail-hidden contexts: a click on a highlight, or a comment created while
+  // hidden, opens one thread inline instead of routing through the drawer.
+  const [popoverCommentId, setPopoverCommentId] = useState<string | null>(null);
+
+  // Creation while the rail is hidden (rendered view, form only exists
+  // there): open the popover on the new comment instead of leaving it with
+  // no focus surface. Skip while the drawer is open: the drawer's own
+  // focus-forwarding handles that case, so the popover doesn't open
+  // underneath the drawer overlay.
+  useEffect(() => {
+    if (!requestedCommentFocus) return;
+    if (
+      !drawerOpen &&
+      !railShown &&
+      viewMode === 'rendered' &&
+      !(diffEnabled && currentSnapshot)
+    ) {
+      setPopoverCommentId(requestedCommentFocus.commentId);
+      setRequestedCommentFocus(null);
+    }
+  }, [requestedCommentFocus, drawerOpen, railShown, viewMode, diffEnabled, currentSnapshot]);
+
+  // Close the popover once the rail can show its own surface, or when the
+  // file changes out from under it.
+  useEffect(() => {
+    if (railShown) setPopoverCommentId(null);
+  }, [railShown]);
+  useEffect(() => {
+    setPopoverCommentId(null);
+  }, [activeFilePath]);
+
   // In Anchored density the new comment's card is already at its anchor and
   // active; the List-surface focus dance does not apply. Consume the request.
   useEffect(() => {
     if (!requestedCommentFocus) return;
     if (railShown && railDensity === 'anchored') setRequestedCommentFocus(null);
   }, [requestedCommentFocus, railShown, railDensity]);
+
+  // Wraps the base highlight-click handler (which only sets activeCommentId)
+  // with the popover trigger: when the rail can't show, a click on a
+  // highlight opens the single-thread popover.
+  const handleHighlightClickWithPopover = useCallback(
+    (commentId: string) => {
+      handleHighlightClick(commentId);
+      if (!railShown) setPopoverCommentId(commentId);
+    },
+    [handleHighlightClick, railShown],
+  );
 
   // Resolved comments have no highlight marks and would render as fake
   // orphans in the margin; they live in the List surface instead.
@@ -2289,7 +2333,7 @@ export default function App() {
                                 activeCommentId={activeCommentId}
                                 selectionText={selection?.text ?? null}
                                 selectionOffset={selection?.offset ?? null}
-                                onHighlightClick={handleHighlightClick}
+                                onHighlightClick={handleHighlightClickWithPopover}
                                 // Fragment arg is intentionally ignored in v1; openTab
                                 // takes only the path. See spec §3 non-goals.
                                 onLocalLinkClick={openTab}
@@ -2312,7 +2356,7 @@ export default function App() {
                                 activeCommentId={activeCommentId}
                                 selectionText={selection?.text ?? null}
                                 selectionOffset={selection?.offset ?? null}
-                                onHighlightClick={handleHighlightClick}
+                                onHighlightClick={handleHighlightClickWithPopover}
                                 // Fragment arg is intentionally ignored in v1; openTab
                                 // takes only the path. See spec §3 non-goals.
                                 onLocalLinkClick={openTab}
@@ -2367,6 +2411,28 @@ export default function App() {
                           onFocusHandled={() => setRequestedCommentFocus(null)}
                         />
                       )}
+                      {popoverCommentId &&
+                        !railShown &&
+                        (() => {
+                          const c = comments.find((x) => x.id === popoverCommentId);
+                          if (!c) return null;
+                          return (
+                            <CommentPopover
+                              comment={c}
+                              pageRef={pageRef as RefObject<HTMLElement | null>}
+                              onClose={() => setPopoverCommentId(null)}
+                              sent={sentCommentIds.includes(c.id)}
+                              anchorMissing={missingAnchors.has(c.id)}
+                              onReply={handleReply}
+                              onResolve={settings.enableResolve ? handleResolve : undefined}
+                              onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                              onDelete={handleDelete}
+                              onEdit={handleEdit}
+                              onEditReply={handleEditReply}
+                              onDeleteReply={handleDeleteReply}
+                            />
+                          );
+                        })()}
                     </div>
                   </div>
                   <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />

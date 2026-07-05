@@ -108,6 +108,33 @@ export function CommentListSurface({
     });
   }, [requestedFocus, resolveEnabled, filter, search, onFocusHandled]);
 
+  // Activating a comment the current filter or search hides widens the view
+  // so its card is visible. Clicking a highlight means "show me this
+  // comment"; track the previous active id so this only fires on a genuine
+  // activation change, not when the user changes the filter while a comment
+  // happens to be active.
+  const prevActiveRef = useRef<string | null>(activeCommentId);
+  useEffect(() => {
+    if (prevActiveRef.current === activeCommentId) return;
+    prevActiveRef.current = activeCommentId;
+    if (!activeCommentId) return;
+    const c = comments.find((x) => x.id === activeCommentId);
+    if (!c) return;
+    const status = getEffectiveStatus(c);
+    const hiddenByFilter =
+      resolveEnabled &&
+      ((filter === 'open' && status !== 'open') || (filter === 'resolved' && status !== 'resolved'));
+    const q = search.toLowerCase();
+    const hiddenBySearch =
+      search !== '' &&
+      !c.text.toLowerCase().includes(q) &&
+      !c.anchor.toLowerCase().includes(q) &&
+      !c.author.toLowerCase().includes(q) &&
+      !(c.replies?.some((r) => r.text.toLowerCase().includes(q)) ?? false);
+    if (hiddenBySearch) setSearch('');
+    if (hiddenByFilter) setFilter(status === 'open' ? 'open' : 'all');
+  }, [activeCommentId, comments, filter, search, resolveEnabled]);
+
   useEffect(() => {
     if (requestedEditor) {
       setActiveEditor(requestedEditor);
