@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
@@ -123,5 +123,93 @@ test.describe('Comments FAB and drawer', () => {
 
     await page.keyboard.press(withMod('\\'));
     await expect(drawer).not.toBeVisible();
+  });
+});
+
+test.describe('Stranded focus requests route to the drawer', () => {
+  // Fixture lives under e2e/fixtures (not node_modules) so the
+  // review-sessions API's allowed-roots check passes in worktree checkouts;
+  // see the note at the top of agent-asks.spec.ts.
+  const ASK_FIXTURE_DIR = resolve(__dirname, 'fixtures', 'comments-drawer-asks-tmp');
+
+  test.afterAll(() => {
+    rmSync(ASK_FIXTURE_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  test('raw view: jump to agent question opens the drawer and focuses the card', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    mkdirSync(ASK_FIXTURE_DIR, { recursive: true });
+    const askDir = resolve(ASK_FIXTURE_DIR, `jump-${process.pid}-${Date.now()}`);
+    mkdirSync(askDir, { recursive: true });
+    const askFile = resolve(askDir, 'spec.md');
+    writeFileSync(askFile, '# Spec\n\nThe rate limit is 100 req/min today.\n', 'utf8');
+
+    const create = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [askFile], origin: 'agent' },
+    });
+    expect(create.status()).toBe(201);
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    try {
+      await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+      await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
+      await expect(page.getByRole('heading', { name: 'Spec' })).toBeVisible({ timeout: 10_000 });
+      // Let the SSE file-watcher connection establish before injecting the
+      // ask (same guard as agent-asks.spec.ts).
+      await page.waitForTimeout(500);
+
+      const ask = await request.post(
+        `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
+        {
+          data: {
+            questions: [
+              {
+                filePath: askFile,
+                anchor: 'rate limit is 100 req/min',
+                text: 'per-user or per-tenant?',
+              },
+            ],
+          },
+        },
+      );
+      expect(ask.status()).toBe(201);
+
+      // No comment surface is visible at this width, so the FAB appearing is
+      // the signal that the ask has landed as a parsed comment.
+      await expect(commentsFab(page)).toBeVisible({ timeout: 10_000 });
+
+      await switchToRaw(page);
+      await expect(commentsDrawer(page)).not.toBeVisible();
+
+      // Jump to the question from the command palette. In raw view the rail
+      // cannot exist and the popover cannot render, so the focus request has
+      // no surface until the fallback opens the drawer.
+      await page.keyboard.press(withMod('k'));
+      const paletteInput = page.getByPlaceholder('Type a command...');
+      await expect(paletteInput).toBeVisible({ timeout: 3_000 });
+      await paletteInput.fill('agent question');
+      await page.keyboard.press('Enter');
+
+      const drawer = commentsDrawer(page);
+      await expect(drawer).toBeVisible();
+      const card = drawer.locator('[data-comment-card-id]', {
+        hasText: 'per-user or per-tenant?',
+      });
+      await expect(card).toBeVisible();
+      await expect(card).toBeFocused();
+    } finally {
+      await request.post(`${baseURL}/api/review-sessions/${sessionId}/abort`, {
+        headers: { 'content-type': 'application/json' },
+      });
+      // The abort triggers an async rewrite of spec.md (clearing the
+      // pending-ask flag). Wait for that write to land before the afterAll
+      // removes the fixture tree, or the removal races the write.
+      await expect
+        .poll(() => readFileSync(askFile, 'utf8'), { timeout: 5_000 })
+        .not.toContain('"expectsReply":true');
+    }
   });
 });

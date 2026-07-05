@@ -617,6 +617,23 @@ export default function App() {
     }
   }, [requestedCommentFocus, drawerOpen, railShown, viewMode, diffEnabled, currentSnapshot]);
 
+  // Invariant: every focus request must reach a visible surface. The rail
+  // (either density), the open drawer, and the creation popover consume
+  // their own cases above and below; the remaining state is rail hidden,
+  // drawer closed, and no popover possible (raw view or diff mode), reached
+  // via jump-to-ask flows. Open the drawer and leave the request set: the
+  // drawer forwards it to the list surface once open, which consumes it.
+  useEffect(() => {
+    if (!requestedCommentFocus) return;
+    if (
+      !drawerOpen &&
+      !railShown &&
+      (viewMode !== 'rendered' || (diffEnabled && currentSnapshot))
+    ) {
+      setDrawerOpen(true);
+    }
+  }, [requestedCommentFocus, drawerOpen, railShown, viewMode, diffEnabled, currentSnapshot]);
+
   // Close the popover once the rail can show its own surface, or when the
   // file changes out from under it.
   useEffect(() => {
@@ -625,6 +642,14 @@ export default function App() {
   useEffect(() => {
     setPopoverCommentId(null);
   }, [activeFilePath]);
+  // A deleted comment (or one an agent rewrite removed) must not leave a
+  // stale id behind: if the same id ever reappeared (undo, rewrite), the
+  // popover would pop back open unprompted.
+  useEffect(() => {
+    setPopoverCommentId((prev) =>
+      prev !== null && !comments.some((c) => c.id === prev) ? null : prev,
+    );
+  }, [comments]);
 
   // In Anchored density the new comment's card is already at its anchor and
   // active; the List-surface focus dance does not apply. Consume the request.
