@@ -51,31 +51,38 @@ test.describe('Density strip', () => {
 
   test('clicking at the scrollbar edge does not trigger a tick jump', async ({ page }) => {
     await openFile(page, fixturePath);
-    await addComment(page, 'valid credentials', 'Comment 1');
+    await addComment(page, 'valid credentials', 'Edge click test');
 
-    // Verify one tick is present.
-    const ticks = page.locator('[data-density-strip] [data-tick-id]');
-    await expect(ticks).toHaveCount(1);
+    // Adding a comment leaves it active; re-open the file so nothing starts
+    // active and the no-jump assertion below is meaningful. Comments persist
+    // to disk, so the tick is still there.
+    await openFile(page, fixturePath);
 
-    // Get the tick's vertical position and ensure we click at a different vertical zone.
-    const tickBox = await ticks.first().boundingBox();
+    const tick = page.locator('[data-density-strip] [data-tick-id]');
+    await expect(tick).toHaveCount(1);
+    await expect(page.locator('mark.comment-highlight-active')).not.toBeVisible();
+
+    // True panel right edge: the scroll container hosting the page sheet.
+    // Not .prose, which is inset from the panel edge by sheet padding (and by
+    // the rail when it shows).
+    const panelRight = await page
+      .locator('[data-doc-page]')
+      .evaluate((el) => el.parentElement!.getBoundingClientRect().right);
+
+    // Click inside the scrollbar band (right of the lane at right: 14), at the
+    // tick's own vertical position: the strongest miss case. Before the lane
+    // inset, the strip hugged right: 0 and this exact point landed on the tick.
+    const tickBox = await tick.boundingBox();
     expect(tickBox).not.toBeNull();
-
-    // Click at the panel's right edge (scrollbar area, within 12px of the right border).
-    const prose = page.locator('.prose');
-    const proseBox = await prose.boundingBox();
-    expect(proseBox).not.toBeNull();
-
-    const panelRight = proseBox!.x + proseBox!.width;
-    const clickX = panelRight - 6; // Within 12px of the right border.
-    // Click at a vertical position away from the tick (bottom of the panel).
-    const clickY = proseBox!.y + proseBox!.height - 50;
-
-    // Click at the edge (scrollbar area).
+    const clickX = panelRight - 6;
+    const clickY = tickBox!.y + tickBox!.height / 2;
     await page.mouse.click(clickX, clickY);
 
-    // Verify the tick is still clickable (the edge click did not interfere).
-    await ticks.click();
+    // No tick fired: negation of the same signal the positive case uses.
+    await expect(page.locator('mark.comment-highlight-active')).not.toBeVisible();
+
+    // The tick itself is still clickable in its own lane.
+    await tick.click();
     await expect(page.locator('mark.comment-highlight-active')).toBeVisible();
   });
 });
