@@ -11,6 +11,7 @@ export const GAP = 56;
 export const RAIL = 280;
 export const PAD_R = 24;
 export const RAIL_FOOTPRINT = GAP + RAIL + PAD_R; // 360
+export const CANVAS_GUTTER = 24;
 
 export interface PageGeometry {
   /** The rail fits by width alone (>= 888px content width). */

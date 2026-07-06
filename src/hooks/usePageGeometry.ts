@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { pageGeometry, type PageGeometry } from '../lib/page-geometry';
+import { pageGeometry, type PageGeometry, CANVAS_GUTTER } from '../lib/page-geometry';
 
 /**
  * Observes the scroll container's content width and derives the page
  * geometry. `enabled` gates observation (rendered view only); `railAllowed`
  * carries the non-geometry rail conditions (visibility toggle, diff, focus).
+ * Accounts for the canvas gutter in the available width so max-width constraints
+ * on the page element never clip the rail gap.
  */
 export function usePageGeometry(
   containerRef: React.RefObject<HTMLElement | null>,
@@ -23,7 +25,7 @@ export function usePageGeometry(
     const measure = () => {
       const cs = getComputedStyle(container);
       const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-      setContentWidth(container.clientWidth - pad);
+      setContentWidth(Math.max(container.clientWidth - pad - CANVAS_GUTTER, 0));
     };
     const ro = new ResizeObserver(measure);
     ro.observe(container);
