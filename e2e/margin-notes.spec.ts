@@ -141,11 +141,11 @@ test.describe('Margin notes', () => {
     await addComment(page, 'valid credentials', 'Margin note four');
     await expect(page.locator('[data-margin-notes]')).toBeVisible();
 
-    await page.setViewportSize({ width: 1240, height: 900 });
+    await page.setViewportSize({ width: 1290, height: 900 });
     await expect(page.locator('[data-margin-notes]')).toBeVisible();
     const colWide = await stableColumnWidth(page);
 
-    await page.setViewportSize({ width: 1120, height: 900 });
+    await page.setViewportSize({ width: 1170, height: 900 });
     await expect(page.locator('[data-margin-notes]')).toBeVisible();
     const colNarrow = await stableColumnWidth(page);
 
