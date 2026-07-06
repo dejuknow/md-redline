@@ -594,6 +594,37 @@ export default function App() {
     if (railShown) setDrawerOpen(false);
   }, [railShown]);
 
+  // Guarantees a comment surface is open for callers that need one to exist
+  // right now (the viewer context menu's Edit/Reply/Jump to Sidebar actions
+  // set an activeCommentId or requestedEditor that only a mounted surface
+  // consumes). Bare setSidebarVisible(true) is not enough: at a narrow width
+  // the rail cannot render at all regardless of sidebarVisible, so the
+  // request would strand until some later surface mount fired it
+  // unprompted. Mirrors the rail-can-show predicate the drawer fallback and
+  // the Cmd+\ shortcut already use.
+  const ensureCommentSurface = useCallback(() => {
+    if (viewMode === 'rendered' && !(diffEnabled && currentSnapshot) && geometry.railFits) {
+      setSidebarVisibleGuarded(true);
+    } else {
+      setDrawerOpen(true);
+    }
+  }, [viewMode, diffEnabled, currentSnapshot, geometry.railFits, setSidebarVisibleGuarded]);
+
+  // Shared decision behind both comment-surface toggles: the Cmd+\ shortcut
+  // and the command palette's "Toggle comments rail" command. Toggle the
+  // rail where it can show; otherwise fall back to the comments drawer,
+  // since that is the only comment surface left at a width the rail can't
+  // fit. Defined once so the two triggers cannot diverge (a bug found in
+  // review: the palette command used to call toggleSidebarPane() directly
+  // and skip the drawer fallback entirely).
+  const toggleCommentsSurface = useCallback(() => {
+    if (viewMode !== 'rendered' || (diffEnabled && currentSnapshot) || !geometry.railFits) {
+      setDrawerOpen((p) => !p);
+    } else {
+      toggleSidebarPane();
+    }
+  }, [viewMode, diffEnabled, currentSnapshot, geometry.railFits, toggleSidebarPane]);
+
   // The highlight popover is the single-thread comment surface for
   // rail-hidden contexts: a click on a highlight, or a comment created while
   // hidden, opens one thread inline instead of routing through the drawer.
@@ -651,12 +682,24 @@ export default function App() {
     );
   }, [comments]);
 
-  // In Anchored density the new comment's card is already at its anchor and
-  // active; the List-surface focus dance does not apply. Consume the request.
+  // In Anchored density the card for a newly created comment is already at
+  // its anchor and active, so the List-surface focus dance does not apply
+  // there. But the same request shape also carries jump-to-ask (the review
+  // banner's View button, the palette's "Jump to agent question" command):
+  // that comment's card may be elsewhere in the rail and not active yet, so
+  // it still needs an explicit activate to scroll the document to its
+  // anchor. Skip the call when it is already the active comment (the
+  // creation case) since handleSidebarActivate would just re-run
+  // scrollToComment for no reason.
   useEffect(() => {
     if (!requestedCommentFocus) return;
-    if (railShown && railDensity === 'anchored') setRequestedCommentFocus(null);
-  }, [requestedCommentFocus, railShown, railDensity]);
+    if (railShown && railDensity === 'anchored') {
+      if (requestedCommentFocus.commentId !== activeCommentId) {
+        handleSidebarActivate(requestedCommentFocus.commentId);
+      }
+      setRequestedCommentFocus(null);
+    }
+  }, [requestedCommentFocus, railShown, railDensity, activeCommentId, handleSidebarActivate]);
 
   // Wraps the base highlight-click handler (which only sets activeCommentId)
   // with the popover trigger: when the rail can't show, a click on a
@@ -1451,7 +1494,7 @@ export default function App() {
     handleDelete,
     handleAddComment,
     setActiveCommentId,
-    setSidebarVisible: setSidebarVisibleGuarded,
+    ensureCommentSurface,
     selectionRef,
     lockSelection,
     setAutoExpandForm,
@@ -1543,11 +1586,7 @@ export default function App() {
       // the comments drawer, since that is the only comment surface left.
       if (mod && e.key === '\\') {
         e.preventDefault();
-        if (viewMode !== 'rendered' || (diffEnabled && currentSnapshot) || !geometry.railFits) {
-          setDrawerOpen((p) => !p);
-        } else {
-          toggleSidebarPane();
-        }
+        toggleCommentsSurface();
         return;
       }
 
@@ -1690,11 +1729,8 @@ export default function App() {
     setActiveModal,
     setSearchFocusTrigger,
     toggleExplorerPane,
-    toggleSidebarPane,
+    toggleCommentsSurface,
     toggleFocusMode,
-    diffEnabled,
-    currentSnapshot,
-    geometry.railFits,
   ]);
 
   useEffect(() => {
@@ -1769,7 +1805,7 @@ export default function App() {
         label: 'Toggle comments rail',
         shortcut: `${modKey}+\\`,
         section: 'View',
-        onExecute: () => toggleSidebarPane(),
+        onExecute: () => toggleCommentsSurface(),
       },
       {
         id: 'toggle-focus-mode',
@@ -1859,7 +1895,7 @@ export default function App() {
     handleOpenMermaidFullscreen,
     toggleFocusMode,
     toggleExplorerPane,
-    toggleSidebarPane,
+    toggleCommentsSurface,
   ]);
 
   const fileCommands = useMemo((): Command[] => {

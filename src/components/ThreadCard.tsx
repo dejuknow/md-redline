@@ -39,8 +39,10 @@ export interface ThreadCardProps {
  * Renders a single comment thread (anchor, body, replies, reply composer) using CommentCard.
  *
  * When `editor` is undefined, ThreadCard manages its own editor state internally.
- * This is the case for MermaidThreadPanel. CommentSidebar passes an external editor
- * to maintain its shared-editor-state behaviour across all cards.
+ * This is the case for MermaidThreadPanel and CommentPopover (each renders a
+ * single card with no cross-card editor conflict to arbitrate). CommentListSurface
+ * and CommentsRail (Anchored density's margin cards) each pass an external editor
+ * to maintain their own shared-editor-state behaviour across all cards.
  */
 export function ThreadCard({
   thread,

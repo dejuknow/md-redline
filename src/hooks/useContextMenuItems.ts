@@ -33,7 +33,15 @@ export interface UseContextMenuItemsParams {
     hintOffset?: number,
   ) => void;
   setActiveCommentId: Dispatch<SetStateAction<string | null>>;
-  setSidebarVisible: (v: boolean | ((prev: boolean) => boolean)) => void;
+  /**
+   * Opens whichever comment surface can currently show one (the rail when it
+   * fits, otherwise the comments drawer). Edit/Reply/Jump to Sidebar all set
+   * activeCommentId and/or a requestedEditor that only a mounted surface
+   * consumes; at a narrow width the rail cannot render regardless of
+   * sidebarVisible, so bare `setSidebarVisible(true)` would strand the
+   * request until some later surface mount fired it unprompted.
+   */
+  ensureCommentSurface: () => void;
   selectionRef: RefObject<SelectionInfo | null>;
   lockSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
@@ -68,7 +76,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     handleDelete,
     handleAddComment,
     setActiveCommentId,
-    setSidebarVisible,
+    ensureCommentSurface,
     selectionRef,
     lockSelection,
     setAutoExpandForm,
@@ -123,7 +131,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
             label: 'Edit',
             onClick: () => {
               setActiveCommentId(commentId);
-              setSidebarVisible(true);
+              ensureCommentSurface();
               triggerEdit(commentId);
             },
           },
@@ -131,7 +139,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
             label: 'Reply',
             onClick: () => {
               setActiveCommentId(commentId);
-              setSidebarVisible(true);
+              ensureCommentSurface();
               triggerReply(commentId);
             },
           },
@@ -155,7 +163,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
             label: 'Jump to Sidebar',
             onClick: () => {
               setActiveCommentId(commentId);
-              setSidebarVisible(true);
+              ensureCommentSurface();
             },
           },
         ];
@@ -207,7 +215,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       handleDelete,
       handleAddComment,
       lockSelection,
-      setSidebarVisible,
+      ensureCommentSurface,
       triggerEdit,
       triggerReply,
       selectionRef,

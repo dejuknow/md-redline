@@ -17,9 +17,9 @@ export interface MermaidThreadPanelProps {
 /**
  * Comment panel for the Mermaid fullscreen modal. Visual chrome (surface
  * background, border, header layout, comments-icon glyph) mirrors
- * `CommentSidebar` so the two views feel like the same product. The modal
- * owns the resize handle + width animation; this component just renders the
- * inner column.
+ * `CommentListSurface` so the two views feel like the same product. The
+ * modal owns the resize handle + width animation; this component just
+ * renders the inner column.
  */
 export function MermaidThreadPanel(props: MermaidThreadPanelProps) {
   const empty = props.threads.length === 0;

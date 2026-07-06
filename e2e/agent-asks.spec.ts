@@ -325,4 +325,62 @@ test.describe('Agent asks', () => {
     // or as a regular orphaned card — either way it stays in the sidebar).
     await expect(page.locator('[data-comment-card-id]')).toHaveCount(1, { timeout: 5_000 });
   });
+
+  test('jump-to-ask activates the comment and scrolls to its anchor in Anchored density', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    fixtureDir = makeFixtureDir('jump-anchored');
+    const file = resolve(fixtureDir, 'spec.md');
+    // A wide viewport (see WIDE_VIEWPORT convention in comments-drawer.spec.ts)
+    // guarantees the rail fits and renders in its default Anchored density.
+    // A tall document with filler ahead of the anchor keeps the ask off
+    // screen at load, so a real scroll is required to bring it into view.
+    const filler = Array.from(
+      { length: 40 },
+      (_, i) => `Filler paragraph ${i} padding out the document so the anchor below starts off screen.`,
+    ).join('\n\n');
+    writeFileSync(file, `# Spec\n\n${filler}\n\nThe rate limit is 100 req/min today.\n`, 'utf8');
+    await page.setViewportSize({ width: 1700, height: 950 });
+
+    const create = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [file], origin: 'agent' },
+    });
+    expect(create.status()).toBe(201);
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+    await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('heading', { name: 'Spec' })).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(500);
+
+    const ask = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        questions: [
+          { filePath: file, anchor: 'rate limit is 100 req/min', text: 'per-user or per-tenant?' },
+        ],
+      },
+    });
+    expect(ask.status()).toBe(201);
+
+    // The rail is showing (Anchored density is the default), so the ask lands
+    // as a margin card rather than a drawer/list row.
+    const marginCard = page.locator('[data-margin-card-id]', { hasText: 'per-user or per-tenant?' });
+    await expect(marginCard).toBeVisible({ timeout: 10_000 });
+
+    // Before the jump: the ask was never activated, so its card isn't marked
+    // active and its anchor (far down the tall document) isn't in view.
+    await expect(marginCard).not.toHaveClass(/border-primary-border/);
+    await expect(page.locator('mark.comment-highlight-active')).toHaveCount(0);
+
+    // Trigger the jump via the review banner's pending-ask chip (handleJumpToAsk).
+    await page.getByRole('button', { name: /jump to the first question/i }).click();
+
+    // The document scrolled to the ask's anchor and the margin card activated.
+    const activeMark = page.locator('mark.comment-highlight-active');
+    await expect(activeMark.first()).toBeVisible();
+    await expect(activeMark.first()).toBeInViewport();
+    await expect(marginCard).toHaveClass(/border-primary-border/);
+  });
 });
