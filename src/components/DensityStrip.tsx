@@ -19,7 +19,16 @@ interface Props {
 export function DensityStrip({ ticks, onJump }: Props) {
   if (ticks.length === 0) return null;
   return (
-    <div data-density-strip className="absolute inset-y-0 right-0 w-2 z-10 pointer-events-none">
+    <div
+      data-density-strip
+      className="absolute inset-y-0 z-10 pointer-events-none"
+      style={{ right: 14, width: 10 }}
+    >
+      <div
+        aria-hidden
+        className="absolute inset-y-2 left-1/2 -translate-x-1/2 w-[3px] rounded-full"
+        style={{ background: 'var(--theme-border-subtle)', opacity: 0.4 }}
+      />
       {ticks.map((t) => {
         const topPct = (t.y01 * 100).toFixed(3);
         return (

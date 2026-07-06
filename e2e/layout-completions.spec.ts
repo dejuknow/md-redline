@@ -48,6 +48,36 @@ test.describe('Density strip', () => {
     await tick.click();
     await expect(page.locator('mark.comment-highlight-active')).toBeVisible();
   });
+
+  test('clicking at the scrollbar edge does not trigger a tick jump', async ({ page }) => {
+    await openFile(page, fixturePath);
+    await addComment(page, 'valid credentials', 'Comment 1');
+
+    // Verify one tick is present.
+    const ticks = page.locator('[data-density-strip] [data-tick-id]');
+    await expect(ticks).toHaveCount(1);
+
+    // Get the tick's vertical position and ensure we click at a different vertical zone.
+    const tickBox = await ticks.first().boundingBox();
+    expect(tickBox).not.toBeNull();
+
+    // Click at the panel's right edge (scrollbar area, within 12px of the right border).
+    const prose = page.locator('.prose');
+    const proseBox = await prose.boundingBox();
+    expect(proseBox).not.toBeNull();
+
+    const panelRight = proseBox!.x + proseBox!.width;
+    const clickX = panelRight - 6; // Within 12px of the right border.
+    // Click at a vertical position away from the tick (bottom of the panel).
+    const clickY = proseBox!.y + proseBox!.height - 50;
+
+    // Click at the edge (scrollbar area).
+    await page.mouse.click(clickX, clickY);
+
+    // Verify the tick is still clickable (the edge click did not interfere).
+    await ticks.click();
+    await expect(page.locator('mark.comment-highlight-active')).toBeVisible();
+  });
 });
 
 test.describe('Section breadcrumb', () => {
