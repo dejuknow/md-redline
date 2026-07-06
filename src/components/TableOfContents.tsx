@@ -26,7 +26,10 @@ export function TableOfContents({ headings, activeHeadingId, onHeadingClick }: P
 
   if (headings.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-content-muted px-4">
+      <div
+        data-toc-panel
+        className="flex-1 flex flex-col items-center justify-center text-content-muted px-4"
+      >
         <svg
           className="w-8 h-8 mb-2 opacity-40"
           fill="none"
@@ -46,7 +49,7 @@ export function TableOfContents({ headings, activeHeadingId, onHeadingClick }: P
   }
 
   return (
-    <div className="flex-1 overflow-y-auto py-1">
+    <div data-toc-panel className="flex-1 overflow-y-auto py-1">
       {headings.map((h) => {
         const isActive = h.id === activeHeadingId;
         return (

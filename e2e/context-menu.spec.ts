@@ -185,18 +185,18 @@ test.describe('Context menu on tab', () => {
   });
 });
 
-test.describe('Context menu on sidebar comment', () => {
-  test('right-clicking a comment card shows sidebar context menu', async ({ page }) => {
+test.describe('Context menu on a rail comment card', () => {
+  test('right-clicking a comment card shows the context menu', async ({ page }) => {
     await openFixture(page);
 
-    // Close the explorer to give sidebar more room
+    // Close the explorer to give the rail more room
     await page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`).click();
     await page.waitForTimeout(300);
 
-    await addComment(page, 'valid credentials', 'Sidebar ctx test');
+    await addComment(page, 'valid credentials', 'Rail ctx test');
 
     // Use coordinates-based right-click for reliability
-    const card = getCard(page, 'Sidebar ctx test');
+    const card = getCard(page, 'Rail ctx test');
     await expect(card).toBeVisible();
     const box = await card.boundingBox();
     expect(box).not.toBeNull();

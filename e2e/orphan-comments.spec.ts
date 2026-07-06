@@ -95,9 +95,21 @@ async function addComment(page: Page, anchor: string, text: string) {
   await expect(page.getByText(text, { exact: true })).toBeVisible();
 }
 
+/**
+ * The "Needs re-anchoring" divider and the "Was anchored here" / "Re-anchor
+ * to selection" context UI only render on CommentListSurface (List density
+ * or the drawer); the default Anchored density's margin cards just show a
+ * compact "Changed" badge with no context. Switch density before orphan
+ * assertions so they target a surface where that UI actually exists.
+ */
+async function switchToListDensity(page: Page) {
+  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+}
+
 test('comment whose anchor disappears moves into Needs re-anchoring section', async ({ page }) => {
   await openFixture(page);
   await addComment(page, 'original anchor phrase', 'note about phrase');
+  await switchToListDensity(page);
 
   // Wait for the addComment save to land on disk before doing the external
   // rewrite, so readFileSync picks up the version that has the comment marker.
@@ -126,6 +138,7 @@ test('comment whose anchor disappears moves into Needs re-anchoring section', as
 test('Re-anchor to selection binds the orphan comment to new text', async ({ page }) => {
   await openFixture(page);
   await addComment(page, 'original anchor phrase', 'note about phrase');
+  await switchToListDensity(page);
 
   // Wait for the addComment save to land on disk before doing the external
   // rewrite, so readFileSync picks up the version that has the comment marker.
@@ -170,6 +183,7 @@ First landing spot sits here. Second landing spot sits farther down for selectio
 
   await openFixture(page);
   await addComment(page, 'original anchor phrase', 'note about phrase');
+  await switchToListDensity(page);
 
   await expect
     .poll(() => readFileSync(fixturePath, 'utf8'), { timeout: 3000 })

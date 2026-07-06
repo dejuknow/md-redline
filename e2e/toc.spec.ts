@@ -43,6 +43,16 @@ async function ensureLeftPanelOpen(page: Page) {
   }
 }
 
+/**
+ * A TOC entry's button carries the same `title` as its matching
+ * SectionBreadcrumb segment once the breadcrumb is showing, so an unscoped
+ * `button[title="..."]` locator is ambiguous. Scope to the TOC panel
+ * (`data-toc-panel`) to target the outline entry specifically.
+ */
+function tocHeading(page: Page, title: string) {
+  return page.locator(`[data-toc-panel] button[title="${title}"]`);
+}
+
 // ---------------------------------------------------------------------------
 // TOC outline tests
 // ---------------------------------------------------------------------------
@@ -53,10 +63,10 @@ test.describe('Table of Contents', () => {
     await ensureLeftPanelOpen(page);
     await switchToOutline(page);
 
-    await expect(page.locator('button[title="Project Specification"]')).toBeVisible();
-    await expect(page.locator('button[title="Introduction"]')).toBeVisible();
-    await expect(page.locator('button[title="Requirements"]')).toBeVisible();
-    await expect(page.locator('button[title="Conclusion"]')).toBeVisible();
+    await expect(tocHeading(page, 'Project Specification')).toBeVisible();
+    await expect(tocHeading(page, 'Introduction')).toBeVisible();
+    await expect(tocHeading(page, 'Requirements')).toBeVisible();
+    await expect(tocHeading(page, 'Conclusion')).toBeVisible();
   });
 
   test('clicking a heading scrolls the content to that section', async ({ page }) => {
@@ -71,7 +81,7 @@ test.describe('Table of Contents', () => {
     });
 
     // Click a heading that's below the fold
-    await page.locator('button[title="Conclusion"]').click();
+    await tocHeading(page, 'Conclusion').click();
 
     // Wait for smooth scroll to complete
     await page.waitForTimeout(600);
@@ -95,7 +105,7 @@ test.describe('Table of Contents', () => {
       return scrollEl ? scrollEl.scrollTop : 0;
     });
 
-    await page.locator('button[title="Conclusion"]').click();
+    await tocHeading(page, 'Conclusion').click();
     await page.waitForTimeout(600);
 
     const scrollAfter = await page.evaluate(() => {
@@ -116,12 +126,12 @@ test.describe('Table of Contents', () => {
 
     // Switch to Outline
     await switchToOutline(page);
-    await expect(page.locator('button[title="Project Specification"]')).toBeVisible();
+    await expect(tocHeading(page, 'Project Specification')).toBeVisible();
 
     // Switch back to Explorer
     await page.locator('button[title="File explorer"]').click();
     // Outline headings should no longer be visible
-    await expect(page.locator('button[title="Project Specification"]')).not.toBeVisible();
+    await expect(tocHeading(page, 'Project Specification')).not.toBeVisible();
   });
 
   test('duplicate headings get unique IDs', async ({ page }) => {
@@ -155,12 +165,12 @@ test.describe('Table of Contents', () => {
     // Cmd+Shift+O should open panel with outline
     await page.keyboard.press(withMod('Shift+o'));
     await page.waitForTimeout(300);
-    await expect(page.locator('button[title="Project Specification"]')).toBeVisible();
+    await expect(tocHeading(page, 'Project Specification')).toBeVisible();
 
     // Cmd+Shift+O again should close the panel
     await page.keyboard.press(withMod('Shift+o'));
     await page.waitForTimeout(300);
-    await expect(page.locator('button[title="Project Specification"]')).not.toBeVisible();
+    await expect(tocHeading(page, 'Project Specification')).not.toBeVisible();
   });
 
   test('command palette lists headings', async ({ page }) => {
@@ -186,7 +196,7 @@ test.describe('Table of Contents', () => {
     await switchToOutline(page);
 
     // Initially scrolled to the top — first heading should be active
-    const firstHeading = page.locator('button[title="Project Specification"]');
+    const firstHeading = tocHeading(page, 'Project Specification');
     await expect(firstHeading).toHaveClass(/bg-primary-bg/);
 
     // Programmatically scroll to "Implementation" heading (instant, no smooth animation)
@@ -213,16 +223,16 @@ test.describe('Table of Contents', () => {
     await switchToOutline(page);
 
     // Click "Conclusion" (the last heading — furthest scroll distance)
-    await page.locator('button[title="Conclusion"]').click();
+    await tocHeading(page, 'Conclusion').click();
 
     // Should be active immediately (state is set synchronously in the click handler)
-    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+    await expect(tocHeading(page, 'Conclusion')).toHaveClass(/bg-primary-bg/);
 
     // Wait longer than the smooth scroll animation to confirm the spy
     // doesn't override the clicked heading after the animation finishes
     await page.waitForTimeout(800);
-    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
-    await expect(page.locator('button[title="Project Specification"]')).not.toHaveClass(
+    await expect(tocHeading(page, 'Conclusion')).toHaveClass(/bg-primary-bg/);
+    await expect(tocHeading(page, 'Project Specification')).not.toHaveClass(
       /bg-primary-bg/,
     );
   });
@@ -233,16 +243,16 @@ test.describe('Table of Contents', () => {
     await switchToOutline(page);
 
     // First click a mid-document heading
-    await page.locator('button[title="Requirements"]').click();
-    await expect(page.locator('button[title="Requirements"]')).toHaveClass(/bg-primary-bg/);
+    await tocHeading(page, 'Requirements').click();
+    await expect(tocHeading(page, 'Requirements')).toHaveClass(/bg-primary-bg/);
     await page.waitForTimeout(800);
 
     // Now click a different heading — it should become active and stay active
-    await page.locator('button[title="Conclusion"]').click();
-    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
-    await expect(page.locator('button[title="Requirements"]')).not.toHaveClass(/bg-primary-bg/);
+    await tocHeading(page, 'Conclusion').click();
+    await expect(tocHeading(page, 'Conclusion')).toHaveClass(/bg-primary-bg/);
+    await expect(tocHeading(page, 'Requirements')).not.toHaveClass(/bg-primary-bg/);
     await page.waitForTimeout(800);
-    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+    await expect(tocHeading(page, 'Conclusion')).toHaveClass(/bg-primary-bg/);
   });
 
   test('manual wheel scroll re-enables the spy after a heading click', async ({ page }) => {
@@ -251,10 +261,10 @@ test.describe('Table of Contents', () => {
     await switchToOutline(page);
 
     // Click "Conclusion" to lock the spy to it
-    await page.locator('button[title="Conclusion"]').click();
+    await tocHeading(page, 'Conclusion').click();
     await page.waitForTimeout(800); // wait for smooth scroll
 
-    await expect(page.locator('button[title="Conclusion"]')).toHaveClass(/bg-primary-bg/);
+    await expect(tocHeading(page, 'Conclusion')).toHaveClass(/bg-primary-bg/);
 
     // Dispatch a wheel event to re-enable the spy, then scroll to the top
     // (wheel fires onManualScroll → spyDisabledRef = false;
@@ -270,10 +280,10 @@ test.describe('Table of Contents', () => {
     await page.waitForTimeout(200);
 
     // The first heading should now be active (spy is tracking scroll position again)
-    await expect(page.locator('button[title="Project Specification"]')).toHaveClass(
+    await expect(tocHeading(page, 'Project Specification')).toHaveClass(
       /bg-primary-bg/,
     );
-    await expect(page.locator('button[title="Conclusion"]')).not.toHaveClass(/bg-primary-bg/);
+    await expect(tocHeading(page, 'Conclusion')).not.toHaveClass(/bg-primary-bg/);
   });
 
   test('outline shows empty state when no headings', async ({ page }) => {
@@ -296,9 +306,9 @@ test.describe('Table of Contents', () => {
     await switchToOutline(page);
 
     // h1 should have less padding than h2, which should have less than h3
-    const h1Btn = page.locator('button[title="Project Specification"]');
-    const h2Btn = page.locator('button[title="Introduction"]');
-    const h3Btn = page.locator('button[title="Technical Constraints"]');
+    const h1Btn = tocHeading(page, 'Project Specification');
+    const h2Btn = tocHeading(page, 'Introduction');
+    const h3Btn = tocHeading(page, 'Technical Constraints');
 
     const h1Classes = (await h1Btn.getAttribute('class')) ?? '';
     const h2Classes = (await h2Btn.getAttribute('class')) ?? '';
