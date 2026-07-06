@@ -60,3 +60,13 @@ export async function openCommentsDrawer(page: Page) {
   await commentsFab(page).click();
   await expect(commentsDrawer(page)).toBeVisible();
 }
+
+/**
+ * The default Anchored density renders inactive cards compact (anchor text,
+ * comment preview, reply count only); full reply text and bulk/search chrome
+ * live on the List density's CommentListSurface instead. Switch density for
+ * assertions that need to see reply bodies or that surface's controls.
+ */
+export async function switchToListDensity(page: Page) {
+  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+}

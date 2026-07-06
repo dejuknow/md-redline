@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { addComment } from './helpers/comments';
+import { addComment, switchToListDensity } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -179,6 +179,9 @@ test.describe('File watcher - external changes', () => {
 
   test('agent-style reply without a timestamp gets backfilled and persisted', async ({ page }) => {
     await openFixture(page);
+    // Reply text only renders in full on the List density; the default
+    // Anchored density collapses an inactive card's replies to a count.
+    await switchToListDensity(page);
 
     // Wait for SSE connection to establish
     await page.waitForTimeout(1500);
@@ -280,6 +283,7 @@ test.describe('File watcher - external changes', () => {
     );
 
     await openFixture(page);
+    await switchToListDensity(page);
 
     // The reply should render with author but WITHOUT "Invalid Date".
     await expect(page.getByText('Yes, "active" is more precise.')).toBeVisible({
@@ -297,6 +301,7 @@ test.describe('File watcher - external changes', () => {
     // post-backfill mtime, so the next user save sent a stale expectedMtime
     // and 409'd with "File was modified externally."
     await openFixture(page);
+    await switchToListDensity(page);
     await page.waitForTimeout(1500);
 
     const withReply = FIXTURE_ORIGINAL.replace(
