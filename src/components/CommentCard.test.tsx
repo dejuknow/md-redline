@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 
 // Mock preferences-client so SettingsContext doesn't hit the network
@@ -42,7 +42,14 @@ const baseComment: MdComment = {
   agentInitiated: true,
 };
 
-function renderCard(props: Partial<Parameters<typeof CommentCard>[0]> = {}) {
+function renderCard(
+  props: Partial<Parameters<typeof CommentCard>[0]> = {},
+  mockSettings?: Record<string, unknown>,
+) {
+  fetchPreferences.mockReset();
+  fetchPreferences.mockResolvedValue({
+    settings: mockSettings || {},
+  });
   const defaults: Parameters<typeof CommentCard>[0] = {
     comment: baseComment,
     isActive: false,
@@ -151,5 +158,30 @@ describe('CommentCard: compact mode', () => {
     renderCard({ comment: withReplies });
     expect(await screen.findByText('First reply')).toBeTruthy();
     expect(screen.queryByText('1 reply')).toBeNull();
+  });
+});
+
+describe('status pill and resolve action', () => {
+  it('renders the open pill in the amber anchor tint', async () => {
+    renderCard({}, { enableResolve: true });
+    const pill = await waitFor(() => screen.getByText('Open'));
+    expect(pill.className).toContain('bg-comment-anchor-bg');
+    expect(pill.className).not.toContain('status-open');
+  });
+
+  it('renders the resolved pill neutral', async () => {
+    const resolvedComment: MdComment = {
+      ...baseComment,
+      status: 'resolved',
+    };
+    renderCard({ comment: resolvedComment }, { enableResolve: true });
+    const pill = await waitFor(() => screen.getByText('Resolved'));
+    expect(pill.className).toContain('bg-surface-inset');
+  });
+
+  it('Resolve is a primary (crimson) action', async () => {
+    renderCard({ isActive: true, onResolve: vi.fn() }, { enableResolve: true });
+    const btn = await waitFor(() => screen.getByRole('button', { name: 'Resolve' }));
+    expect(btn.className).toContain('text-primary-text');
   });
 });

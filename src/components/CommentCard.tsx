@@ -44,8 +44,8 @@ interface Props {
 }
 
 const STATUS_CONFIG: Record<CommentStatus, { label: string; className: string }> = {
-  open: { label: 'Open', className: 'bg-status-open-bg text-status-open-text' },
-  resolved: { label: 'Resolved', className: 'bg-status-resolved-bg text-status-resolved-text' },
+  open: { label: 'Open', className: 'bg-comment-anchor-bg text-comment-anchor-text' },
+  resolved: { label: 'Resolved', className: 'bg-surface-inset text-content-secondary' },
 };
 
 export const CommentCard = memo(function CommentCard({
@@ -387,7 +387,7 @@ export const CommentCard = memo(function CommentCard({
                 )
               : onResolve && (
                   <ActionButton
-                    intent="success"
+                    intent="primary"
                     onClick={(e) => {
                       e.stopPropagation();
                       onResolve(comment.id);
