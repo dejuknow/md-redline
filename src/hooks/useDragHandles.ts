@@ -173,9 +173,14 @@ export function useDragHandles({
     };
     scrollContainer.addEventListener('scroll', handler, { passive: true });
     window.addEventListener('resize', handler);
+    // Pane toggles and the page's width transitions resize the container
+    // without a window resize; reposition on those too.
+    const ro = new ResizeObserver(handler);
+    ro.observe(scrollContainer);
     return () => {
       scrollContainer.removeEventListener('scroll', handler);
       window.removeEventListener('resize', handler);
+      ro.disconnect();
     };
   }, [activeCommentId, scrollContainerRef, updatePositions]);
 

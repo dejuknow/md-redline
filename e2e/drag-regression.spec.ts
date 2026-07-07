@@ -14,6 +14,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { FORMATTED_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/formatted-doc.md');
@@ -120,7 +121,7 @@ test.describe('Drag start handle backwards - regression', () => {
     await expect(highlights.first()).toBeVisible({ timeout: 5000 });
 
     // The anchor should have expanded
-    const anchorPreview = card.locator('.font-mono').first();
+    const anchorPreview = card.locator('[data-anchor-quote]').first();
     const anchorText = await anchorPreview.textContent();
     const cleanAnchor = anchorText?.replace(/["\u201C\u201D]/g, '').trim() ?? '';
     expect(cleanAnchor.length).toBeGreaterThan('followed by regular text'.length);
@@ -191,5 +192,47 @@ test.describe('Drag start handle backwards - regression', () => {
 
     const highlights = page.locator('mark.comment-highlight');
     await expect(highlights.first()).toBeVisible({ timeout: 5000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: handles must reposition when the scroll container resizes
+// without a window resize event (pane toggle, page width transition)
+// ---------------------------------------------------------------------------
+
+test.describe('Drag handles reposition on container resize', () => {
+  test('handles stay aligned with the mark after toggling the explorer pane', async ({
+    page,
+  }) => {
+    await openFixture(page);
+
+    await addComment(page, 'followed by regular text', 'Resize reposition test');
+
+    const card = getCard(page, 'Resize reposition test');
+    await card.click();
+    await expect(page.locator('[data-drag-handle]')).toHaveCount(2);
+
+    // Toggle the file explorer pane (no window resize fires). This resizes
+    // the scroll container directly, and the page sheet itself has its own
+    // motion-safe width transition (150ms) layered on top of the pane's
+    // width transition (200ms). Wait past both, plus a frame, before
+    // asserting the handles caught up.
+    await page.keyboard.press(withMod('b'));
+    await page.waitForTimeout(400);
+
+    const mark = page.locator('mark.comment-highlight-active').first();
+    const markBox = await mark.boundingBox();
+    expect(markBox).not.toBeNull();
+
+    const handles = page.locator('[data-drag-handle]');
+    const startBox = await handles.first().boundingBox();
+    const endBox = await handles.last().boundingBox();
+    expect(startBox).not.toBeNull();
+    expect(endBox).not.toBeNull();
+
+    // Start handle sits at the mark's left edge; end handle at its right
+    // edge (both offset by a couple px for the handle's own width/inset).
+    expect(Math.abs(startBox!.x - markBox!.x)).toBeLessThanOrEqual(8);
+    expect(Math.abs(endBox!.x - (markBox!.x + markBox!.width))).toBeLessThanOrEqual(8);
   });
 });
