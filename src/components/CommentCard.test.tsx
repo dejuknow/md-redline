@@ -104,6 +104,16 @@ describe('CommentCard — user-authored comment', () => {
   });
 });
 
+describe('anchor quote', () => {
+  it('renders the anchor as a serif excerpt with the full anchor in title', () => {
+    renderCard({ comment: { ...baseComment, anchor: 'Password must be at least 8 characters' } });
+    const quote = screen.getByTitle('Password must be at least 8 characters');
+    expect(quote.hasAttribute('data-anchor-quote')).toBe(true);
+    expect(quote.className).toContain('comment-quote');
+    expect(quote.className).not.toContain('font-mono');
+  });
+});
+
 describe('CommentCard: compact mode', () => {
   it('compact hides the replies thread and shows a count line', async () => {
     const withReplies: MdComment = {

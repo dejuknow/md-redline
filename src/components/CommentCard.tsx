@@ -218,11 +218,9 @@ export const CommentCard = memo(function CommentCard({
       {/* Header: anchor + optional status badge */}
       <div className="px-3 pt-3 pb-1 flex items-start gap-2">
         <div
-          className={`text-xs font-mono px-2 py-1 rounded inline-block max-w-full truncate flex-1 min-w-0 ${
-            isResolved
-              ? 'bg-surface-inset text-content-muted'
-              : 'bg-comment-anchor-bg text-comment-anchor-text border border-comment-anchor-border'
-          }`}
+          data-anchor-quote
+          title={comment.anchor}
+          className={`comment-quote flex-1 min-w-0 line-clamp-2 ${isResolved ? 'comment-quote-resolved' : ''}`}
         >
           &ldquo;{comment.anchor}&rdquo;
         </div>

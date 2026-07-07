@@ -1202,3 +1202,23 @@ body {
 .raw-comment-marker-flash {
   animation: raw-marker-flash 1.5s ease-out;
 }
+
+/* Comment card anchor excerpt: serif italic pull from the document, not a
+   mono code chip. Left rule in the highlighter color ties it to the mark. */
+.comment-quote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--theme-text-secondary);
+  border-left: 2.5px solid var(--theme-comment-underline);
+  background: color-mix(in srgb, var(--theme-comment-anchor-bg) 55%, transparent);
+  border-radius: 0 5px 5px 0;
+  padding: 3px 8px;
+}
+
+.comment-quote-resolved {
+  border-left-color: var(--theme-border);
+  background: var(--theme-bg-inset);
+  color: var(--theme-text-muted);
+}
