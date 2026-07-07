@@ -2141,7 +2141,7 @@ export default function App() {
         author={author}
         onAuthorChange={setAuthor}
         onToggleExplorer={toggleExplorerPane}
-        onToggleSidebar={toggleSidebarPane}
+        onToggleSidebar={toggleCommentsSurface}
         onOpenSettings={() => setActiveModal('settings')}
         onTrustFolder={handleTrustFolder}
         tabs={
