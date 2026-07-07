@@ -24,13 +24,23 @@ function AllProviders({ children }: { children: ReactNode }) {
   return createElement(SettingsProvider, null, children);
 }
 
+// jsdom has no ResizeObserver; CommentCard (wrapped by ThreadCard) observes
+// its text node to re-check clamping on resize.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 beforeEach(() => {
   fetchPreferences.mockReset();
   fetchPreferences.mockResolvedValue({ settings: {} });
+  vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 const baseThreadProps = {

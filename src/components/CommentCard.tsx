@@ -96,15 +96,38 @@ export const CommentCard = memo(function CommentCard({
   const editingReplyId = editor?.mode === 'reply-edit' ? editor.replyId : null;
   const editorToken = editor?.token ?? 0;
 
-  // Detect if comment text is long enough to need clamping
+  // Detect if comment text is long enough to need clamping. Re-check when
+  // fonts finish loading and when the text element resizes (container width
+  // changes with pane toggles and the page's continuous shrink); both paths
+  // fired spurious Show more buttons when only checked on mount.
   const checkClamped = useCallback(() => {
     const el = textRef.current;
-    if (el) setIsClamped(el.scrollHeight > el.clientHeight);
+    if (!el) return;
+    const next = el.scrollHeight > el.clientHeight;
+    setIsClamped((prev) => (prev === next ? prev : next));
   }, []);
 
   useLayoutEffect(() => {
     checkClamped();
   }, [comment.text, isTextExpanded, checkClamped]);
+
+  useEffect(() => {
+    let cancelled = false;
+    document.fonts?.ready.then(() => {
+      if (!cancelled) checkClamped();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkClamped]);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => checkClamped());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [checkClamped, isEditing]);
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {

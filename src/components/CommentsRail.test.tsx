@@ -51,9 +51,18 @@ function layout(overrides: Partial<MarginLayout> = {}): MarginLayout {
 }
 
 // No real DOM element behind the ref: the List-density viewport-measuring
-// effect no-ops when scrollRef.current is null, so tests don't need a
-// ResizeObserver stub (jsdom doesn't implement one).
+// effect no-ops when scrollRef.current is null. CommentCard itself still
+// observes its text node for clamp re-checks, so a ResizeObserver stub is
+// installed below (jsdom doesn't implement one).
 const nullScrollRef = { current: null } as RefObject<HTMLElement | null>;
+
+// jsdom has no ResizeObserver; CommentCard (rendered by CommentsRail's cards)
+// observes its text node to re-check clamping on resize.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 function renderRail(props: Partial<React.ComponentProps<typeof CommentsRail>> = {}) {
   const defaults: React.ComponentProps<typeof CommentsRail> = {
@@ -88,9 +97,13 @@ function renderRail(props: Partial<React.ComponentProps<typeof CommentsRail>> = 
 beforeEach(() => {
   fetchPreferences.mockReset();
   fetchPreferences.mockResolvedValue({ settings: {} });
+  vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('CommentsRail', () => {
   describe('header', () => {

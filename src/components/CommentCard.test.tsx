@@ -24,13 +24,29 @@ function AllProviders({ children }: { children: ReactNode }) {
   return createElement(SettingsProvider, null, children);
 }
 
+// jsdom has no ResizeObserver. CommentCard observes its text node to re-check
+// clamping on resize, so every test in this file needs a stub — track
+// observed elements so the clamp re-check test can assert on them.
+let resizeObserverObserved: Element[] = [];
+class ResizeObserverStub {
+  constructor(private cb: ResizeObserverCallback) {}
+  observe(el: Element) {
+    resizeObserverObserved.push(el);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
 beforeEach(() => {
   fetchPreferences.mockReset();
   fetchPreferences.mockResolvedValue({ settings: {} });
+  resizeObserverObserved = [];
+  vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 const baseComment: MdComment = {
@@ -183,5 +199,13 @@ describe('status pill and resolve action', () => {
     renderCard({ isActive: true, onResolve: vi.fn() }, { enableResolve: true });
     const btn = await waitFor(() => screen.getByRole('button', { name: 'Resolve' }));
     expect(btn.className).toContain('text-primary-text');
+  });
+});
+
+describe('clamp re-check', () => {
+  it('re-checks clamping when the text element resizes', () => {
+    renderCard({});
+    const textEl = screen.getByText(baseComment.text);
+    expect(resizeObserverObserved).toContain(textEl);
   });
 });
