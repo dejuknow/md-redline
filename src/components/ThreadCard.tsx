@@ -101,6 +101,7 @@ export function ThreadCard({
       ref={divRef}
       tabIndex={-1}
       data-comment-card-id={thread.id}
+      className="outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-primary-ring"
     >
       <CommentCard
         comment={thread}
