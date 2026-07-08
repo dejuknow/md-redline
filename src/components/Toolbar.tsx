@@ -102,7 +102,9 @@ export function Toolbar({
         </svg>
       </span>
 
-      {tabs && <div className="flex-1 min-w-0 self-stretch flex items-end">{tabs}</div>}
+      {/* pt keeps tab tops off the viewport edge; tabs stay bottom-aligned
+          so the active tab still merges into the sheet below. */}
+      {tabs && <div className="flex-1 min-w-0 self-stretch flex items-end pt-1.5">{tabs}</div>}
 
       {/* Center spacer with status */}
       <div className="flex items-center gap-2 min-w-0 shrink">

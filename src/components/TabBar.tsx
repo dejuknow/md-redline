@@ -192,7 +192,7 @@ export function TabBar({
                   className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-r border-border border-b-2 shrink-0 max-w-[200px] transition-colors ${
                     isActive
                       ? embedded
-                        ? 'bg-surface text-content font-medium rounded-t-md border-b-transparent shadow-[inset_0_2px_0_var(--theme-accent)]'
+                        ? 'bg-surface text-content font-medium rounded-t-md border-b-transparent'
                         : 'bg-surface text-content font-medium border-b-primary'
                       : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
                   }`}
