@@ -168,6 +168,7 @@ body {
   --theme-text-secondary: #b3ac9f;
   --theme-text-muted: #8d877b;
   --theme-text-faint: #57524a;
+  --theme-code-text: #cdc6b9;
   --theme-accent: #e0584f;
   --theme-accent-hover: #e97a72;
   --theme-accent-bg: rgba(224, 88, 79, 0.12);
@@ -667,7 +668,7 @@ body {
   --tw-prose-td-borders: var(--theme-border);
   --tw-prose-captions: var(--theme-text-muted);
   --tw-prose-pre-bg: var(--theme-bg-inset);
-  --tw-prose-pre-code: var(--theme-text-secondary);
+  --tw-prose-pre-code: var(--theme-code-text, var(--theme-text-secondary));
 }
 
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
@@ -689,7 +690,7 @@ body {
 
 .prose :where(pre):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   background-color: var(--theme-bg-inset);
-  color: var(--theme-text-secondary);
+  color: var(--theme-code-text, var(--theme-text-secondary));
 }
 
 .prose :where(pre code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
