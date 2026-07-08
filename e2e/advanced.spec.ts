@@ -618,7 +618,7 @@ test.describe('Drag-resize anchors', () => {
     await page.waitForTimeout(500);
 
     // The anchor in the card should now be longer
-    const anchorPreview = card.locator('.font-mono').first();
+    const anchorPreview = card.locator('[data-anchor-quote]').first();
     const anchorText = await anchorPreview.textContent();
     const cleanAnchor = anchorText?.replace(/["\u201C\u201D]/g, '').trim() ?? '';
     expect(cleanAnchor.length).toBeGreaterThan('email and password'.length);
@@ -641,7 +641,7 @@ test.describe('Drag-resize anchors', () => {
     await page.keyboard.press('Escape');
 
     // Anchor should remain unchanged
-    const anchorPreview = card.locator('.font-mono').first();
+    const anchorPreview = card.locator('[data-anchor-quote]').first();
     const anchorText = await anchorPreview.textContent();
     const cleanAnchor = anchorText?.replace(/["\u201C\u201D]/g, '').trim() ?? '';
     expect(cleanAnchor).toBe('valid credentials');
