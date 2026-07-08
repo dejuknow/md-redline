@@ -82,6 +82,26 @@ function getCard(page: Page, commentText: string) {
 /**
  * Drag the start handle leftward by a given pixel offset.
  */
+/** Poll until two consecutive reads of both drag handles' x position agree,
+ * meaning the resize-triggered reposition (ResizeObserver plus the page's own
+ * width transition) has settled. */
+async function stableHandlePositions(page: Page): Promise<void> {
+  let previous: { start: number; end: number } | null = null;
+  await expect(async () => {
+    const handles = page.locator('[data-drag-handle]');
+    const startBox = await handles.first().boundingBox();
+    const endBox = await handles.last().boundingBox();
+    const current = startBox && endBox ? { start: startBox.x, end: endBox.x } : null;
+    const stable =
+      current !== null &&
+      previous !== null &&
+      current.start === previous.start &&
+      current.end === previous.end;
+    previous = current;
+    expect(stable).toBe(true);
+  }).toPass({ timeout: 2000 });
+}
+
 async function dragStartHandleLeft(page: Page, pxLeft: number) {
   const startHandle = page.locator('[data-drag-handle]').first();
   const box = await startHandle.boundingBox();
@@ -215,10 +235,10 @@ test.describe('Drag handles reposition on container resize', () => {
     // Toggle the file explorer pane (no window resize fires). This resizes
     // the scroll container directly, and the page sheet itself has its own
     // motion-safe width transition (150ms) layered on top of the pane's
-    // width transition (200ms). Wait past both, plus a frame, before
-    // asserting the handles caught up.
+    // width transition (200ms). Poll until the handles' position stops
+    // moving before asserting they caught up.
     await page.keyboard.press(withMod('b'));
-    await page.waitForTimeout(400);
+    await stableHandlePositions(page);
 
     const mark = page.locator('mark.comment-highlight-active').first();
     const markBox = await mark.boundingBox();
