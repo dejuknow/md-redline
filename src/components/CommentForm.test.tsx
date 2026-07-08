@@ -110,16 +110,24 @@ describe('CommentForm selection pill', () => {
     expect(onLock).toHaveBeenCalled();
   });
 
-  it('overflow tap expands with the full template grid and empty text', async () => {
+  it('overflow tap lists the remaining templates in place; picking one prefills the form', async () => {
     fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
     renderForm();
 
     fireEvent.click(await screen.findByRole('button', { name: 'More templates' }));
 
-    expect(await screen.findByText('Quick templates:')).toBeTruthy();
-    expect(screen.getByText('Remove')).toBeTruthy();
-    const textarea = screen.getByPlaceholderText('Add your comment...') as HTMLTextAreaElement;
-    expect(textarea.value).toBe('');
+    // The menu lists only templates beyond the two inline pill slots and
+    // does not open the form by itself.
+    const menuItem = await screen.findByRole('button', { name: 'Remove' });
+    expect(document.querySelector('[data-pill-template-menu]')).toBeTruthy();
+    expect(screen.queryByPlaceholderText('Add your comment...')).toBeNull();
+
+    fireEvent.click(menuItem);
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).not.toBe('');
+    expect(document.querySelector('[data-pill-template-menu]')).toBeNull();
   });
 
   it('Comment tap expands empty with the grid hidden even when showTemplatesByDefault is on', async () => {

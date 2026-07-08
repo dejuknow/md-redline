@@ -28,6 +28,11 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const [showTemplates, setShowTemplates] = useState(
     settings.quickComment ? settings.showTemplatesByDefault : false,
   );
+  const [showPillMenu, setShowPillMenu] = useState(false);
+  // The selection rect is a snapshot from selection time; re-measure the live
+  // DOM selection on scroll so the pill follows its text instead of floating
+  // over whatever scrolled underneath it.
+  const [liveRect, setLiveRect] = useState<DOMRect | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
   const [formSize, setFormSize] = useState<{ height: number; width: number } | null>(null);
@@ -80,9 +85,26 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       if (!settings.quickComment) setIsExpanded(false);
       setText('');
       setShowTemplates(settings.quickComment ? settings.showTemplatesByDefault : false);
+      setShowPillMenu(false);
+      setLiveRect(null);
       setFormSize(null);
     }
   }, [selectionKey, settings.quickComment, settings.showTemplatesByDefault]);
+
+  // Follow the selection while the pill is showing. Capture-phase listener
+  // catches the document panel's inner scroll container without needing a ref
+  // to it.
+  useEffect(() => {
+    if (isExpanded) return;
+    const remeasure = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      setLiveRect(sel.getRangeAt(0).getBoundingClientRect());
+    };
+    document.addEventListener('scroll', remeasure, { capture: true, passive: true });
+    return () =>
+      document.removeEventListener('scroll', remeasure, { capture: true } as EventListenerOptions);
+  }, [isExpanded]);
 
   useLayoutEffect(() => {
     const node = formRef.current;
@@ -98,15 +120,17 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     );
   }, [isExpanded, showTemplates, text, selectionKey]);
 
-  // Position the form near the selection
+  // Position the form near the selection (the live rect when the pill has
+  // been following a scroll, the snapshot otherwise).
+  const anchorRect = liveRect ?? selection.rect;
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
   const viewportPadding = 12;
   const viewportHeight = window.innerHeight;
   const viewportWidth = window.innerWidth;
   const formHeight = formSize?.height ?? (isExpanded ? (showTemplates ? 280 : 220) : 44);
   const formWidth = formSize?.width ?? (isExpanded ? 320 : 300);
-  const belowTop = selection.rect.bottom + 8;
-  const aboveTop = selection.rect.top - formHeight - 8;
+  const belowTop = anchorRect.bottom + 8;
+  const aboveTop = anchorRect.top - formHeight - 8;
   const showAbove =
     belowTop + formHeight > viewportHeight - viewportPadding && aboveTop >= viewportPadding;
   const top = clamp(
@@ -115,10 +139,13 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     Math.max(viewportPadding, viewportHeight - formHeight - viewportPadding),
   );
   const left = clamp(
-    selection.rect.left,
+    anchorRect.left,
     viewportPadding,
     Math.max(viewportPadding, viewportWidth - formWidth - viewportPadding),
   );
+  // Hide (do not unmount) while the selection is scrolled out of view; it
+  // reappears when the text scrolls back in.
+  const anchorOffscreen = anchorRect.bottom < 0 || anchorRect.top > viewportHeight;
 
   const style: React.CSSProperties = {
     position: 'fixed',
@@ -126,6 +153,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     top: `${top}px`,
     maxHeight: `${Math.max(0, viewportHeight - viewportPadding * 2)}px`,
     zIndex: 50,
+    visibility: anchorOffscreen ? 'hidden' : undefined,
   };
 
   const handleSubmit = () => {
@@ -173,14 +201,36 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   const handlePillOverflow = () => {
     onLock();
-    setShowTemplates(true);
-    setIsExpanded(true);
+    setShowPillMenu((prev) => !prev);
   };
 
   if (!isExpanded) {
     const pillTemplates = TEMPLATES.slice(0, 2);
+    const menuTemplates = TEMPLATES.slice(2);
     return (
       <div ref={formRef} style={style} data-comment-form>
+        {showPillMenu && menuTemplates.length > 0 && (
+          <div
+            data-pill-template-menu
+            className={`absolute right-0 z-10 min-w-40 max-w-64 py-1 bg-surface-raised border border-border rounded-lg shadow-lg ${
+              showAbove ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+            }`}
+          >
+            {menuTemplates.map((t) => (
+              <button
+                key={t.label}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setShowPillMenu(false);
+                  handlePillTemplate(t.text);
+                }}
+                className="block w-full text-left px-3 py-1.5 text-xs text-content-secondary hover:bg-tint hover:text-content transition-colors truncate"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="selection-pill-enter flex items-center gap-0.5 px-1.5 py-1 bg-surface-raised border border-border rounded-full shadow-lg">
           <button
             onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
@@ -201,9 +251,6 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               />
             </svg>
             Comment
-            <span aria-hidden="true" className="font-mono text-[10px] text-content-muted border border-border-subtle rounded px-1">
-              {modLabel}+Enter
-            </span>
           </button>
           {pillTemplates.length > 0 && <span className="w-px self-stretch my-1 bg-border" />}
           {pillTemplates.map((t) => (
@@ -221,7 +268,12 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               onMouseDown={(e) => e.preventDefault()}
               onClick={handlePillOverflow}
               aria-label="More templates"
-              className="px-2 py-1 rounded-full text-xs text-content-secondary hover:bg-tint transition-colors"
+              aria-expanded={showPillMenu}
+              className={`px-2 py-1 rounded-full text-xs transition-colors ${
+                showPillMenu
+                  ? 'bg-surface-inset text-content'
+                  : 'text-content-secondary hover:bg-tint'
+              }`}
             >
               &#8943;
             </button>

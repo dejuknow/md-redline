@@ -91,7 +91,7 @@ test.describe('Selection pill', () => {
       .toContain('@comment{');
   });
 
-  test('Comment opens the form without the grid; overflow opens it with the grid', async ({
+  test('Comment opens the form without the grid; overflow lists the remaining templates in place', async ({
     page,
   }) => {
     await openFixture(page);
@@ -106,12 +106,25 @@ test.describe('Selection pill', () => {
     await page.locator('[data-comment-form] button[title="Quick templates"]').click();
     await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).toBeVisible();
 
-    // Dismiss, reselect, take the overflow path
+    // Dismiss, reselect, take the overflow path: the kebab expands a menu of
+    // the remaining templates instead of jumping to the form.
     await page.keyboard.press('Escape');
     await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
     await selectText(page, 'validates all inputs');
     await pill.getByRole('button', { name: 'More templates' }).click();
-    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).toBeVisible();
-    await expect(page.getByPlaceholder('Add your comment...')).toHaveValue('');
+    const menu = page.locator('[data-pill-template-menu]');
+    await expect(menu).toBeVisible();
+    await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
+
+    // Picking one prefills the form with that template, like the inline
+    // one-tap buttons.
+    const firstMenuItem = menu.locator('button').first();
+    const label = (await firstMenuItem.textContent())!.trim();
+    await firstMenuItem.click();
+    await expect(menu).not.toBeVisible();
+    const textarea = page.getByPlaceholder('Add your comment...');
+    await expect(textarea).toBeVisible();
+    await expect(textarea).not.toHaveValue('');
+    expect(label.length).toBeGreaterThan(0);
   });
 });
