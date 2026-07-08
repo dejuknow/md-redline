@@ -25,11 +25,11 @@ function AllProviders({ children }: { children: ReactNode }) {
 }
 
 // jsdom has no ResizeObserver. CommentCard observes its text node to re-check
-// clamping on resize, so every test in this file needs a stub — track
+// clamping on resize, so every test in this file needs a stub. Track
 // observed elements so the clamp re-check test can assert on them.
 let resizeObserverObserved: Element[] = [];
 class ResizeObserverStub {
-  constructor(private cb: ResizeObserverCallback) {}
+  constructor(_cb: ResizeObserverCallback) {}
   observe(el: Element) {
     resizeObserverObserved.push(el);
   }
