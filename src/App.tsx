@@ -589,7 +589,6 @@ export default function App() {
   // it. Close it automatically once the rail becomes available again, so
   // the two surfaces never show at the same time.
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const fabVisible = !railShown && !focusMode && comments.length > 0;
   useEffect(() => {
     if (railShown) setDrawerOpen(false);
   }, [railShown]);
@@ -2273,9 +2272,7 @@ export default function App() {
 
           {/* Markdown viewer */}
           <div
-            className={`flex-1 min-h-0 min-w-0 relative panel-center ${
-              viewMode === 'raw' ? 'bg-surface mx-3 mt-3 doc-sheet' : 'bg-surface-secondary'
-            }`}
+            className="flex-1 min-h-0 min-w-0 relative panel-center bg-surface-secondary"
             data-prose-font={settings.proseFont}
           >
             {showSearch && (
@@ -2332,6 +2329,15 @@ export default function App() {
                 onClearSnapshot={handleClearSnapshot}
                 onCopyDocument={handleCopyDocument}
                 copyFeedback={copyFeedback}
+                breadcrumb={
+                  viewMode === 'rendered' && !(diffEnabled && currentSnapshot) ? (
+                    <SectionBreadcrumb
+                      chain={breadcrumbChain}
+                      containerRef={containerRef}
+                      onJump={handleHeadingNavigate}
+                    />
+                  ) : undefined
+                }
               />
               {viewMode === 'raw' ? (
                 <RawView
@@ -2497,29 +2503,9 @@ export default function App() {
                     </div>
                   </div>
                   <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />
-                  {!(diffEnabled && currentSnapshot) && (
-                    <SectionBreadcrumb
-                      chain={breadcrumbChain}
-                      containerRef={containerRef}
-                      onJump={handleHeadingNavigate}
-                    />
-                  )}
                 </div>
               )}
             </div>
-            {fabVisible && (
-              <button
-                data-comments-fab
-                onClick={() => setDrawerOpen(true)}
-                className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 px-3 py-2 rounded-full bg-surface-raised border border-border shadow-md text-xs font-medium text-content hover:bg-tint transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                aria-label={`Open comments (${commentCount} open)`}
-              >
-                Comments
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary-bg-strong text-primary-text tabular-nums">
-                  {commentCount}
-                </span>
-              </button>
-            )}
           </div>
         </div>
 

@@ -4,7 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
-import { addComment, commentsFab, commentsDrawer, openCommentsDrawer } from './helpers/comments';
+import { addComment, commentsDrawer, openCommentsDrawer } from './helpers/comments';
 import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -55,8 +55,8 @@ async function switchToRaw(page: Page) {
 
 const rail = (page: Page) => page.locator('[data-comments-rail]');
 
-test.describe('Comments FAB and drawer', () => {
-  test('narrow rendered view: FAB shows the open count, opens the drawer, a card activates its anchor, and Escape closes it', async ({
+test.describe('Comments drawer', () => {
+  test('narrow rendered view: the toolbar comments button opens the drawer, a card activates its anchor, and Escape closes it', async ({
     page,
   }) => {
     await openFixture(page);
@@ -65,13 +65,8 @@ test.describe('Comments FAB and drawer', () => {
     // The rail cannot fit at this width.
     await expect(rail(page)).toHaveCount(0);
 
-    const fab = commentsFab(page);
-    await expect(fab).toBeVisible();
-    await expect(fab).toHaveAttribute('aria-label', 'Open comments (1 open)');
-
-    await fab.click();
+    await openCommentsDrawer(page);
     const drawer = commentsDrawer(page);
-    await expect(drawer).toBeVisible();
     const card = drawer.locator('.group.rounded-lg', { hasText: 'Narrow drawer comment' });
     await expect(card).toBeVisible();
 
@@ -82,14 +77,13 @@ test.describe('Comments FAB and drawer', () => {
     await expect(drawer).not.toBeVisible();
   });
 
-  test('raw view: FAB is visible and the drawer lists comments', async ({ page }) => {
+  test('raw view: the drawer lists comments', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Raw view comment');
 
     await switchToRaw(page);
     // No rail ever shows in raw view, regardless of width.
     await expect(rail(page)).toHaveCount(0);
-    await expect(commentsFab(page)).toBeVisible();
 
     await openCommentsDrawer(page);
     await expect(
@@ -97,18 +91,13 @@ test.describe('Comments FAB and drawer', () => {
     ).toBeVisible();
   });
 
-  test('wide rendered view: the rail shows and the FAB is absent', async ({ page }) => {
+  test('wide rendered view: the rail shows and the drawer stays closed', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Wide view comment');
 
     await page.setViewportSize(WIDE_VIEWPORT);
     await expect(rail(page)).toBeVisible();
-    await expect(commentsFab(page)).toHaveCount(0);
-  });
-
-  test('zero comments: the FAB stays hidden even at a narrow width', async ({ page }) => {
-    await openFixture(page);
-    await expect(commentsFab(page)).toHaveCount(0);
+    await expect(commentsDrawer(page)).not.toBeVisible();
   });
 
   test(`${withMod('\\')} at a narrow width toggles the drawer`, async ({ page }) => {
@@ -177,9 +166,12 @@ test.describe('Stranded focus requests route to the drawer', () => {
       );
       expect(ask.status()).toBe(201);
 
-      // No comment surface is visible at this width, so the FAB appearing is
-      // the signal that the ask has landed as a parsed comment.
-      await expect(commentsFab(page)).toBeVisible({ timeout: 10_000 });
+      // No comment surface is visible at this width, so the painted highlight
+      // mark appearing in the prose is the signal that the ask has landed as
+      // a parsed comment.
+      await expect(page.locator('mark[data-comment-ids]').first()).toBeVisible({
+        timeout: 10_000,
+      });
 
       await switchToRaw(page);
       await expect(commentsDrawer(page)).not.toBeVisible();

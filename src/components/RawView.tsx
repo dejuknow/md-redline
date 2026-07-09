@@ -677,14 +677,19 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
   // toolbar, so it must shrink to fill the remaining space rather than claim
   // the full parent height — otherwise the bottom of the scroll container
   // overflows by exactly the toolbar's height and bleeds into the footer.
+  // Same canvas + sheet composition as the rendered view: the scroll
+  // container is transparent canvas with a small gutter; the raw text lives
+  // on a full-width doc-sheet below the toolbar.
   const outerClass = 'raw-view flex flex-col flex-1 min-h-0';
-  const scrollClass = 'flex-1 overflow-y-auto px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16';
+  const scrollClass = 'flex-1 overflow-y-auto px-3 pt-3';
+  const sheetClass = 'doc-sheet bg-surface min-h-full px-8 pt-4 pb-[50vh] lg:px-12 xl:px-16';
 
   if (diffEnabled && diffLines && !hasChanges) {
     return (
       <div ref={containerRef} className={outerClass}>
         <div ref={scrollRef} className={scrollClass}>
-          <div className="flex flex-col items-center justify-center text-content-muted py-16">
+          <div className={sheetClass}>
+            <div className="flex flex-col items-center justify-center text-content-muted py-16">
             <svg
               className="w-12 h-12 mb-3 text-content-faint"
               fill="none"
@@ -719,6 +724,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
                 </p>
               </>
             )}
+            </div>
           </div>
         </div>
       </div>
@@ -728,6 +734,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
   return (
     <div ref={containerRef} className={outerClass}>
       <div ref={scrollRef} className={scrollClass}>
+        <div className={sheetClass}>
         <div className="max-w-3xl mx-auto">
           <div ref={tableRef} className="raw-view-table">
             {displayRows.map((row, i) => {
@@ -753,6 +760,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
               );
             })}
           </div>
+        </div>
         </div>
       </div>
     </div>

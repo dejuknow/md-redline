@@ -31,6 +31,9 @@ interface Props {
   // Copy document (clean markdown, no comment markers — works in both views)
   onCopyDocument: () => void;
   copyFeedback: boolean;
+
+  /** Middle slot: the section breadcrumb (rendered view only). */
+  breadcrumb?: React.ReactNode;
 }
 
 const toggleClass = (active: boolean) =>
@@ -75,6 +78,7 @@ export function PanelToolbar({
   onClearSnapshot,
   onCopyDocument,
   copyFeedback,
+  breadcrumb,
 }: Props) {
   const modLabel = getPrimaryModifierLabel();
   const isRaw = viewMode === 'raw';
@@ -218,6 +222,9 @@ export function PanelToolbar({
           </button>
         )}
       </div>
+
+      {/* MIDDLE: section breadcrumb, centered in the otherwise dead space */}
+      <div className="flex-1 min-w-0 flex justify-center px-3 overflow-hidden">{breadcrumb}</div>
 
       {/* RIGHT: actions — search → copy → handoff (primary CTA, far right) */}
       <div className="raw-toolbar-right">

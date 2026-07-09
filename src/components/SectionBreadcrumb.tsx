@@ -10,9 +10,10 @@ interface Props {
 }
 
 /**
- * Floating breadcrumb naming the current section once the reader scrolls past
- * the first heading. Content comes from headingChain; this component only owns
- * the scrolled visibility check and rendering.
+ * Breadcrumb naming the current section once the reader scrolls past the
+ * first heading. Renders inline in the panel toolbar's middle slot. Content
+ * comes from headingChain; this component only owns the scrolled visibility
+ * check and rendering.
  */
 export function SectionBreadcrumb({ chain, containerRef, onJump, initialVisible = false }: Props) {
   const [scrolled, setScrolled] = useState(initialVisible);
@@ -47,7 +48,7 @@ export function SectionBreadcrumb({ chain, containerRef, onJump, initialVisible 
   return (
     <div
       data-section-breadcrumb
-      className="breadcrumb-enter absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-3 py-1 rounded-full border border-border bg-surface-secondary/90 backdrop-blur shadow-sm max-w-[80%]"
+      className="breadcrumb-enter flex items-center gap-1 min-w-0 max-w-full"
     >
       {chain.map((h, i) => (
         <span key={h.id} className="flex items-center gap-1 min-w-0">
