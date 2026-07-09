@@ -29,10 +29,17 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     settings.quickComment ? settings.showTemplatesByDefault : false,
   );
   const [showPillMenu, setShowPillMenu] = useState(false);
-  // The selection rect is a snapshot from selection time; re-measure the live
-  // DOM selection on scroll so the pill follows its text instead of floating
-  // over whatever scrolled underneath it.
-  const [liveRect, setLiveRect] = useState<DOMRect | null>(null);
+  // The selection rect is a snapshot from selection time; on scroll the pill
+  // follows its text instead of floating over whatever scrolled underneath.
+  // Preferred source is the live DOM selection; when that has been collapsed
+  // (locked selections survive as SelectionInfo only), fall back to shifting
+  // the snapshot by how far the document scroller moved since capture.
+  const [liveRect, setLiveRect] = useState<{ top: number; bottom: number; left: number } | null>(
+    null,
+  );
+  const scrollBaselineRef = useRef<number | null>(null);
+  const getDocScroller = () =>
+    (document.querySelector('[data-doc-page]')?.parentElement as HTMLElement | null) ?? null;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
   const [formSize, setFormSize] = useState<{ height: number; width: number } | null>(null);
@@ -87,9 +94,16 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       setShowTemplates(settings.quickComment ? settings.showTemplatesByDefault : false);
       setShowPillMenu(false);
       setLiveRect(null);
+      scrollBaselineRef.current = getDocScroller()?.scrollTop ?? null;
       setFormSize(null);
     }
   }, [selectionKey, settings.quickComment, settings.showTemplatesByDefault]);
+
+  // Baseline for the scroll-delta fallback, captured once per mount (the
+  // selection-change effect above refreshes it for subsequent selections).
+  useEffect(() => {
+    scrollBaselineRef.current = getDocScroller()?.scrollTop ?? null;
+  }, []);
 
   // Follow the selection while the pill is showing. Capture-phase listener
   // catches the document panel's inner scroll container without needing a ref
@@ -98,13 +112,33 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     if (isExpanded) return;
     const remeasure = () => {
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-      setLiveRect(sel.getRangeAt(0).getBoundingClientRect());
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        const r = sel.getRangeAt(0).getBoundingClientRect();
+        setLiveRect((prev) =>
+          prev && prev.top === r.top && prev.bottom === r.bottom && prev.left === r.left
+            ? prev
+            : { top: r.top, bottom: r.bottom, left: r.left },
+        );
+        return;
+      }
+      const scroller = getDocScroller();
+      if (!scroller || scrollBaselineRef.current === null) return;
+      const delta = scroller.scrollTop - scrollBaselineRef.current;
+      const next = {
+        top: selection.rect.top - delta,
+        bottom: selection.rect.bottom - delta,
+        left: selection.rect.left,
+      };
+      setLiveRect((prev) =>
+        prev && prev.top === next.top && prev.bottom === next.bottom && prev.left === next.left
+          ? prev
+          : next,
+      );
     };
     document.addEventListener('scroll', remeasure, { capture: true, passive: true });
     return () =>
       document.removeEventListener('scroll', remeasure, { capture: true } as EventListenerOptions);
-  }, [isExpanded]);
+  }, [isExpanded, selection.rect]);
 
   useLayoutEffect(() => {
     const node = formRef.current;
