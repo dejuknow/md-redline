@@ -30,9 +30,20 @@ const WIDTH = 320;
 export function CommentPopover({ comment, pageRef, onClose, sent, anchorMissing, ...cb }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
+
+  // Measure after every render (guarded set) so the flip decision below uses
+  // the real height, including growth from replies or an open composer.
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const h = node.offsetHeight;
+    setMeasuredHeight((prev) => (prev === h ? prev : h));
+  });
 
   // Position below the comment's topmost mark, page-relative (the popover is
   // absolutely positioned inside the page, so it scrolls with the text).
+  // Near the viewport bottom it flips above the mark instead of clipping.
   useLayoutEffect(() => {
     const page = pageRef.current;
     if (!page) return;
@@ -49,8 +60,15 @@ export function CommentPopover({ comment, pageRef, onClose, sent, anchorMissing,
       Math.max(markRect.left - pageRect.left, 12),
       pageRect.width - WIDTH - 12,
     );
-    setPos({ left, top: markRect.bottom - pageRect.top + 10 });
-  }, [comment.id, pageRef]);
+    const height = measuredHeight ?? 220;
+    const clipsBelow = markRect.bottom + 10 + height > window.innerHeight - 12;
+    const fitsAbove = markRect.top - 10 - height >= 12;
+    const top =
+      clipsBelow && fitsAbove
+        ? markRect.top - pageRect.top - height - 10
+        : markRect.bottom - pageRect.top + 10;
+    setPos({ left, top });
+  }, [comment.id, pageRef, measuredHeight]);
 
   // Esc + outside click close.
   useLayoutEffect(() => {
