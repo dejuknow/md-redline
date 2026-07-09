@@ -78,10 +78,30 @@ export function CommentListSurface({
   const { settings } = useSettings();
   const resolveEnabled = settings.enableResolve;
 
+  // Keep a card visible by scrolling ONLY the list's own overflow container.
+  // scrollIntoView walks every scrollable ancestor; the rail-hosted surface
+  // shares the document's scroll container, so scrollIntoView here aborted
+  // the in-flight smooth scroll to the card's anchor (the card is already
+  // visible in the pinned rail, making the net document scroll zero).
+  const scrollCardIntoList = (node: HTMLElement) => {
+    const list = node.closest('[data-comment-list-scroll]') as HTMLElement | null;
+    if (!list) return;
+    const listRect = list.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    if (nodeRect.top < listRect.top) {
+      list.scrollTo({ top: list.scrollTop + nodeRect.top - listRect.top - 8, behavior: 'smooth' });
+    } else if (nodeRect.bottom > listRect.bottom) {
+      list.scrollTo({
+        top: list.scrollTop + nodeRect.bottom - listRect.bottom + 8,
+        behavior: 'smooth',
+      });
+    }
+  };
+
   // Scroll to active comment
   useEffect(() => {
     if (activeCommentId && activeRef.current) {
-      activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      scrollCardIntoList(activeRef.current);
     }
   }, [activeCommentId]);
 
@@ -101,7 +121,7 @@ export function CommentListSurface({
     const node = commentRefs.current.get(requestedFocus.commentId);
     if (!node) return;
 
-    node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    scrollCardIntoList(node);
     requestAnimationFrame(() => {
       node.focus({ preventScroll: true });
       onFocusHandled?.();
@@ -295,7 +315,7 @@ export function CommentListSurface({
       </div>
 
       {/* Comment list */}
-      <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
+      <div data-comment-list-scroll className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
         {orphanActiveComments.length > 0 && (
           <>
             <div className="flex items-center gap-2 pb-1">
