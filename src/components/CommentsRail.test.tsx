@@ -11,7 +11,7 @@ vi.mock('../lib/preferences-client', () => ({
 }));
 
 import { SettingsProvider } from '../contexts/SettingsContext';
-import { CommentsRail } from './CommentsRail';
+import { CommentsRail, RailDensityControl } from './CommentsRail';
 import type { MarginLayout } from '../hooks/useMarginLayout';
 import type { MdComment } from '../types';
 
@@ -67,7 +67,6 @@ class ResizeObserverStub {
 function renderRail(props: Partial<React.ComponentProps<typeof CommentsRail>> = {}) {
   const defaults: React.ComponentProps<typeof CommentsRail> = {
     density: 'anchored',
-    onDensityChange: vi.fn(),
     scrollRef: nullScrollRef,
     layout: layout(),
     anchoredComments: comments,
@@ -75,7 +74,6 @@ function renderRail(props: Partial<React.ComponentProps<typeof CommentsRail>> = 
     activeCommentId: null,
     missingAnchors: new Set(['c2']),
     sentCommentIds: [],
-    openCount: 2,
     onActivate: vi.fn(),
     onReply: vi.fn(),
     onDelete: vi.fn(),
@@ -105,22 +103,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('CommentsRail', () => {
-  describe('header', () => {
-    it('renders both density options and switches on click', () => {
-      const onDensityChange = vi.fn();
-      renderRail({ onDensityChange });
-      expect(screen.getByRole('button', { name: 'Anchored' })).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'List' })).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: 'List' }));
-      expect(onDensityChange).toHaveBeenCalledWith('list');
-    });
-
-    it('renders the open count', async () => {
-      renderRail({ openCount: 3 });
-      expect(await screen.findByText('3 open')).toBeTruthy();
-    });
+describe('RailDensityControl', () => {
+  it('renders both density options, the open count, and switches on click', () => {
+    const onDensityChange = vi.fn();
+    render(
+      <RailDensityControl density="anchored" onDensityChange={onDensityChange} openCount={3} />,
+    );
+    expect(screen.getByRole('button', { name: 'Anchored' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'List' })).toBeTruthy();
+    expect(screen.getByText('3 open')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    expect(onDensityChange).toHaveBeenCalledWith('list');
   });
+});
+
+describe('CommentsRail', () => {
 
   describe('Anchored density', () => {
     it('renders a positioned card per anchoredComments entry', async () => {
@@ -154,9 +151,8 @@ describe('CommentsRail', () => {
       expect(onActivate).toHaveBeenCalledWith('c1');
     });
 
-    it('renders the header but no cards when layout is inactive', () => {
+    it('renders no cards when layout is inactive', () => {
       renderRail({ layout: layout({ active: false }) });
-      expect(screen.getByRole('button', { name: 'Anchored' })).toBeTruthy();
       expect(document.querySelector('[data-margin-notes]')).toBeNull();
       expect(document.querySelector('[data-margin-card-id]')).toBeNull();
     });

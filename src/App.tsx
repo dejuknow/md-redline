@@ -79,7 +79,7 @@ import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSes
 import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import { selectAgentAsks } from './lib/agent-asks';
-import { CommentsRail } from './components/CommentsRail';
+import { CommentsRail, RailDensityControl } from './components/CommentsRail';
 import { CommentsDrawer } from './components/CommentsDrawer';
 import { useMarginLayout } from './hooks/useMarginLayout';
 import { DensityStrip } from './components/DensityStrip';
@@ -2114,6 +2114,16 @@ export default function App() {
     }
   }, [reviewSessions, optimisticSentIds]);
 
+  // Tab badges answer "does this file have open comments", so they include
+  // agent-initiated ones. The handoff button keeps the sendable-only map.
+  const tabCommentCounts = useMemo(() => {
+    const merged = new Map<string, number>();
+    for (const [path, count] of commentCounts) {
+      merged.set(path, count + (agentCommentCounts.get(path) ?? 0));
+    }
+    return merged;
+  }, [commentCounts, agentCommentCounts]);
+
   return (
     <div className="h-screen flex flex-col bg-surface-secondary">
       <ReviewBanner
@@ -2148,7 +2158,7 @@ export default function App() {
             embedded
             tabs={tabs}
             activeFilePath={activeFilePath}
-            commentCounts={commentCounts}
+            commentCounts={tabCommentCounts}
             resolvedCommentCounts={resolvedCommentCounts}
             onSwitchTab={switchTab}
             onCloseTab={closeTab}
@@ -2338,6 +2348,15 @@ export default function App() {
                     />
                   ) : undefined
                 }
+                railControls={
+                  railShown ? (
+                    <RailDensityControl
+                      density={railDensity}
+                      onDensityChange={setRailDensity}
+                      openCount={commentCount}
+                    />
+                  ) : undefined
+                }
               />
               {viewMode === 'raw' ? (
                 <RawView
@@ -2449,7 +2468,6 @@ export default function App() {
                       {railShown && (
                         <CommentsRail
                           density={railDensity}
-                          onDensityChange={setRailDensity}
                           scrollRef={containerRef as RefObject<HTMLElement | null>}
                           layout={marginLayout}
                           anchoredComments={marginComments}
@@ -2457,7 +2475,6 @@ export default function App() {
                           activeCommentId={activeCommentId}
                           missingAnchors={missingAnchors}
                           sentCommentIds={sentCommentIds}
-                          openCount={commentCount}
                           onActivate={handleSidebarActivate}
                           onReply={handleReply}
                           onResolve={settings.enableResolve ? handleResolve : undefined}

@@ -34,6 +34,8 @@ interface Props {
 
   /** Middle slot: the section breadcrumb (rendered view only). */
   breadcrumb?: React.ReactNode;
+  /** Rail controls (density toggle + open count), shown while the rail is. */
+  railControls?: React.ReactNode;
 }
 
 const toggleClass = (active: boolean) =>
@@ -79,6 +81,7 @@ export function PanelToolbar({
   onCopyDocument,
   copyFeedback,
   breadcrumb,
+  railControls,
 }: Props) {
   const modLabel = getPrimaryModifierLabel();
   const isRaw = viewMode === 'raw';
@@ -226,8 +229,9 @@ export function PanelToolbar({
       {/* MIDDLE: section breadcrumb, centered in the otherwise dead space */}
       <div className="flex-1 min-w-0 flex justify-center px-3 overflow-hidden">{breadcrumb}</div>
 
-      {/* RIGHT: actions — search → copy → handoff (primary CTA, far right) */}
+      {/* RIGHT: actions — rail controls → search → copy → handoff (primary CTA, far right) */}
       <div className="raw-toolbar-right">
+        {railControls}
         {/* Search */}
         <Tooltip text={searchLabel}>
           <button

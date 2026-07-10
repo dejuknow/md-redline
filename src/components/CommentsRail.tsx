@@ -13,7 +13,6 @@ import {
 
 interface CommentsRailProps {
   density: RailDensity;
-  onDensityChange: (d: RailDensity) => void;
   scrollRef: React.RefObject<HTMLElement | null>;
   layout: MarginLayout;
   anchoredComments: MdComment[];
@@ -21,7 +20,6 @@ interface CommentsRailProps {
   activeCommentId: string | null;
   missingAnchors: Set<string>;
   sentCommentIds: string[];
-  openCount: number;
   onActivate: (id: string) => void;
   onReply: (commentId: string, text: string) => void;
   onResolve?: (id: string) => void;
@@ -50,7 +48,7 @@ interface CommentsRailProps {
  * caller only decides whether the rail can show at all.
  */
 export function CommentsRail(props: CommentsRailProps) {
-  const { density, onDensityChange, scrollRef, openCount } = props;
+  const { density, scrollRef } = props;
 
   // List density pins to the viewport: measure the scroll container height.
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -73,11 +71,10 @@ export function CommentsRail(props: CommentsRailProps) {
     >
       {density === 'list' ? (
         <div
-          className="sticky top-0 flex flex-col"
+          className="sticky top-0 flex flex-col py-2"
           style={{ height: viewportHeight || undefined }}
         >
-          <RailHeader density={density} onDensityChange={onDensityChange} openCount={openCount} />
-          <div className="flex-1 min-h-0 mt-2 bg-surface-raised border border-border rounded-lg overflow-hidden">
+          <div className="flex-1 min-h-0 bg-surface-raised border border-border rounded-lg overflow-hidden">
             <CommentListSurface
               comments={props.allComments}
               activeCommentId={props.activeCommentId}
@@ -105,16 +102,18 @@ export function CommentsRail(props: CommentsRailProps) {
           </div>
         </div>
       ) : (
-        <>
-          <RailHeader density={density} onDensityChange={onDensityChange} openCount={openCount} />
-          <AnchoredCards {...props} />
-        </>
+        <AnchoredCards {...props} />
       )}
     </div>
   );
 }
 
-function RailHeader({
+/**
+ * Density toggle + open count for the rail, rendered in the panel toolbar's
+ * right group (not inside the rail: a header floating over the anchored
+ * cards occluded them).
+ */
+export function RailDensityControl({
   density,
   onDensityChange,
   openCount,
@@ -124,10 +123,7 @@ function RailHeader({
   openCount: number;
 }) {
   return (
-    <div
-      data-rail-header
-      className="sticky top-2 z-10 flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border-subtle bg-surface/85 backdrop-blur-sm"
-    >
+    <div data-rail-header className="flex items-center gap-2 mr-1">
       <div role="group" aria-label="Comment layout density" className="flex rounded-md border border-border-subtle overflow-hidden">
         {(['anchored', 'list'] as const).map((d) => (
           <button
@@ -144,7 +140,7 @@ function RailHeader({
           </button>
         ))}
       </div>
-      <span className="ml-auto text-[10px] text-content-muted tabular-nums">
+      <span className="text-[10px] text-content-muted tabular-nums whitespace-nowrap">
         {openCount} open
       </span>
     </div>
