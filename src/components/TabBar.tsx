@@ -28,7 +28,7 @@ const tabControlButtonClass =
   'flex h-full w-8 items-center justify-center shrink-0 border-l border-border text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
 
 const tabActionButtonClass =
-  'sticky right-0 z-10 flex h-full items-center justify-center bg-surface-secondary px-2.5 shrink-0 border-r border-border text-content-muted transition-colors hover:bg-tint hover:text-content';
+  'sticky right-0 z-10 flex h-full items-center justify-center bg-surface-secondary px-2.5 shrink-0 rounded-t-md text-content-muted transition-colors hover:bg-tint hover:text-content';
 
 export function TabBar({
   tabs,
@@ -163,7 +163,7 @@ export function TabBar({
         )}
 
         <div ref={tabsViewportRef} className="min-w-0 flex-1 h-full overflow-x-auto no-scrollbar">
-          <div ref={tabsContentRef} className="flex h-full items-stretch min-w-max">
+          <div ref={tabsContentRef} className="flex h-full items-stretch min-w-max gap-1">
             {tabs.map((tab) => {
               const isActive = tab.filePath === activeFilePath;
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
@@ -189,10 +189,10 @@ export function TabBar({
                       onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
                     }
                   }}
-                  className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-r border-border border-b-2 shrink-0 max-w-[200px] transition-colors ${
+                  className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-b-2 rounded-t-md shrink-0 max-w-[200px] transition-colors ${
                     isActive
                       ? embedded
-                        ? 'bg-surface text-content font-medium rounded-t-md border-b-transparent'
+                        ? 'bg-surface text-content font-medium border-b-transparent'
                         : 'bg-surface text-content font-medium border-b-primary'
                       : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
                   }`}
