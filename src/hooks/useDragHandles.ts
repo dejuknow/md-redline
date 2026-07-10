@@ -174,15 +174,21 @@ export function useDragHandles({
     scrollContainer.addEventListener('scroll', handler, { passive: true });
     window.addEventListener('resize', handler);
     // Pane toggles and the page's width transitions resize the container
-    // without a window resize; reposition on those too.
+    // without a window resize; reposition on those too. The container alone
+    // is not enough: it resizes instantly while the page animates its width
+    // over 150ms (re-wrapping the text and moving the marks), so observe the
+    // page as well; it fires throughout the transition including the settled
+    // frame.
     const ro = new ResizeObserver(handler);
     ro.observe(scrollContainer);
+    const page = pageRef.current;
+    if (page) ro.observe(page);
     return () => {
       scrollContainer.removeEventListener('scroll', handler);
       window.removeEventListener('resize', handler);
       ro.disconnect();
     };
-  }, [activeCommentId, scrollContainerRef, updatePositions]);
+  }, [activeCommentId, scrollContainerRef, pageRef, updatePositions]);
 
   const onHandleMouseDown = useCallback(
     (handle: 'start' | 'end') => {
