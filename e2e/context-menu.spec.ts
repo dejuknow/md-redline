@@ -122,9 +122,9 @@ test.describe('Context menu on tab', () => {
     await openFixture(page);
 
     // Close the explorer so tab area is fully unobscured
-    const explorerBtn = page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
-    const cls = (await explorerBtn.getAttribute('class')) ?? '';
-    if (cls.includes('bg-primary-bg')) await explorerBtn.click();
+    if (await page.locator('[data-sidebar-panel]').count()) {
+      await page.locator('[data-sidebar-panel] button[title="Close panel"]').click();
+    }
     await page.waitForTimeout(300);
 
     const tab = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
@@ -142,9 +142,9 @@ test.describe('Context menu on tab', () => {
     await openFixture(page);
 
     // Start with the Explorer closed so we can verify the action opens it.
-    const explorerBtn = page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
-    const initialCls = (await explorerBtn.getAttribute('class')) ?? '';
-    if (initialCls.includes('bg-primary-bg')) await explorerBtn.click();
+    if (await page.locator('[data-sidebar-panel]').count()) {
+      await page.locator('[data-sidebar-panel] button[title="Close panel"]').click();
+    }
     await page.waitForTimeout(300);
 
     const tab = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
@@ -154,8 +154,8 @@ test.describe('Context menu on tab', () => {
     await expect(menu).toBeVisible();
     await menu.getByText('Reveal in Explorer Sidebar').click();
 
-    // Explorer toolbar button should now show the active (bg-primary-bg) state.
-    await expect(explorerBtn).toHaveClass(/bg-primary-bg/);
+    // The expanded sidebar panel should now be open.
+    await expect(page.locator('[data-sidebar-panel]')).toBeVisible();
 
     // Explorer should be navigated to the fixture's parent dir — the fixture
     // file row (w-full text-left, titled with its full path) should be listed.
@@ -168,9 +168,9 @@ test.describe('Context menu on tab', () => {
     await openFixture(page);
     await openSecondFile(page);
 
-    const explorerBtn = page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
-    const cls = (await explorerBtn.getAttribute('class')) ?? '';
-    if (cls.includes('bg-primary-bg')) await explorerBtn.click();
+    if (await page.locator('[data-sidebar-panel]').count()) {
+      await page.locator('[data-sidebar-panel] button[title="Close panel"]').click();
+    }
     await page.waitForTimeout(300);
 
     const tab1 = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
@@ -190,7 +190,7 @@ test.describe('Context menu on a rail comment card', () => {
     await openFixture(page);
 
     // Close the explorer to give the rail more room
-    await page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`).click();
+    await page.locator('[data-sidebar-panel] button[title="Close panel"]').click();
     await page.waitForTimeout(300);
 
     await addComment(page, 'valid credentials', 'Rail ctx test');

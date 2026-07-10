@@ -28,18 +28,20 @@ async function openFixture(page: Page) {
 // File explorer tests
 // ---------------------------------------------------------------------------
 
-/** Toggle explorer via the toolbar button. */
-const explorerToggle = (page: Page) =>
-  page.locator(`button[title="Toggle file explorer sidebar (${MOD_LABEL}+B)"]`);
-
-async function toggleExplorer(page: Page) {
-  await explorerToggle(page).click();
+/** Open state: the expanded sidebar panel exists; collapsed shows the icon rail. */
+async function isExplorerOpen(page: Page) {
+  return (await page.locator('[data-sidebar-panel]').count()) > 0;
 }
 
-/** The toolbar button gets bg-primary-bg when explorer is open. Check that class. */
-async function isExplorerOpen(page: Page) {
-  const cls = (await explorerToggle(page).getAttribute('class')) ?? '';
-  return cls.includes('bg-primary-bg');
+/** Toggle via the sidebar chrome: rail icon opens, Close panel collapses. */
+async function toggleExplorer(page: Page) {
+  if (await isExplorerOpen(page)) {
+    await page.locator('[data-sidebar-panel] button[title="Close panel"]').click();
+  } else {
+    await page
+      .locator(`[data-sidebar-rail] button[title="Show Explorer (${MOD_LABEL}+B)"]`)
+      .click();
+  }
 }
 
 async function ensureExplorerVisible(page: Page) {
@@ -51,7 +53,7 @@ async function ensureExplorerVisible(page: Page) {
 }
 
 test.describe('File explorer', () => {
-  test('toolbar button toggles file explorer visibility', async ({ page }) => {
+  test('sidebar rail and close button toggle file explorer visibility', async ({ page }) => {
     await openFixture(page);
 
     await ensureExplorerVisible(page);

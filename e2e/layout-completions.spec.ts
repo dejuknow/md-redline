@@ -131,17 +131,19 @@ test.describe('Focus mode', () => {
 test.describe('Merged chrome', () => {
   test('tabs render in the title row and stay functional', async ({ page }) => {
     await openFile(page, fixturePath);
-    // The tab and the settings button share one row: same bounding-box band.
-    // Scoped to the title row and de-duped with hasText: the bare "test-doc.md"
-    // text also matches the tab's nested close control and the explorer's
-    // file-list entry outside this row.
+    // The tab and the comments toggle share one row: same bounding-box band.
+    // (Settings moved to the sidebar bottom, so the comments toggle is the
+    // title row's permanent right-side anchor.) Scoped to the title row and
+    // de-duped with hasText: the bare "test-doc.md" text also matches the
+    // tab's nested close control and the explorer's file-list entry outside
+    // this row.
     const tab = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
-    const settings = page.locator('button[title*="Settings"]');
+    const commentsToggle = page.locator('button[title*="Toggle comments rail"]');
     const tabBox = await tab.boundingBox();
-    const settingsBox = await settings.boundingBox();
+    const toggleBox = await commentsToggle.boundingBox();
     expect(tabBox).not.toBeNull();
-    expect(settingsBox).not.toBeNull();
-    expect(Math.abs(tabBox!.y - settingsBox!.y)).toBeLessThanOrEqual(12);
+    expect(toggleBox).not.toBeNull();
+    expect(Math.abs(tabBox!.y - toggleBox!.y)).toBeLessThanOrEqual(12);
 
     // Open a second file via the plus button and switch back.
     await page.getByRole('button', { name: 'Open file' }).click();

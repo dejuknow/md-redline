@@ -1,0 +1,42 @@
+/** App logo mark. Keep in sync with public/favicon.svg. */
+export function AppLogo() {
+  return (
+    <span title="md-redline" className="flex items-center shrink-0">
+      <svg
+        className="w-5 h-5"
+        viewBox="0 0 100 116"
+        style={{
+          fillRule: 'evenodd',
+          clipRule: 'evenodd',
+          strokeLinejoin: 'round',
+          strokeMiterlimit: 2,
+        }}
+      >
+        <g transform="matrix(1,0,0,1,-10,-2)">
+          <path
+            d="M100,18L100,102C100,107.519 95.519,112 90,112L30,112C24.481,112 20,107.519 20,102L20,18C20,12.481 24.481,8 30,8L90,8C95.519,8 100,12.481 100,18Z"
+            style={{ fill: 'white', stroke: 'currentColor', strokeWidth: 4, opacity: 0.8 }}
+          />
+        </g>
+        <g transform="matrix(0.935484,0,0,1.6,-6.129032,-30.8)">
+          <path
+            d="M91,36.125L91,39.875C91,41.6 88.605,43 85.655,43L34.345,43C31.395,43 29,41.6 29,39.875L29,36.125C29,34.4 31.395,33 34.345,33L85.655,33C88.605,33 91,34.4 91,36.125Z"
+            style={{ fill: 'rgb(55,55,55)' }}
+          />
+        </g>
+        <g transform="matrix(0.935484,0,0,1.6,-6.129032,-34.8)">
+          <path
+            d="M91,56.125L91,59.875C91,61.6 88.605,63 85.655,63L34.345,63C31.395,63 29,61.6 29,59.875L29,56.125C29,54.4 31.395,53 34.345,53L85.655,53C88.605,53 91,54.4 91,56.125Z"
+            style={{ fill: 'rgb(220,38,38)' }}
+          />
+        </g>
+        <g transform="matrix(0.916667,0,0,1.6,-5.583333,-38.8)">
+          <path
+            d="M77,76.125L77,79.875C77,81.6 74.556,83 71.545,83L34.455,83C31.444,83 29,81.6 29,79.875L29,76.125C29,74.4 31.444,73 34.455,73L71.545,73C74.556,73 77,74.4 77,76.125Z"
+            style={{ fill: 'rgb(55,55,55)' }}
+          />
+        </g>
+      </svg>
+    </span>
+  );
+}
