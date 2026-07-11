@@ -2132,20 +2132,33 @@ export default function App() {
       {/* Full-height left sidebar: expanded panel or slim icon rail. It owns
           the window's left edge top to bottom (the chrome row starts to its
           right). Hidden entirely in focus mode. */}
-      {!focusMode &&
-        (explorerVisible ? (
+      {!focusMode && (
           <>
             <div
-              className={`border-r border-border bg-surface-secondary shrink-0 flex flex-col overflow-hidden ${
+              className={`relative border-r border-border bg-surface-secondary shrink-0 overflow-hidden ${
                 isDragging ? '' : 'transition-[width] duration-200 ease-in-out'
               }`}
-              style={{ width: explorerWidth }}
-              data-sidebar-panel
+              style={{ width: explorerVisible ? explorerWidth : 40 }}
             >
-              {/* Identity row: logo left, close right. h-11 matches the chrome
-                  row so the hairline under both aligns across the window. */}
-              <div className="h-11 border-b border-transparent flex items-center justify-between pl-3 pr-2 shrink-0">
+              {/* Logo pinned to one spot so it never shifts between the
+                  expanded and collapsed states. */}
+              <div className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none">
                 <AppLogo />
+              </div>
+
+              {/* Expanded panel. Fixed width so its content clips during the
+                  width animation instead of reflowing. Mounted only while
+                  open (the container keeps animating). */}
+              {explorerVisible && (
+              <div
+                className="h-full flex flex-col"
+                style={{ width: explorerWidth }}
+                data-sidebar-panel
+              >
+              {/* Identity row: the pinned logo sits at its left; close at the
+                  right. h-11 matches the chrome row so the hairline under
+                  both aligns across the window. */}
+              <div className="h-11 border-b border-transparent flex items-center justify-end pr-2 shrink-0">
                 <button
                   onClick={() => setExplorerVisible(false)}
                   className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
@@ -2257,21 +2270,16 @@ export default function App() {
                 </IconButton>
               </div>
             </div>
+
+            )}
+
+            {/* Collapsed icon rail: sits under the pinned logo, mounted only
+                while collapsed. */}
+            {!explorerVisible && (
             <div
-              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-              onMouseDown={(e) => onResizeStart('explorer', e)}
+              data-sidebar-rail
+              className="absolute inset-y-0 left-0 w-10 flex flex-col items-center pt-11 pb-1 gap-1.5"
             >
-              <div className="absolute inset-y-0 -left-1 -right-1" />
-            </div>
-          </>
-        ) : (
-          <div
-            data-sidebar-rail
-            className="w-10 border-r border-border bg-surface-secondary shrink-0 flex flex-col items-center pt-2.5 pb-1 gap-1.5"
-          >
-            <span className="mb-1.5">
-              <AppLogo />
-            </span>
             <IconButton
               size="md"
               onClick={() => {
@@ -2323,8 +2331,19 @@ export default function App() {
                 />
               </svg>
             </IconButton>
-          </div>
-        ))}
+            </div>
+            )}
+            </div>
+            {explorerVisible && (
+              <div
+                className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+                onMouseDown={(e) => onResizeStart('explorer', e)}
+              >
+                <div className="absolute inset-y-0 -left-1 -right-1" />
+              </div>
+            )}
+          </>
+        )}
 
       {/* Main column: chrome row, document, status bar */}
       <div className="flex-1 min-w-0 flex flex-col">
