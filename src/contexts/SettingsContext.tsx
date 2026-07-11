@@ -10,6 +10,7 @@ import {
 import {
   type AppSettings,
   type CommentTemplate,
+  type DocWidth,
   DEFAULT_SETTINGS,
   DEFAULT_TEMPLATES,
   parseSettings,
@@ -26,6 +27,7 @@ interface SettingsContextValue {
   updateQuickComment: (quick: boolean) => void;
   updateMermaidFullscreenPanelCollapsed: (collapsed: boolean) => void;
   updateProseFont: (font: 'serif' | 'sans') => void;
+  updateDocWidth: (width: DocWidth) => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -122,6 +124,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
+  const updateDocWidth = useCallback((docWidth: DocWidth) => update({ docWidth }), [update]);
+
   const resetTemplates = useCallback(() => update({ templates: DEFAULT_TEMPLATES }), [update]);
 
   const resetAll = useCallback(() => {
@@ -146,6 +150,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateQuickComment,
         updateMermaidFullscreenPanelCollapsed,
         updateProseFont,
+        updateDocWidth,
         resetTemplates,
         resetAll,
       }}

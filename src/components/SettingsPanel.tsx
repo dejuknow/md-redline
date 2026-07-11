@@ -23,6 +23,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     updateEnableResolve,
     updateQuickComment,
     updateProseFont,
+    updateDocWidth,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -641,6 +642,34 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                           }`}
                         >
                           {font === 'serif' ? 'Serif' : 'Sans'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Document Width */}
+                <div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Document width</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Maximum width of the rendered text column.
+                      </p>
+                    </div>
+                    <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+                      {(['narrow', 'default', 'wide'] as const).map((width) => (
+                        <button
+                          key={width}
+                          onClick={() => updateDocWidth(width)}
+                          aria-pressed={settings.docWidth === width}
+                          className={`px-3 py-1 text-xs font-medium transition-colors ${
+                            settings.docWidth === width
+                              ? 'bg-primary text-on-primary'
+                              : 'bg-surface text-content-secondary hover:bg-tint'
+                          }`}
+                        >
+                          {width === 'narrow' ? 'Narrow' : width === 'default' ? 'Default' : 'Wide'}
                         </button>
                       ))}
                     </div>

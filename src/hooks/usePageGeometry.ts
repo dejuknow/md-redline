@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { pageGeometry, type PageGeometry, CANVAS_GUTTER } from '../lib/page-geometry';
+import { pageGeometry, type PageGeometry, CANVAS_GUTTER, COL_MAX } from '../lib/page-geometry';
 
 /**
  * Observes the scroll container's content width and derives the page
@@ -12,6 +12,7 @@ export function usePageGeometry(
   containerRef: React.RefObject<HTMLElement | null>,
   railAllowed: boolean,
   enabled: boolean,
+  colMax: number = COL_MAX,
 ): PageGeometry {
   const [contentWidth, setContentWidth] = useState(0);
 
@@ -33,5 +34,8 @@ export function usePageGeometry(
     return () => ro.disconnect();
   }, [containerRef, enabled]);
 
-  return useMemo(() => pageGeometry(contentWidth, railAllowed), [contentWidth, railAllowed]);
+  return useMemo(
+    () => pageGeometry(contentWidth, railAllowed, colMax),
+    [contentWidth, railAllowed, colMax],
+  );
 }

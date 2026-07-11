@@ -118,6 +118,37 @@ test.describe('Margin notes', () => {
       .toContain('Reply from the margin');
   });
 
+  test('the Reply action works on an inactive compact card', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Margin note A');
+    await addComment(page, 'brute force attacks', 'Margin note B');
+
+    const cards = page.locator('[data-margin-card-id]');
+    await expect(cards).toHaveCount(2);
+
+    // Activate the second card so the first is inactive and therefore renders
+    // compact (this surface passes compact={!active}). Click the comment text,
+    // not the card center, to avoid landing on an action-bar button.
+    const secondCard = page.locator('[data-margin-card-id]', { hasText: 'Margin note B' });
+    await secondCard.getByText('Margin note B').click();
+
+    const firstCard = page.locator('[data-margin-card-id]', { hasText: 'Margin note A' });
+    // Compact: no editor surface is mounted until the action bar fires.
+    await expect(firstCard.locator('textarea')).toHaveCount(0);
+
+    // Reply straight from the inactive card's hover action bar, without first
+    // clicking the card body. The composer must open even though the card is
+    // compact (regression: the composer was !compact-gated so this Reply
+    // button was dead while Edit on the same card worked).
+    await firstCard.getByRole('button', { name: 'Reply' }).click();
+    await firstCard.getByPlaceholder('Write a reply...').fill('Reply from a compact card');
+    await page.keyboard.press(withMod('Enter'));
+
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'))
+      .toContain('Reply from a compact card');
+  });
+
   test('hiding the rail hides the layer; narrow windows never show it', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Margin note three');

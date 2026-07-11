@@ -5,6 +5,7 @@ import {
   COL_MAX,
   COL_MIN,
   RAIL_FOOTPRINT,
+  DOC_WIDTH_COLS,
 } from './page-geometry';
 
 describe('pageGeometry', () => {
@@ -52,5 +53,15 @@ describe('pageGeometry', () => {
     const g = pageGeometry(300, true);
     expect(g.railFits).toBe(false);
     expect(g.colWidth).toBe(320);
+  });
+
+  it('caps the column at the docWidth setting instead of COL_MAX', () => {
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.narrow).colWidth).toBe(560);
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).colWidth).toBe(800);
+    // The wide page still fits: 48 + 800 + 360
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).pageWidth).toBe(1208);
+    // The rail threshold is colMax-independent (COL_MIN governs it).
+    expect(pageGeometry(888, true, DOC_WIDTH_COLS.wide).railFits).toBe(true);
+    expect(pageGeometry(887, true, DOC_WIDTH_COLS.narrow).railFits).toBe(false);
   });
 });

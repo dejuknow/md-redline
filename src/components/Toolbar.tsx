@@ -13,7 +13,11 @@ interface Props {
   /** User's home directory; used to tilde-shorten the path in the trust prompt. */
   homeDir: string;
   isLoading: boolean;
-  sidebarVisible: boolean;
+  /** Whether a comments surface is actually on screen (rail or drawer), which
+   * is what the toggle button's active state reflects. Not the same as the
+   * sidebarVisible intent flag: at a width too narrow for the rail the toggle
+   * drives the drawer instead, so the button must track the drawer too. */
+  commentsSurfaceVisible: boolean;
   author: string;
   onAuthorChange: (name: string) => void;
   onToggleSidebar: () => void;
@@ -27,7 +31,7 @@ export function Toolbar({
   accessDeniedDir,
   homeDir,
   isLoading,
-  sidebarVisible,
+  commentsSurfaceVisible,
   author,
   onAuthorChange,
   onToggleSidebar,
@@ -120,7 +124,7 @@ export function Toolbar({
       {/* Comments rail toggle (far right; settings lives at the sidebar's bottom) */}
       <IconButton
         variant="active"
-        active={sidebarVisible}
+        active={commentsSurfaceVisible}
         size="md"
         onClick={onToggleSidebar}
         title={`Toggle comments rail (${modLabel}+\\)`}

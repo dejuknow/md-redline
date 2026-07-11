@@ -39,7 +39,9 @@ interface Props {
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
-  /** Margin-notes compact rendering: replies collapse to a count line and the composer is hidden. */
+  /** Margin-notes compact rendering: the replies thread collapses to a count
+   * line. Editor surfaces (the edit textarea and reply composer) still render
+   * when triggered, since the hover action bar is reachable on compact cards. */
   compact?: boolean;
 }
 
@@ -548,8 +550,13 @@ export const CommentCard = memo(function CommentCard({
         </div>
       )}
 
-      {/* Reply input (shown when replying — trigger is in the action bar above) */}
-      {!compact && !isResolved && isReplying && (
+      {/* Reply input (shown when replying — trigger is in the action bar
+          above). Deliberately not compact-gated, unlike the collapsed replies
+          thread: the composer is an explicit editor surface, opened only by an
+          action-bar click, which is reachable on a compact (inactive) margin
+          card exactly like the Edit textarea above. Gating it on !compact left
+          Reply dead on inactive anchored cards while Edit worked. */}
+      {!isResolved && isReplying && (
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
           <textarea
             ref={replyRef}

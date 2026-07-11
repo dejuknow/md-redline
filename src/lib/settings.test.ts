@@ -95,8 +95,35 @@ describe('parseSettings', () => {
       quickComment: true,
       mermaidFullscreenPanelCollapsed: false,
       proseFont: 'serif',
+      docWidth: 'wide',
     };
     expect(parseSettings(full)).toEqual(full);
+  });
+});
+
+describe('parseSettings docWidth', () => {
+  it('defaults to default when absent or invalid', () => {
+    expect(parseSettings({}).docWidth).toBe('default');
+    expect(parseSettings({ docWidth: 'huge' }).docWidth).toBe('default');
+  });
+
+  it('accepts narrow, default, and wide', () => {
+    expect(parseSettings({ docWidth: 'narrow' }).docWidth).toBe('narrow');
+    expect(parseSettings({ docWidth: 'wide' }).docWidth).toBe('wide');
+  });
+});
+
+describe('parseSettings legacy template migration', () => {
+  it('rewrites persisted copies of the old em-dash default texts', () => {
+    const parsed = parseSettings({
+      templates: [
+        { label: 'Rewrite this', text: 'Rewrite this section — it needs to be clearer.' },
+        { label: 'Custom', text: 'My own — template text.' },
+      ],
+    });
+    expect(parsed.templates[0].text).toBe('Rewrite this section to make it clearer.');
+    // Customized templates are never touched, even if they contain em-dashes.
+    expect(parsed.templates[1].text).toBe('My own — template text.');
   });
 });
 

@@ -90,7 +90,7 @@ import { useCommentTicks } from './hooks/useCommentTicks';
 import { SectionBreadcrumb } from './components/SectionBreadcrumb';
 import { headingChain } from './lib/heading-chain';
 import { usePageGeometry } from './hooks/usePageGeometry';
-import { PAD_L } from './lib/page-geometry';
+import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -249,7 +249,7 @@ export default function App() {
   const [homeDir, setHomeDir] = useState<string>('');
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
-  const { settings } = useSettings();
+  const { settings, updateDocWidth } = useSettings();
   const setTheme = useSetPersistedTheme();
   const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();
   const pageVisible = usePageVisible();
@@ -578,12 +578,19 @@ export default function App() {
     requestCommentFocus,
   });
 
-  const railAllowed =
-    viewMode === 'rendered' && sidebarVisible && !(diffEnabled && currentSnapshot) && !focusMode;
+  // A rail can exist in this view at all: rendered mode, not showing a diff
+  // snapshot. Whether it actually fits is layered on via geometry.railFits /
+  // railShown below. Derived once so the many rail-surface call sites
+  // (railAllowed, the surface toggles, the focus-routing effects, the density
+  // strip, the margin layer render) cannot silently diverge when rail
+  // eligibility changes.
+  const railCapable = viewMode === 'rendered' && !(diffEnabled && currentSnapshot);
+  const railAllowed = railCapable && sidebarVisible && !focusMode;
   const geometry = usePageGeometry(
     containerRef as RefObject<HTMLElement | null>,
     railAllowed,
     viewMode === 'rendered',
+    DOC_WIDTH_COLS[settings.docWidth],
   );
   const railShown = geometry.railShown;
 
@@ -605,12 +612,12 @@ export default function App() {
   // unprompted. Mirrors the rail-can-show predicate the drawer fallback and
   // the Cmd+\ shortcut already use.
   const ensureCommentSurface = useCallback(() => {
-    if (viewMode === 'rendered' && !(diffEnabled && currentSnapshot) && geometry.railFits) {
+    if (railCapable && geometry.railFits) {
       setSidebarVisibleGuarded(true);
     } else {
       setDrawerOpen(true);
     }
-  }, [viewMode, diffEnabled, currentSnapshot, geometry.railFits, setSidebarVisibleGuarded]);
+  }, [railCapable, geometry.railFits, setSidebarVisibleGuarded]);
 
   // Shared decision behind both comment-surface toggles: the Cmd+\ shortcut
   // and the command palette's "Toggle comments rail" command. Toggle the
@@ -620,12 +627,12 @@ export default function App() {
   // review: the palette command used to call toggleSidebarPane() directly
   // and skip the drawer fallback entirely).
   const toggleCommentsSurface = useCallback(() => {
-    if (viewMode !== 'rendered' || (diffEnabled && currentSnapshot) || !geometry.railFits) {
+    if (!railCapable || !geometry.railFits) {
       setDrawerOpen((p) => !p);
     } else {
       toggleSidebarPane();
     }
-  }, [viewMode, diffEnabled, currentSnapshot, geometry.railFits, toggleSidebarPane]);
+  }, [railCapable, geometry.railFits, toggleSidebarPane]);
 
   // The highlight popover is the single-thread comment surface for
   // rail-hidden contexts: a click on a highlight, or a comment created while
@@ -639,16 +646,11 @@ export default function App() {
   // underneath the drawer overlay.
   useEffect(() => {
     if (!requestedCommentFocus) return;
-    if (
-      !drawerOpen &&
-      !railShown &&
-      viewMode === 'rendered' &&
-      !(diffEnabled && currentSnapshot)
-    ) {
+    if (!drawerOpen && !railShown && railCapable) {
       setPopoverCommentId(requestedCommentFocus.commentId);
       setRequestedCommentFocus(null);
     }
-  }, [requestedCommentFocus, drawerOpen, railShown, viewMode, diffEnabled, currentSnapshot]);
+  }, [requestedCommentFocus, drawerOpen, railShown, railCapable]);
 
   // Invariant: every focus request must reach a visible surface. The rail
   // (either density), the open drawer, and the creation popover consume
@@ -658,14 +660,10 @@ export default function App() {
   // drawer forwards it to the list surface once open, which consumes it.
   useEffect(() => {
     if (!requestedCommentFocus) return;
-    if (
-      !drawerOpen &&
-      !railShown &&
-      (viewMode !== 'rendered' || (diffEnabled && currentSnapshot))
-    ) {
+    if (!drawerOpen && !railShown && !railCapable) {
       setDrawerOpen(true);
     }
-  }, [requestedCommentFocus, drawerOpen, railShown, viewMode, diffEnabled, currentSnapshot]);
+  }, [requestedCommentFocus, drawerOpen, railShown, railCapable]);
 
   // Close the popover once the rail can show its own surface, or when the
   // file changes out from under it.
@@ -729,7 +727,7 @@ export default function App() {
     highlightPaintTick,
   );
 
-  const densityEnabled = viewMode === 'rendered' && !(diffEnabled && currentSnapshot);
+  const densityEnabled = railCapable;
   const commentTicks = useCommentTicks(containerRef, comments, densityEnabled, highlightPaintTick);
 
   // Toast when an agent rewrite (or any edit) orphans comments. Debounce so
@@ -748,8 +746,8 @@ export default function App() {
       orphanToastCountRef.current = 0;
       showToast(
         count === 1
-          ? '1 comment lost its anchor. See "Needs re-anchoring" in Comments.'
-          : `${count} comments lost their anchor. See "Needs re-anchoring" in Comments.`,
+          ? '1 comment lost its anchor. Look for the flagged card in the comments rail.'
+          : `${count} comments lost their anchor. Look for the flagged cards in the comments rail.`,
       );
     }, 500);
   }, [newOrphanIds, showToast]);
@@ -1823,6 +1821,24 @@ export default function App() {
         onExecute: () => setViewMode('rendered'),
       },
       {
+        id: 'doc-width-narrow',
+        label: 'Document width: Narrow',
+        section: 'View',
+        onExecute: () => updateDocWidth('narrow'),
+      },
+      {
+        id: 'doc-width-default',
+        label: 'Document width: Default',
+        section: 'View',
+        onExecute: () => updateDocWidth('default'),
+      },
+      {
+        id: 'doc-width-wide',
+        label: 'Document width: Wide',
+        section: 'View',
+        onExecute: () => updateDocWidth('wide'),
+      },
+      {
         id: 'view-raw',
         label: 'Switch to raw markdown',
         section: 'View',
@@ -1887,6 +1903,7 @@ export default function App() {
     return cmds;
   }, [
     setViewMode,
+    updateDocWidth,
     setExplorerVisibleGuarded,
     setLeftPanelView,
     explorerVisible,
@@ -2366,7 +2383,7 @@ export default function App() {
         accessDeniedDir={accessDeniedDir}
         homeDir={homeDir}
         isLoading={isLoading}
-        sidebarVisible={sidebarVisible}
+        commentsSurfaceVisible={railShown || drawerOpen}
         author={author}
         onAuthorChange={setAuthor}
         onToggleSidebar={toggleCommentsSurface}
@@ -2449,7 +2466,7 @@ export default function App() {
                 onCopyDocument={handleCopyDocument}
                 copyFeedback={copyFeedback}
                 breadcrumb={
-                  viewMode === 'rendered' && !(diffEnabled && currentSnapshot) ? (
+                  railCapable ? (
                     <SectionBreadcrumb
                       chain={breadcrumbChain}
                       containerRef={containerRef}

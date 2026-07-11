@@ -175,6 +175,18 @@ describe('CommentCard: compact mode', () => {
     expect(await screen.findByText('First reply')).toBeTruthy();
     expect(screen.queryByText('1 reply')).toBeNull();
   });
+
+  it('compact still renders the reply composer when reply-compose is active', async () => {
+    // The action bar is reachable on a compact (inactive) margin card, so the
+    // composer it triggers must render there too — otherwise Reply is a dead
+    // button. It is deliberately not compact-gated, unlike the replies thread.
+    renderCard({
+      comment: baseComment,
+      compact: true,
+      editor: { mode: 'reply-compose', token: 1 },
+    });
+    expect(await screen.findByPlaceholderText('Write a reply...')).toBeTruthy();
+  });
 });
 
 describe('status pill and resolve action', () => {
