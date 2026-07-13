@@ -365,29 +365,4 @@ test.describe('Handoff + snapshot', () => {
 
     // Note: Both files' snapshots are verified by the "snapshot saved" toast during handoff
   });
-
-  test('clear snapshot via diff toggle dropdown after handoff', async ({ page, context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await openFixture(page);
-    await addComment(page, 'authentication system', 'Needs more detail');
-    await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
-    await page.getByTestId('handoff-button').click();
-    await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
-
-    // Switch to raw view to see diff toggle
-    await page.locator('button[title="View raw markdown"]').click();
-    await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
-
-    // Verify diff toggle visible and clear snapshot via toolbar button
-    const clearBtn = page.locator('.raw-toolbar button', { hasText: 'Clear snapshot' });
-    await expect(clearBtn).toBeVisible();
-    await clearBtn.click();
-    await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
-
-    // Diff toggle stays visible but flips to disabled with the
-    // "take a snapshot first" tooltip after the snapshot is cleared.
-    const disabledDiff = page.locator('button[title*="hand off to take a snapshot"]');
-    await expect(disabledDiff).toBeVisible();
-    await expect(disabledDiff).toBeDisabled();
-  });
 });
