@@ -82,7 +82,7 @@ describe('useDiffSnapshot', () => {
     act(() => result.current.handleClearSnapshot());
     expect(result.current.currentSnapshot).toBeNull();
     expect(setDiffEnabled).toHaveBeenCalledWith(false);
-    expect(showToast).toHaveBeenCalledWith('Snapshot cleared');
+    expect(showToast).toHaveBeenCalledWith('Snapshot cleared', 'info');
   });
 
   it('first save shows "Snapshot saved", second shows "Snapshot updated"', () => {
@@ -97,14 +97,17 @@ describe('useDiffSnapshot', () => {
 
     // First snapshot
     act(() => result.current.handleSnapshot());
-    expect(showToast).toHaveBeenLastCalledWith('Snapshot saved — diff view will show changes');
+    expect(showToast).toHaveBeenLastCalledWith(
+      'Snapshot saved — diff view will show changes',
+      'success',
+    );
 
     // Force a re-render so the hook picks up committed state and recreates handleSnapshot
     rerender({ path: '/test.md' });
 
     // Second snapshot — should detect the existing entry
     act(() => result.current.handleSnapshot());
-    expect(showToast).toHaveBeenLastCalledWith('Snapshot updated');
+    expect(showToast).toHaveBeenLastCalledWith('Snapshot updated', 'success');
   });
 
   it('snapshots persist to localStorage', () => {

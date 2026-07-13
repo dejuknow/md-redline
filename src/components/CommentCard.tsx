@@ -412,7 +412,7 @@ export const CommentCard = memo(function CommentCard({
                 )
               : onResolve && (
                   <ActionButton
-                    intent="primary"
+                    intent="success"
                     onClick={(e) => {
                       e.stopPropagation();
                       onResolve(comment.id);

@@ -242,7 +242,7 @@ describe('ReviewBanner', () => {
     });
     expect(onResolved).toHaveBeenCalled();
     await waitFor(() => {
-      expect(showToast).toHaveBeenCalledWith('Review cancelled');
+      expect(showToast).toHaveBeenCalledWith('Review cancelled', 'info');
     });
   });
 

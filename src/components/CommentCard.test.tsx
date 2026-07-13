@@ -207,10 +207,11 @@ describe('status pill and resolve action', () => {
     expect(pill.className).toContain('bg-surface-inset');
   });
 
-  it('Resolve is a primary (crimson) action', async () => {
+  it('Resolve is a success (green) action, not crimson', async () => {
     renderCard({ isActive: true, onResolve: vi.fn() }, { enableResolve: true });
     const btn = await waitFor(() => screen.getByRole('button', { name: 'Resolve' }));
-    expect(btn.className).toContain('text-primary-text');
+    expect(btn.className).toContain('text-success-text');
+    expect(btn.className).not.toContain('text-primary-text');
   });
 });
 

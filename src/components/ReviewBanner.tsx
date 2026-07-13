@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import type { ReviewSession } from '../hooks/useReviewSession';
+import type { ShowToast } from '../hooks/useToast';
 
 interface ReviewBannerProps {
   sessions: ReviewSession[];
@@ -13,7 +14,7 @@ interface ReviewBannerProps {
   /** Called after a successful batch POST with the IDs that were sent. Parent uses this for optimistic UI update. */
   onBatchSent?: (sentIds: string[]) => void;
   /** Optional toast callback for brief confirmation and error messages. */
-  showToast?: (message: string) => void;
+  showToast?: ShowToast;
   /** Comment IDs grouped by file path. */
   commentIdsByFile: Map<string, string[]>;
   /** Agent name per session id — used for the completion banner in fire-and-forget sessions. */
@@ -108,21 +109,21 @@ export function ReviewBanner({
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Batch send failed: ${message}`);
+          showToast?.(`Batch send failed: ${message}`, 'error');
           return;
         }
         if (!res.ok) {
           const detail = await readErrorMessage(res);
-          showToast?.(`Batch send failed: ${detail}`);
+          showToast?.(`Batch send failed: ${detail}`, 'error');
           return;
         }
         const data = (await res.json()) as { ok: boolean; queued?: boolean };
         onHandoffSuccess(s);
         onBatchSent?.(unsentIds);
         if (data.queued) {
-          showToast?.(`Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`);
+          showToast?.(`Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`, 'success');
         } else {
-          showToast?.(`Sent ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'} to agent`);
+          showToast?.(`Sent ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'} to agent`, 'success');
         }
       } finally {
         setBusyId(null);
@@ -154,16 +155,16 @@ export function ReviewBanner({
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Finish failed: ${message}`);
+          showToast?.(`Finish failed: ${message}`, 'error');
           return;
         }
         if (!res.ok) {
           const detail = await readErrorMessage(res);
-          showToast?.(`Finish failed: ${detail}`);
+          showToast?.(`Finish failed: ${detail}`, 'error');
           return;
         }
         onHandoffSuccess(s);
-        showToast?.('Review finished and sent to agent');
+        showToast?.('Review finished and sent to agent', 'success');
         onResolved();
       } finally {
         setBusyId(null);
@@ -184,12 +185,12 @@ export function ReviewBanner({
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Couldn't end review: ${message}`);
+          showToast?.(`Couldn't end review: ${message}`, 'error');
           return;
         }
         if (!res.ok) {
           const detail = await readErrorMessage(res);
-          showToast?.(`Couldn't end review: ${detail}`);
+          showToast?.(`Couldn't end review: ${detail}`, 'error');
           return;
         }
         onResolved();
@@ -212,17 +213,17 @@ export function ReviewBanner({
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'network error';
-          showToast?.(`Cancel failed: ${message}`);
+          showToast?.(`Cancel failed: ${message}`, 'error');
           return;
         }
 
         if (!res.ok) {
           const detail = await readErrorMessage(res);
-          showToast?.(`Cancel failed: ${detail}`);
+          showToast?.(`Cancel failed: ${detail}`, 'error');
           return;
         }
 
-        showToast?.('Review cancelled');
+        showToast?.('Review cancelled', 'info');
         onResolved();
       } finally {
         setBusyId(null);
@@ -235,7 +236,7 @@ export function ReviewBanner({
 
   return (
     <div
-      className="sticky top-0 z-40 border-b border-primary/30 bg-primary-bg px-4 py-2 text-primary-text"
+      className="sticky top-0 z-40 border-b border-border bg-surface-secondary px-4 py-2 text-content"
       data-testid="review-banner"
     >
       {sessions.map((s) => {
@@ -293,7 +294,7 @@ export function ReviewBanner({
             <span className="flex gap-2">
               <button
                 type="button"
-                className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
+                className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-40"
                 onClick={() => void handleSendBatch(s)}
                 disabled={disabled || s.waitingForAgent || unsentIds.length === 0}
                 title={
@@ -314,7 +315,7 @@ export function ReviewBanner({
               </button>
               <button
                 type="button"
-                className="rounded border-2 border-primary text-primary-text bg-surface px-3 py-1 text-sm font-semibold hover:bg-primary-bg-strong disabled:opacity-50"
+                className="rounded border border-border bg-surface text-content-secondary px-3 py-1 text-sm font-medium hover:bg-tint hover:text-content transition-colors disabled:opacity-40"
                 onClick={() => void handleSendAndFinish(s)}
                 disabled={busyId === s.id || !ready}
               >
@@ -326,7 +327,7 @@ export function ReviewBanner({
               </button>
               <button
                 type="button"
-                className="px-2 py-1 text-sm text-primary-text hover:underline disabled:opacity-50"
+                className="rounded px-2 py-1 text-sm text-content-secondary hover:text-content hover:bg-tint transition-colors disabled:opacity-50"
                 onClick={() => void handleCancel(s)}
                 disabled={busyId === s.id}
               >
@@ -462,7 +463,7 @@ function AgentSessionRow({
           />
         ) : (
           agentCommentCount > 0 && (
-            <span className="ml-2 text-secondary-text">
+            <span className="ml-2 text-content-secondary">
               ({agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'})
             </span>
           )
@@ -470,7 +471,7 @@ function AgentSessionRow({
       </span>
       <button
         type="button"
-        className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-semibold hover:bg-primary-hover disabled:opacity-50"
+        className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-40"
         onClick={handleEndReview}
         disabled={busy}
         aria-label={`End review with ${agentName}`}

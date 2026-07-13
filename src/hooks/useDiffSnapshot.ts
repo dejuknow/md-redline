@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, type RefObject } from 'react';
+import type { ShowToast } from './useToast';
 
 const STORAGE_KEY = 'md-redline-snapshots';
 
 export function useDiffSnapshot(
   activeFilePath: string | null,
   rawMarkdownRef: RefObject<string>,
-  showToast: (msg: string) => void,
+  showToast: ShowToast,
   setDiffEnabled: (v: boolean) => void,
 ) {
   const [snapshots, setSnapshots] = useState<Map<string, string>>(() => {
@@ -47,7 +48,10 @@ export function useDiffSnapshot(
         }
         return next;
       });
-      showToast(isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes');
+      showToast(
+        isUpdate ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes',
+        'success',
+      );
     },
     [activeFilePath, showToast, rawMarkdownRef],
   );
@@ -60,7 +64,7 @@ export function useDiffSnapshot(
       return next;
     });
     setDiffEnabled(false);
-    showToast('Snapshot cleared');
+    showToast('Snapshot cleared', 'info');
   }, [activeFilePath, setDiffEnabled, showToast]);
 
   return { currentSnapshot, handleSnapshot, handleClearSnapshot };

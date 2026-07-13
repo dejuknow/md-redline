@@ -66,7 +66,7 @@ import { useMermaidRenderer } from './hooks/useMermaidRenderer';
 import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
 import { MermaidFullscreenModal } from './components/MermaidFullscreenModal';
 import { usePaneLayout } from './hooks/usePaneLayout';
-import { useToast } from './hooks/useToast';
+import { useToast, type ShowToast } from './hooks/useToast';
 import { useModalState } from './hooks/useModalState';
 import { useSearch } from './hooks/useSearch';
 import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
@@ -107,9 +107,9 @@ const ThemedMarkdownViewer = forwardRef<MarkdownViewerHandle, ComponentProps<typ
 export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
   const [savedSession] = useState(() => loadSession());
-  const showToastRef = useRef<((msg: string) => void) | null>(null);
+  const showToastRef = useRef<ShowToast | null>(null);
   const onSaveError = useCallback(
-    (msg: string) => showToastRef.current?.(`Save failed: ${msg}`),
+    (msg: string) => showToastRef.current?.(`Save failed: ${msg}`, 'error'),
     [],
   );
   const {
@@ -748,6 +748,7 @@ export default function App() {
         count === 1
           ? '1 comment lost its anchor. Look for the flagged card in the comments rail.'
           : `${count} comments lost their anchor. Look for the flagged cards in the comments rail.`,
+        'info',
       );
     }, 500);
   }, [newOrphanIds, showToast]);
@@ -941,6 +942,7 @@ export default function App() {
         count === 1
           ? `${author} has a question${fileBase ? ` on ${fileBase}` : ''}`
           : `${author} has ${count} questions${fileBase ? ` on ${fileBase}` : ''}`,
+        'info',
         { label: 'View', onClick: () => handleJumpToAsk(sessionId) },
       );
     }, 500);
@@ -1021,7 +1023,7 @@ export default function App() {
     if (!mermaidFullscreen.activeSource) return;
     if (!activeMermaidBlock) {
       mermaidFullscreen.close();
-      showToast('Diagram was removed from the document.');
+      showToast('Diagram was removed from the document.', 'info');
     }
     // mermaidFullscreen is a new object each render; individual fields are listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1148,7 +1150,7 @@ export default function App() {
                   },
                 }
               : undefined;
-          showToast(`${parts.join(', ')} externally`, diffAction);
+          showToast(`${parts.join(', ')} externally`, 'info', diffAction);
         }
       } catch {
         // Ignore parse errors — still update the content
@@ -1445,10 +1447,10 @@ export default function App() {
         body: JSON.stringify({ path }),
       })
         .then((r) => {
-          if (!r.ok) showToast('Could not reveal file');
+          if (!r.ok) showToast('Could not reveal file', 'error');
         })
         .catch(() => {
-          showToast('Could not reveal file');
+          showToast('Could not reveal file', 'error');
         });
     },
     [showToast],
@@ -2676,6 +2678,7 @@ export default function App() {
         visible={toast.visible}
         onDismiss={dismissToast}
         action={toast.action}
+        kind={toast.kind}
       />
 
       {/* Comments drawer: the comment surface wherever the rail can't show */}

@@ -29,6 +29,7 @@ import { renderMarkdown } from '../markdown/pipeline';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
+import type { ShowToast } from './useToast';
 
 interface TabInfo {
   filePath: string;
@@ -46,7 +47,7 @@ export interface UseCommentsParams {
   activeFilePath: string | null;
   viewerRef: RefObject<MarkdownViewerHandle | null>;
   rawViewRef: RefObject<RawViewHandle | null>;
-  showToast: (msg: string) => void;
+  showToast: ShowToast;
   clearSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
   requestCommentFocus: (commentId: string) => void;
@@ -277,8 +278,9 @@ export function useComments(params: UseCommentsParams) {
         () =>
           showToast(
             `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''} (snapshot saved)`,
+            'success',
           ),
-        () => showToast("Couldn't copy to clipboard. Try from localhost."),
+        () => showToast("Couldn't copy to clipboard. Try from localhost.", 'error'),
       );
     },
     [commentCounts, showToast, enableResolve],

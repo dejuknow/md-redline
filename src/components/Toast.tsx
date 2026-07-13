@@ -1,14 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ToastAction } from '../hooks/useToast';
+import type { ToastAction, ToastKind } from '../hooks/useToast';
 
 interface Props {
   message: string;
   visible: boolean;
   onDismiss: () => void;
   action?: ToastAction;
+  kind?: ToastKind;
 }
 
-export function Toast({ message, visible, onDismiss, action }: Props) {
+// One neutral bar for every toast; the meaning lives in the icon color. The bar
+// is the theme's own text color mixed 80% toward its surface, with the surface
+// color as text — i.e. an inverted, slightly-softened neutral. That means it
+// always sits at the opposite value from the page (a warm charcoal on light
+// themes, a warm off-white on dark ones), so it stands out without blending,
+// and it's drawn from each theme's palette rather than a fixed foreign color.
+// The 80% mix takes the edge off the near-black on light themes. Icon colors
+// are mid-tones that read on both bar values; `error` uses an alert glyph,
+// never the success check.
+const TOAST_BG = 'color-mix(in srgb, var(--color-content) 80%, var(--color-surface))';
+const TOAST_FG = 'var(--color-surface)';
+const KIND_STYLES: Record<ToastKind, { iconColor: string; icon: string }> = {
+  success: {
+    iconColor: '#10b981',
+    icon: 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  },
+  error: {
+    iconColor: '#ef4444',
+    icon: 'M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z',
+  },
+  info: {
+    iconColor: '#9ca3af',
+    icon: 'M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z',
+  },
+};
+
+export function Toast({ message, visible, onDismiss, action, kind = 'info' }: Props) {
   const [show, setShow] = useState(false);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -49,19 +76,19 @@ export function Toast({ message, visible, onDismiss, action }: Props) {
         show ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
     >
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary text-sm font-medium rounded-lg shadow-lg">
+      <div
+        className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-lg"
+        style={{ background: TOAST_BG, color: TOAST_FG }}
+      >
         <svg
           className="w-4 h-4 shrink-0"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
           strokeWidth={2}
+          style={{ color: KIND_STYLES[kind].iconColor }}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" d={KIND_STYLES[kind].icon} />
         </svg>
         {message}
         {action && (
@@ -72,7 +99,7 @@ export function Toast({ message, visible, onDismiss, action }: Props) {
               if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
               fadeTimerRef.current = setTimeout(onDismiss, 200);
             }}
-            className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-on-primary/20 hover:bg-on-primary/30 transition-colors"
+            className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-current/10 hover:bg-current/20 transition-colors"
           >
             {action.label}
           </button>
