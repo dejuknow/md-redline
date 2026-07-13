@@ -69,7 +69,7 @@ SameSite=Strict cookie, valid for 30 days with sliding renewal.
 
 ### Password Requirements
 
-Passwords are hashed with bcrypt (<!-- @comment{"id":"c-bcrypt","anchor":"cost factor 12","text":"bcrypt is fine, but should new installs default to argon2id?","author":"Dennis","timestamp":"2026-07-12T14:25:00.000Z"} -->cost factor 12) before storage. Plain-text
+Passwords are hashed with bcrypt (<!-- @comment{"id":"c-bcrypt","anchor":"cost factor 12","text":"bcrypt is fine, but should new installs default to argon2id?","author":"Dennis","timestamp":"2026-07-12T14:25:00.000Z","replies":[{"id":"r-bcrypt-1","author":"Claude","timestamp":"2026-07-12T14:41:00.000Z","text":"argon2id is the stronger default for new installs. I would keep verifying existing bcrypt hashes and re-hash them on the next successful login, so nobody is forced to reset."}]} -->cost factor 12) before storage. Plain-text
 passwords are never logged or persisted, and rotation is never forced on a
 fixed schedule.
 

@@ -1046,6 +1046,25 @@ test.describe('Product shots — hero', () => {
     // Gate on a card actually rendering (the bcrypt comment's reply text).
     await expect(page.getByText('argon2id', { exact: false })).toBeVisible({ timeout: 10_000 });
 
+    // Put the two visible comments into showcase states. Both carry a Claude
+    // reply. Focus (activate) the bcrypt comment ("cost factor 12") so its reply
+    // thread expands, then open its reply composer with an unsent draft, so the
+    // highlighted card is the one being replied to and shows the full
+    // agent-then-user exchange. The reset-token comment ("valid for 1 hour")
+    // stays inactive, so its Claude reply shows as a collapsed "1 reply" count.
+    const CARD = '[data-comment-card-id]';
+    const bcryptCard = page.locator(CARD, { hasText: 'cost factor 12' }).first();
+    await bcryptCard.click();
+    await page.waitForTimeout(200);
+    await bcryptCard.getByRole('button', { name: 'Reply' }).first().click();
+    await page
+      .getByPlaceholder('Write a reply...')
+      .fill('Agreed. New installs default to argon2id; bcrypt hashes upgrade on next login.');
+    // Confirm the expanded Claude reply and the unsent draft are both live.
+    await expect(page.getByText('re-hash them on the next', { exact: false })).toBeVisible();
+    await expect(page.getByPlaceholder('Write a reply...')).toHaveValue(/argon2id/);
+    await page.waitForTimeout(200);
+
     // Scroll Password Management to the top of the doc scroller so its two
     // comment cards (cost factor 12, valid for 1 hour) are both on screen.
     // Done instantly and re-asserted after a settle, because the tab switch +

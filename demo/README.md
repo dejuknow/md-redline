@@ -158,7 +158,11 @@ Current stills:
   The app in a macOS window frame (titlebar, rounded corners, soft shadow) on a
   transparent background at 2x, so it floats on GitHub's light or dark theme.
   Light theme, three tabs, Outline panel, Anchored comments, scrolled to
-  Password Management so both comment cards show. Seeds a restored 3-tab session
+  Password Management so both comment cards show. Both carry an agent (Claude)
+  reply; the focused card also has an open reply composer holding an unsent
+  draft (so it shows the full comment, agent reply, and in-progress reply),
+  while the other card's reply stays collapsed as a "1 reply" count.
+  Seeds a restored 3-tab session
   via `localStorage` from the committed `fixtures/hero/*.md` (authentication-spec
   carries the five comments); the frame is composited in-browser around the
   capture, so no image tooling is needed. To refresh the README image,
