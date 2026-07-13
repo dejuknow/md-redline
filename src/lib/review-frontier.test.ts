@@ -8,6 +8,7 @@ const base = {
   openCount: 0,
   alreadyAdvanced: false,
   fileChanged: false,
+  resolveEnabledChanged: false,
 };
 
 describe('shouldAdvanceFrontier', () => {
@@ -31,6 +32,9 @@ describe('shouldAdvanceFrontier', () => {
   });
   it('does not advance on the render where the active file just changed', () => {
     expect(shouldAdvanceFrontier({ ...base, fileChanged: true })).toBe(false);
+  });
+  it('does not advance when the resolve setting just changed', () => {
+    expect(shouldAdvanceFrontier({ ...base, resolveEnabledChanged: true })).toBe(false);
   });
 });
 

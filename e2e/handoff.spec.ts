@@ -363,6 +363,6 @@ test.describe('Handoff + snapshot', () => {
     await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('button[title*="diff"]')).toBeVisible();
 
-    // Note: Both files' snapshots are verified by the "snapshot saved" toast during handoff
+    // Note: Both files' references are verified by the "tracking changes" toast during handoff
   });
 });

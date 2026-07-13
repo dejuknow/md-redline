@@ -581,11 +581,14 @@ export default function App() {
   const prevOpenCountRef = useRef(commentCount);
   const advancedForEpisodeRef = useRef(false);
   const frontierFileRef = useRef(activeFilePath);
+  const prevResolveEnabledRef = useRef(settings.enableResolve);
   useEffect(() => {
     const fileChanged = frontierFileRef.current !== activeFilePath;
+    const resolveEnabledChanged = prevResolveEnabledRef.current !== settings.enableResolve;
     const prevOpenCount = prevOpenCountRef.current;
     frontierFileRef.current = activeFilePath;
     prevOpenCountRef.current = commentCount;
+    prevResolveEnabledRef.current = settings.enableResolve;
 
     // A new open comment starts a fresh episode.
     if (commentCount > 0) advancedForEpisodeRef.current = false;
@@ -598,6 +601,7 @@ export default function App() {
         openCount: commentCount,
         alreadyAdvanced: advancedForEpisodeRef.current,
         fileChanged,
+        resolveEnabledChanged,
       })
     ) {
       advancedForEpisodeRef.current = true;
@@ -2503,7 +2507,7 @@ export default function App() {
                 diffPending={diffPending}
                 diffChunkCount={diffChunkCount}
                 referenceLabel={
-                  diffEnabled && currentReference
+                  diffEnabled && currentReference && diffChunkCount > 0
                     ? formatReferenceLabel(currentReference)
                     : undefined
                 }

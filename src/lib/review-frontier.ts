@@ -11,6 +11,12 @@ export interface FrontierAdvanceInput {
   alreadyAdvanced: boolean;
   /** Whether the active file changed since the previous evaluation. */
   fileChanged: boolean;
+  /**
+   * Whether the resolve setting changed since the previous evaluation; the
+   * open-count is not comparable across it (resolve OFF counts ALL comments,
+   * ON counts only non-resolved ones).
+   */
+  resolveEnabledChanged: boolean;
 }
 
 /**
@@ -20,6 +26,7 @@ export interface FrontierAdvanceInput {
  */
 export function shouldAdvanceFrontier(input: FrontierAdvanceInput): boolean {
   if (input.fileChanged) return false;
+  if (input.resolveEnabledChanged) return false;
   if (!input.resolveEnabled) return false;
   if (!input.hasReference) return false;
   if (input.openCount > 0) return false;
