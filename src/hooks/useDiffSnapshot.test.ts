@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDiffSnapshot } from './useDiffSnapshot';
 
+type DiffReferenceForTest = { content: string; capturedAt: number; origin: 'handoff' | 'review' };
+
 const STORAGE_KEY = 'md-redline-snapshots';
 
 function setup(activeFilePath: string | null = '/test.md', initialContent: string = 'hello world') {
@@ -117,7 +119,9 @@ describe('useDiffSnapshot', () => {
     act(() => result.current.handleSnapshot());
 
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-    expect(stored['/test.md']).toBe('persisted');
+    expect(stored['/test.md']).toEqual(
+      expect.objectContaining({ content: 'persisted', origin: 'handoff' }),
+    );
   });
 
   it('initializes from localStorage on mount', () => {
@@ -129,5 +133,67 @@ describe('useDiffSnapshot', () => {
 
     // Should read the pre-existing snapshot, not null
     expect(result.current.currentSnapshot).toBe('pre-existing content');
+  });
+
+  it('migrates a legacy bare-string snapshot to a DiffReference', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ '/legacy.md': 'old content' }));
+    const { hookArgs } = setup('/legacy.md', 'current');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    expect(result.current.currentSnapshot).toBe('old content');
+    expect(result.current.currentReference).toEqual(
+      expect.objectContaining({ content: 'old content', origin: 'handoff' }),
+    );
+    expect(typeof result.current.currentReference!.capturedAt).toBe('number');
+  });
+
+  it('captureReference stores a record with the given origin and returns the previous reference', () => {
+    const { hookArgs, rawMarkdownRef } = setup('/t.md', 'v1');
+    const { result, rerender } = renderHook(({ args }) => useDiffSnapshot(...args), {
+      initialProps: { args: hookArgs },
+    });
+    let prev: unknown;
+    act(() => {
+      prev = result.current.captureReference('handoff');
+    });
+    expect(prev).toBeNull();
+    expect(result.current.currentReference).toEqual(
+      expect.objectContaining({ content: 'v1', origin: 'handoff' }),
+    );
+
+    rerender({ args: hookArgs });
+    rawMarkdownRef.current = 'v2';
+    let prev2: unknown;
+    act(() => {
+      prev2 = result.current.captureReference('review');
+    });
+    expect(prev2).toEqual(expect.objectContaining({ content: 'v1', origin: 'handoff' }));
+    expect(result.current.currentReference).toEqual(
+      expect.objectContaining({ content: 'v2', origin: 'review' }),
+    );
+  });
+
+  it('restoreReference puts a specific reference back (Undo)', () => {
+    const { hookArgs, rawMarkdownRef } = setup('/t.md', 'v1');
+    const { result, rerender } = renderHook(({ args }) => useDiffSnapshot(...args), {
+      initialProps: { args: hookArgs },
+    });
+    // First capture establishes the v1 handoff reference.
+    act(() => {
+      result.current.captureReference('handoff');
+    });
+    rerender({ args: hookArgs });
+
+    // Advancing to v2 returns the previous (v1) reference; that is what Undo restores.
+    rawMarkdownRef.current = 'v2';
+    let prev: DiffReferenceForTest | null = null;
+    act(() => {
+      prev = result.current.captureReference('review') as DiffReferenceForTest | null;
+    });
+    expect(prev).toEqual(expect.objectContaining({ content: 'v1', origin: 'handoff' }));
+    expect(result.current.currentSnapshot).toBe('v2');
+
+    rerender({ args: hookArgs });
+    act(() => result.current.restoreReference(prev));
+    expect(result.current.currentSnapshot).toBe('v1');
   });
 });
