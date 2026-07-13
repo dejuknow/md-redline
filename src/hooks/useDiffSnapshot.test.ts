@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDiffSnapshot, type DiffReference } from './useDiffSnapshot';
 
@@ -8,11 +8,9 @@ const STORAGE_KEY = 'md-redline-snapshots';
 
 function setup(activeFilePath: string | null = '/test.md', initialContent: string = 'hello world') {
   const rawMarkdownRef = { current: initialContent };
-  const showToast = vi.fn();
   return {
     rawMarkdownRef,
-    showToast,
-    hookArgs: [activeFilePath, rawMarkdownRef, showToast] as const,
+    hookArgs: [activeFilePath, rawMarkdownRef] as const,
   };
 }
 
@@ -27,29 +25,29 @@ describe('useDiffSnapshot', () => {
     expect(result.current.currentSnapshot).toBeNull();
   });
 
-  it('handleSnapshot saves rawMarkdownRef.current to snapshots', () => {
+  it('captureReference saves rawMarkdownRef.current to references', () => {
     const { hookArgs, rawMarkdownRef } = setup('/test.md', 'file content');
     const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
 
-    act(() => result.current.handleSnapshot());
+    act(() => result.current.captureReference('handoff'));
 
     expect(result.current.currentSnapshot).toBe('file content');
 
     // Confirm it tracks the ref's value at call time
     rawMarkdownRef.current = 'changed';
-    act(() => result.current.handleSnapshot());
+    act(() => result.current.captureReference('handoff'));
     expect(result.current.currentSnapshot).toBe('changed');
   });
 
-  it('after handleSnapshot, currentSnapshot returns the saved content', () => {
+  it('after captureReference, currentSnapshot returns the saved content', () => {
     const { hookArgs } = setup('/doc.md', 'saved text');
     const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
 
-    act(() => result.current.handleSnapshot());
+    act(() => result.current.captureReference('handoff'));
     expect(result.current.currentSnapshot).toBe('saved text');
   });
 
-  it('handleSnapshot with extraEntries saves additional file snapshots', () => {
+  it('captureReference with extraEntries saves additional file references', () => {
     const { hookArgs } = setup('/a.md', 'content a');
     const { result, rerender } = renderHook(({ args }) => useDiffSnapshot(...args), {
       initialProps: { args: hookArgs },
@@ -59,9 +57,9 @@ describe('useDiffSnapshot', () => {
       ['/b.md', 'content b'],
       ['/c.md', 'content c'],
     ]);
-    act(() => result.current.handleSnapshot(extras));
+    act(() => result.current.captureReference('handoff', extras));
 
-    // Current file has its snapshot
+    // Current file has its reference
     expect(result.current.currentSnapshot).toBe('content a');
 
     // Switch to /b.md to verify extra entry was saved
@@ -70,35 +68,11 @@ describe('useDiffSnapshot', () => {
     expect(result.current.currentSnapshot).toBe('content b');
   });
 
-  it('first save shows "Snapshot saved", second shows "Snapshot updated"', () => {
-    const rawMarkdownRef = { current: 'v1' };
-    const showToast = vi.fn();
-
-    const { result, rerender } = renderHook(
-      ({ path }) => useDiffSnapshot(path, rawMarkdownRef, showToast),
-      { initialProps: { path: '/test.md' } },
-    );
-
-    // First snapshot
-    act(() => result.current.handleSnapshot());
-    expect(showToast).toHaveBeenLastCalledWith(
-      'Snapshot saved — diff view will show changes',
-      'success',
-    );
-
-    // Force a re-render so the hook picks up committed state and recreates handleSnapshot
-    rerender({ path: '/test.md' });
-
-    // Second snapshot — should detect the existing entry
-    act(() => result.current.handleSnapshot());
-    expect(showToast).toHaveBeenLastCalledWith('Snapshot updated', 'success');
-  });
-
-  it('snapshots persist to localStorage', () => {
+  it('references persist to localStorage', () => {
     const { hookArgs } = setup('/test.md', 'persisted');
     const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
 
-    act(() => result.current.handleSnapshot());
+    act(() => result.current.captureReference('handoff'));
 
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
     expect(stored['/test.md']).toEqual(

@@ -97,7 +97,7 @@ test.describe('Single-file hand-off', () => {
 
     // Check toast
     await expect(
-      page.getByText('Copied agent instructions for 1 file (snapshot saved)'),
+      page.getByText('Copied agent instructions for 1 file. Now tracking changes.'),
     ).toBeVisible();
 
     // Verify clipboard content
@@ -269,7 +269,7 @@ test.describe('Multi-file hand-off', () => {
     await dropdown.getByText('Copy handoff for 2 files').click();
 
     await expect(
-      page.getByText('Copied agent instructions for 2 files (snapshot saved)'),
+      page.getByText('Copied agent instructions for 2 files. Now tracking changes.'),
     ).toBeVisible();
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
@@ -326,7 +326,7 @@ test.describe('Handoff + snapshot', () => {
     await addComment(page, 'authentication system', 'Needs more detail');
     await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
     await page.getByTestId('handoff-button').click();
-    await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/tracking changes/i)).toBeVisible({ timeout: 5_000 });
 
     // Switch to raw view and verify diff toggle is visible (snapshot was created)
     await page.locator('button[title="View raw markdown"]').click();
@@ -356,7 +356,7 @@ test.describe('Handoff + snapshot', () => {
     await page.getByTestId('handoff-chevron').click();
     const dropdown = page.locator('.absolute.right-0.top-full');
     await dropdown.getByText('Copy handoff for 2 files').click();
-    await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/tracking changes/i)).toBeVisible({ timeout: 5_000 });
 
     // File 2 (active tab) should have a snapshot → switch to raw view and verify diff toggle visible
     await page.locator('button[title="View raw markdown"]').click();

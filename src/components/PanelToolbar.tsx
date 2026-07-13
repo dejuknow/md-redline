@@ -93,10 +93,10 @@ export function PanelToolbar({
   // and e2e selectors), and the aria-label.
   const viewModeLabel = isRaw ? 'Switch to rendered view' : 'View raw markdown';
   const diffLabel = !hasDiffSnapshot
-    ? 'Show diff overlay — hand off to take a snapshot first'
+    ? 'Show diff. Hand off to an agent first.'
     : diffEnabled
-      ? 'Hide diff overlay'
-      : 'Show diff since snapshot';
+      ? 'Hide diff'
+      : 'Show diff';
   const searchLabel = `Find in document (${modLabel}+F)`;
   const copyLabel = copyFeedback ? 'Copied!' : 'Copy document (comment markers stripped)';
 

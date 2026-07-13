@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { ShowToast } from './useToast';
 
 const STORAGE_KEY = 'md-redline-snapshots';
 
@@ -28,11 +27,7 @@ function normalizeStored(parsed: unknown): Map<string, DiffReference> {
   return map;
 }
 
-export function useDiffSnapshot(
-  activeFilePath: string | null,
-  rawMarkdownRef: RefObject<string>,
-  showToast: ShowToast,
-) {
+export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: RefObject<string>) {
   const [refs, setRefs] = useState<Map<string, DiffReference>>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -102,24 +97,10 @@ export function useDiffSnapshot(
     [activeFilePath],
   );
 
-  // --- Legacy API, kept working until the Task 6 vocabulary sweep removes it. ---
-  const handleSnapshot = useCallback(
-    (extraEntries?: Map<string, string>) => {
-      if (!activeFilePath) return;
-      const prev = captureReference('handoff', extraEntries);
-      showToast(
-        prev ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes',
-        'success',
-      );
-    },
-    [activeFilePath, captureReference, showToast],
-  );
-
   return {
     currentReference,
     currentSnapshot,
     captureReference,
     restoreReference,
-    handleSnapshot,
   };
 }

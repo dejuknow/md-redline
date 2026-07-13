@@ -472,13 +472,8 @@ export default function App() {
   }, [rawMarkdown]);
 
   // Diff snapshot state
-  const {
-    currentSnapshot,
-    currentReference,
-    captureReference,
-    restoreReference,
-    handleSnapshot,
-  } = useDiffSnapshot(activeFilePath, rawMarkdownRef, showToast);
+  const { currentSnapshot, currentReference, captureReference, restoreReference } =
+    useDiffSnapshot(activeFilePath, rawMarkdownRef);
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
   const currentSnapshotRef = useRef(currentSnapshot);
@@ -816,10 +811,10 @@ export default function App() {
         const tab = tabs.find((t) => t.filePath === p);
         if (tab) extra.set(p, tab.rawMarkdown);
       }
-      handleSnapshot(extra.size > 0 ? extra : undefined);
+      captureReference('handoff', extra.size > 0 ? extra : undefined);
       handleCopyAgentPrompt(filePaths);
     },
-    [handleSnapshot, handleCopyAgentPrompt, activeFilePath, tabs],
+    [captureReference, handleCopyAgentPrompt, activeFilePath, tabs],
   );
 
   const { sessions: reviewSessions, refresh: refreshReviewSessions } = useReviewSession();
@@ -834,9 +829,9 @@ export default function App() {
         const tab = tabs.find((t) => t.filePath === p);
         if (tab) extra.set(p, tab.rawMarkdown);
       }
-      handleSnapshot(extra.size > 0 ? extra : undefined);
+      captureReference('handoff', extra.size > 0 ? extra : undefined);
     },
-    [tabs, activeFilePath, handleSnapshot],
+    [tabs, activeFilePath, captureReference],
   );
 
   // Strip `?review=<id>` from the address bar once a review resolves, so
@@ -1923,7 +1918,7 @@ export default function App() {
     if (currentSnapshot) {
       cmds.push({
         id: 'toggle-diff-overlay',
-        label: diffEnabled ? 'Hide diff overlay' : 'Show diff overlay',
+        label: diffEnabled ? 'Hide diff' : 'Show diff',
         section: 'View',
         onExecute: handleDiffToggle,
       });

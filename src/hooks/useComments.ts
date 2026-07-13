@@ -277,7 +277,7 @@ export function useComments(params: UseCommentsParams) {
       navigator.clipboard.writeText(prompt).then(
         () =>
           showToast(
-            `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''} (snapshot saved)`,
+            `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}. Now tracking changes.`,
             'success',
           ),
         () => showToast("Couldn't copy to clipboard. Try from localhost.", 'error'),

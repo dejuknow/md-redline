@@ -33,7 +33,7 @@ async function takeSnapshotViaHandoff(
   await addComment(page, 'Section One', 'placeholder');
   await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('handoff-button').click();
-  await expect(page.getByText(/snapshot saved/)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/tracking changes/i)).toBeVisible({ timeout: 5_000 });
 }
 
 /** Switch to raw view via the toolbar button. */
@@ -372,7 +372,7 @@ test.describe('Diff overlay', () => {
 /** Diff toggle button inside the rendered view's secondary toolbar. */
 function renderedDiffBtn(page: Page): Locator {
   return page
-    .locator('.raw-toolbar button[title*="diff since snapshot"], .raw-toolbar button[title*="Hide diff overlay"]')
+    .locator('.raw-toolbar button[title="Show diff"], .raw-toolbar button[title="Hide diff"]')
     .first();
 }
 

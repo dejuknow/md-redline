@@ -709,7 +709,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
                   No content changes
                 </p>
                 <p className="text-xs text-center leading-relaxed max-w-xs">
-                  Comment threads were updated since your snapshot.
+                  Comment threads were updated.
                   <br />
                   Open Comments to review.
                 </p>
