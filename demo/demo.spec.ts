@@ -30,9 +30,8 @@ const DEMO_FILE = resolve(__dirname, '..', 'demo-sample.md');
 const REVIEW_DEMO_FILE = resolve(__dirname, '..', 'demo-prd.md');
 const FRAMES_DIR = resolve(__dirname, 'frames');
 const WALLPAPER = resolve(__dirname, 'assets/background.png');
-// Product shots (npm run demo:shots): framed UI stills, same wallpaper +
-// window chrome as the videos. Regenerate-and-eyeball after a UI change.
-const FIXTURE_BANNER_SHOT = resolve(__dirname, 'fixtures/banner-shot.md');
+// Product shots (npm run demo:shots): deterministic UI stills, regenerated and
+// eyeballed after a UI change. Output dir is gitignored.
 const SHOTS_DIR = resolve(__dirname, 'output/shots');
 
 // ----------------------------------------------------------------------------
@@ -988,60 +987,92 @@ test.describe.serial('Demo recording', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Product shots — framed UI stills (npm run demo:shots)
+// Hero showcase — the README screenshot (public/screenshot.png).
 //
-// Same wallpaper + window chrome as the videos (via setupDemoPage), so the
-// stills match the demo's look. Output lands in demo/output/shots and is
-// gitignored: this is a regenerate-and-eyeball reference, not a pixel gate.
-// After a UI change that touches one of these surfaces, re-run and look:
-//   npm run demo:shots   (greps test titles for "shot:")
-// Add a new still by adding another `test('shot: ...')` here.
+// Full-bleed (no wallpaper/chrome), captured at 2x for a crisp still. Seeds a
+// restored 3-tab session + light theme via localStorage, flips the left panel
+// to Outline and comments to Anchored, then scrolls to Password Management so
+// the "cost factor 12" and "valid for 1 hour" cards are both on screen.
+// Fixtures live in fixtures/hero (committed) so the scene is deterministic.
+//   npm run demo:shots
+// then copy demo/output/shots/hero-showcase-light.png to public/screenshot.png.
 // ---------------------------------------------------------------------------
-test.describe('Product shots', () => {
-  test('shot: review banner (light)', async ({ page, request, baseURL }) => {
-    // Isolation: abort any open sessions so our POST creates a fresh one (201).
-    const existing = await request.get(`${baseURL}/api/review-sessions`);
-    if (existing.ok()) {
-      const { sessions } = (await existing.json()) as {
-        sessions: { id: string; status: string }[];
-      };
-      for (const s of sessions.filter((s) => s.status === 'open')) {
-        await request.post(`${baseURL}/api/review-sessions/${s.id}/abort`, {
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-    }
+test.describe('Product shots — hero', () => {
+  test.use({ viewport: { width: 1512, height: 820 }, deviceScaleFactor: 2 });
 
-    // Seed a user-origin review from a fixture that already carries two of the
-    // author's comments, so the banner renders its enabled state (the budgeted
-    // crimson "Send" primary, not the faded disabled one). Copied to DEMO_FILE
-    // so the banner reads the same "demo-sample.md" basename as the videos.
-    copyFileSync(FIXTURE_BANNER_SHOT, DEMO_FILE);
-    await setupDemoPage(page);
-    const res = await request.post(`${baseURL}/api/review-sessions`, {
-      data: { filePaths: [DEMO_FILE], enableResolve: true },
+  test('shot: hero showcase (light)', async ({ page, request, baseURL }) => {
+    const heroDir = resolve(__dirname, 'fixtures/hero');
+    const authPath = resolve(heroDir, 'authentication-spec.md');
+    const apiPath = resolve(heroDir, 'api-design.md');
+    const dataPath = resolve(heroDir, 'data-model.md');
+
+    // Trust the fixtures dir so /api/file can read the tabbed files.
+    await request.put(`${baseURL}/api/preferences`, {
+      data: { author: 'Dennis', trustedRoots: [heroDir] },
     });
-    expect(res.status()).toBe(201);
-    const { sessionId } = (await res.json()) as { sessionId: string };
 
-    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
-    const banner = page.getByTestId('review-banner');
-    await expect(banner).toBeVisible({ timeout: 12_000 });
-    // Gate on the enabled primary so we never shoot the loading/zero state.
-    await expect(
-      banner.getByRole('button', { name: /Send 2 comments/ }),
-    ).toBeEnabled({ timeout: 10_000 });
-    await page.waitForTimeout(300);
+    // Seed light theme + a restored 3-tab session before the app boots.
+    // Session-restore opens the active tab LAST, so to keep the spec leftmost
+    // we make data-model the seeded-active tab (it opens auth then api first),
+    // then click the spec tab active below.
+    await page.addInitScript(
+      ({ tabs, active }) => {
+        localStorage.setItem('theme', 'light');
+        localStorage.setItem('author', 'Dennis');
+        localStorage.setItem(
+          'md-redline-session',
+          JSON.stringify({ openTabs: tabs, activeFilePath: active }),
+        );
+      },
+      { tabs: [authPath, apiPath, dataPath], active: dataPath },
+    );
+
+    await page.goto('/');
+    await expect(page.locator('.prose')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[data-theme="light"]')).toBeVisible();
+
+    // Left panel -> Outline, then activate the spec tab (kept leftmost).
+    await page.getByRole('button', { name: 'Outline' }).click();
+    await page.locator(`button[title="${authPath}"]`).click();
+    await expect(page.getByRole('heading', { name: 'Password Management' })).toBeVisible({
+      timeout: 10_000,
+    });
+    // Comment layout -> Anchored.
+    await page
+      .getByRole('group', { name: 'Comment layout density' })
+      .getByRole('button', { name: 'Anchored' })
+      .click();
+
+    // Gate on a card actually rendering (the bcrypt comment's reply text).
+    await expect(page.getByText('argon2id', { exact: false })).toBeVisible({ timeout: 10_000 });
+
+    // Scroll Password Management to the top of the doc scroller so its two
+    // comment cards (cost factor 12, valid for 1 hour) are both on screen.
+    // Done instantly and re-asserted after a settle, because the tab switch +
+    // anchored-card layout can fire a late auto-scroll that reverts it.
+    const scrollPMToTop = () => {
+      const h = [...document.querySelectorAll('.prose h1, .prose h2, .prose h3')].find(
+        (e) => e.textContent?.trim() === 'Password Management',
+      ) as HTMLElement | undefined;
+      if (!h) return null;
+      let s: HTMLElement | null = h.parentElement;
+      while (s) {
+        const oy = getComputedStyle(s).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && s.scrollHeight > s.clientHeight) break;
+        s = s.parentElement;
+      }
+      if (!s) return null;
+      s.style.scrollBehavior = 'auto';
+      s.scrollTop += h.getBoundingClientRect().top - s.getBoundingClientRect().top - 24;
+      return Math.round(h.getBoundingClientRect().top - s.getBoundingClientRect().top);
+    };
+    await page.waitForTimeout(500);
+    await page.evaluate(scrollPMToTop);
+    await page.waitForTimeout(350);
+    await page.evaluate(scrollPMToTop); // re-assert after any late auto-scroll
+    await page.waitForTimeout(150);
 
     mkdirSync(SHOTS_DIR, { recursive: true });
-    // Framed top slice: wallpaper margin + window chrome + banner + a little doc.
-    await page.screenshot({
-      path: resolve(SHOTS_DIR, 'review-banner-light.png'),
-      clip: { x: 0, y: 0, width: 1600, height: 360 },
-    });
-  });
-
-  test.afterAll(() => {
-    if (existsSync(DEMO_FILE)) unlinkSync(DEMO_FILE);
+    await page.screenshot({ path: resolve(SHOTS_DIR, 'hero-showcase-light.png') });
   });
 });

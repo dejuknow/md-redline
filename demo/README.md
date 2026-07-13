@@ -138,30 +138,33 @@ Floors you shouldn't cross: `DRAG_DURATION ≥ 600`, `SUBMIT_RIPPLE_DWELL ≥ 44
 `POST_SEND_HOLD ≥ 1300`, `TYPE_DELAY ≥ 14`. Going under these breaks
 the quality checks in §4.
 
-## 7. Product shots (framed UI stills)
+## 7. Product shots (UI stills)
 
-Separate from the videos: single framed screenshots of a UI surface, in the
-same wallpaper + window chrome as the videos (they reuse `setupDemoPage`), for
-reviewing a component's look and catching visual drift.
+Separate from the videos: a deterministic screenshot of a UI surface, for
+reviewing its look and catching visual drift.
 
 ```bash
 npm run demo:shots
-open demo/output/shots/review-banner-light.png
+open demo/output/shots/hero-showcase-light.png
 ```
 
-This runs only the `Product shots` tests in `demo.spec.ts` (the script greps
-test titles for `shot:`). Output lands in `demo/output/shots/` and is
-gitignored: it's a regenerate-and-eyeball reference, not a committed baseline
-or a pixel-diff gate. Re-run it after a change that touches one of these
-surfaces and compare by eye.
+This runs every `Product shots` test in `demo.spec.ts` (the script greps test
+titles for `shot:`). Output lands in `demo/output/shots/` and is gitignored:
+it's a regenerate-and-eyeball reference, not a pixel-diff gate.
 
 Current stills:
 
-- `review-banner-light.png` — the review banner in its enabled state (the
-  "Agent is waiting on your review" row with the crimson **Send** primary).
-  Seeded deterministically from `fixtures/banner-shot.md`, which carries two
-  of the author's comments so the primary renders enabled rather than faded.
+- `hero-showcase-light.png` — **the README screenshot** (`public/screenshot.png`).
+  Full-bleed at 2x, light theme, three tabs, Outline panel, Anchored comments,
+  scrolled to Password Management so both comment cards show. Seeds a restored
+  3-tab session via `localStorage` from the committed `fixtures/hero/*.md`
+  (authentication-spec carries the five comments). To refresh the README image,
+  regenerate and copy it over:
+  ```bash
+  npm run demo:shots
+  cp demo/output/shots/hero-showcase-light.png public/screenshot.png
+  ```
 
-To add a still, add another `test('shot: <name>', ...)` in the `Product shots`
-block and, if it needs a specific state, a small seeded fixture like
-`banner-shot.md`. Keep the title prefixed `shot:` so `demo:shots` picks it up.
+To add a still, add another `test('shot: <name>', ...)` in a `Product shots`
+block and, if it needs a specific state, a small seeded fixture. Keep the title
+prefixed `shot:` so `demo:shots` picks it up.
