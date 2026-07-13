@@ -1130,9 +1130,11 @@ body {
   font-style: italic;
 }
 
+/* Neutral inline code, matching the rendered view: the crimson accent is
+   budgeted for review actions, so red code chips read as errors. */
 .raw-inline-code {
-  color: var(--theme-accent-text);
-  background-color: var(--theme-accent-bg);
+  color: var(--theme-text);
+  background-color: var(--theme-bg-inset);
   border-radius: 3px;
   padding: 0.1em 0.3em;
 }
