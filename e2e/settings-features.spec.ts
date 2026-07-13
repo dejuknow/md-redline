@@ -40,6 +40,9 @@ async function selectText(page: Page, text: string) {
         const range = document.createRange();
         range.setStart(node, idx);
         range.setEnd(node, idx + targetText.length);
+        // The pill hides when its anchor is off-screen; keep the target in view
+        // so bottom-of-doc anchors don't land below the scroll fold.
+        node.parentElement?.scrollIntoView({ block: 'nearest' });
         const sel = window.getSelection()!;
         sel.removeAllRanges();
         sel.addRange(range);
@@ -239,8 +242,11 @@ test.describe('Quick comment mode', () => {
     await selectText(page, 'valid credentials');
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
 
-    // Click on an area outside the form and outside the prose (the toolbar logo)
-    await page.locator('span[title="md-redline"]').click();
+    // Click on an area outside the form and outside the prose (the toolbar logo).
+    // The logo is pointer-events-none and sits over the sidebar panel header, so
+    // force the click past the actionability check (the app dismisses on the
+    // document-level mousedown regardless of the exact target).
+    await page.locator('span[title="md-redline"]').click({ force: true });
 
     // Form should be dismissed
     await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
@@ -256,8 +262,8 @@ test.describe('Quick comment mode', () => {
 
     await textarea.fill('Important feedback');
 
-    // Click outside
-    await page.locator('span[title="md-redline"]').click();
+    // Click outside (see note above: force past the pointer-events-none logo).
+    await page.locator('span[title="md-redline"]').click({ force: true });
 
     // Form should still be visible since it has text
     await expect(textarea).toBeVisible();

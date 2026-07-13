@@ -13,6 +13,10 @@ export async function selectText(page: Page, text: string) {
         const range = document.createRange();
         range.setStart(node, idx);
         range.setEnd(node, idx + targetText.length);
+        // The pill hides itself when its anchor is off-screen (CommentForm's
+        // anchorOffscreen guard). Bring the target into view first so bottom
+        // anchors in a scrolled doc don't land below the fold.
+        node.parentElement?.scrollIntoView({ block: 'nearest' });
         const sel = window.getSelection()!;
         sel.removeAllRanges();
         sel.addRange(range);

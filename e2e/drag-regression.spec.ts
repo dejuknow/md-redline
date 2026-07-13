@@ -50,6 +50,9 @@ async function selectText(page: Page, text: string) {
         const sel = window.getSelection()!;
         sel.removeAllRanges();
         sel.addRange(range);
+        // Keep the anchor on-screen so the pill isn't hidden by its
+        // anchorOffscreen guard (see helpers/comments.ts selectText).
+        node.parentElement?.scrollIntoView({ block: 'nearest' });
         const rect = range.getBoundingClientRect();
         node.parentElement?.dispatchEvent(
           new MouseEvent('mouseup', {

@@ -49,6 +49,11 @@ async function selectText(page: Page, text: string) {
         const range = document.createRange();
         range.setStart(node, idx);
         range.setEnd(node, idx + targetText.length);
+        // A real user can only select visible text; the pill hides itself when
+        // its anchor is off-screen (CommentForm's anchorOffscreen guard). Bottom
+        // anchors in a scrolled doc would otherwise land below the fold, so bring
+        // the target into view before measuring and dispatching.
+        node.parentElement?.scrollIntoView({ block: 'nearest' });
         const sel = window.getSelection()!;
         sel.removeAllRanges();
         sel.addRange(range);
