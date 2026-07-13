@@ -1072,7 +1072,34 @@ test.describe('Product shots — hero', () => {
     await page.evaluate(scrollPMToTop); // re-assert after any late auto-scroll
     await page.waitForTimeout(150);
 
+    // Capture the app, then composite a macOS window frame (titlebar + rounded
+    // corners + soft shadow) around it on a transparent background, so the
+    // README image floats on GitHub's light or dark theme. Framing a static
+    // <img> (not the live app) avoids disturbing the scrolled layout, and the
+    // transparent PNG needs no external image tooling.
+    const content = await page.screenshot();
+    const dataUri = `data:image/png;base64,${content.toString('base64')}`;
+    await page.setContent(
+      `<!doctype html><html><head><style>
+        html,body{margin:0;padding:0;background:transparent}
+        .pad{display:inline-block;padding:90px}
+        .win{border-radius:16px;overflow:hidden;box-shadow:0 24px 55px rgba(0,0,0,0.38)}
+        .bar{height:36px;background:#232730;display:flex;align-items:center;padding:0 15px;gap:9px;box-sizing:border-box}
+        .dot{width:13px;height:13px;border-radius:50%}
+        img{display:block;width:1512px;height:auto}
+      </style></head><body>
+        <div class="pad"><div class="win">
+          <div class="bar"><span class="dot" style="background:#FF5F56"></span><span class="dot" style="background:#FFBD2E"></span><span class="dot" style="background:#27C93F"></span></div>
+          <img src="${dataUri}">
+        </div></div>
+      </body></html>`,
+    );
+    await page.locator('.win img').waitFor();
+
     mkdirSync(SHOTS_DIR, { recursive: true });
-    await page.screenshot({ path: resolve(SHOTS_DIR, 'hero-showcase-light.png') });
+    await page.locator('.pad').screenshot({
+      path: resolve(SHOTS_DIR, 'hero-showcase-light.png'),
+      omitBackground: true,
+    });
   });
 });

@@ -155,10 +155,13 @@ it's a regenerate-and-eyeball reference, not a pixel-diff gate.
 Current stills:
 
 - `hero-showcase-light.png` — **the README screenshot** (`public/screenshot.png`).
-  Full-bleed at 2x, light theme, three tabs, Outline panel, Anchored comments,
-  scrolled to Password Management so both comment cards show. Seeds a restored
-  3-tab session via `localStorage` from the committed `fixtures/hero/*.md`
-  (authentication-spec carries the five comments). To refresh the README image,
+  The app in a macOS window frame (titlebar, rounded corners, soft shadow) on a
+  transparent background at 2x, so it floats on GitHub's light or dark theme.
+  Light theme, three tabs, Outline panel, Anchored comments, scrolled to
+  Password Management so both comment cards show. Seeds a restored 3-tab session
+  via `localStorage` from the committed `fixtures/hero/*.md` (authentication-spec
+  carries the five comments); the frame is composited in-browser around the
+  capture, so no image tooling is needed. To refresh the README image,
   regenerate and copy it over:
   ```bash
   npm run demo:shots
