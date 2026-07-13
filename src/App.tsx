@@ -629,11 +629,22 @@ export default function App() {
   // eligibility changes.
   const railCapable = viewMode === 'rendered' && !(diffEnabled && currentSnapshot);
   const railAllowed = railCapable && sidebarVisible && !focusMode;
+  // The anchored rail earns its gutter width only once it has a card to
+  // place. List density always reserves — its panel is intentional even when
+  // empty. Anchored + zero non-resolved comments collapses the empty margin
+  // instead of parking a wide dead gutter next to the prose. The rail itself
+  // stays mounted (railShown is unaffected, so chrome and routing are
+  // unchanged); only the sheet width drops and re-centers, and colWidth is
+  // held constant so the first comment slides the gutter open without
+  // reflowing the text.
+  const railHasContent =
+    railDensity === 'list' || comments.some((c) => getEffectiveStatus(c) !== 'resolved');
   const geometry = usePageGeometry(
     containerRef as RefObject<HTMLElement | null>,
     railAllowed,
     viewMode === 'rendered',
     DOC_WIDTH_COLS[settings.docWidth],
+    railHasContent,
   );
   const railShown = geometry.railShown;
 

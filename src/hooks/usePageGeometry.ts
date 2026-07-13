@@ -4,7 +4,9 @@ import { pageGeometry, type PageGeometry, CANVAS_GUTTER, COL_MAX } from '../lib/
 /**
  * Observes the scroll container's content width and derives the page
  * geometry. `enabled` gates observation (rendered view only); `railAllowed`
- * carries the non-geometry rail conditions (visibility toggle, diff, focus).
+ * carries the non-geometry rail conditions (visibility toggle, diff, focus);
+ * `reserveRail` keeps the rail's gutter width only while it has content to
+ * place (collapsing the empty margin without hiding the rail's chrome).
  * Accounts for the canvas gutter in the available width so max-width constraints
  * on the page element never clip the rail gap.
  */
@@ -13,6 +15,7 @@ export function usePageGeometry(
   railAllowed: boolean,
   enabled: boolean,
   colMax: number = COL_MAX,
+  reserveRail: boolean = true,
 ): PageGeometry {
   const [contentWidth, setContentWidth] = useState(0);
 
@@ -35,7 +38,7 @@ export function usePageGeometry(
   }, [containerRef, enabled]);
 
   return useMemo(
-    () => pageGeometry(contentWidth, railAllowed, colMax),
-    [contentWidth, railAllowed, colMax],
+    () => pageGeometry(contentWidth, railAllowed, colMax, reserveRail),
+    [contentWidth, railAllowed, colMax, reserveRail],
   );
 }

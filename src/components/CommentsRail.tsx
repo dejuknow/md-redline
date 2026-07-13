@@ -50,6 +50,14 @@ interface CommentsRailProps {
 export function CommentsRail(props: CommentsRailProps) {
   const { density, scrollRef } = props;
 
+  // When anchored density has no cards to place, the page geometry collapses
+  // the gutter so the rail root now overlaps the prose. It is invisible
+  // (transparent, no cards), but an in-flow-sized absolute box still eats
+  // pointer events, which would block selecting the very text the reader is
+  // about to comment on. Drop pointer events in exactly that state; the first
+  // comment restores them (there is a card to interact with again).
+  const anchoredEmpty = density === 'anchored' && props.anchoredComments.length === 0;
+
   // List density pins to the viewport: measure the scroll container height.
   const [viewportHeight, setViewportHeight] = useState(0);
   useEffect(() => {
@@ -66,7 +74,7 @@ export function CommentsRail(props: CommentsRailProps) {
   return (
     <div
       data-comments-rail
-      className="absolute inset-y-0"
+      className={`absolute inset-y-0${anchoredEmpty ? ' pointer-events-none' : ''}`}
       style={{ right: PAD_R, width: RAIL }}
     >
       {density === 'list' ? (

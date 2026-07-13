@@ -55,6 +55,32 @@ describe('pageGeometry', () => {
     expect(g.colWidth).toBe(320);
   });
 
+  it('collapses the empty gutter but keeps the rail shown and column stable', () => {
+    // Same width as the full-rail case, but the anchored rail has no cards.
+    const reserved = pageGeometry(1400, true);
+    const collapsed = pageGeometry(1400, true, COL_MAX, false);
+    // Rail stays logically shown and the prose column is byte-for-byte the
+    // same, so the first comment slides the gutter open without reflowing text.
+    expect(collapsed.railShown).toBe(true);
+    expect(collapsed.colWidth).toBe(reserved.colWidth);
+    // Only the sheet shrinks: rail footprint drops to a symmetric PAD_L.
+    expect(collapsed.pageWidth).toBe(PAD_L + collapsed.colWidth + PAD_L);
+    expect(collapsed.pageWidth).toBeLessThan(reserved.pageWidth);
+  });
+
+  it('holds the column on the rail-shown track when collapsed mid-width', () => {
+    // 1000px: rail-shown column is 592 (below COL_MAX). Collapsing must keep
+    // that same 592 so the text does not rewrap when the first comment lands.
+    const collapsed = pageGeometry(1000, true, COL_MAX, false);
+    expect(collapsed.colWidth).toBe(592);
+    expect(collapsed.pageWidth).toBe(PAD_L + 592 + PAD_L);
+  });
+
+  it('ignores reserveRail when the rail cannot fit by width', () => {
+    // Below the fit threshold: the no-rail layout is used regardless.
+    expect(pageGeometry(887, true, COL_MAX, false)).toEqual(pageGeometry(887, true));
+  });
+
   it('caps the column at the docWidth setting instead of COL_MAX', () => {
     expect(pageGeometry(2000, true, DOC_WIDTH_COLS.narrow).colWidth).toBe(560);
     expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).colWidth).toBe(800);
