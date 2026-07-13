@@ -71,6 +71,7 @@ import { useModalState } from './hooks/useModalState';
 import { useSearch } from './hooks/useSearch';
 import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
 import { useDiffSnapshot } from './hooks/useDiffSnapshot';
+import { shouldAdvanceFrontier } from './lib/review-frontier';
 import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
@@ -471,12 +472,14 @@ export default function App() {
   }, [rawMarkdown]);
 
   // Diff snapshot state
-  const { currentSnapshot, handleSnapshot, handleClearSnapshot } = useDiffSnapshot(
-    activeFilePath,
-    rawMarkdownRef,
-    showToast,
-    setDiffEnabled,
-  );
+  const {
+    currentSnapshot,
+    currentReference,
+    captureReference,
+    restoreReference,
+    handleSnapshot,
+    handleClearSnapshot,
+  } = useDiffSnapshot(activeFilePath, rawMarkdownRef, showToast, setDiffEnabled);
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
   const currentSnapshotRef = useRef(currentSnapshot);
@@ -577,6 +580,48 @@ export default function App() {
     setAutoExpandForm,
     requestCommentFocus,
   });
+
+  // Review frontier: when the active file's open comments cross to zero, advance
+  // the diff reference to the current content so the diff resets for the next
+  // round. Gated on the resolve feature so the "resolved" story is always true.
+  const prevOpenCountRef = useRef(commentCount);
+  const advancedForEpisodeRef = useRef(false);
+  const frontierFileRef = useRef(activeFilePath);
+  useEffect(() => {
+    const fileChanged = frontierFileRef.current !== activeFilePath;
+    const prevOpenCount = prevOpenCountRef.current;
+    frontierFileRef.current = activeFilePath;
+    prevOpenCountRef.current = commentCount;
+
+    // A new open comment starts a fresh episode.
+    if (commentCount > 0) advancedForEpisodeRef.current = false;
+
+    if (
+      shouldAdvanceFrontier({
+        resolveEnabled: settings.enableResolve,
+        hasReference: currentReference != null,
+        prevOpenCount,
+        openCount: commentCount,
+        alreadyAdvanced: advancedForEpisodeRef.current,
+        fileChanged,
+      })
+    ) {
+      advancedForEpisodeRef.current = true;
+      const prevRef = captureReference('review');
+      showToast('All comments resolved. Diff reset.', 'info', {
+        label: 'Undo',
+        onClick: () => restoreReference(prevRef),
+      });
+    }
+  }, [
+    commentCount,
+    activeFilePath,
+    currentReference,
+    settings.enableResolve,
+    captureReference,
+    restoreReference,
+    showToast,
+  ]);
 
   // A rail can exist in this view at all: rendered mode, not showing a diff
   // snapshot. Whether it actually fits is layered on via geometry.railFits /

@@ -2,7 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { addComment } from './helpers/comments';
+import { addComment, openCommentsDrawer } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -302,6 +302,47 @@ test.describe('Diff overlay', () => {
 
     // The diff highlight on the body should also be there.
     await expect(page.locator('.raw-line-diff-added').first()).toBeVisible();
+  });
+
+  test('resolving the last comment resets the diff and Undo restores it', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+
+    // Turn on the resolve feature (General settings). Auto-advance is gated on it.
+    await page.keyboard.press('Meta+,');
+    await page.getByRole('switch', { name: /resolve/i }).click();
+    await page.keyboard.press('Escape');
+
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(1000);
+
+    // External content edit so the diff has at least one chunk.
+    const original = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
+    await switchToRaw(page);
+    const diffBtn = toggleBtn(page, 'diff');
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+
+    // Raw + diff view can't fit the comments rail, so the card lives in the
+    // comments drawer instead.
+    await openCommentsDrawer(page);
+
+    // Resolve the single open comment via its card action. Exact match is
+    // required: a non-exact "Resolve" also matches the drawer's "Resolved"
+    // filter tab.
+    await page.getByRole('button', { name: 'Resolve', exact: true }).first().click();
+
+    // Frontier advances: reset toast appears and the chunk badge disappears.
+    await expect(page.getByText('All comments resolved. Diff reset.')).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+
+    // Undo brings the diff back.
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
   });
 });
 
