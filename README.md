@@ -12,7 +12,7 @@ With the built-in MCP server, review runs in both directions. Your agent can req
 
 **See the full review workflow in 30 seconds:**
 
-https://github.com/user-attachments/assets/7f493201-3aca-489c-86f0-3a7df454f693
+https://github.com/user-attachments/assets/3a2bf20a-d4a0-403c-b023-e877130fd959
 
 Works with [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and any other MCP client that supports stdio servers. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. `mdr` gives that workflow review tooling closer to code review.
 
@@ -111,7 +111,7 @@ The reverse direction, for docs the agent did not just write: your own draft, a 
 
 The agent calls `mdr_review`. Its findings land as inline comments anchored to the exact text, and the browser opens so you can read them as they arrive. The agent then waits (via `mdr_wait`) while you work through the feedback: reply on any card, edit the doc, delete comments you disagree with. When you are done, click **End review** in the banner. That click is the signal for the agent to re-read the file and pick up your replies and edits, so the session stays open until you press it. The agent is not stuck; it is listening.
 
-https://github.com/user-attachments/assets/39a53685-cdac-4251-b75d-52cad6996b37
+https://github.com/user-attachments/assets/41339401-6096-40de-abbf-e93ef7ffd2c2
 
 ### Either direction: the agent can ask you questions
 
