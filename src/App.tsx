@@ -71,7 +71,7 @@ import { useModalState } from './hooks/useModalState';
 import { useSearch } from './hooks/useSearch';
 import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
 import { useDiffSnapshot } from './hooks/useDiffSnapshot';
-import { shouldAdvanceFrontier } from './lib/review-frontier';
+import { shouldAdvanceFrontier, formatReferenceLabel } from './lib/review-frontier';
 import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
@@ -2484,7 +2484,7 @@ export default function App() {
                   setViewMode(mode);
                   if (mode === 'raw') {
                     clearSelection();
-                    if (currentSnapshot) {
+                    if (diffChunkCount > 0) {
                       setDiffEnabled(true);
                       setDiffPending(false);
                     }
@@ -2507,6 +2507,11 @@ export default function App() {
                 diffEnabled={diffEnabled}
                 diffPending={diffPending}
                 diffChunkCount={diffChunkCount}
+                referenceLabel={
+                  diffEnabled && currentReference
+                    ? formatReferenceLabel(currentReference)
+                    : undefined
+                }
                 onDiffToggle={handleDiffToggle}
                 onDiffPrev={() => {
                   if (viewMode === 'raw') rawViewRef.current?.diffPrev();

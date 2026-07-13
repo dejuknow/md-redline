@@ -78,17 +78,14 @@ test.describe('Diff overlay', () => {
     await expect(toggleBtn(page, 'diff')).toBeVisible();
   });
 
-  test('diff auto-enables on raw mode entry and shows "No changes" when content matches snapshot', async ({
-    page,
-    context,
-  }) => {
+  test('diff stays closed on raw entry when there are no changes', async ({ page, context }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    // Diff should auto-enable when entering raw mode with a snapshot
-    await expectActive(toggleBtn(page, 'diff'));
-    await expect(page.getByText('No changes yet')).toBeVisible();
+    // No content changed since the reference, so the overlay must NOT auto-open.
+    await expectInactive(toggleBtn(page, 'diff'));
+    await expect(page.getByText('No changes yet')).not.toBeVisible();
   });
 
   test('external edit shows toast with View diff action that stays in current view', async ({
@@ -145,11 +142,14 @@ test.describe('Diff overlay', () => {
 
     const diffBtn = toggleBtn(page, 'diff');
 
-    // Diff is auto-enabled on raw mode entry; "No changes" shows
-    await expectActive(diffBtn);
+    // Manually open the (empty) diff, then toggle it off. With zero changes
+    // the toggle stays visually quiet even while enabled, so confirm the
+    // overlay actually opened via the "No changes yet" placeholder instead
+    // of the active class.
+    await diffBtn.click();
+    await expectInactive(diffBtn);
     await expect(page.getByText('No changes yet')).toBeVisible();
 
-    // Toggle off — should stay in raw view without diff
     await diffBtn.click();
     await expectInactive(diffBtn);
     await expect(page.locator('.raw-view')).toBeVisible();
@@ -233,14 +233,9 @@ test.describe('Diff overlay', () => {
     const diffBtn = toggleBtn(page, 'diff');
     const countBadge = diffBtn.locator('span.tabular-nums');
 
-    // Auto-enabled on entry, no changes since snapshot — badge hidden.
-    await expectActive(diffBtn);
-    await expect(countBadge).not.toBeVisible();
-
-    // Toggle overlay OFF before any edit. The "compute while off" path is
-    // what we're verifying — the badge must appear and update from edits
-    // even though the overlay never gets re-enabled.
-    await diffBtn.click();
+    // No content changed since the reference, so raw entry leaves the overlay
+    // closed and the badge hidden. The overlay only auto-opens when there are
+    // changes to show.
     await expectInactive(diffBtn);
     await expect(countBadge).not.toBeVisible();
 
@@ -290,6 +285,10 @@ test.describe('Diff overlay', () => {
     // Wait for the diff to register the new chunk via the panel toolbar badge.
     const diffBtn = toggleBtn(page, 'diff');
     await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+
+    // There were no changes at raw entry, so the overlay stayed closed.
+    // Open it manually now that there is something to show.
+    await diffBtn.click();
     await expectActive(diffBtn);
 
     // Marker rows must remain visible in the diff overlay — they were
@@ -340,6 +339,28 @@ test.describe('Diff overlay', () => {
     // Undo brings the diff back.
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('diff reference label states what is being compared', async ({ page, context }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(1000);
+
+    const original = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
+
+    // Wait for the external change to land in the rendered view before
+    // switching to raw, so the raw-entry gate sees a nonzero chunk count
+    // (and therefore auto-opens the overlay) instead of racing the SSE update.
+    await expect(page.getByRole('heading', { name: 'Updated Section Two' })).toBeVisible({
+      timeout: 15_000,
+    });
+    await switchToRaw(page);
+    await expect(toggleBtn(page, 'diff').locator('span.tabular-nums')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await expect(page.getByTestId('diff-reference-label')).toContainText('Since last handoff');
   });
 });
 

@@ -23,6 +23,7 @@ interface Props {
   diffEnabled: boolean;
   diffPending?: boolean;
   diffChunkCount: number;
+  referenceLabel?: string;
   onDiffToggle: () => void;
   onDiffPrev: () => void;
   onDiffNext: () => void;
@@ -74,6 +75,7 @@ export function PanelToolbar({
   diffEnabled,
   diffPending,
   diffChunkCount,
+  referenceLabel,
   onDiffToggle,
   onDiffPrev,
   onDiffNext,
@@ -134,7 +136,7 @@ export function PanelToolbar({
           <button
             type="button"
             disabled={!hasDiffSnapshot}
-            className={`${toggleClass(diffEnabled)} flex items-center gap-1 relative disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+            className={`${toggleClass(diffEnabled && diffChunkCount > 0)} flex items-center gap-1 relative disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
             onClick={onDiffToggle}
             aria-label={diffLabel}
             title={diffLabel}
@@ -160,6 +162,12 @@ export function PanelToolbar({
             )}
           </button>
         </Tooltip>
+
+        {referenceLabel && (
+          <span className="text-[11px] text-content-muted ml-1 whitespace-nowrap" data-testid="diff-reference-label">
+            {referenceLabel}
+          </span>
+        )}
 
         {/* Diff prev/next chevrons */}
         {hasDiffSnapshot && diffEnabled && diffChunkCount > 0 && (
