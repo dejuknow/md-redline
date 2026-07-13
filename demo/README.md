@@ -137,3 +137,31 @@ compressed the apparent timeline. If you ever revert to PNG, expect
 Floors you shouldn't cross: `DRAG_DURATION ≥ 600`, `SUBMIT_RIPPLE_DWELL ≥ 440`,
 `POST_SEND_HOLD ≥ 1300`, `TYPE_DELAY ≥ 14`. Going under these breaks
 the quality checks in §4.
+
+## 7. Product shots (framed UI stills)
+
+Separate from the videos: single framed screenshots of a UI surface, in the
+same wallpaper + window chrome as the videos (they reuse `setupDemoPage`), for
+reviewing a component's look and catching visual drift.
+
+```bash
+npm run demo:shots
+open demo/output/shots/review-banner-light.png
+```
+
+This runs only the `Product shots` tests in `demo.spec.ts` (the script greps
+test titles for `shot:`). Output lands in `demo/output/shots/` and is
+gitignored: it's a regenerate-and-eyeball reference, not a committed baseline
+or a pixel-diff gate. Re-run it after a change that touches one of these
+surfaces and compare by eye.
+
+Current stills:
+
+- `review-banner-light.png` — the review banner in its enabled state (the
+  "Agent is waiting on your review" row with the crimson **Send** primary).
+  Seeded deterministically from `fixtures/banner-shot.md`, which carries two
+  of the author's comments so the primary renders enabled rather than faded.
+
+To add a still, add another `test('shot: <name>', ...)` in the `Product shots`
+block and, if it needs a specific state, a small seeded fixture like
+`banner-shot.md`. Keep the title prefixed `shot:` so `demo:shots` picks it up.

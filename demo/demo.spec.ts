@@ -30,6 +30,10 @@ const DEMO_FILE = resolve(__dirname, '..', 'demo-sample.md');
 const REVIEW_DEMO_FILE = resolve(__dirname, '..', 'demo-prd.md');
 const FRAMES_DIR = resolve(__dirname, 'frames');
 const WALLPAPER = resolve(__dirname, 'assets/background.png');
+// Product shots (npm run demo:shots): framed UI stills, same wallpaper +
+// window chrome as the videos. Regenerate-and-eyeball after a UI change.
+const FIXTURE_BANNER_SHOT = resolve(__dirname, 'fixtures/banner-shot.md');
+const SHOTS_DIR = resolve(__dirname, 'output/shots');
 
 // ----------------------------------------------------------------------------
 // Timing constants. Tuned across many iterations — each has a reason. Tweak
@@ -980,5 +984,64 @@ test.describe.serial('Demo recording', () => {
   test.afterAll(() => {
     if (existsSync(DEMO_FILE)) unlinkSync(DEMO_FILE);
     if (existsSync(REVIEW_DEMO_FILE)) unlinkSync(REVIEW_DEMO_FILE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Product shots — framed UI stills (npm run demo:shots)
+//
+// Same wallpaper + window chrome as the videos (via setupDemoPage), so the
+// stills match the demo's look. Output lands in demo/output/shots and is
+// gitignored: this is a regenerate-and-eyeball reference, not a pixel gate.
+// After a UI change that touches one of these surfaces, re-run and look:
+//   npm run demo:shots   (greps test titles for "shot:")
+// Add a new still by adding another `test('shot: ...')` here.
+// ---------------------------------------------------------------------------
+test.describe('Product shots', () => {
+  test('shot: review banner (light)', async ({ page, request, baseURL }) => {
+    // Isolation: abort any open sessions so our POST creates a fresh one (201).
+    const existing = await request.get(`${baseURL}/api/review-sessions`);
+    if (existing.ok()) {
+      const { sessions } = (await existing.json()) as {
+        sessions: { id: string; status: string }[];
+      };
+      for (const s of sessions.filter((s) => s.status === 'open')) {
+        await request.post(`${baseURL}/api/review-sessions/${s.id}/abort`, {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    }
+
+    // Seed a user-origin review from a fixture that already carries two of the
+    // author's comments, so the banner renders its enabled state (the budgeted
+    // crimson "Send" primary, not the faded disabled one). Copied to DEMO_FILE
+    // so the banner reads the same "demo-sample.md" basename as the videos.
+    copyFileSync(FIXTURE_BANNER_SHOT, DEMO_FILE);
+    await setupDemoPage(page);
+    const res = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [DEMO_FILE], enableResolve: true },
+    });
+    expect(res.status()).toBe(201);
+    const { sessionId } = (await res.json()) as { sessionId: string };
+
+    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+    const banner = page.getByTestId('review-banner');
+    await expect(banner).toBeVisible({ timeout: 12_000 });
+    // Gate on the enabled primary so we never shoot the loading/zero state.
+    await expect(
+      banner.getByRole('button', { name: /Send 2 comments/ }),
+    ).toBeEnabled({ timeout: 10_000 });
+    await page.waitForTimeout(300);
+
+    mkdirSync(SHOTS_DIR, { recursive: true });
+    // Framed top slice: wallpaper margin + window chrome + banner + a little doc.
+    await page.screenshot({
+      path: resolve(SHOTS_DIR, 'review-banner-light.png'),
+      clip: { x: 0, y: 0, width: 1600, height: 360 },
+    });
+  });
+
+  test.afterAll(() => {
+    if (existsSync(DEMO_FILE)) unlinkSync(DEMO_FILE);
   });
 });
