@@ -224,7 +224,7 @@ async function setupDemoPage(page: Page) {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('theme', 'nord');
+    localStorage.setItem('theme', 'light');
 
     // The Toast component auto-dismisses after 5s via setTimeout(_, 5000).
     // That's too short for a demo: the file-change toast with "View diff"
@@ -311,14 +311,14 @@ async function setupDemoPage(page: Page) {
           transform: translate(-80px, -120px);
         }
 
-        /* Nord's native selection is rgba(136, 192, 208, 0.3) — 30% alpha
-           on a dark background reads as invisible once JPEG-compressed at
-           demo resolution. Boost alpha so the drag-to-select highlight is
-           clearly visible in the video. Scoped to .prose so the comment
-           form input's own selection stays theme-default. */
+        /* The theme's native selection tint is low-alpha and reads as
+           invisible once JPEG-compressed at demo resolution. Force a brighter
+           highlight so the drag-to-select tracks clearly in the video. Scoped
+           to .prose so the comment form input's own selection stays
+           theme-default. */
         .prose ::selection,
         .prose::selection {
-          background-color: rgba(136, 192, 208, 0.55) !important;
+          background-color: rgba(37, 99, 235, 0.4) !important;
           color: inherit;
         }
 
@@ -480,8 +480,18 @@ async function smoothScrollTargetInto(
         if (idx < 0) continue;
         const el = node.parentElement;
         if (!el) return;
+        // Walk up to the nearest ancestor that ACTUALLY scrolls vertically.
+        // The old check stopped at the first `overflowY !== 'visible'`
+        // element, but the doc sheet now uses `overflow: clip` (a
+        // non-scrolling value), so it halted there and every scrollTop write
+        // was a no-op. Require a real scroll range plus a scrolling overflow.
         let scroller: Element | null = el;
-        while (scroller && getComputedStyle(scroller).overflowY === 'visible') {
+        while (scroller) {
+          const oy = getComputedStyle(scroller).overflowY;
+          const scrolls =
+            (oy === 'auto' || oy === 'scroll' || oy === 'overlay') &&
+            scroller.scrollHeight > scroller.clientHeight;
+          if (scrolls) break;
           scroller = scroller.parentElement;
         }
         if (!scroller) return;
@@ -672,7 +682,7 @@ test.describe.serial('Demo recording', () => {
 
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
     await expect(page.locator('.prose')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('[data-theme="nord"]')).toBeVisible();
+    await expect(page.locator('[data-theme="light"]')).toBeVisible();
 
     const banner = page.getByTestId('review-banner');
     await expect(banner).toBeVisible({ timeout: 12_000 });
@@ -835,7 +845,7 @@ test.describe.serial('Demo recording', () => {
 
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
     await expect(page.locator('.prose')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('[data-theme="nord"]')).toBeVisible();
+    await expect(page.locator('[data-theme="light"]')).toBeVisible();
 
     const banner = page.getByTestId('review-banner');
     await expect(banner).toBeVisible({ timeout: 12_000 });
