@@ -106,20 +106,22 @@ export function useDiffSnapshot(
   // --- Legacy API, kept working until the Task 6 vocabulary sweep removes it. ---
   const handleSnapshot = useCallback(
     (extraEntries?: Map<string, string>) => {
+      if (!activeFilePath) return;
       const prev = captureReference('handoff', extraEntries);
       showToast(
         prev ? 'Snapshot updated' : 'Snapshot saved — diff view will show changes',
         'success',
       );
     },
-    [captureReference, showToast],
+    [activeFilePath, captureReference, showToast],
   );
 
   const handleClearSnapshot = useCallback(() => {
+    if (!activeFilePath) return;
     restoreReference(null);
     setDiffEnabled(false);
     showToast('Snapshot cleared', 'info');
-  }, [restoreReference, setDiffEnabled, showToast]);
+  }, [activeFilePath, restoreReference, setDiffEnabled, showToast]);
 
   return {
     currentReference,

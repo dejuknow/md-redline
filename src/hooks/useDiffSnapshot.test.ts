@@ -2,9 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDiffSnapshot } from './useDiffSnapshot';
-
-type DiffReferenceForTest = { content: string; capturedAt: number; origin: 'handoff' | 'review' };
+import { useDiffSnapshot, type DiffReference } from './useDiffSnapshot';
 
 const STORAGE_KEY = 'md-redline-snapshots';
 
@@ -146,6 +144,20 @@ describe('useDiffSnapshot', () => {
     expect(typeof result.current.currentReference!.capturedAt).toBe('number');
   });
 
+  it('preserves an already-valid stored DiffReference without re-stamping', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ '/rec.md': { content: 'x', capturedAt: 123456, origin: 'review' } }),
+    );
+    const { hookArgs } = setup('/rec.md', 'current');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    expect(result.current.currentReference).toEqual({
+      content: 'x',
+      capturedAt: 123456,
+      origin: 'review',
+    });
+  });
+
   it('captureReference stores a record with the given origin and returns the previous reference', () => {
     const { hookArgs, rawMarkdownRef } = setup('/t.md', 'v1');
     const { result, rerender } = renderHook(({ args }) => useDiffSnapshot(...args), {
@@ -185,9 +197,9 @@ describe('useDiffSnapshot', () => {
 
     // Advancing to v2 returns the previous (v1) reference; that is what Undo restores.
     rawMarkdownRef.current = 'v2';
-    let prev: DiffReferenceForTest | null = null;
+    let prev: DiffReference | null = null;
     act(() => {
-      prev = result.current.captureReference('review') as DiffReferenceForTest | null;
+      prev = result.current.captureReference('review') as DiffReference | null;
     });
     expect(prev).toEqual(expect.objectContaining({ content: 'v1', origin: 'handoff' }));
     expect(result.current.currentSnapshot).toBe('v2');
