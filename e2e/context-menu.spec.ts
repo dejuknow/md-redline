@@ -3,7 +3,6 @@ import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
-import { MOD_LABEL } from './helpers/shortcuts';
 import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

@@ -33,7 +33,10 @@ export function CommentPopover({ comment, pageRef, onClose, sent, anchorMissing,
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
 
   // Measure after every render (guarded set) so the flip decision below uses
-  // the real height, including growth from replies or an open composer.
+  // the real height, including growth from replies or an open composer. The
+  // guarded set (only updates when the height actually changes) is what keeps
+  // the intentionally dep-less effect from looping.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs every render by design; guarded set prevents the update loop
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node) return;

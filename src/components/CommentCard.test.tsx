@@ -29,7 +29,7 @@ function AllProviders({ children }: { children: ReactNode }) {
 // observed elements so the clamp re-check test can assert on them.
 let resizeObserverObserved: Element[] = [];
 class ResizeObserverStub {
-  constructor(_cb: ResizeObserverCallback) {}
+  constructor() {}
   observe(el: Element) {
     resizeObserverObserved.push(el);
   }
