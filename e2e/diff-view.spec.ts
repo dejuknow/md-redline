@@ -156,23 +156,20 @@ test.describe('Diff overlay', () => {
     await expect(page.getByText('No changes yet')).not.toBeVisible();
   });
 
-  test('clear snapshot button disables diff toggle', async ({ page, context }) => {
+  test('Mark reviewed advances the reference and clears the diff', async ({ page, context }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(1000);
+
+    const original = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
     await switchToRaw(page);
 
     const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn).toBeVisible();
-    await expect(diffBtn).toBeEnabled();
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
 
-    await toolbarBtn(page, 'Clear snapshot').click();
-    await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
-
-    // Diff toggle stays visible (so users discover the feature) but becomes
-    // disabled with an explanatory tooltip after the snapshot is cleared.
-    await expect(diffBtn).toBeVisible();
-    await expect(diffBtn).toBeDisabled();
-    await expect(diffBtn).toHaveAttribute('title', /snapshot/i);
+    await toolbarBtn(page, 'Mark reviewed').click();
+    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
   });
 
   test('diff toggle is visible-but-disabled before taking a snapshot', async ({ page }) => {
@@ -442,21 +439,19 @@ test.describe('Rendered diff overlay', () => {
     await expect(page.locator('.rendered-diff-removed').first()).toBeVisible();
   });
 
-  test('clear snapshot disables the rendered toolbar diff button', async ({ page, context }) => {
+  test('Mark reviewed clears the rendered diff', async ({ page, context }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
-    await expect(renderedDiffBtn(page)).toBeVisible();
+    await page.waitForTimeout(500);
 
-    // Clear snapshot from the panel toolbar's Clear snapshot text button.
-    await page.locator('.raw-toolbar button', { hasText: 'Clear snapshot' }).first().click();
-    await expect(page.getByText(/snapshot cleared/i)).toBeVisible({ timeout: 5_000 });
+    const modified = FIXTURE_ORIGINAL.replace(
+      'Rate limiting prevents brute force attacks.',
+      'Rate limiting prevents brute force attacks and stops scraping bots.',
+    );
+    writeFileSync(FIXTURE, modified);
+    await expect(page.getByText(/stops scraping bots/)).toBeVisible({ timeout: 15_000 });
 
-    // Diff button stays visible (so users discover the feature) but flips
-    // to disabled with the "take a snapshot first" tooltip.
-    const disabledDiff = page
-      .locator('.raw-toolbar button[title*="hand off to take a snapshot"]')
-      .first();
-    await expect(disabledDiff).toBeVisible();
-    await expect(disabledDiff).toBeDisabled();
+    await page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' }).first().click();
+    await expect(page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' })).toHaveCount(0);
   });
 });

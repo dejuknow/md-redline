@@ -478,8 +478,7 @@ export default function App() {
     captureReference,
     restoreReference,
     handleSnapshot,
-    handleClearSnapshot,
-  } = useDiffSnapshot(activeFilePath, rawMarkdownRef, showToast, setDiffEnabled);
+  } = useDiffSnapshot(activeFilePath, rawMarkdownRef, showToast);
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
   const currentSnapshotRef = useRef(currentSnapshot);
@@ -1001,6 +1000,14 @@ export default function App() {
       setDiffEnabled(false);
     }
   }, [diffEnabled, setDiffEnabled]);
+
+  const handleMarkReviewed = useCallback(() => {
+    const prevRef = captureReference('review');
+    showToast('Diff reset.', 'info', {
+      label: 'Undo',
+      onClick: () => restoreReference(prevRef),
+    });
+  }, [captureReference, restoreReference, showToast]);
 
   const mermaidBlocks = useMemo(() => collectMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
   const viewerNeedsTheme = mermaidBlocks.length > 0;
@@ -1975,16 +1982,16 @@ export default function App() {
         onExecute: openFilePicker,
       },
     ];
-    if (currentSnapshot) {
+    if (diffChunkCount > 0) {
       cmds.push({
-        id: 'clear-snapshot',
-        label: 'Clear diff snapshot',
+        id: 'mark-reviewed',
+        label: 'Mark reviewed',
         section: 'File',
-        onExecute: handleClearSnapshot,
+        onExecute: handleMarkReviewed,
       });
     }
     return cmds;
-  }, [reloadFile, openFilePicker, handleClearSnapshot, currentSnapshot]);
+  }, [reloadFile, openFilePicker, handleMarkReviewed, diffChunkCount]);
 
   const generalCommands = useMemo(
     (): Command[] => [
@@ -2509,7 +2516,7 @@ export default function App() {
                   if (viewMode === 'raw') rawViewRef.current?.diffNext();
                   else renderedDiffRef.current?.next();
                 }}
-                onClearSnapshot={handleClearSnapshot}
+                onMarkReviewed={handleMarkReviewed}
                 onCopyDocument={handleCopyDocument}
                 copyFeedback={copyFeedback}
                 breadcrumb={

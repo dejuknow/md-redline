@@ -26,7 +26,7 @@ interface Props {
   onDiffToggle: () => void;
   onDiffPrev: () => void;
   onDiffNext: () => void;
-  onClearSnapshot: () => void;
+  onMarkReviewed: () => void;
 
   // Copy document (clean markdown, no comment markers — works in both views)
   onCopyDocument: () => void;
@@ -51,13 +51,13 @@ const actionClass =
 /**
  * Single panel toolbar shared by raw and rendered views. Hosts every
  * cross-view document action — view mode, diff overlay (+ navigation /
- * clear-snapshot), search, copy, and handoff. Lifting these up here
+ * mark reviewed), search, copy, and handoff. Lifting these up here
  * eliminates the previous "two levels of toolbar icons" (TabBar right side
  * + per-view secondary toolbar).
  *
  * Layout:
  *   LEFT  — display state ("how am I looking at this document"):
- *           view mode → diff toggle → prev/next → clear snapshot
+ *           view mode → diff toggle → prev/next → mark reviewed
  *   RIGHT — actions ("what do I do with this document"):
  *           search → copy → handoff (primary CTA, far right)
  */
@@ -77,7 +77,7 @@ export function PanelToolbar({
   onDiffToggle,
   onDiffPrev,
   onDiffNext,
-  onClearSnapshot,
+  onMarkReviewed,
   onCopyDocument,
   copyFeedback,
   breadcrumb,
@@ -213,15 +213,16 @@ export function PanelToolbar({
           </div>
         )}
 
-        {/* Clear snapshot */}
-        {hasDiffSnapshot && (
+        {/* Mark reviewed: advances the diff reference to the current version.
+            Shown only when there are changes to review. */}
+        {diffChunkCount > 0 && (
           <button
             type="button"
             className={actionClass}
-            onClick={onClearSnapshot}
-            title="Clear snapshot"
+            onClick={onMarkReviewed}
+            title="Mark reviewed"
           >
-            Clear snapshot
+            Mark reviewed
           </button>
         )}
       </div>

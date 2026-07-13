@@ -32,7 +32,6 @@ export function useDiffSnapshot(
   activeFilePath: string | null,
   rawMarkdownRef: RefObject<string>,
   showToast: ShowToast,
-  setDiffEnabled: (v: boolean) => void,
 ) {
   const [refs, setRefs] = useState<Map<string, DiffReference>>(() => {
     try {
@@ -116,19 +115,11 @@ export function useDiffSnapshot(
     [activeFilePath, captureReference, showToast],
   );
 
-  const handleClearSnapshot = useCallback(() => {
-    if (!activeFilePath) return;
-    restoreReference(null);
-    setDiffEnabled(false);
-    showToast('Snapshot cleared', 'info');
-  }, [activeFilePath, restoreReference, setDiffEnabled, showToast]);
-
   return {
     currentReference,
     currentSnapshot,
     captureReference,
     restoreReference,
     handleSnapshot,
-    handleClearSnapshot,
   };
 }

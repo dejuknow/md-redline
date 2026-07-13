@@ -9,12 +9,10 @@ const STORAGE_KEY = 'md-redline-snapshots';
 function setup(activeFilePath: string | null = '/test.md', initialContent: string = 'hello world') {
   const rawMarkdownRef = { current: initialContent };
   const showToast = vi.fn();
-  const setDiffEnabled = vi.fn();
   return {
     rawMarkdownRef,
     showToast,
-    setDiffEnabled,
-    hookArgs: [activeFilePath, rawMarkdownRef, showToast, setDiffEnabled] as const,
+    hookArgs: [activeFilePath, rawMarkdownRef, showToast] as const,
   };
 }
 
@@ -72,26 +70,12 @@ describe('useDiffSnapshot', () => {
     expect(result.current.currentSnapshot).toBe('content b');
   });
 
-  it('handleClearSnapshot removes the snapshot and calls setDiffEnabled(false)', () => {
-    const { hookArgs, setDiffEnabled, showToast } = setup('/test.md', 'content');
-    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
-
-    act(() => result.current.handleSnapshot());
-    expect(result.current.currentSnapshot).toBe('content');
-
-    act(() => result.current.handleClearSnapshot());
-    expect(result.current.currentSnapshot).toBeNull();
-    expect(setDiffEnabled).toHaveBeenCalledWith(false);
-    expect(showToast).toHaveBeenCalledWith('Snapshot cleared', 'info');
-  });
-
   it('first save shows "Snapshot saved", second shows "Snapshot updated"', () => {
     const rawMarkdownRef = { current: 'v1' };
     const showToast = vi.fn();
-    const setDiffEnabled = vi.fn();
 
     const { result, rerender } = renderHook(
-      ({ path }) => useDiffSnapshot(path, rawMarkdownRef, showToast, setDiffEnabled),
+      ({ path }) => useDiffSnapshot(path, rawMarkdownRef, showToast),
       { initialProps: { path: '/test.md' } },
     );
 
