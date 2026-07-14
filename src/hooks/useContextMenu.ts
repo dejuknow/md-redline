@@ -30,17 +30,22 @@ export function useContextMenu() {
       }
     };
 
-    const handleScroll = () => {
-      close();
-    };
+    // Close when the user scrolls the surface away from the menu's anchor.
+    // We listen for the user's scroll *gestures* (wheel/touchmove) rather than
+    // the `scroll` event, because `scroll` also fires for programmatic and
+    // browser-driven scrolls: opening the menu re-renders the app, and the
+    // browser's scroll-anchoring nudges the document container by a pixel or
+    // two, which would otherwise dismiss the menu the instant it appears.
+    const handleUserScroll = () => close();
 
     document.addEventListener('keydown', handleKeyDown);
-    // Close on any scroll event (capture phase to catch scrollable containers)
-    document.addEventListener('scroll', handleScroll, true);
+    document.addEventListener('wheel', handleUserScroll, { capture: true, passive: true });
+    document.addEventListener('touchmove', handleUserScroll, { capture: true, passive: true });
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('scroll', handleScroll, true);
+      document.removeEventListener('wheel', handleUserScroll, { capture: true });
+      document.removeEventListener('touchmove', handleUserScroll, { capture: true });
     };
   }, [state.isOpen, close]);
 
