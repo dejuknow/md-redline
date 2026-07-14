@@ -1,7 +1,7 @@
 {
   "name": "md-redline",
   "description": "Inline review comments for markdown specs. Built-in MCP server hands feedback directly to your AI agent.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "MIT",
   "type": "module",
   "homepage": "https://github.com/dejuknow/md-redline",
