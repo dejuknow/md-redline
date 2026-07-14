@@ -22,7 +22,11 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 test.afterEach(async () => {
-  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
+  // maxRetries/retryDelay: the app persists the doc via an atomic write
+  // (temp file + rename under a lock), so a debounced save can land in
+  // fixtureDir between readdir and rmdir and raise ENOTEMPTY. Retrying lets
+  // the in-flight write settle before the directory is removed.
+  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 /** Open the test fixture file and wait for it to render */

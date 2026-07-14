@@ -95,7 +95,9 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
   await commentBtn.click();
   await page.getByPlaceholder('Add your comment...').fill(commentText);
   await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment' }).click();
-  await expect(page.getByText(commentText, { exact: true })).toBeVisible();
+  // 10s (not the implicit 5s): the multi-li anchor is the heaviest case in this
+  // file, and under a saturated full-suite run the card render can exceed 5s.
+  await expect(page.getByText(commentText, { exact: true })).toBeVisible({ timeout: 10_000 });
 }
 
 test.describe('highlight seam regression', () => {
