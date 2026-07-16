@@ -309,14 +309,19 @@ export function PanelToolbar({
 
         {/* Handoff (primary CTA — anchors the far right). Always visible
             when a file is open; disabled until at least one comment exists,
-            so the path to "send this to an agent" is always discoverable. */}
+            so the path to "send this to an agent" is always discoverable.
+            A hairline divider separates it from the utility icons so it
+            reads as the terminal action, not another utility. */}
         {onCopyAgentPrompt && activeFilePath && (
-          <HandOffButton
-            activeFilePath={activeFilePath}
-            commentCounts={commentCounts}
-            onCopyAgentPrompt={onCopyAgentPrompt}
-            disabled={commentCount === 0}
-          />
+          <>
+            <div className="w-px h-4 bg-border" aria-hidden="true" />
+            <HandOffButton
+              activeFilePath={activeFilePath}
+              commentCounts={commentCounts}
+              onCopyAgentPrompt={onCopyAgentPrompt}
+              disabled={commentCount === 0}
+            />
+          </>
         )}
       </div>
     </div>
