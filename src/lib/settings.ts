@@ -1,9 +1,17 @@
+// This module is shared with the server (server/preferences.ts builds its
+// persistence whitelist from AppSettings). Keep it free of browser, React,
+// and Node-only imports.
+
 export interface CommentTemplate {
   label: string;
   text: string;
 }
 
-export type DocWidth = 'narrow' | 'default' | 'wide';
+export const DOC_WIDTHS = ['narrow', 'default', 'wide'] as const;
+export type DocWidth = (typeof DOC_WIDTHS)[number];
+
+export const PROSE_FONTS = ['serif', 'sans'] as const;
+export type ProseFont = (typeof PROSE_FONTS)[number];
 
 export interface AppSettings {
   templates: CommentTemplate[];
@@ -16,7 +24,7 @@ export interface AppSettings {
   /** When true, the comment thread panel in the Mermaid fullscreen view starts collapsed. Persists across sessions. */
   mermaidFullscreenPanelCollapsed: boolean;
   /** Typeface for rendered document prose. UI chrome always uses the sans face. */
-  proseFont: 'serif' | 'sans';
+  proseFont: ProseFont;
   /** Maximum prose column width in the rendered view (see DOC_WIDTH_COLS). */
   docWidth: DocWidth;
 }
@@ -109,13 +117,11 @@ export function parseSettings(input: unknown): AppSettings {
       typeof parsed.mermaidFullscreenPanelCollapsed === 'boolean'
         ? parsed.mermaidFullscreenPanelCollapsed
         : DEFAULT_SETTINGS.mermaidFullscreenPanelCollapsed,
-    proseFont:
-      parsed.proseFont === 'sans' || parsed.proseFont === 'serif'
-        ? parsed.proseFont
-        : DEFAULT_SETTINGS.proseFont,
-    docWidth:
-      parsed.docWidth === 'narrow' || parsed.docWidth === 'default' || parsed.docWidth === 'wide'
-        ? parsed.docWidth
-        : DEFAULT_SETTINGS.docWidth,
+    proseFont: PROSE_FONTS.includes(parsed.proseFont as ProseFont)
+      ? (parsed.proseFont as ProseFont)
+      : DEFAULT_SETTINGS.proseFont,
+    docWidth: DOC_WIDTHS.includes(parsed.docWidth as DocWidth)
+      ? (parsed.docWidth as DocWidth)
+      : DEFAULT_SETTINGS.docWidth,
   };
 }

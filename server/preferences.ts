@@ -2,6 +2,12 @@ import { readFile, rename, open, stat, unlink } from 'fs/promises';
 import { readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
+import {
+  DOC_WIDTHS,
+  PROSE_FONTS,
+  type AppSettings as ClientAppSettings,
+  type CommentTemplate,
+} from '../src/lib/settings';
 
 const PREFS_FILENAME = '.md-redline.json';
 const LOCK_SUFFIX = '.lock';
@@ -15,16 +21,7 @@ export interface RecentFile {
   openedAt: string;
 }
 
-export interface AppSettings {
-  templates?: { label: string; text: string }[];
-  commentMaxLength?: number;
-  showTemplatesByDefault?: boolean;
-  enableResolve?: boolean;
-  quickComment?: boolean;
-  mermaidFullscreenPanelCollapsed?: boolean;
-  proseFont?: 'serif' | 'sans';
-  docWidth?: 'narrow' | 'default' | 'wide';
-}
+export type AppSettings = Partial<ClientAppSettings>;
 
 export interface Preferences {
   author?: string;
@@ -54,38 +51,52 @@ function sanitizeRecentFile(value: unknown): RecentFile | null {
   return { path: value.path, name: value.name, openedAt: value.openedAt };
 }
 
-function sanitizeTemplate(value: unknown): { label: string; text: string } | null {
+function sanitizeTemplate(value: unknown): CommentTemplate | null {
   if (!isPlainObject(value)) return null;
   if (typeof value.label !== 'string' || typeof value.text !== 'string') return null;
   return { label: value.label, text: value.text };
 }
 
+function sanitizeBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function sanitizeEnum<T extends string>(values: readonly T[], value: unknown): T | undefined {
+  return values.includes(value as T) ? (value as T) : undefined;
+}
+
+/**
+ * One sanitizer per client settings field, returning the cleaned value or
+ * undefined to drop it. The mapped type over the client's AppSettings makes
+ * this exhaustive: adding a field to AppSettings in src/lib/settings.ts
+ * without adding its sanitizer here is a compile error, so the persistence
+ * whitelist can never silently drift behind the client again.
+ */
+const SETTING_SANITIZERS: {
+  [K in keyof ClientAppSettings]-?: (value: unknown) => ClientAppSettings[K] | undefined;
+} = {
+  templates: (v) =>
+    Array.isArray(v)
+      ? v.map(sanitizeTemplate).filter((t): t is CommentTemplate => t !== null)
+      : undefined,
+  commentMaxLength: (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined),
+  showTemplatesByDefault: sanitizeBoolean,
+  enableResolve: sanitizeBoolean,
+  quickComment: sanitizeBoolean,
+  mermaidFullscreenPanelCollapsed: sanitizeBoolean,
+  proseFont: (v) => sanitizeEnum(PROSE_FONTS, v),
+  docWidth: (v) => sanitizeEnum(DOC_WIDTHS, v),
+};
+
 function sanitizeSettings(value: unknown): AppSettings | undefined {
   if (!isPlainObject(value)) return undefined;
-  const out: AppSettings = {};
-  if (Array.isArray(value.templates)) {
-    out.templates = value.templates
-      .map(sanitizeTemplate)
-      .filter((t): t is { label: string; text: string } => t !== null);
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(SETTING_SANITIZERS) as (keyof ClientAppSettings)[]) {
+    if (!(key in value)) continue;
+    const sanitized = SETTING_SANITIZERS[key](value[key]);
+    if (sanitized !== undefined) out[key] = sanitized;
   }
-  if (typeof value.commentMaxLength === 'number' && Number.isFinite(value.commentMaxLength)) {
-    out.commentMaxLength = value.commentMaxLength;
-  }
-  if (typeof value.showTemplatesByDefault === 'boolean') {
-    out.showTemplatesByDefault = value.showTemplatesByDefault;
-  }
-  if (typeof value.enableResolve === 'boolean') out.enableResolve = value.enableResolve;
-  if (typeof value.quickComment === 'boolean') out.quickComment = value.quickComment;
-  if (typeof value.mermaidFullscreenPanelCollapsed === 'boolean') {
-    out.mermaidFullscreenPanelCollapsed = value.mermaidFullscreenPanelCollapsed;
-  }
-  if (value.proseFont === 'serif' || value.proseFont === 'sans') {
-    out.proseFont = value.proseFont;
-  }
-  if (value.docWidth === 'narrow' || value.docWidth === 'default' || value.docWidth === 'wide') {
-    out.docWidth = value.docWidth;
-  }
-  return out;
+  return out as AppSettings;
 }
 
 /**

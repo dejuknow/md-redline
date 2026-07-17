@@ -9,6 +9,7 @@ import {
   sanitizePreferencesPatch,
   writePreferences,
 } from './preferences';
+import { DEFAULT_SETTINGS, type AppSettings as ClientAppSettings } from '../src/lib/settings';
 
 let testDir: string;
 
@@ -351,6 +352,16 @@ describe('cross-process file lock', () => {
       },
     } as Record<string, unknown>);
     expect(result.settings).toEqual({ mermaidFullscreenPanelCollapsed: true });
+  });
+
+  it('round-trips every client settings field through the whitelist', async () => {
+    // DEFAULT_SETTINGS always carries every AppSettings key, so a field added
+    // on the client that the server whitelist drops fails this test even if
+    // the compile-time exhaustiveness check in SETTING_SANITIZERS is bypassed.
+    const full: ClientAppSettings = { ...DEFAULT_SETTINGS, proseFont: 'sans', docWidth: 'wide' };
+    const result = await writePreferences(testDir, { settings: full });
+    expect(result.settings).toEqual(full);
+    expect(await readPreferences(testDir)).toEqual({ settings: full });
   });
 
   it('preserves proseFont and docWidth through the whitelist', async () => {
