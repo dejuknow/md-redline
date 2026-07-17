@@ -15,7 +15,11 @@ export default defineConfig({
   retries: 1,
   timeout: 30_000,
   use: {
-    baseURL: 'http://localhost:4173',
+    // 127.0.0.1, not localhost: vite binds IPv4 loopback only, and
+    // Playwright's Node-side API client pays a ~300ms ::1-refusal fallback
+    // on every localhost request (the browser doesn't). Measured 305ms vs
+    // 3ms per request-context call.
+    baseURL: 'http://127.0.0.1:4173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

@@ -127,6 +127,17 @@ export interface ReviewSession {
 interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
   resolver: (result: ReviewResult) => void;
   waiter: Promise<ReviewResult>;
+  /**
+   * Number of /wait requests currently parked on this session's waiter,
+   * maintained by the route layer via beginWaitPark/endWaitPark. sendBatch
+   * delivers directly only while this is > 0; otherwise the batch must be
+   * queued. Resolving the waiter with nobody parked loses the batch:
+   * sendBatch installs a fresh waiter immediately, so a poll arriving later
+   * parks on the fresh one and the resolved result is unreachable. This is
+   * not a theoretical race — the MCP client re-polls /wait?timeout=90, so
+   * an unparked window opens every 90 seconds in normal operation.
+   */
+  parkedWaitCount: number;
   /** Set when the session transitions to a terminal state. Used for retention cleanup. */
   terminalAt: Date | null;
   /** When waitingForAgent was last set to true. Used for auto-clear timeout. */
@@ -232,6 +243,7 @@ export class ReviewSessionStore {
       waitingForAgent: false,
       resolver,
       waiter,
+      parkedWaitCount: 0,
       terminalAt: null,
       waitingForAgentSince: null,
       queuedBatch: null,
@@ -351,6 +363,28 @@ export class ReviewSessionStore {
     }
 
     return s.waiter;
+  }
+
+  /**
+   * Bracket around awaiting the /wait waiter, maintained by the HTTP layer.
+   * The store cannot observe whether anyone is awaiting a promise, so the
+   * route reports it: beginWaitPark just before awaiting, endWaitPark when
+   * the request stops listening (response sent, ?timeout elapsed, or the
+   * connection aborted). sendBatch consults the count to decide between
+   * direct delivery and queueing.
+   */
+  beginWaitPark(id: string): void {
+    const s = this.sessions.get(id);
+    if (s) s.parkedWaitCount++;
+  }
+
+  endWaitPark(id: string): void {
+    const s = this.sessions.get(id);
+    if (s && s.parkedWaitCount > 0) s.parkedWaitCount--;
+  }
+
+  hasParkedWaiter(id: string): boolean {
+    return (this.sessions.get(id)?.parkedWaitCount ?? 0) > 0;
   }
 
   /**
@@ -489,9 +523,17 @@ export class ReviewSessionStore {
     return s.doneWaiter;
   }
 
+  /**
+   * Deliver a batch to a parked /wait poll. Returns false when direct
+   * delivery is impossible — session closed, agent still busy with the
+   * previous batch (waitingForAgent), or no poll currently parked — and the
+   * caller must queueBatch instead. Delivering with no parked waiter would
+   * resolve a promise nobody holds; the batch would be silently lost (see
+   * parkedWaitCount).
+   */
   sendBatch(id: string, prompt: string, commentIds: string[]): boolean {
     const s = this.sessions.get(id);
-    if (!s || s.status !== 'open' || s.waitingForAgent) return false;
+    if (!s || s.status !== 'open' || s.waitingForAgent || s.parkedWaitCount === 0) return false;
 
     // Accumulate sent IDs
     for (const cid of commentIds) {

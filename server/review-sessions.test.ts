@@ -37,6 +37,7 @@ describe('ReviewSessionStore', () => {
 
   it('sendBatch resolves the waiter with batch status and keeps the session open', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter = store.waitForSession(session.id);
 
     const ok = store.sendBatch(session.id, 'BATCH PROMPT', ['c1', 'c2']);
@@ -49,10 +50,12 @@ describe('ReviewSessionStore', () => {
 
   it('sendBatch accumulates sentCommentIds across batches', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.sendBatch(session.id, 'batch1', ['c1', 'c2']);
 
     // Agent re-attaches, clearing waitingForAgent
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.sendBatch(session.id, 'batch2', ['c3']);
 
@@ -62,11 +65,13 @@ describe('ReviewSessionStore', () => {
 
   it('after sendBatch, waitForSession returns a NEW promise that blocks', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter1 = store.waitForSession(session.id);
     store.sendBatch(session.id, 'batch1', ['c1']);
     await waiter1;
 
     // The agent calls waitForSession again — should get a new promise
+    store.beginWaitPark(session.id);
     const waiter2 = store.waitForSession(session.id);
     let resolved = false;
     void waiter2.then(() => { resolved = true; });
@@ -83,6 +88,7 @@ describe('ReviewSessionStore', () => {
 
   it('sendBatch while waitingForAgent returns false', () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.sendBatch(session.id, 'batch1', ['c1']);
 
@@ -92,6 +98,7 @@ describe('ReviewSessionStore', () => {
 
   it('finish with prompt resolves waiter with done status', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter = store.waitForSession(session.id);
 
     const ok = store.finish(session.id, 'FINAL PROMPT', ['c1']);
@@ -105,6 +112,7 @@ describe('ReviewSessionStore', () => {
 
   it('finish without prompt resolves waiter with done status and no prompt', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter = store.waitForSession(session.id);
 
     const ok = store.finish(session.id);
@@ -117,6 +125,7 @@ describe('ReviewSessionStore', () => {
 
   it('finish on already-resolved session returns false', () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.finish(session.id);
     expect(store.finish(session.id)).toBe(false);
@@ -124,6 +133,7 @@ describe('ReviewSessionStore', () => {
 
   it('abort resolves the waiter with the supplied reason and marks status', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter = store.waitForSession(session.id);
 
     const ok = store.abort(session.id, 'user_cancelled');
@@ -159,6 +169,7 @@ describe('ReviewSessionStore', () => {
     store.startSweep(10_000); // sweep every 10s
 
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter = store.waitForSession(session.id);
 
     // 5 min in — well within the 30-min backstop. Backgrounded tabs whose
@@ -177,6 +188,7 @@ describe('ReviewSessionStore', () => {
   it('sweep does not touch done or already-aborted sessions', () => {
     store.startSweep(10_000);
     const a = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(a.id);
     store.waitForSession(a.id);
     store.finish(a.id, 'done');
 
@@ -193,6 +205,7 @@ describe('ReviewSessionStore', () => {
   it('finish wins over sweep once the session is marked done', async () => {
     store.startSweep(10_000);
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     const waiter = store.waitForSession(session.id);
 
     // Just before the 30-min backstop, mark the session done. Sweeps after
@@ -209,6 +222,7 @@ describe('ReviewSessionStore', () => {
   it('sweep aborts only stale sessions when several coexist with staggered heartbeats', async () => {
     store.startSweep(10_000);
     const a = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(a.id);
     const aWaiter = store.waitForSession(a.id);
 
     // 10 min in, create b. a is 10 min stale (still within 30-min
@@ -229,6 +243,7 @@ describe('ReviewSessionStore', () => {
   it('sweep auto-clears waitingForAgent after 60s if agent does not pick up', () => {
     store.startSweep(10_000);
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.sendBatch(session.id, 'batch1', ['c1']);
 
@@ -256,6 +271,7 @@ describe('ReviewSessionStore', () => {
   it('sweep does not clear waitingForAgent if agent picks up in time', () => {
     store.startSweep(10_000);
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.sendBatch(session.id, 'batch1', ['c1']);
 
@@ -265,6 +281,7 @@ describe('ReviewSessionStore', () => {
 
     // Agent picks up after 30s (within the 60s timeout)
     vi.advanceTimersByTime(5_000);
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id); // clears waitingForAgent
 
     expect(store.getSession(session.id)?.waitingForAgent).toBe(false);
@@ -273,6 +290,7 @@ describe('ReviewSessionStore', () => {
   it('terminal sessions are retained for the resolution window then aged out', async () => {
     store.startSweep(10_000);
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
     store.waitForSession(session.id);
     store.finish(session.id, 'done');
 
@@ -433,6 +451,7 @@ describe('ReviewSessionStore', () => {
   describe('queueBatch / deliverQueuedBatchIfAny', () => {
     it('queueBatch adds a batch and updates sentCommentIds', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']); // sets waitingForAgent
 
@@ -450,6 +469,7 @@ describe('ReviewSessionStore', () => {
 
     it('queueBatch merges into an existing queued batch by unioning IDs and taking max-per-file counts', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']);
 
@@ -463,6 +483,7 @@ describe('ReviewSessionStore', () => {
 
     it('queueBatch rejects if session is not open', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
       store.waitForSession(session.id);
       store.finish(session.id);
 
@@ -471,6 +492,7 @@ describe('ReviewSessionStore', () => {
 
     it('deliverQueuedBatchIfAny returns true when a batch is queued (delivery happens via waitForSession)', async () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']);
 
@@ -480,6 +502,7 @@ describe('ReviewSessionStore', () => {
       expect(store.deliverQueuedBatchIfAny(session.id)).toBe(true);
 
       // waitForSession delivers the queued batch immediately, rebuilding the prompt.
+      store.beginWaitPark(session.id);
       const result = await store.waitForSession(session.id);
       expect(result.status).toBe('batch');
       if (result.status === 'batch') {
@@ -492,12 +515,14 @@ describe('ReviewSessionStore', () => {
 
     it('delivered prompt after merge includes the union of comment IDs, not just the latest', async () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
       store.waitForSession(session.id);
       store.sendBatch(session.id, 'batch1', ['c1']);
 
       store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
       store.queueBatch(session.id, ['c3'], new Map([['/tmp/a.md', 3]]));
 
+      store.beginWaitPark(session.id);
       const result = await store.waitForSession(session.id);
       expect(result.status).toBe('batch');
       if (result.status === 'batch') {
@@ -726,6 +751,7 @@ describe('ReviewSessionStore', () => {
 
     it('ignores done sessions', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
       store.waitForSession(session.id);
       store.finish(session.id);
       expect(store.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
@@ -912,6 +938,53 @@ describe('ReviewSessionStore', () => {
       expect(store.getPendingAsks(session.id)).toHaveLength(0);
       // The ask map entry must be gone too — otherwise this is a memory leak.
       expect(store.waitForAsk(askId)).toBeUndefined();
+    });
+  });
+
+  describe('parked-waiter accounting (batches sent between polls)', () => {
+    it('sendBatch returns false when no /wait poll is parked', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      // waitForSession alone does not mark a poll as parked — only the HTTP
+      // layer's beginWaitPark does. A direct send here would resolve a
+      // waiter nobody holds and the batch would be lost.
+      store.waitForSession(session.id);
+      expect(store.sendBatch(session.id, 'batch1', ['c1'])).toBe(false);
+    });
+
+    it('a batch sent between polls is queued and delivered on the next poll', async () => {
+      // Mirrors the MCP client's /wait?timeout=90 re-poll cycle: poll 1
+      // times out and un-parks; the user clicks Send batch in the gap;
+      // poll 2 must receive that batch instead of parking forever.
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+
+      // Poll 1 arrives, then times out (route releases the park).
+      store.beginWaitPark(session.id);
+      store.waitForSession(session.id);
+      store.endWaitPark(session.id);
+
+      // User sends a batch in the unparked gap: direct delivery must be
+      // refused, and the route-layer fallback queues it.
+      expect(store.sendBatch(session.id, 'batch1', ['c1'])).toBe(false);
+      expect(store.queueBatch(session.id, ['c1'], new Map([['/tmp/a.md', 1]]))).toBe(true);
+
+      // Poll 2 arrives and receives the queued batch immediately.
+      store.beginWaitPark(session.id);
+      const result = await store.waitForSession(session.id);
+      store.endWaitPark(session.id);
+      expect(result.status).toBe('batch');
+      if (result.status === 'batch') {
+        expect(result.commentIds).toEqual(['c1']);
+      }
+    });
+
+    it('endWaitPark floors at zero and hasParkedWaiter tracks the bracket', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      expect(store.hasParkedWaiter(session.id)).toBe(false);
+      store.endWaitPark(session.id); // over-release must not corrupt the count
+      store.beginWaitPark(session.id);
+      expect(store.hasParkedWaiter(session.id)).toBe(true);
+      store.endWaitPark(session.id);
+      expect(store.hasParkedWaiter(session.id)).toBe(false);
     });
   });
 });

@@ -342,24 +342,23 @@ export function registerReviewSessionRoutes(
     }
     const ok = reviewSessions.sendBatch(id, body.prompt, body.commentIds as string[]);
     if (!ok) {
-      const session = reviewSessions.getSession(id);
-      if (session?.waitingForAgent) {
-        // Agent is busy. Queue the batch for delivery on the next poll. We
-        // store IDs + counts here so a subsequent queueBatch on top of this
-        // one merges cleanly and the prompt is rebuilt at delivery time
-        // (avoids duplicated system-instruction preambles).
-        const queued = reviewSessions.queueBatch(
-          id,
-          body.commentIds as string[],
-          commentCountsByPath,
-        );
-        if (!queued) {
-          return c.json({ error: 'Session is not open' }, 409);
-        }
-        console.log(`[review-session] batch queued for ${id} (${(body.commentIds as string[]).length} comments)`);
-        return c.json({ ok: true, queued: true });
+      // Direct delivery wasn't possible: the agent is busy with the previous
+      // batch (waitingForAgent), or no /wait poll is parked right now — the
+      // MCP client re-polls with ?timeout=90, so between polls there is
+      // nobody to deliver to. Queue the batch; the next waitForSession call
+      // delivers it. We store IDs + counts (not a prebuilt prompt) so
+      // back-to-back queues merge cleanly and the prompt is rebuilt at
+      // delivery time (avoids duplicated system-instruction preambles).
+      const queued = reviewSessions.queueBatch(
+        id,
+        body.commentIds as string[],
+        commentCountsByPath,
+      );
+      if (!queued) {
+        return c.json({ error: 'Session is not open' }, 409);
       }
-      return c.json({ error: 'Session is not open' }, 409);
+      console.log(`[review-session] batch queued for ${id} (${(body.commentIds as string[]).length} comments)`);
+      return c.json({ ok: true, queued: true });
     }
     console.log(`[review-session] batch sent for ${id} (${(body.commentIds as string[]).length} comments)`);
     return c.json({ ok: true });
@@ -1209,17 +1208,6 @@ export function registerReviewSessionRoutes(
       );
     }
 
-    // waitForSession's resolution handles queued-batch delivery internally
-    // (it inspects s.queuedBatch and resolves the waiter with that batch
-    // before installing a fresh waiter). The previous `deliverQueuedBatchIfAny`
-    // call here was a pure boolean check with a misleading "deliver" name —
-    // dropped to avoid implying a side effect that isn't there.
-    //
-    // waitForSession returns the session's existing waiter promise. If the
-    // session is already resolved, the promise is already settled and resolves
-    // immediately. If still open, this awaits until batch/finish/abort/sweep.
-    const waiterPromise = reviewSessions.waitForSession(id);
-
     // Optional ?timeout=<seconds> lets polling clients (e.g. Codex, which
     // enforces a 120s hard timeout per tool call) avoid being killed. The
     // endpoint returns {status:'pending'} after the timeout so the client can
@@ -1238,17 +1226,77 @@ export function registerReviewSessionRoutes(
       timeoutMs = parsedSec * 1000;
     }
 
-    if (timeoutMs > 0) {
-      const pending = new Promise<{ status: 'pending' }>((resolve) => {
-        const t = setTimeout(() => resolve({ status: 'pending' }), timeoutMs);
-        if (typeof t === 'object' && 'unref' in t) (t as { unref: () => void }).unref();
-      });
-      const result = await Promise.race([waiterPromise, pending]);
-      return c.json(result);
-    }
+    // Bracket the await with parked-waiter accounting so sendBatch can tell
+    // whether a live poll is listening (deliver directly) or not (queue for
+    // the next poll). release() is once-only so the finally can't
+    // double-decrement a count owned by a concurrent poll.
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        reviewSessions.endWaitPark(id);
+      }
+    };
+    reviewSessions.beginWaitPark(id);
+    try {
+      // waitForSession's resolution handles queued-batch delivery internally
+      // (it inspects s.queuedBatch and resolves the waiter with that batch
+      // before installing a fresh waiter).
+      //
+      // waitForSession returns the session's existing waiter promise. If the
+      // session is already resolved, the promise is already settled and
+      // resolves immediately. If still open, this awaits until
+      // batch/finish/abort/sweep.
+      const waiterPromise = reviewSessions.waitForSession(id);
 
-    const result = await waiterPromise;
-    return c.json(result);
+      // A poll whose client vanished must not count as parked — sendBatch
+      // would deliver into the dead connection and the batch would be lost.
+      // The request's abort signal un-parks it (best effort: if the runtime
+      // never fires the signal, behavior degrades to the pre-fix status quo
+      // for this narrow case).
+      const ABORTED = Symbol('aborted');
+      const PENDING = Symbol('pending');
+      const signal: AbortSignal | undefined = c.req.raw.signal;
+      const connectionAborted = new Promise<typeof ABORTED>((resolve) => {
+        if (!signal) return; // never resolves; no abort support
+        if (signal.aborted) resolve(ABORTED);
+        else signal.addEventListener('abort', () => resolve(ABORTED), { once: true });
+      });
+
+      if (timeoutMs > 0) {
+        const pending = new Promise<typeof PENDING>((resolve) => {
+          const t = setTimeout(() => resolve(PENDING), timeoutMs);
+          if (typeof t === 'object' && 'unref' in t) (t as { unref: () => void }).unref();
+        });
+        const result = await Promise.race([waiterPromise, pending, connectionAborted]);
+        if (result !== PENDING && result !== ABORTED) {
+          return c.json(result);
+        }
+        // Un-park BEFORE the settled recheck: from this point a concurrent
+        // Send batch queues instead of delivering. Then catch the opposite
+        // interleave — a batch delivered to our waiter in the same tick the
+        // timeout fired — by rechecking settledness; reporting it as
+        // 'pending' would lose it (sendBatch already installed a fresh
+        // waiter). The two synchronous statements leave no window between
+        // them for a batch to fall through.
+        release();
+        const late = await Promise.race([waiterPromise, Promise.resolve(PENDING)]);
+        if (late !== PENDING) {
+          return c.json(late);
+        }
+        return c.json({ status: 'pending' });
+      }
+
+      const result = await Promise.race([waiterPromise, connectionAborted]);
+      if (result !== ABORTED) {
+        return c.json(result);
+      }
+      // Connection died while parked; the finally un-parks so future batches
+      // queue. The response body goes nowhere — 'pending' is as good as any.
+      return c.json({ status: 'pending' });
+    } finally {
+      release();
+    }
   });
 
   // POST /agent-done is the "user clicked Done in the agent-review banner"
