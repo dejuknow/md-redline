@@ -19,7 +19,15 @@ const APP_DIR = resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
 const { version: CLI_VERSION } = require(join(APP_DIR, 'package.json'));
 const DIST_SERVER = join(APP_DIR, 'dist', 'server.js');
-const DEFAULT_SERVER_PORT = 3001;
+// 6373 ("MDR" on a phone keypad) keeps mdr out of the 3000-3010 range that
+// Next.js/Nest/CRA stacks contend for. The server reads the same env var,
+// so an override stays consistent across CLI and server.
+const DEFAULT_SERVER_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? '', 10) || 6373;
+// Pre-0.7 servers bound 3001+. Scanning the old range lets this CLI find a
+// still-running old server, so the version-upgrade path can stop it and
+// `mdr --stop` keeps working across the port migration. Safe to drop once
+// no pre-6373 servers can plausibly be running.
+const LEGACY_SERVER_PORT = 3001;
 const DEFAULT_CLIENT_PORT = 5188;
 const MAX_PORT_SCAN = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
@@ -94,9 +102,14 @@ async function findServerPort() {
     if (port && await checkServer(port)) return port;
   } catch {}
 
-  // Scan the port range as fallback
-  for (let p = DEFAULT_SERVER_PORT; p < DEFAULT_SERVER_PORT + MAX_PORT_SCAN; p++) {
-    if (await checkServer(p)) return p;
+  // Scan the port range as fallback, then the legacy pre-0.7 range
+  const bases = DEFAULT_SERVER_PORT === LEGACY_SERVER_PORT
+    ? [DEFAULT_SERVER_PORT]
+    : [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT];
+  for (const base of bases) {
+    for (let p = base; p < base + MAX_PORT_SCAN; p++) {
+      if (await checkServer(p)) return p;
+    }
   }
   return null;
 }
@@ -104,7 +117,7 @@ async function findServerPort() {
 async function findClientPort() {
   for (let p = DEFAULT_CLIENT_PORT; p < DEFAULT_CLIENT_PORT + MAX_PORT_SCAN; p++) {
     try {
-      const response = await fetch(`http://localhost:${p}/__mdr__`, {
+      const response = await fetch(`http://127.0.0.1:${p}/__mdr__`, {
         signal: AbortSignal.timeout(1_000),
       });
       if (response.ok && (await response.text()) === 'mdr') return p;
@@ -185,7 +198,7 @@ async function enableRestrictedMode() {
 
 async function getServerVersion(port) {
   try {
-    const response = await fetch(`http://localhost:${port}/api/version`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/version`, {
       signal: AbortSignal.timeout(1_000),
     });
     if (response.ok) {
@@ -282,7 +295,9 @@ async function buildUrl(file, dir) {
   const clientPort = await findClientPort();
   const serverPort = await findServerPort();
   const port = clientPort ?? serverPort ?? DEFAULT_CLIENT_PORT;
-  const baseUrl = `http://localhost:${port}`;
+  // 127.0.0.1 rather than localhost: browsers prefer ::1 too, so a
+  // localhost URL can land on whatever app squats the port on IPv6.
+  const baseUrl = `http://127.0.0.1:${port}`;
   if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
   if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
   return baseUrl;
@@ -524,14 +539,14 @@ async function runMcpStdio() {
   // Bin owns the baseUrl state so there's no module-level mutable in the
   // mcp-stdio module. runMcpServer reads it via getBaseUrl() on every tool
   // call, after ensureServerRunning() has had a chance to refresh it.
-  let currentBaseUrl = `http://localhost:${DEFAULT_CLIENT_PORT}`;
+  let currentBaseUrl = `http://127.0.0.1:${DEFAULT_CLIENT_PORT}`;
   await mod.runMcpServer({
     getBaseUrl: () => currentBaseUrl,
     openInBrowser,
     ensureServerRunning: async () => {
       await ensureServerRunning();
       const port = (await findClientPort()) ?? (await findServerPort()) ?? DEFAULT_CLIENT_PORT;
-      currentBaseUrl = `http://localhost:${port}`;
+      currentBaseUrl = `http://127.0.0.1:${port}`;
     },
   });
 }
@@ -594,7 +609,7 @@ async function main() {
       const serverPort = await findServerPort();
       if (serverPort) {
         try {
-          await fetch(`http://localhost:${serverPort}/api/grant-access`, {
+          await fetch(`http://127.0.0.1:${serverPort}/api/grant-access`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: targetPath }),

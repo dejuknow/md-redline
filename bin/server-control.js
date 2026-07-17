@@ -3,13 +3,16 @@ import { execSync } from 'child_process';
 export function buildKillCommand(port, platform = process.platform) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
   if (platform === 'win32') {
-    return `netstat -ano | findstr :${port} | findstr LISTENING`;
+    return `netstat -ano | findstr 127.0.0.1:${port} | findstr LISTENING`;
   }
   // -sTCP:LISTEN restricts matches to listeners. Without it, lsof also
   // returns PIDs with outbound connections to the port — including this
   // CLI itself after it probes /api/version or /api/shutdown — and the
   // subsequent `kill` would SIGTERM the caller mid-upgrade.
-  return `lsof -iTCP:${port} -sTCP:LISTEN -t | xargs kill 2>/dev/null`;
+  // @127.0.0.1 restricts matches to the IPv4 loopback socket mdr binds.
+  // Another app can hold the same port number on IPv6 (e.g. a Nest server
+  // on *:PORT); without the scoping, `kill` would SIGTERM that app too.
+  return `lsof -iTCP@127.0.0.1:${port} -sTCP:LISTEN -t | xargs kill 2>/dev/null`;
 }
 
 export function killPort(port, {
@@ -47,7 +50,11 @@ export async function checkServer(port, {
   timeoutMs = 1_000,
 } = {}) {
   try {
-    const response = await fetchFn(`http://localhost:${port}/api/config`, {
+    // 127.0.0.1, never `localhost`: the server binds IPv4 loopback only,
+    // while `localhost` resolves to ::1 first. If another app holds the
+    // same port on IPv6, a localhost probe reaches that app and the CLI
+    // concludes its own healthy server is not running.
+    const response = await fetchFn(`http://127.0.0.1:${port}/api/config`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return false;
@@ -76,7 +83,7 @@ export async function gracefulShutdown(port, {
   // let the poll below decide success — otherwise we'd fall back to
   // killPort during a race where the server is moments from exiting.
   try {
-    const response = await fetchFn(`http://localhost:${port}/api/shutdown`, {
+    const response = await fetchFn(`http://127.0.0.1:${port}/api/shutdown`, {
       method: 'POST',
       // Server middleware rejects POSTs without this header with 415 as a
       // CSRF guard against text/plain form submits.

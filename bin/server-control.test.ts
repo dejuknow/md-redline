@@ -8,15 +8,18 @@ import {
 } from './server-control.js';
 
 describe('buildKillCommand', () => {
-  it('scopes lsof to LISTEN state on macOS/Linux', () => {
+  it('scopes lsof to loopback LISTEN sockets on macOS/Linux', () => {
+    // Must be scoped to 127.0.0.1: mdr binds IPv4 loopback only, and another
+    // app (e.g. a Nest server on IPv6 *:PORT) can share the port number.
+    // An unscoped lsof would SIGTERM that innocent process too.
     const cmd = buildKillCommand(3001, 'darwin');
-    expect(cmd).toContain('lsof -iTCP:3001 -sTCP:LISTEN -t');
+    expect(cmd).toContain('lsof -iTCP@127.0.0.1:3001 -sTCP:LISTEN -t');
     expect(cmd).toContain('xargs kill');
   });
 
-  it('uses netstat LISTENING filter on Windows', () => {
+  it('uses loopback-scoped netstat LISTENING filter on Windows', () => {
     const cmd = buildKillCommand(3001, 'win32');
-    expect(cmd).toBe('netstat -ano | findstr :3001 | findstr LISTENING');
+    expect(cmd).toBe('netstat -ano | findstr 127.0.0.1:3001 | findstr LISTENING');
   });
 
   it('returns null for non-integer, zero, negative, or out-of-range ports', () => {
@@ -28,12 +31,12 @@ describe('buildKillCommand', () => {
 });
 
 describe('killPort', () => {
-  it('invokes the lsof LISTEN-scoped command on macOS', () => {
+  it('invokes the loopback-scoped lsof command on macOS', () => {
     const exec = vi.fn();
     const ok = killPort(3001, { platform: 'darwin', exec });
     expect(ok).toBe(true);
     expect(exec).toHaveBeenCalledWith(
-      expect.stringContaining('lsof -iTCP:3001 -sTCP:LISTEN -t'),
+      expect.stringContaining('lsof -iTCP@127.0.0.1:3001 -sTCP:LISTEN -t'),
       expect.anything(),
     );
   });
@@ -53,9 +56,9 @@ describe('killPort', () => {
 
   it('on Windows parses netstat output and invokes taskkill per PID', () => {
     const netstatOutput = [
-      '  TCP    0.0.0.0:3001           0.0.0.0:0              LISTENING       4242',
-      '  TCP    [::]:3001              [::]:0                 LISTENING       4242',
-      '  TCP    0.0.0.0:3001           0.0.0.0:0              LISTENING       4243',
+      '  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       4242',
+      '  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       4242',
+      '  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       4243',
     ].join('\n');
     const exec = vi.fn((cmd: string) => {
       if (cmd.startsWith('netstat')) return netstatOutput;
@@ -96,8 +99,12 @@ describe('checkServer', () => {
   it('returns true on 2xx with mdr-shaped JSON', async () => {
     const fetchFn = vi.fn(async () => mkResponse(true));
     await expect(checkServer(3001, { fetchFn })).resolves.toBe(true);
+    // Probe 127.0.0.1, never `localhost`: the server binds IPv4 loopback,
+    // but `localhost` resolves to ::1 first, so with an IPv6 listener from
+    // another app on the same port the probe would hit that app instead
+    // and the CLI would go blind to its own healthy server.
     expect(fetchFn).toHaveBeenCalledWith(
-      'http://localhost:3001/api/config',
+      'http://127.0.0.1:3001/api/config',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -142,7 +149,7 @@ describe('gracefulShutdown', () => {
     });
     expect(result).toBe(true);
     expect(fetchFn).toHaveBeenCalledWith(
-      'http://localhost:3001/api/shutdown',
+      'http://127.0.0.1:3001/api/shutdown',
       expect.objectContaining({
         method: 'POST',
         // Server middleware 415s POSTs without this header.

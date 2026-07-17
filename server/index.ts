@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 import { readFile, readdir, stat, realpath, rename, open } from 'fs/promises';
 import { promises as fsPromises } from 'fs';
 import { randomBytes } from 'crypto';
-import { watch, statSync, realpathSync, unlinkSync, type FSWatcher } from 'fs';
+import { watch, statSync, realpathSync, readFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { homedir, platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
@@ -1385,9 +1385,28 @@ function detectStaticDir(): string | undefined {
 
 export const app = createApp({ staticDir: detectStaticDir(), defaultTrustHome: true });
 
-const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '3001', 10);
+// 6373 ("MDR" on a phone keypad) stays clear of the 3000-3010 range that
+// Next.js/Nest/CRA stacks contend for. Must match DEFAULT_SERVER_PORT in
+// bin/md-redline, which scans this range to find us.
+const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '6373', 10);
 const MAX_PORT_ATTEMPTS = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
+
+/**
+ * Delete the shared port file only if it still holds this server's port.
+ * Multiple servers can be alive at once (e.g. an orphan from a failed
+ * launch plus the live one); an exiting server must not clobber the file
+ * a sibling wrote for the CLI's fast-path lookup.
+ */
+export function removePortFileIfOwned(portFile: string, port: number): void {
+  try {
+    if (readFileSync(portFile, 'utf8').trim() === String(port)) {
+      unlinkSync(portFile);
+    }
+  } catch {
+    /* missing or unreadable file — nothing to clean up */
+  }
+}
 
 function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
   return new Promise((res, rej) => {
@@ -1435,18 +1454,14 @@ if (isMainModule) {
           throw e;
         }
       }
-      console.log(`md-redline server running on http://localhost:${port}`);
+      console.log(`md-redline server running on http://127.0.0.1:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
       if (initialArg) {
         console.log(`Initial path: ${initialArg}`);
       }
 
       const cleanup = () => {
-        try {
-          unlinkSync(PORT_FILE);
-        } catch {
-          /* ignore */
-        }
+        removePortFileIfOwned(PORT_FILE, port);
       };
       process.on('exit', cleanup);
       process.on('SIGINT', () => {

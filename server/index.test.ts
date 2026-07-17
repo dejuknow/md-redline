@@ -2,7 +2,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createApp, createAppFull, isPathInsideRoot, type CreateAppOptions } from './index';
+import {
+  createApp,
+  createAppFull,
+  isPathInsideRoot,
+  removePortFileIfOwned,
+  type CreateAppOptions,
+} from './index';
 import { addReply, parseComments } from '../src/lib/comment-parser';
 
 type AppInstance = ReturnType<typeof createApp>;
@@ -3838,5 +3844,32 @@ describe('static file serving CSP (img-src https: for remote images)', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-security-policy')).toBeNull();
     expect(response.headers.get('cache-control')).toContain('immutable');
+  });
+});
+
+describe('removePortFileIfOwned', () => {
+  it('deletes the port file when it holds this server\'s port', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'md-redline-portfile-'));
+    const portFile = join(dir, 'md-redline.port');
+    await writeFile(portFile, '6373\n');
+    removePortFileIfOwned(portFile, 6373);
+    await expect(readFile(portFile, 'utf8')).rejects.toThrow();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('leaves the port file alone when a sibling server owns it', async () => {
+    // Two servers can be alive at once (orphan from a failed launch plus
+    // the live one). The exiting server must not delete the file the live
+    // server wrote, or the CLI loses its fast-path lookup.
+    const dir = await mkdtemp(join(tmpdir(), 'md-redline-portfile-'));
+    const portFile = join(dir, 'md-redline.port');
+    await writeFile(portFile, '6374');
+    removePortFileIfOwned(portFile, 6373);
+    await expect(readFile(portFile, 'utf8')).resolves.toBe('6374');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('is a no-op when the port file is missing', () => {
+    expect(() => removePortFileIfOwned(join(tmpdir(), 'md-redline-portfile-nonexistent'), 6373)).not.toThrow();
   });
 });

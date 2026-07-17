@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import type { HmrContext, Plugin, ViteDevServer } from 'vite';
 
 const serverPort = Number.parseInt(process.env.MD_REDLINE_VITE_PORT ?? '5188', 10);
-const apiPort = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '3001', 10);
+const apiPort = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '6373', 10);
 
 export function ignoreMarkdownHotUpdatePlugin(): Plugin {
   return {
@@ -42,9 +42,12 @@ export default defineConfig({
     exclude: ['e2e/**', 'demo/**', 'node_modules/**', '.worktrees/**'],
   },
   server: {
+    // Bind IPv4 loopback explicitly so the CLI's 127.0.0.1 probe of
+    // /__mdr__ always reaches us regardless of how localhost resolves.
+    host: '127.0.0.1',
     port: serverPort,
     proxy: {
-      '/api': `http://localhost:${apiPort}`,
+      '/api': `http://127.0.0.1:${apiPort}`,
     },
     watch: {
       ignored: ['**/*.md'],
