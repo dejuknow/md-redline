@@ -21,41 +21,30 @@ const handOffIcon = (
   </svg>
 );
 
-const chevronIcon = (
-  <svg className="w-2 h-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-  </svg>
-);
-
 interface Props {
   activeFilePath: string;
   commentCounts: Map<string, number>;
   onCopyAgentPrompt: (filePaths: string[]) => void;
-  /**
-   * When true, the button renders in a disabled state with an explanatory
-   * tooltip rather than being hidden. Used when no comments exist yet. The
-   * primary CTA stays visible so users discover the feature, and the tooltip
-   * tells them what to do to enable it.
-   */
-  disabled?: boolean;
 }
 
 /**
- * Handoff is md-redline's "submit review", so its prominence is
- * state-reactive: a quiet muted icon while there is nothing to send (the
- * resting toolbar stays calm), blooming into a labeled, count-bearing,
- * accent-tinted CTA the moment comments exist and handoff becomes the
- * user's next step. With comments in multiple files the CTA grows a
- * chevron segment that opens the multi-file picker.
+ * Handoff is md-redline's "submit review": the unit it sends is the review
+ * session, not the active document. The button's scope always matches its
+ * label:
+ *
+ * - No sendable comments anywhere: quiet disabled icon with an explanatory
+ *   tooltip, so the feature stays discoverable.
+ * - Exactly one file with comments: labeled CTA, click copies immediately.
+ *   If that file is a background tab, the label names it so switching tabs
+ *   never makes a pending review look lost.
+ * - Multiple files with comments: the label announces the plural scope
+ *   ("Hand off 2 files…") and the click opens a picker with every file
+ *   pre-selected. Confirm-and-prune, not build-up-from-zero: the picker's
+ *   CTA reads the final scope back before anything is copied, so partial
+ *   handoff is always deliberate.
  */
-export function HandOffButton({
-  activeFilePath,
-  commentCounts,
-  onCopyAgentPrompt,
-  disabled,
-}: Props) {
+export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt }: Props) {
   const [open, setOpen] = useState(false);
-  const [chevronHover, setChevronHover] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const ref = useRef<HTMLDivElement>(null);
 
@@ -63,8 +52,8 @@ export function HandOffButton({
     .filter(([, count]) => count > 0)
     .map(([path, count]) => ({ path, count }));
 
+  const disabled = filesWithComments.length === 0;
   const hasMultipleFiles = filesWithComments.length > 1;
-  const activeCount = commentCounts.get(activeFilePath) ?? 0;
 
   // Close on click outside
   useEffect(() => {
@@ -102,75 +91,59 @@ export function HandOffButton({
             {handOffIcon}
           </IconButton>
         </Tooltip>
-        <button
-          type="button"
-          title="Hand off multiple files"
-          data-testid="handoff-chevron"
-          aria-hidden="true"
-          tabIndex={-1}
-          className="pl-0 pr-0.5 self-stretch flex items-center rounded-r opacity-0 pointer-events-none text-content-muted"
-        >
-          {chevronIcon}
-        </button>
       </div>
     );
   }
 
-  // Enabled rendering: labeled accent-tinted CTA. Both segments go strong
-  // together while the dropdown is open or the chevron is hovered, so the
-  // split still reads as one control.
-  const pressed = open || chevronHover;
-  const segmentClass = `text-primary-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-    pressed ? 'bg-primary-bg-strong' : 'bg-primary-bg hover:bg-primary-bg-strong'
-  }`;
+  // Enabled rendering: labeled accent-tinted CTA whose label always tells
+  // the truth about scope.
+  const single = filesWithComments[0];
+  const singleIsBackground = !hasMultipleFiles && single.path !== activeFilePath;
+  const title = hasMultipleFiles
+    ? 'Hand off to agent. Choose files to include.'
+    : `Hand off to agent. Copies instructions for ${
+        singleIsBackground ? getPathBasename(single.path) : 'this file'
+      }.`;
 
   return (
     <div className="relative flex items-center" data-testid="handoff-group" ref={ref}>
-      <Tooltip text="Hand off to agent. Copies instructions for this file.">
-        <button
-          type="button"
-          onClick={() => onCopyAgentPrompt([activeFilePath])}
-          title="Hand off to agent. Copies instructions for this file."
-          data-testid="handoff-button"
-          className={`flex items-center gap-1.5 pl-1.5 pr-2 py-1 text-xs font-medium whitespace-nowrap ${
-            hasMultipleFiles ? 'rounded-l' : 'rounded'
-          } ${segmentClass}`}
-        >
-          <span className="block w-3.5 h-3.5 shrink-0">{handOffIcon}</span>
-          <span>Hand off</span>
-          {activeCount > 0 && <span className="tabular-nums opacity-70">{activeCount}</span>}
-        </button>
-      </Tooltip>
-
-      {hasMultipleFiles ? (
+      {/* Suppress the tooltip while the picker is open — it would overlap
+          the first file row, and the open picker already says everything. */}
+      <Tooltip text={open ? null : title}>
         <button
           type="button"
           onClick={() => {
-            setOpen((p) => {
-              if (!p) setSelected(new Set(filesWithComments.map((f) => f.path)));
-              return !p;
-            });
+            if (hasMultipleFiles) {
+              setOpen((p) => {
+                if (!p) setSelected(new Set(filesWithComments.map((f) => f.path)));
+                return !p;
+              });
+            } else {
+              onCopyAgentPrompt([single.path]);
+            }
           }}
-          onMouseEnter={() => setChevronHover(true)}
-          onMouseLeave={() => setChevronHover(false)}
-          title="Hand off multiple files"
-          data-testid="handoff-chevron"
-          className={`ml-px px-1 self-stretch flex items-center rounded-r ${segmentClass}`}
+          title={title}
+          aria-haspopup={hasMultipleFiles || undefined}
+          aria-expanded={hasMultipleFiles ? open : undefined}
+          data-testid="handoff-button"
+          className={`flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded text-xs font-medium whitespace-nowrap text-primary-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+            open ? 'bg-primary-bg-strong' : 'bg-primary-bg hover:bg-primary-bg-strong'
+          }`}
         >
-          {chevronIcon}
+          <span className="block w-3.5 h-3.5 shrink-0">{handOffIcon}</span>
+          {hasMultipleFiles ? (
+            <span>Hand off {filesWithComments.length} files…</span>
+          ) : (
+            <>
+              <span>Hand off</span>
+              {singleIsBackground && (
+                <span className="max-w-[10rem] truncate">{getPathBasename(single.path)}</span>
+              )}
+              <span className="tabular-nums opacity-70">{single.count}</span>
+            </>
+          )}
         </button>
-      ) : (
-        <button
-          type="button"
-          title="Hand off multiple files"
-          data-testid="handoff-chevron"
-          aria-hidden="true"
-          tabIndex={-1}
-          className="pl-0 pr-0.5 self-stretch flex items-center rounded-r opacity-0 pointer-events-none text-content-muted"
-        >
-          {chevronIcon}
-        </button>
-      )}
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 bg-surface border border-border rounded-lg shadow-lg py-1.5 min-w-[240px]">

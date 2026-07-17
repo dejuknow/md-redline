@@ -13,7 +13,6 @@ interface Props {
   onSearch: () => void;
 
   // Handoff
-  commentCount: number;
   commentCounts: Map<string, number>;
   activeFilePath: string | null;
   onCopyAgentPrompt?: (filePaths: string[]) => void;
@@ -67,7 +66,6 @@ export function PanelToolbar({
   onViewModeChange,
   searchActive,
   onSearch,
-  commentCount,
   commentCounts,
   activeFilePath,
   onCopyAgentPrompt,
@@ -308,10 +306,12 @@ export function PanelToolbar({
         </Tooltip>
 
         {/* Handoff (primary CTA — anchors the far right). Always visible
-            when a file is open; disabled until at least one comment exists,
-            so the path to "send this to an agent" is always discoverable.
-            A hairline divider separates it from the utility icons so it
-            reads as the terminal action, not another utility. */}
+            when a file is open; disabled until at least one sendable comment
+            exists in ANY open tab (the button owns that logic), so the path
+            to "send this to an agent" is always discoverable and a pending
+            review never looks lost from a comment-free tab. A hairline
+            divider separates it from the utility icons so it reads as the
+            terminal action, not another utility. */}
         {onCopyAgentPrompt && activeFilePath && (
           <>
             <div className="w-px h-4 bg-border" aria-hidden="true" />
@@ -319,7 +319,6 @@ export function PanelToolbar({
               activeFilePath={activeFilePath}
               commentCounts={commentCounts}
               onCopyAgentPrompt={onCopyAgentPrompt}
-              disabled={commentCount === 0}
             />
           </>
         )}

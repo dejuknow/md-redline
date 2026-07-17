@@ -2509,7 +2509,6 @@ export default function App() {
                     setSearchFocusTrigger((t) => t + 1);
                   }
                 }}
-                commentCount={commentCount}
                 commentCounts={commentCounts}
                 activeFilePath={activeFilePath}
                 onCopyAgentPrompt={handleHandoff}
