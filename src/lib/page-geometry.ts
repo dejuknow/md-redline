@@ -14,7 +14,7 @@ export const RAIL_FOOTPRINT = GAP + RAIL + PAD_R; // 360
 export const CANVAS_GUTTER = 24;
 
 /** Prose column caps for the Document width setting. */
-export const DOC_WIDTH_COLS = { narrow: 560, default: COL_MAX, wide: 800 } as const;
+export const DOC_WIDTH_COLS = { narrow: 520, default: COL_MAX, wide: 860 } as const;
 
 export interface PageGeometry {
   /** The rail fits by width alone (>= 888px content width). */

@@ -82,10 +82,10 @@ describe('pageGeometry', () => {
   });
 
   it('caps the column at the docWidth setting instead of COL_MAX', () => {
-    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.narrow).colWidth).toBe(560);
-    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).colWidth).toBe(800);
-    // The wide page still fits: 48 + 800 + 360
-    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).pageWidth).toBe(1208);
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.narrow).colWidth).toBe(520);
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).colWidth).toBe(860);
+    // The wide page still fits: 48 + 860 + 360
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide).pageWidth).toBe(1268);
     // The rail threshold is colMax-independent (COL_MIN governs it).
     expect(pageGeometry(888, true, DOC_WIDTH_COLS.wide).railFits).toBe(true);
     expect(pageGeometry(887, true, DOC_WIDTH_COLS.narrow).railFits).toBe(false);
