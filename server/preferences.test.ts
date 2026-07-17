@@ -353,6 +353,28 @@ describe('cross-process file lock', () => {
     expect(result.settings).toEqual({ mermaidFullscreenPanelCollapsed: true });
   });
 
+  it('preserves proseFont and docWidth through the whitelist', async () => {
+    const result = await writePreferences(testDir, {
+      settings: {
+        proseFont: 'sans',
+        docWidth: 'wide',
+        unknownSetting: 'drop me',
+      },
+    } as Record<string, unknown>);
+    expect(result.settings).toEqual({ proseFont: 'sans', docWidth: 'wide' });
+  });
+
+  it('drops invalid proseFont and docWidth values', async () => {
+    const result = await writePreferences(testDir, {
+      settings: {
+        proseFont: 'comic-sans',
+        docWidth: 12,
+        quickComment: true,
+      },
+    } as Record<string, unknown>);
+    expect(result.settings).toEqual({ quickComment: true });
+  });
+
   it('sanitizePreferencesPatch returns {} for non-object input', () => {
     expect(sanitizePreferencesPatch(null)).toEqual({});
     expect(sanitizePreferencesPatch('hello')).toEqual({});

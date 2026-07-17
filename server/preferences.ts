@@ -22,6 +22,8 @@ export interface AppSettings {
   enableResolve?: boolean;
   quickComment?: boolean;
   mermaidFullscreenPanelCollapsed?: boolean;
+  proseFont?: 'serif' | 'sans';
+  docWidth?: 'narrow' | 'default' | 'wide';
 }
 
 export interface Preferences {
@@ -76,6 +78,12 @@ function sanitizeSettings(value: unknown): AppSettings | undefined {
   if (typeof value.quickComment === 'boolean') out.quickComment = value.quickComment;
   if (typeof value.mermaidFullscreenPanelCollapsed === 'boolean') {
     out.mermaidFullscreenPanelCollapsed = value.mermaidFullscreenPanelCollapsed;
+  }
+  if (value.proseFont === 'serif' || value.proseFont === 'sans') {
+    out.proseFont = value.proseFont;
+  }
+  if (value.docWidth === 'narrow' || value.docWidth === 'default' || value.docWidth === 'wide') {
+    out.docWidth = value.docWidth;
   }
   return out;
 }
