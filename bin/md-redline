@@ -144,6 +144,14 @@ function spawnDetached(command, args, options = {}) {
     const child = isWin
       ? spawn(buildWindowsCommand(command, args), {
           cwd: spawnCwd,
+          // Opt-in only. On Windows `detached` gives the child its own console
+          // window that windowsHide can't reliably suppress under shell:true,
+          // so a long-lived child (the server) would leave a visible console.
+          // The browser launcher needs it: without detached, `cmd /c start` is
+          // torn down before ShellExecute fires because the CLI unrefs and
+          // exits within milliseconds. Its cmd exits instantly, so no window
+          // ever shows.
+          detached: options.detached === true,
           stdio: 'ignore',
           shell: true,
           windowsHide: true,
@@ -338,7 +346,7 @@ async function openInBrowser(url) {
     return;
   }
   if (process.platform === 'win32') {
-    await spawnDetached('cmd', ['/c', 'start', '', url]);
+    await spawnDetached('cmd', ['/c', 'start', '', url], { detached: true });
     return;
   }
   if (process.platform === 'linux') {
