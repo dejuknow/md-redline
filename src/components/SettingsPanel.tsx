@@ -4,6 +4,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import type { CommentTemplate } from '../lib/settings';
 import { DEFAULT_TEMPLATES } from '../lib/settings';
 import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
+import { ThemePreview } from './ThemePreview';
 
 type Section = 'templates' | 'general' | 'theme';
 
@@ -808,15 +809,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
-                        <div className="flex gap-1">
-                          {t.colors.map((c, i) => (
-                            <div
-                              key={i}
-                              className="w-4 h-4 rounded-full border border-border-subtle"
-                              style={{ backgroundColor: c }}
-                            />
-                          ))}
-                        </div>
+                        <ThemePreview t={t} />
                       </div>
                       <span
                         className={`text-sm font-medium ${
@@ -860,15 +853,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
-                        <div className="flex gap-1">
-                          {t.colors.map((c, i) => (
-                            <div
-                              key={i}
-                              className="w-4 h-4 rounded-full border border-border-subtle"
-                              style={{ backgroundColor: c }}
-                            />
-                          ))}
-                        </div>
+                        <ThemePreview t={t} />
                       </div>
                       <span
                         className={`text-sm font-medium ${

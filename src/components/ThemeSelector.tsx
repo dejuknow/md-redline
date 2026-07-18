@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { useThemePersistence } from '../hooks/useThemePersistence';
 import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
+import type { ThemeDef } from '../lib/themes';
+import { ThemePreview } from './ThemePreview';
 
 function ThemeButton({
   t,
   theme,
   onClick,
 }: {
-  t: { key: string; label: string; colors: string[] };
+  t: ThemeDef;
   theme: string | undefined;
   onClick: () => void;
 }) {
@@ -20,15 +22,7 @@ function ThemeButton({
           : 'text-content-secondary hover:bg-tint'
       }`}
     >
-      <div className="flex gap-0.5">
-        {t.colors.map((c, i) => (
-          <div
-            key={i}
-            className="w-3 h-3 rounded-full border border-border-subtle"
-            style={{ backgroundColor: c }}
-          />
-        ))}
-      </div>
+      <ThemePreview t={t} compact />
       {t.label}
       {theme === t.key && (
         <svg
@@ -81,7 +75,7 @@ export function ThemeSelector() {
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-44 bg-surface-raised rounded-lg shadow-lg border border-border overflow-hidden z-50 max-h-[70vh] overflow-y-auto">
+        <div className="absolute right-0 mt-1 w-52 bg-surface-raised rounded-lg shadow-lg border border-border overflow-hidden z-50 max-h-[70vh] overflow-y-auto">
           {/* System */}
           <button
             onClick={() => {
