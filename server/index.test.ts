@@ -2090,7 +2090,7 @@ describe('review sessions API', () => {
     // The user opens a review of a file. Then an agent calls mdr_review on
     // the same file. The agent must get a fresh agent-origin session — never
     // the user's — because the two have incompatible terminal-state contracts.
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-cross-origin-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-cross-origin-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2129,7 +2129,7 @@ async function buildTestApp(options: { allowedRoots: string[] }) {
 
 describe('POST /api/review-sessions/:id/agent-comments', () => {
   it('inserts agent markers into the file and returns askId', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Title\n\nThe rate limit is 100 req/min today.\n', 'utf8');
 
@@ -2164,7 +2164,7 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
   });
 
   it('rejects when an anchor is not found', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Title\n\nNothing here matches.\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2191,7 +2191,7 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
   });
 
   it('rejects when a previous ask is still pending', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Title\n\nFirst anchor. Second anchor.\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2690,7 +2690,7 @@ describe('POST /agent-comments with replies and expectsReply=false', () => {
 
 describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
   it('long-polls until reply is sent and returns the reply payload', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'Some text here.\n', 'utf8');
     const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2725,7 +2725,7 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
   });
 
   it('returns 404 when the ask does not exist', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     await writeFile(join(tmp, 'a.md'), '# x\n', 'utf8');
     const { app } = await buildTestApp({ allowedRoots: [tmp] });
     const create = await app.request('/api/review-sessions', {
@@ -2739,7 +2739,7 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
   });
 
   it('returns 404 when the askId belongs to a different session', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const fileA = join(tmp, 'a.md');
     const fileB = join(tmp, 'b.md');
     await writeFile(fileA, 'A unique anchor here.\n', 'utf8');
@@ -2776,7 +2776,7 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
 
 describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
   it('resolves the wait, removes markers, and returns ok', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'Some text here.\n', 'utf8');
     const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2815,7 +2815,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
   });
 
   it('accepts partial replies (not all questions need a reply)', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'First anchor. Second anchor.\n', 'utf8');
     const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2861,7 +2861,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
   });
 
   it('still rejects replies referencing unknown commentIds', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-ask-unknown-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-unknown-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'Some text here.\n', 'utf8');
     const { app } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2891,7 +2891,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
 
 describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
   it('releases the ask and resolves the waiter', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-release-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-release-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, 'Some text here.\n', 'utf8');
     const { app } = await buildTestApp({ allowedRoots: [tmp] });
@@ -2923,7 +2923,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
   });
 
   it('404s on unknown session', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-release-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-release-')));
     await writeFile(join(tmp, 'a.md'), '# x\n', 'utf8');
     const { app } = await buildTestApp({ allowedRoots: [tmp] });
     const res = await app.request('/api/review-sessions/rev_nope/asks/ask_x/release', {
@@ -2934,7 +2934,7 @@ describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
   });
 
   it('404s on unknown ask', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-release-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-release-')));
     await writeFile(join(tmp, 'a.md'), '# x\n', 'utf8');
     const { app } = await buildTestApp({ allowedRoots: [tmp] });
     const create = await app.request('/api/review-sessions', {
@@ -3691,7 +3691,7 @@ describe('Inline reply delivery to pending asks', () => {
 
 describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
   it('POST /agent-done returns 200 and sets session done', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-done-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-done-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -3714,7 +3714,7 @@ describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
   });
 
   it('POST /agent-done rejects user-origin sessions with 409', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-done-user-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-done-user-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -3734,7 +3734,7 @@ describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
   });
 
   it('GET /agent-wait returns immediately with {status:"done"} if already done', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-wait-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -3760,7 +3760,7 @@ describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
   });
 
   it('GET /agent-wait returns pending after timeout when not yet done', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-pending-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-wait-pending-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -3796,7 +3796,7 @@ describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
     // session to terminal-aborted. The agent's parked mdr_wait wakes up with
     // {status:'aborted', reason: …} so the agent can distinguish "user
     // engaged and clicked Done" from "session ended without engagement."
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-aborted-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-wait-aborted-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
@@ -3823,7 +3823,7 @@ describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
   });
 
   it('GET /agent-wait returns done for a session that was marked done before the store gc\'d it', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'mdr-agent-wait-late-'));
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-wait-late-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
     const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
