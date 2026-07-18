@@ -39,6 +39,7 @@ export default defineConfig({
       MD_REDLINE_HOME: e2eHomeDir,
       MD_REDLINE_PORT: '3101',
       MD_REDLINE_VITE_PORT: '4173',
+      NO_UPDATE_NOTIFIER: '1',
     },
   },
 });
