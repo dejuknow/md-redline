@@ -66,4 +66,13 @@ jobs:
         run: npm ci
 
       - name: Unit and CLI tests
+        if: runner.os != 'Windows'
         run: npm run test:unit
+
+      # server/index.test.ts injects a fake platformName while creating real
+      # files, so it cannot run on a Windows host yet. Excluded here only;
+      # tracked in https://github.com/dejuknow/md-redline/issues/9.
+      - name: Unit and CLI tests (server suite excluded on Windows, see #9)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: npx vitest run --exclude '**/server/index.test.ts'
