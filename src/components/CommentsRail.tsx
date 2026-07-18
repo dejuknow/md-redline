@@ -265,15 +265,14 @@ function AnchoredCards({
       className="absolute inset-x-0 top-0"
       style={{ height: layout.layerHeight }}
     >
-      {/* Connector: horizontal at the anchor line, vertical along the layer's
-          left edge, horizontal into the card. Full opacity when active,
-          dimmed when merely hovered. */}
+      {/* Connector: vertical along the layer's left edge from the anchor
+          line to the card, then horizontal into the card. No bar at the
+          anchor line itself: in a displaced cluster that bar sits at the
+          height of a NEIGHBORING card and reads as pointing at it. The
+          vertical's endpoint at the document edge is the anchor cue. Full
+          opacity when active, dimmed when merely hovered. */}
       {connectorAnchorTop !== undefined && connectorCardTop !== undefined && (
         <div style={{ opacity: connectorIsActive ? 1 : 0.5 }}>
-          <div
-            className="margin-connector absolute"
-            style={{ left: -GAP, width: GAP, top: connectorAnchorTop + 10, height: 1 }}
-          />
           {Math.abs(connectorCardTop - connectorAnchorTop) > 1 && (
             <div
               className="margin-connector absolute"
