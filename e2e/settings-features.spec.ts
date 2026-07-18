@@ -174,6 +174,11 @@ test.describe('Resolve workflow toggle', () => {
 
     const card = getCard(page, 'Resolved reply test');
 
+    // Activate the card: creation no longer does this automatically, and a
+    // compact (inactive) card collapses its reply thread to a count instead
+    // of rendering replies inline (needed below for the [data-reply-id] node).
+    await card.getByText('Resolved reply test').click();
+
     // Add a reply
     await card.getByRole('button', { name: 'Reply' }).click();
     const replyArea = card.getByPlaceholder('Write a reply...');

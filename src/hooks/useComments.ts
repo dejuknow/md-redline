@@ -50,7 +50,7 @@ export interface UseCommentsParams {
   showToast: ShowToast;
   clearSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
-  requestCommentFocus: (commentId: string) => void;
+  requestCommentFocus: (commentId: string, origin?: 'creation' | 'jump') => void;
 }
 
 export function useComments(params: UseCommentsParams) {
@@ -194,8 +194,7 @@ export function useComments(params: UseCommentsParams) {
         newCommentId,
       );
       updateAndSave(newRaw);
-      setActiveCommentId(newCommentId);
-      requestCommentFocus(newCommentId);
+      requestCommentFocus(newCommentId, 'creation');
       clearSelection();
       setAutoExpandForm(false);
     },

@@ -179,15 +179,16 @@ test.describe('Adding comments', () => {
     await addComment(page, 'valid credentials', 'This needs more detail about what valid means.');
   });
 
-  test('newly added comment becomes the active margin card', async ({ page }) => {
+  test('newly added comment appears in the margin without activating it', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Focus this new comment');
 
     // Default density is Anchored: the new comment's card sits at its anchor
-    // in the margin and is marked active, rather than focused in a list.
+    // in the margin, compact and inactive. Activating it on creation would
+    // pin the card and shove the rest of the cluster (crit round 2, item 04).
     const card = page.locator('[data-margin-card-id]', { hasText: 'Focus this new comment' });
     await expect(card).toBeVisible();
-    await expect(card).toHaveClass(/border-primary-border/);
+    await expect(card).not.toHaveClass(/border-primary-border/);
   });
 
   test('comment is persisted to the markdown file', async ({ page }) => {
@@ -286,6 +287,10 @@ test.describe('Comment editing and replies', () => {
     await addComment(page, 'double-submit cookie pattern', 'Is this still best practice?');
 
     const card = getCard(page, 'Is this still best practice?');
+    // Activate the card: creation no longer does this automatically, and a
+    // compact (inactive) card collapses its reply thread to a count instead
+    // of rendering replies inline.
+    await card.getByText('Is this still best practice?').click();
     // Click the "Reply" text button at the bottom of the card
     await card.getByRole('button', { name: 'Reply' }).click();
 
@@ -304,6 +309,10 @@ test.describe('Comment editing and replies', () => {
     await addComment(page, 'double-submit cookie pattern', 'Reply lifecycle');
 
     const card = getCard(page, 'Reply lifecycle');
+    // Activate the card: creation no longer does this automatically, and a
+    // compact (inactive) card collapses its reply thread to a count instead
+    // of rendering replies inline (needed below for the [data-reply-id] node).
+    await card.getByText('Reply lifecycle').click();
     await card.getByRole('button', { name: 'Reply' }).click();
 
     const replyArea = card.getByPlaceholder('Write a reply...');
@@ -333,6 +342,10 @@ test.describe('Comment editing and replies', () => {
     await addComment(page, 'double-submit cookie pattern', 'Second comment');
 
     const secondCard = getCard(page, 'Second comment');
+    // Activate the card: creation no longer does this automatically, and a
+    // compact (inactive) card collapses its reply thread to a count instead
+    // of rendering replies inline (needed below for the [data-reply-id] node).
+    await secondCard.getByText('Second comment').click();
     await secondCard.getByRole('button', { name: 'Reply' }).click();
     await secondCard.getByPlaceholder('Write a reply...').fill('Second reply');
     await secondCard.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();

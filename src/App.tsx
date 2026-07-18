@@ -26,7 +26,6 @@ import {
 import { getEffectiveStatus } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
-import type { SidebarCommentFocusRequest } from './components/CommentListSurface';
 import { CommentPopover } from './components/CommentPopover';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
@@ -393,8 +392,11 @@ export default function App() {
   const [autoExpandForm, setAutoExpandForm] = useState(false);
   const [highlightPaintTick, setHighlightPaintTick] = useState(0);
   const handleHighlightsPainted = useCallback(() => setHighlightPaintTick((t) => t + 1), []);
-  const [requestedCommentFocus, setRequestedCommentFocus] =
-    useState<SidebarCommentFocusRequest | null>(null);
+  const [requestedCommentFocus, setRequestedCommentFocus] = useState<{
+    commentId: string;
+    token: number;
+    origin: 'creation' | 'jump';
+  } | null>(null);
 
   // Modal state — only one modal can be open at a time
   const { activeModal, setActiveModal, toggleModal, openFilePicker } = useModalState();
@@ -522,7 +524,8 @@ export default function App() {
     containerRef as RefObject<HTMLElement | null>,
   );
   const requestCommentFocus = useCallback(
-    (commentId: string) => setRequestedCommentFocus({ commentId, token: Date.now() }),
+    (commentId: string, origin: 'creation' | 'jump' = 'jump') =>
+      setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
     [],
   );
 
@@ -736,19 +739,17 @@ export default function App() {
     );
   }, [comments]);
 
-  // In Anchored density the card for a newly created comment is already at
-  // its anchor and active, so the List-surface focus dance does not apply
-  // there. But the same request shape also carries jump-to-ask (the review
-  // banner's View button, the palette's "Jump to agent question" command):
-  // that comment's card may be elsewhere in the rail and not active yet, so
-  // it still needs an explicit activate to scroll the document to its
-  // anchor. Skip the call when it is already the active comment (the
-  // creation case) since handleSidebarActivate would just re-run
-  // scrollToComment for no reason.
+  // In Anchored density a newly created comment's card is already at its
+  // anchor; activating it would pin it and shove the cluster, so creation
+  // requests are consumed without activation. Jump-to-ask and palette
+  // jumps still activate so the document scrolls to the anchor.
   useEffect(() => {
     if (!requestedCommentFocus) return;
     if (railShown && railDensity === 'anchored') {
-      if (requestedCommentFocus.commentId !== activeCommentId) {
+      if (
+        requestedCommentFocus.origin !== 'creation' &&
+        requestedCommentFocus.commentId !== activeCommentId
+      ) {
         handleSidebarActivate(requestedCommentFocus.commentId);
       }
       setRequestedCommentFocus(null);

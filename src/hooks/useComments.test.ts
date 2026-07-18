@@ -387,11 +387,14 @@ describe('useComments', () => {
       expect(savedContent).toContain('Nice greeting');
       expect(savedContent).toContain('new-uuid-1');
 
-      // Should set active comment id to the new UUID
-      expect(result.current.activeCommentId).toBe('new-uuid-1');
+      // Should NOT activate the new comment: activating it would pin its
+      // margin card and shove the anchored-rail cluster (crit round 2, item 04).
+      expect(result.current.activeCommentId).toBeNull();
 
-      // Should call requestCommentFocus with the new id
-      expect(requestCommentFocus).toHaveBeenCalledWith('new-uuid-1');
+      // Creation requests focus with the 'creation' origin and does NOT
+      // activate the comment: the anchored rail leaves the resting stack
+      // anchor-aligned (crit round 2, item 04).
+      expect(requestCommentFocus).toHaveBeenCalledWith('new-uuid-1', 'creation');
 
       // Should clear selection
       expect(clearSelection).toHaveBeenCalledTimes(1);
