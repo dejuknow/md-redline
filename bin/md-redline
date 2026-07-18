@@ -609,12 +609,17 @@ async function main() {
       const serverPort = await findServerPort();
       if (serverPort) {
         try {
-          await fetch(`http://127.0.0.1:${serverPort}/api/grant-access`, {
+          const grantRes = await fetch(`http://127.0.0.1:${serverPort}/api/grant-access`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: targetPath }),
             signal: AbortSignal.timeout(2_000),
           });
+          if (!grantRes.ok) {
+            console.error(
+              `Warning: server refused access to ${targetPath} (HTTP ${grantRes.status}); it may open as access denied.`,
+            );
+          }
         } catch { /* server will enforce its own checks */ }
       }
     }
