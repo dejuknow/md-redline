@@ -39,6 +39,20 @@ mdr --stop                   # Stop the running server
 
 That gives you the viewer and commenting. The agent integration (reviews in both directions, anchored questions) comes from the MCP server, registered in the next section.
 
+## Updating
+
+mdr checks npm once a day (from its local server, never blocking anything)
+and shows a small notice in the viewer and the terminal when a new version
+is out. Upgrading is one command:
+
+```bash
+npm install -g md-redline@latest
+```
+
+The running server restarts itself on the next `mdr` invocation after an
+upgrade. To disable update checks entirely, set `NO_UPDATE_NOTIFIER=1` (or
+run in CI, which is auto-detected).
+
 ## MCP setup
 
 Register the MCP server with your agent so it can request reviews mid-task.
