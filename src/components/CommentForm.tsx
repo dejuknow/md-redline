@@ -265,7 +265,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
             ))}
           </div>
         )}
-        <div className="selection-pill-enter flex items-center gap-0.5 px-1.5 py-1 bg-surface-raised border border-border rounded-full shadow-lg">
+        <div className="selection-pill-enter flex items-center gap-0.5 px-1.5 py-1 max-w-[calc(100vw-24px)] overflow-hidden bg-surface-raised border border-border rounded-full shadow-lg">
           <button
             onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
             onClick={handleExpand}
