@@ -405,3 +405,26 @@ describe('cross-process file lock', () => {
     expect(result).toEqual({ author: 'Steal' });
   });
 });
+
+describe('update-check preferences', () => {
+  it('round-trips the updateCheck cache through writePreferences', async () => {
+    const cache = { latestKnown: '9.9.9', checkedAt: '2026-07-17T00:00:00.000Z' };
+    await writePreferences(testDir, { updateCheck: cache });
+    expect((await readPreferences(testDir)).updateCheck).toEqual(cache);
+  });
+
+  it('drops malformed updateCheck shapes', () => {
+    expect(sanitizePreferencesPatch({ updateCheck: 'yes' })).toEqual({});
+    expect(sanitizePreferencesPatch({ updateCheck: { latestKnown: 1 } })).toEqual({});
+    expect(
+      sanitizePreferencesPatch({ updateCheck: { latestKnown: '1.0.0', checkedAt: 42 } }),
+    ).toEqual({});
+  });
+
+  it('keeps string updateDismissedVersion and drops junk', () => {
+    expect(sanitizePreferencesPatch({ updateDismissedVersion: '0.7.0' })).toEqual({
+      updateDismissedVersion: '0.7.0',
+    });
+    expect(sanitizePreferencesPatch({ updateDismissedVersion: 7 })).toEqual({});
+  });
+});

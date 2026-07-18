@@ -22,6 +22,11 @@ export interface RecentFile {
   openedAt: string;
 }
 
+export interface UpdateCheckCache {
+  latestKnown: string;
+  checkedAt: string;
+}
+
 export type AppSettings = Partial<ClientAppSettings>;
 
 export interface Preferences {
@@ -30,6 +35,11 @@ export interface Preferences {
   theme?: string;
   recentFiles?: RecentFile[];
   trustedRoots?: string[];
+  /** Server-owned registry-check cache. The HTTP PUT route strips this key
+   * from client bodies; only the server's update checker writes it. */
+  updateCheck?: UpdateCheckCache;
+  /** Viewer dismissal of the update notice, per latest-version string. */
+  updateDismissedVersion?: string;
 }
 
 function prefsPath(homeDir: string): string {
@@ -129,6 +139,15 @@ export function sanitizePreferencesPatch(input: unknown): Partial<Preferences> {
   if ('settings' in input) {
     const settings = sanitizeSettings(input.settings);
     if (settings) out.settings = settings;
+  }
+  if (typeof input.updateDismissedVersion === 'string') {
+    out.updateDismissedVersion = input.updateDismissedVersion;
+  }
+  if (isPlainObject(input.updateCheck)) {
+    const { latestKnown, checkedAt } = input.updateCheck;
+    if (typeof latestKnown === 'string' && typeof checkedAt === 'string') {
+      out.updateCheck = { latestKnown, checkedAt };
+    }
   }
   return out;
 }
