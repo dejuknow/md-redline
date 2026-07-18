@@ -159,7 +159,7 @@ body {
 [data-theme="dark"] {
   color-scheme: dark;
   --theme-bg: #1d1b18;
-  --theme-bg-secondary: #131211;
+  --theme-bg-secondary: #0f0e0d;
   --theme-bg-raised: #26231e;
   --theme-bg-inset: #16140f;
   --theme-border: #35312a;
@@ -197,9 +197,9 @@ body {
   --theme-tint-primary: rgba(224, 88, 79, 0.25);
   --theme-tint-success: rgba(52, 211, 153, 0.25);
   --theme-tint-danger: rgba(248, 113, 113, 0.2);
-  --theme-comment-bg: rgba(245, 158, 11, 0.2);
-  --theme-comment-bg-opaque: #483515;
-  --theme-comment-bg-hover: rgba(245, 158, 11, 0.3);
+  --theme-comment-bg: rgba(245, 158, 11, 0.32);
+  --theme-comment-bg-opaque: #624514;
+  --theme-comment-bg-hover: rgba(245, 158, 11, 0.42);
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #fbbf24;
   --theme-comment-ring: rgba(251, 191, 36, 0.3);
@@ -219,7 +219,7 @@ body {
   --theme-scrollbar-thumb: #45403a;
   --theme-scrollbar-thumb-hover: #57524a;
   --theme-scrollbar-track: #1d1b18;
-  --theme-sheet-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.3);
+  --theme-sheet-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 26px rgba(0, 0, 0, 0.42);
 }
 
 /* ========== Sepia Theme ========== */
