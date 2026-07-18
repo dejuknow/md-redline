@@ -41,6 +41,7 @@ import {
 import { useDiffLines } from './hooks/useDiffLines';
 import { PanelToolbar } from './components/PanelToolbar';
 import { Toast } from './components/Toast';
+import { UpdateNotice } from './components/UpdateNotice';
 
 import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu } from './components/ContextMenu';
@@ -66,6 +67,7 @@ import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
 import { MermaidFullscreenModal } from './components/MermaidFullscreenModal';
 import { usePaneLayout } from './hooks/usePaneLayout';
 import { useToast, type ShowToast } from './hooks/useToast';
+import { useUpdateNotice } from './hooks/useUpdateNotice';
 import { useModalState } from './hooks/useModalState';
 import { useSearch } from './hooks/useSearch';
 import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
@@ -382,6 +384,7 @@ export default function App() {
   // Toast notification state
   const { toast, showToast, dismissToast } = useToast();
   showToastRef.current = showToast;
+  const { latest: updateLatest, dismiss: dismissUpdateNotice } = useUpdateNotice();
 
   // Accumulate external-change counts so rapid SSE events coalesce into one
   // updating toast ("3 comments addressed") instead of flickering "1 comment" each time.
@@ -2776,6 +2779,9 @@ export default function App() {
         action={toast.action}
         kind={toast.kind}
       />
+
+      {/* Update-available notice: persistent sibling of the toast */}
+      <UpdateNotice latest={updateLatest} onDismiss={dismissUpdateNotice} showToast={showToast} />
 
       {/* Comments drawer: the comment surface wherever the rail can't show */}
       <CommentsDrawer

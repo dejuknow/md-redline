@@ -11,6 +11,7 @@ export interface DiskPreferences {
   settings?: Record<string, unknown>;
   theme?: string;
   recentFiles?: RecentFileEntry[];
+  updateDismissedVersion?: string;
 }
 
 export async function fetchPreferences(): Promise<DiskPreferences> {

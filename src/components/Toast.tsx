@@ -18,8 +18,8 @@ interface Props {
 // The 80% mix takes the edge off the near-black on light themes. Icon colors
 // are mid-tones that read on both bar values; `error` uses an alert glyph,
 // never the success check.
-const TOAST_BG = 'color-mix(in srgb, var(--color-content) 80%, var(--color-surface))';
-const TOAST_FG = 'var(--color-surface)';
+export const TOAST_BG = 'color-mix(in srgb, var(--color-content) 80%, var(--color-surface))';
+export const TOAST_FG = 'var(--color-surface)';
 const KIND_STYLES: Record<ToastKind, { iconColor: string; icon: string }> = {
   success: {
     iconColor: '#10b981',
