@@ -124,7 +124,19 @@ export const MarkdownViewer = memo(
         const mark = Array.from(marks).find((m) =>
           (m as HTMLElement).dataset.commentIds?.split(',').includes(commentId),
         );
-        if (mark) {
+        if (!mark) return;
+        // Reveal the anchor a third from the container's top rather than
+        // centered: reading continues downward from the anchor, so the
+        // runway belongs below it. Raw view positions markers the same way.
+        const scroller = containerRef.current.closest('.overflow-y-auto');
+        if (scroller) {
+          const markRect = (mark as HTMLElement).getBoundingClientRect();
+          const scRect = scroller.getBoundingClientRect();
+          scroller.scrollTo({
+            top: scroller.scrollTop + markRect.top - scRect.top - scRect.height / 3,
+            behavior: 'smooth',
+          });
+        } else {
           mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       },
