@@ -631,13 +631,13 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         Typeface for rendered document text.
                       </p>
                     </div>
-                    <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+                    <div role="group" aria-label="Prose typeface" className="flex rounded-lg border border-border overflow-hidden shrink-0">
                       {(['serif', 'sans'] as const).map((font) => (
                         <button
                           key={font}
                           onClick={() => updateProseFont(font)}
                           aria-pressed={settings.proseFont === font}
-                          className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          className={`px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
                             settings.proseFont === font
                               ? 'bg-primary text-on-primary'
                               : 'bg-surface text-content-secondary hover:bg-tint'
@@ -659,13 +659,13 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         Maximum width of the rendered text column.
                       </p>
                     </div>
-                    <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+                    <div role="group" aria-label="Document width" className="flex rounded-lg border border-border overflow-hidden shrink-0">
                       {(['narrow', 'default', 'wide'] as const).map((width) => (
                         <button
                           key={width}
                           onClick={() => updateDocWidth(width)}
                           aria-pressed={settings.docWidth === width}
-                          className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          className={`px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
                             settings.docWidth === width
                               ? 'bg-primary text-on-primary'
                               : 'bg-surface text-content-secondary hover:bg-tint'
@@ -697,7 +697,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                           key={size}
                           onClick={() => updateProseSize(size)}
                           aria-pressed={settings.proseSize === size}
-                          className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          className={`px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
                             settings.proseSize === size
                               ? 'bg-primary text-on-primary'
                               : 'bg-surface text-content-secondary hover:bg-tint'

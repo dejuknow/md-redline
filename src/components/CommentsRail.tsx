@@ -138,7 +138,7 @@ export function RailDensityControl({
             key={d}
             onClick={() => onDensityChange(d)}
             aria-pressed={density === d}
-            className={`text-[10px] px-2 py-1 font-medium transition-colors cursor-pointer ${
+            className={`text-[10px] px-2 py-1 font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
               density === d
                 ? 'bg-primary-bg-strong text-primary-text'
                 : 'text-content-secondary hover:bg-tint'

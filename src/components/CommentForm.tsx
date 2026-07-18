@@ -269,7 +269,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           <button
             onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
             onClick={handleExpand}
-            className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full text-sm font-medium text-primary-text hover:bg-tint-primary transition-colors"
+            className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full text-sm font-medium text-primary-text hover:bg-tint-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
           >
             <svg
               className="w-3.5 h-3.5"
@@ -292,7 +292,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               key={t.label}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handlePillTemplate(t.text)}
-              className="px-2.5 py-1 rounded-full text-xs text-content-secondary hover:bg-tint transition-colors max-w-36 truncate"
+              className="px-2.5 py-1 rounded-full text-xs text-content-secondary hover:bg-tint transition-colors max-w-36 truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
             >
               {t.label}
             </button>
@@ -303,7 +303,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
               onClick={handlePillOverflow}
               aria-label="More templates"
               aria-expanded={showPillMenu}
-              className={`px-2 py-1 rounded-full text-xs transition-colors ${
+              className={`px-2 py-1 rounded-full text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring ${
                 showPillMenu
                   ? 'bg-surface-inset text-content'
                   : 'text-content-secondary hover:bg-tint'

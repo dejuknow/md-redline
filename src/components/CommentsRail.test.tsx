@@ -115,6 +115,13 @@ describe('RailDensityControl', () => {
     fireEvent.click(screen.getByRole('button', { name: 'List' }));
     expect(onDensityChange).toHaveBeenCalledWith('list');
   });
+
+  it('density buttons carry a visible keyboard focus ring', () => {
+    render(<RailDensityControl density="anchored" onDensityChange={vi.fn()} openCount={2} />);
+    const anchored = screen.getByRole('button', { name: 'Anchored' });
+    expect(anchored.className).toContain('focus-visible:ring-2');
+    expect(anchored.className).toContain('focus-visible:ring-inset');
+  });
 });
 
 describe('CommentsRail', () => {
