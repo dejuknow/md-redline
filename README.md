@@ -51,7 +51,8 @@ npm install -g md-redline@latest
 
 The running server restarts itself on the next `mdr` invocation after an
 upgrade. To disable update checks entirely, set `NO_UPDATE_NOTIFIER=1` (or
-run in CI, which is auto-detected).
+run in CI, which is auto-detected). Note this is a presence check, following
+the ecosystem convention: any value, even `0` or empty, disables the checks.
 
 ## MCP setup
 
