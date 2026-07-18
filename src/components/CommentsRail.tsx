@@ -234,6 +234,15 @@ function AnchoredCards({
     return cb;
   };
 
+  // Evict callbacks for comments no longer on the rail; without this the
+  // map grows for the life of the file. Identity for live ids is untouched.
+  useEffect(() => {
+    const live = new Set(anchoredComments.map((c) => c.id));
+    for (const id of refCallbacks.current.keys()) {
+      if (!live.has(id)) refCallbacks.current.delete(id);
+    }
+  }, [anchoredComments]);
+
   if (!layout.active) return null;
 
   // One connector at a time: the active card wins over the hovered card.
