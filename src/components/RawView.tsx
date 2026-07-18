@@ -353,6 +353,23 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
   const flashTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [activeDiffChunk, setActiveDiffChunk] = useState(0);
 
+  // Fold state per marker id. Folded is the default (baked into the
+  // generated HTML); this set holds the user-expanded exceptions.
+  const [expandedMarkerIds, setExpandedMarkerIds] = useState<Set<string>>(new Set());
+
+  const toggleMarkerFold = useCallback((e: React.MouseEvent) => {
+    const markerEl = (e.target as HTMLElement).closest('.raw-comment-marker');
+    if (!markerEl) return;
+    const id = markerEl.getAttribute('data-comment-id');
+    if (!id) return;
+    setExpandedMarkerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // Clean up flash timer on unmount
   useEffect(() => {
     return () => {
@@ -590,6 +607,18 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     }
   }, [displayRows, searchQuery, searchActiveIndex, onSearchCount]);
 
+  // Re-apply fold state after innerHTML replacement. Runs after the
+  // innerHTML effect above by declaration order.
+  useLayoutEffect(() => {
+    if (!tableRef.current) return;
+    tableRef.current
+      .querySelectorAll<HTMLElement>('.raw-comment-marker[data-comment-id]')
+      .forEach((el) => {
+        const id = el.getAttribute('data-comment-id')!;
+        el.classList.toggle('raw-marker-folded', !expandedMarkerIds.has(id));
+      });
+  }, [displayRows, expandedMarkerIds]);
+
   // Highlight active comment marker (only in current content, not removed lines)
   useLayoutEffect(() => {
     if (!tableRef.current) return;
@@ -753,7 +782,7 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
       <div ref={scrollRef} className={scrollClass}>
         <div className={sheetClass}>
         <div className="max-w-3xl mx-auto">
-          <div ref={tableRef} className="raw-view-table">
+          <div ref={tableRef} className="raw-view-table" onClick={toggleMarkerFold}>
             {displayRows.map((row, i) => {
               const diffClass =
                 row.type === 'added'

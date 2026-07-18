@@ -181,6 +181,22 @@ test.describe('Comment markers in raw view', () => {
     expect(id).toBeTruthy();
     expect(id!.length).toBeGreaterThan(10);
   });
+
+  test('comment markers fold to a pill and expand on click', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Fold test');
+
+    await switchToRaw(page);
+
+    const marker = page.locator('.raw-comment-marker[data-comment-id]').first();
+    await expect(marker.locator('.raw-marker-pill')).toBeVisible();
+    await expect(marker.locator('.raw-marker-json')).toBeHidden();
+    await marker.click();
+    await expect(marker.locator('.raw-marker-json')).toBeVisible();
+    await expect(marker.locator('.raw-marker-pill')).toBeHidden();
+    await marker.click();
+    await expect(marker.locator('.raw-marker-json')).toBeHidden();
+  });
 });
 
 // ---------------------------------------------------------------------------

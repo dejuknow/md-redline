@@ -1227,13 +1227,39 @@ body {
   border-radius: 3px;
   padding: 0.1em 0.2em;
   border-bottom: 2px solid var(--theme-comment-underline);
-  cursor: default;
+  cursor: pointer;
 }
 
 .raw-comment-marker-active {
   background-color: var(--theme-comment-bg-hover);
   border-bottom-color: var(--theme-comment-underline-active);
   outline: 1px solid var(--theme-comment-ring);
+}
+
+/* Folded by default: the pill shows author + first words; the JSON shows
+   only when expanded, styled as metadata rather than highlighted content
+   (crit round 2, item 05). */
+.raw-marker-pill {
+  display: none;
+  white-space: nowrap;
+}
+.raw-marker-pill::before {
+  content: '❝ ';
+  opacity: 0.8;
+}
+.raw-marker-folded .raw-marker-pill {
+  display: inline;
+}
+.raw-marker-folded .raw-marker-json {
+  display: none;
+}
+.raw-comment-marker:not(.raw-marker-folded) {
+  background-color: transparent;
+  border-bottom-style: dashed;
+}
+.raw-marker-json {
+  color: var(--theme-text-muted);
+  font-style: italic;
 }
 
 /* Flash animation when scrolling to a comment marker */
