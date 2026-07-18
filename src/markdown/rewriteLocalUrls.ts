@@ -30,9 +30,22 @@ export function posixResolve(base: string, target: string): string {
 }
 
 function collapseSegments(p: string): string {
-  const isAbsolute = p.startsWith('/');
+  const driveMatch = p.match(/^([a-zA-Z]:)(?:\/|$)/);
+  const uncMatch = p.match(/^\/\/([^/]+)\/([^/]+)(?:\/|$)/);
+  let prefix = '';
+  let rest = p;
+  if (driveMatch) {
+    prefix = `${driveMatch[1]}/`;
+    rest = p.slice(driveMatch[0].length);
+  } else if (uncMatch) {
+    prefix = `//${uncMatch[1]}/${uncMatch[2]}`;
+    rest = p.slice(uncMatch[0].length);
+  } else if (p.startsWith('/')) {
+    prefix = '/';
+    rest = p.slice(1);
+  }
   const out: string[] = [];
-  for (const segment of p.split('/')) {
+  for (const segment of rest.split('/')) {
     if (segment === '' || segment === '.') continue;
     if (segment === '..') {
       out.pop();
@@ -40,7 +53,10 @@ function collapseSegments(p: string): string {
     }
     out.push(segment);
   }
-  return (isAbsolute ? '/' : '') + out.join('/');
+  if (prefix === '/') return `/${out.join('/')}`;
+  if (prefix.endsWith('/')) return `${prefix}${out.join('/')}`;
+  if (prefix) return out.length > 0 ? `${prefix}/${out.join('/')}` : prefix;
+  return out.join('/');
 }
 
 export type ClassifiedUrl =
@@ -215,13 +231,12 @@ function rewriteAnchor(node: Element, baseDir: string | null): void {
 
 export const rewriteLocalUrls: Plugin<[Options?], Root> = (options) => {
   const filePath = options?.filePath;
-  // filePath is a real OS path. On Windows it uses backslashes
-  // (C:\Users\me\notes\index.md), which the POSIX dirname/resolve helpers
-  // don't understand — they'd find no '/' and collapse the base to '.',
-  // resolving relative images against the launch cwd instead of the
-  // document's directory. Normalize to forward slashes first; the server's
-  // path resolver accepts C:/... fine.
-  const baseDir = filePath ? posixDirname(filePath.replace(/\\/g, '/')) : null;
+  // Normalize only paths that are unambiguously Windows paths. Backslashes are
+  // legal filename characters on POSIX, so replacing them in every file path
+  // would redirect assets from directories such as `/tmp/team\\docs`.
+  const windowsPath = filePath && (/^[a-zA-Z]:[\\/]/.test(filePath) || /^\\\\/.test(filePath));
+  const normalizedFilePath = windowsPath ? filePath.replace(/\\/g, '/') : filePath;
+  const baseDir = normalizedFilePath ? posixDirname(normalizedFilePath) : null;
 
   return (tree) => {
     visit(tree, 'element', (node: Element) => {

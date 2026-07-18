@@ -171,6 +171,67 @@ function spawnDetached(command, args, options = {}) {
   });
 }
 
+function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
+  return new Promise((resolveSpawn, rejectSpawn) => {
+    const env = {
+      ...process.env,
+      MDR_INTERNAL_BROWSER_COMMAND: command,
+      MDR_INTERNAL_BROWSER_URL: url,
+    };
+    const child = shellCommand
+      ? spawn(process.env.ComSpec ?? 'cmd.exe', [
+          '/d',
+          '/s',
+          '/c',
+          '"%MDR_INTERNAL_BROWSER_COMMAND%" "%MDR_INTERNAL_BROWSER_URL%"',
+        ], {
+          cwd: APP_DIR,
+          detached: true,
+          stdio: 'ignore',
+          env,
+          windowsHide: true,
+        })
+      : spawn(command, [url], {
+          cwd: APP_DIR,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+
+    child.once('error', rejectSpawn);
+    child.once('spawn', () => {
+      child.unref();
+      resolveSpawn(child);
+    });
+  });
+}
+
+function openWithWindowsShell(url) {
+  return new Promise((resolveSpawn, rejectSpawn) => {
+    // Keep the encoded URL out of cmd.exe's command string. cmd expands the
+    // placeholder once and does not recursively expand percent signs in its
+    // value, so URL escapes such as %3A and %5C reach the browser intact.
+    const child = spawn(process.env.ComSpec ?? 'cmd.exe', [
+      '/d',
+      '/s',
+      '/c',
+      'start "" "%MDR_INTERNAL_BROWSER_URL%"',
+    ], {
+      cwd: APP_DIR,
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, MDR_INTERNAL_BROWSER_URL: url },
+      windowsHide: true,
+    });
+
+    child.once('error', rejectSpawn);
+    child.once('spawn', () => {
+      child.unref();
+      resolveSpawn(child);
+    });
+  });
+}
+
 async function stopServer(quiet = false) {
   const serverPort = await findServerPort();
   if (!serverPort) {
@@ -346,6 +407,11 @@ async function openInBrowser(url) {
   // so it survives this process exiting, same as the platform defaults below.
   const override = process.env.MDR_BROWSER?.trim();
   if (override) {
+    if (process.platform === 'win32') {
+      const needsShell = /\.(?:cmd|bat)$/i.test(override);
+      await spawnWindowsBrowser(override, url, { shellCommand: needsShell });
+      return;
+    }
     await spawnDetached(override, [url], { detached: true });
     return;
   }
@@ -354,7 +420,7 @@ async function openInBrowser(url) {
     return;
   }
   if (process.platform === 'win32') {
-    await spawnDetached('cmd', ['/c', 'start', '', url], { detached: true });
+    await openWithWindowsShell(url);
     return;
   }
   if (process.platform === 'linux') {

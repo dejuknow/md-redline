@@ -51,6 +51,15 @@ describe('posixResolve', () => {
   it('handles "." segments', () => {
     expect(posixResolve('/a/b', './c/./d.md')).toBe('/a/b/c/d.md');
   });
+
+  it('does not climb above a Windows drive root', () => {
+    expect(posixResolve('C:/a', '../../img.png')).toBe('C:/img.png');
+  });
+
+  it('preserves a UNC share root', () => {
+    expect(posixResolve('//server/share/docs', '../img.png')).toBe('//server/share/img.png');
+    expect(posixResolve('//server/share', '../../img.png')).toBe('//server/share/img.png');
+  });
 });
 
 describe('classifyUrl', () => {
@@ -382,5 +391,31 @@ describe('rewriteLocalUrls plugin — Windows base paths', () => {
     const out = runPlugin('<a href="./other.md">x</a>', WIN_FILE);
     expect(out).toContain('href="#"');
     expect(out).toContain('data-mdr-local-md="C:/Users/me/notes/other.md"');
+  });
+
+  it('does not climb above the drive root', () => {
+    const out = runPlugin('<img src="../../diagram.png" alt="d">', 'C:\\notes\\index.md');
+    expect(out).toContain(
+      `src="/api/asset?path=${encodeURIComponent('C:/diagram.png')}"`,
+    );
+  });
+
+  it('preserves UNC share roots', () => {
+    const out = runPlugin(
+      '<img src="../diagram.png" alt="d">',
+      '\\\\server\\share\\notes\\index.md',
+    );
+    expect(out).toContain(
+      `src="/api/asset?path=${encodeURIComponent('//server/share/diagram.png')}"`,
+    );
+  });
+});
+
+describe('rewriteLocalUrls plugin — POSIX paths with backslashes', () => {
+  it('preserves a backslash that is part of a POSIX directory name', () => {
+    const out = runPlugin('<img src="./diagram.png" alt="d">', '/tmp/team\\docs/index.md');
+    expect(out).toContain(
+      `src="/api/asset?path=${encodeURIComponent('/tmp/team\\docs/diagram.png')}"`,
+    );
   });
 });

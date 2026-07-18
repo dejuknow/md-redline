@@ -55,7 +55,8 @@ describe('mdr browser launcher (subprocess)', () => {
     const marker = join(dir, 'launched.txt');
     const stub = createBrowserStub(dir, marker);
 
-    const code = await runCli(['__open', 'http://127.0.0.1:65535/probe?file=C%3A%5Cspec.md'], {
+    const url = 'http://127.0.0.1:65535/probe?file=C%3A%5CUsers%5Cme%5Cspec.md';
+    const code = await runCli(['__open', url], {
       ...process.env,
       MDR_BROWSER: stub,
     });
@@ -66,6 +67,6 @@ describe('mdr browser launcher (subprocess)', () => {
     // appears because the child was torn down with the parent.
     const launched = await waitForFile(marker, 5000);
     expect(launched, 'browser stub never ran: the launcher did not survive CLI exit').toBe(true);
-    expect(readFileSync(marker, 'utf8')).toContain('LAUNCHED');
+    expect(readFileSync(marker, 'utf8')).toBe(url);
   }, 15_000);
 });
