@@ -271,10 +271,10 @@ export function CommentListSurface({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Filter tabs (only when resolve enabled) */}
-      {resolveEnabled && (
-        <div className="px-3 pt-3 pb-1">
-          <div className="flex gap-1">
+      {/* Filters and search share one row (crit round 2, chrome density) */}
+      <div className="px-3 pt-3 pb-2 flex items-center gap-2">
+        {resolveEnabled && (
+          <div className="flex gap-1 shrink-0">
             {FILTER_TABS.map(({ key, label }) => {
               const count =
                 key === 'all' ? comments.length : key === 'open' ? openCount : resolvedCount;
@@ -300,17 +300,13 @@ export function CommentListSurface({
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* Search */}
-      <div className={`px-3 ${resolveEnabled ? 'pb-2' : 'pt-3 pb-2'}`}>
+        )}
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search comments..."
-          className="w-full text-xs border border-border-subtle rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
+          placeholder="Search"
+          className="flex-1 min-w-0 text-xs border border-border-subtle rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent placeholder:text-content-muted bg-surface text-content"
         />
       </div>
 

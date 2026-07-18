@@ -161,7 +161,7 @@ describe('CommentsRail', () => {
   describe('List density', () => {
     it('renders CommentListSurface content and no anchored cards', () => {
       renderRail({ density: 'list' });
-      expect(screen.getByPlaceholderText('Search comments...')).toBeTruthy();
+      expect(screen.getByPlaceholderText('Search')).toBeTruthy();
       expect(document.querySelector('[data-margin-card-id]')).toBeNull();
       expect(document.querySelector('[data-margin-notes]')).toBeNull();
     });

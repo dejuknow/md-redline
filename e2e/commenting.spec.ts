@@ -376,7 +376,7 @@ test.describe('Sidebar filtering', () => {
 
     // Search lives on the List surface; switch density first.
     await switchToListDensity(page);
-    await page.getByPlaceholder('Search comments...').fill('rate');
+    await page.getByPlaceholder('Search').fill('rate');
 
     await expect(page.getByText('Improve rate limiting')).toBeVisible();
     await expect
