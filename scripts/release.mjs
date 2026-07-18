@@ -2,13 +2,18 @@
 // scripts/release.mjs
 //
 // Orchestrates the md-redline release flow:
-// preflight → tests → compute version → generate notes → confirm/edit
-// → bump → publish → push → create release.
+// preflight → local unit tests → verify CI green → compute version
+// → generate notes → confirm/edit → bump → push → publish → create release.
+//
+// The slow end-to-end suite is NOT re-run here. CI already runs unit (on
+// Windows, macOS and Linux) plus e2e on the exact commit being released, so the
+// gate is "is HEAD's CI matrix green?" rather than a slower, mac-only rerun
+// that would still miss the other platforms.
 //
 // Spec: docs/superpowers/specs/2026-04-07-release-notes-review-design.md
 //
-// Dev escape hatch: set RELEASE_SKIP_E2E=1 to skip the slow Playwright
-// suite during local iteration. Real releases never set this.
+// Dev escape hatch: set RELEASE_SKIP_CI_CHECK=1 to bypass the CI gate during
+// local iteration or an offline emergency. Real releases never set this.
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
@@ -16,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+
+import { evaluateCiRuns } from './ci-status.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -114,15 +121,66 @@ function preflight() {
   console.log('  ✓ working tree clean');
 }
 
-function runTests() {
-  console.log('\n→ Running unit tests');
+function runLocalUnitTests() {
+  // Fast local sanity only (build + unit, a few seconds). The full matrix,
+  // including e2e and the Windows/macOS/Linux unit jobs, is enforced against
+  // this exact commit by verifyCiGreen().
+  console.log('\n→ Running unit tests locally (build + unit)');
   run('npm', ['test']);
-  if (process.env.RELEASE_SKIP_E2E === '1') {
-    console.log('  (skipping e2e: RELEASE_SKIP_E2E=1)');
+}
+
+/**
+ * Gate the release on the real CI matrix. Reads the check runs GitHub recorded
+ * for HEAD and refuses to publish unless every GitHub Actions check completed
+ * successfully. This is what catches platform-specific breakage (e.g. a
+ * Windows-only failure) that a local, mac-only test run never would.
+ *
+ * HEAD here is the pre-bump commit CI actually ran on; `npm version` later adds
+ * a commit that only changes the version string, so the tested code is
+ * unchanged.
+ */
+function verifyCiGreen() {
+  if (process.env.RELEASE_SKIP_CI_CHECK === '1') {
+    console.log('\n→ Skipping CI gate (RELEASE_SKIP_CI_CHECK=1)');
+    console.warn(
+      '  ! Publishing without confirming CI passed on this commit. Real releases should not do this.',
+    );
     return;
   }
-  console.log('\n→ Running e2e tests');
-  run('npm', ['run', 'test:e2e']);
+
+  console.log('\n→ Verifying CI is green for HEAD');
+  const sha = run('git', ['rev-parse', 'HEAD'], { capture: true }).trim();
+  const shortSha = sha.slice(0, 7);
+
+  let raw;
+  try {
+    raw = run(
+      'gh',
+      ['api', `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`],
+      { capture: true },
+    );
+  } catch (e) {
+    throw new Error(
+      `Could not query CI status for ${shortSha} via gh: ${e.message}\n` +
+      `If you are genuinely offline, set RELEASE_SKIP_CI_CHECK=1 to bypass (not recommended).`,
+    );
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Could not parse gh check-runs response for ${shortSha}: ${e.message}`);
+  }
+
+  const result = evaluateCiRuns(data.check_runs);
+  if (!result.ok) {
+    throw new Error(
+      `CI gate failed for ${shortSha}: ${result.message}\n` +
+      `Release only from a commit whose CI matrix is fully green (check the Actions tab or \`gh pr checks\`).`,
+    );
+  }
+  console.log(`  ✓ ${result.message} (${shortSha})`);
 }
 
 function readPackageVersion() {
@@ -343,7 +401,8 @@ async function main() {
   console.log(`md-redline release: ${type}\n`);
 
   preflight();
-  runTests();
+  runLocalUnitTests();
+  verifyCiGreen();
 
   const currentVersion = readPackageVersion();
   const nextVersion = computeNextVersion(type);
