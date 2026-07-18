@@ -25,6 +25,9 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const modLabel = getPrimaryModifierLabel();
   const [isExpanded, setIsExpanded] = useState(!!settings.quickComment);
   const [text, setText] = useState('');
+  // True while a template prefill sits untouched; Escape then clears the
+  // prefill instead of closing the form.
+  const [prefillPristine, setPrefillPristine] = useState(false);
   const [showTemplates, setShowTemplates] = useState(
     settings.quickComment ? settings.showTemplatesByDefault : false,
   );
@@ -200,6 +203,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       selection.offset,
     );
     setText('');
+    setPrefillPristine(false);
     setIsExpanded(false);
     setShowTemplates(false);
   };
@@ -211,6 +215,11 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     }
     if (e.key === 'Escape') {
       e.preventDefault();
+      if (prefillPristine && text) {
+        setText('');
+        setPrefillPristine(false);
+        return;
+      }
       onCancel();
     }
   };
@@ -222,6 +231,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
 
   const handleTemplateClick = (template: string) => {
     setText(template);
+    setPrefillPristine(true);
     setShowTemplates(false);
     inputRef.current?.focus();
   };
@@ -229,6 +239,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   const handlePillTemplate = (templateText: string) => {
     onLock();
     setText(templateText);
+    setPrefillPristine(true);
     setShowTemplates(false);
     setIsExpanded(true);
   };
@@ -355,7 +366,10 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
         <textarea
           ref={inputRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setPrefillPristine(false);
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Add your comment..."
           rows={1}

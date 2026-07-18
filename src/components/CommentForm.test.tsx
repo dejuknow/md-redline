@@ -145,6 +145,41 @@ describe('CommentForm selection pill', () => {
     expect(screen.queryByText('Quick templates:')).toBeNull();
   });
 
+  it('Escape clears an untouched template prefill instead of closing the form', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onCancel = vi.fn();
+    renderForm({ onCancel });
+
+    fireEvent.click(await screen.findByText('Rewrite this'));
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('Please rewrite this section.');
+
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    expect(textarea.value).toBe('');
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('typing after a prefill makes Escape close the form as before', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onCancel = vi.fn();
+    renderForm({ onCancel });
+
+    fireEvent.click(await screen.findByText('Rewrite this'));
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: textarea.value + ' now' } });
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it('quickComment bypasses the pill and honors showTemplatesByDefault', async () => {
     fetchPreferences.mockResolvedValue({
       settings: {
