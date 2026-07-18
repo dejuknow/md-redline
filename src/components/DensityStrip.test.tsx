@@ -26,6 +26,7 @@ describe('DensityStrip', () => {
     // Assert on the data-tick-top-pct mirror instead, same intent: the tick
     // sits at the 10% proportional position.
     expect(open.getAttribute('data-tick-top-pct')).toContain('10');
+    expect(open.className).toContain('h-1');
     expect(open.style.backgroundColor).toBe('var(--theme-comment-underline)');
     const ask = strip.querySelector('[data-tick-id="c"]') as HTMLElement;
     expect(ask.style.backgroundColor).toBe('var(--theme-accent)');

@@ -45,7 +45,7 @@ export function DensityStrip({ ticks, onJump }: Props) {
             data-tick-top-pct={topPct}
             title={t.label}
             onClick={() => onJump(t.id)}
-            className="absolute left-[2px] right-[2px] h-[3px] rounded-[1px] pointer-events-auto cursor-pointer hover:scale-y-[1.8] transition-transform"
+            className="absolute left-[2px] right-[2px] h-1 rounded-[1px] pointer-events-auto cursor-pointer hover:scale-y-[1.8] transition-transform"
             style={{
               top: `min(${topPct}%, calc(100% - 4px))`,
               backgroundColor: KIND_COLOR[t.kind],
