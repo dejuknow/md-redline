@@ -1178,7 +1178,7 @@ body {
 }
 
 .raw-code-block {
-  color: var(--theme-text-secondary);
+  color: var(--theme-code-text, var(--theme-text-secondary));
   background-color: var(--theme-bg-inset);
   border-radius: 4px;
   display: inline;
