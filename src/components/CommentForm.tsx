@@ -94,6 +94,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
       prevSelectionKeyRef.current = selectionKey;
       if (!settings.quickComment) setIsExpanded(false);
       setText('');
+      setPrefillPristine(false);
       setShowTemplates(settings.quickComment ? settings.showTemplatesByDefault : false);
       setShowPillMenu(false);
       setLiveRect(null);

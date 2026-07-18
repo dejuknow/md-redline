@@ -193,7 +193,8 @@ export function buildHighlightedHtml(raw: string): string {
         const text =
           typeof parsed.text === 'string' ? parsed.text.replace(/\s+/g, ' ').trim() : '';
         const full = text ? `${author}: ${text}` : author;
-        region.summary = full.length > 44 ? `${full.slice(0, 44).trimEnd()}…` : full;
+        const units = [...full];
+        region.summary = units.length > 44 ? `${units.slice(0, 44).join('').trimEnd()}…` : full;
       }
     } catch {
       /* ignore parse errors */

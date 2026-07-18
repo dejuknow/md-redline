@@ -12,7 +12,7 @@ export const LIGHT_THEMES: ThemeDef[] = [
 ];
 
 export const DARK_THEMES: ThemeDef[] = [
-  { key: 'dark', label: 'Dark', colors: ['#131211', '#e0584f', '#f59e0b'] },
+  { key: 'dark', label: 'Dark', colors: ['#0f0e0d', '#e0584f', '#f59e0b'] },
   { key: 'nord', label: 'Nord', colors: ['#2e3440', '#88c0d0', '#ebcb8b'] },
   { key: 'rose-pine', label: 'Rosé Pine', colors: ['#191724', '#c4a7e7', '#f6c177'] },
   { key: 'catppuccin', label: 'Catppuccin', colors: ['#1e1e2e', '#cba6f7', '#f9e2af'] },

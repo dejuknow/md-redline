@@ -220,7 +220,7 @@ body {
   --theme-diff-added-text: #6ee7b7;
   --theme-diff-removed-bg: rgba(239, 68, 68, 0.15);
   --theme-diff-removed-text: #fca5a5;
-  --theme-gradient-from: #131211;
+  --theme-gradient-from: #0f0e0d;
   --theme-gradient-to: rgba(224, 88, 79, 0.06);
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(249, 115, 22, 0.7);
@@ -1269,6 +1269,12 @@ body {
 .raw-marker-json {
   color: var(--theme-text-muted);
   font-style: italic;
+}
+
+/* An expanded marker that is also active keeps the amber fill; without
+   this the unfolded de-emphasis rule outranks the active treatment. */
+.raw-comment-marker-active:not(.raw-marker-folded) {
+  background-color: var(--theme-comment-bg-hover);
 }
 
 /* Flash animation when scrolling to a comment marker */

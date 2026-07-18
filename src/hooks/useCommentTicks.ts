@@ -49,7 +49,7 @@ export function useCommentTicks(
         id: c.id,
         y01: Math.min(Math.max(top / scrollHeight, 0), 1),
         kind,
-        label: `${c.author}: ${c.text.slice(0, 60)}`,
+        label: `${c.author || 'Comment'}: ${c.text.slice(0, 60)}`,
       });
     }
     setTicks((prev) => {

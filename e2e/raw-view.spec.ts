@@ -196,6 +196,7 @@ test.describe('Comment markers in raw view', () => {
     await expect(marker.locator('.raw-marker-pill')).toBeHidden();
     await marker.click();
     await expect(marker.locator('.raw-marker-json')).toBeHidden();
+    await expect(marker.locator('.raw-marker-pill')).toBeVisible();
   });
 });
 
