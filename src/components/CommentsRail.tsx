@@ -294,7 +294,7 @@ function AnchoredCards({
             ref={getCardRef(comment.id)}
             onMouseEnter={() => setHoveredId(comment.id)}
             onMouseLeave={() => setHoveredId((prev) => (prev === comment.id ? null : prev))}
-            className={`margin-note-enter absolute left-0 right-0 bg-surface-raised border rounded-lg shadow-sm transition-shadow ${
+            className={`margin-note-enter margin-note-pos absolute left-0 right-0 bg-surface-raised border rounded-lg shadow-sm ${
               active ? 'border-primary-border shadow-md' : 'border-border'
             }`}
             style={{ top }}

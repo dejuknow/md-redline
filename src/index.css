@@ -782,6 +782,28 @@ mark.comment-highlight-active {
   background: var(--theme-comment-underline);
   opacity: 0.7;
   pointer-events: none;
+  transition:
+    top 150ms ease,
+    height 150ms ease;
+}
+
+/* Card reflows read as movement, not replacement (crit round 2, item 04).
+   Inline top changes on cards and the connector slide over 150ms. The
+   box-shadow transition lives here too because transition declarations
+   replace each other rather than merge. */
+.margin-note-pos {
+  transition:
+    top 150ms ease,
+    box-shadow 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .margin-note-pos {
+    transition: box-shadow 150ms ease;
+  }
+  .margin-connector {
+    transition: none;
+  }
 }
 
 /* Pending selection highlight */
