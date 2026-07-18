@@ -101,7 +101,7 @@ interface DisplayRow {
   sourceLineIndex?: number;
 }
 
-type Region = { start: number; end: number; className: string; id?: string };
+type Region = { start: number; end: number; className: string; id?: string; summary?: string };
 type MarkdownAstNode = {
   type: string;
   depth?: number;
@@ -186,7 +186,15 @@ export function buildHighlightedHtml(raw: string): string {
     try {
       const jsonStr = cm[0].replace(/^<!-- @comment/, '').replace(/ -->$/, '');
       const parsed = JSON.parse(jsonStr);
-      if (parsed.id) region.id = parsed.id;
+      if (parsed.id) {
+        region.id = parsed.id;
+        const author =
+          typeof parsed.author === 'string' && parsed.author ? parsed.author : 'Comment';
+        const text =
+          typeof parsed.text === 'string' ? parsed.text.replace(/\s+/g, ' ').trim() : '';
+        const full = text ? `${author}: ${text}` : author;
+        region.summary = full.length > 44 ? `${full.slice(0, 44).trimEnd()}…` : full;
+      }
     } catch {
       /* ignore parse errors */
     }
@@ -235,9 +243,18 @@ export function buildHighlightedHtml(raw: string): string {
       parts.push(escapeHtml(raw.slice(cursor, r.start)));
     }
     const idAttr = r.id ? ` data-comment-id="${escapeAttr(r.id)}"` : '';
-    parts.push(
-      `<span class="${r.className}"${idAttr}>${escapeHtml(raw.slice(r.start, r.end))}</span>`,
-    );
+    if (r.summary && r.id) {
+      parts.push(
+        `<span class="${r.className} raw-marker-folded"${idAttr}>` +
+          `<span class="raw-marker-pill">${escapeHtml(r.summary)}</span>` +
+          `<span class="raw-marker-json">${escapeHtml(raw.slice(r.start, r.end))}</span>` +
+          `</span>`,
+      );
+    } else {
+      parts.push(
+        `<span class="${r.className}"${idAttr}>${escapeHtml(raw.slice(r.start, r.end))}</span>`,
+      );
+    }
     cursor = r.end;
   }
 

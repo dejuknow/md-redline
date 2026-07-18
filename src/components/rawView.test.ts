@@ -139,7 +139,7 @@ describe('buildHighlightedHtml', () => {
 
     it('highlights comment markers', () => {
       const html = buildHighlightedHtml(`Some text ${marker}hello world`);
-      expect(html).toContain('class="raw-comment-marker"');
+      expect(html).toContain('raw-comment-marker');
     });
 
     it('adds data-comment-id attribute', () => {
