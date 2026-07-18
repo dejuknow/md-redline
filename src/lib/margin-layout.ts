@@ -9,14 +9,22 @@ export interface MarginEntry {
 export const MARGIN_GAP = 8;
 
 /**
+ * Max distance (px) a non-active card may be lifted above its own anchor
+ * by the active card's pin. Past the cap the pinned card moves down by
+ * the residual instead, so a cluster never drags cards far from their
+ * anchors (crit round 2, item 04).
+ */
+export const MAX_LIFT = 96;
+
+/**
  * Compute card top positions for margin notes.
  *
  * Orphans stack in a block from 0. Anchored cards sort by anchor position and
  * resolve top-down (push-down on overlap). The active card gets best-effort
  * priority: it pins at its anchor when possible, and cards above compress
- * upward toward the orphan-block floor. When they cannot free enough room,
- * the active card shifts down by exactly the residual overflow instead. No
- * two cards ever overlap.
+ * upward toward the orphan-block floor (capped at MAX_LIFT above each card's
+ * own anchor). When they cannot free enough room, the active card shifts down
+ * by exactly the residual overflow instead. No two cards ever overlap.
  */
 export function resolveCollisions(
   entries: MarginEntry[],
@@ -56,11 +64,13 @@ export function resolveCollisions(
     const active = anchored[idx];
     const pinned = Math.max(active.anchorTop, floor);
 
-    // Pass 1 (walking up from the active card): desired tops, ignoring the floor.
+    // Pass 1 (walking up from the active card): desired tops, ignoring the
+    // floor but never lifting a card more than MAX_LIFT above its anchor.
     const desired = new Array<number>(idx);
     let nextTop = pinned;
     for (let i = idx - 1; i >= 0; i--) {
-      desired[i] = Math.min(anchored[i].anchorTop, nextTop - anchored[i].height - gap);
+      const ideal = Math.min(anchored[i].anchorTop, nextTop - anchored[i].height - gap);
+      desired[i] = Math.max(ideal, anchored[i].anchorTop - MAX_LIFT);
       nextTop = desired[i];
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCollisions, type MarginEntry } from './margin-layout';
+import { resolveCollisions, MAX_LIFT, type MarginEntry } from './margin-layout';
 
 function entry(id: string, anchorTop: number | null, height = 100): MarginEntry {
   return { id, anchorTop, height };
@@ -14,6 +14,14 @@ function assertNoOverlap(entries: MarginEntry[], tops: Map<string, number>, gap 
     expect(placed[i].top).toBeGreaterThanOrEqual(placed[i - 1].bottom + gap);
   }
   for (const p of placed) expect(p.top).toBeGreaterThanOrEqual(0);
+}
+
+/** Assert no anchored card sits more than MAX_LIFT above its own anchor. */
+function assertLiftCapped(entries: MarginEntry[], tops: Map<string, number>) {
+  for (const e of entries) {
+    if (e.anchorTop === null) continue;
+    expect(tops.get(e.id)!).toBeGreaterThanOrEqual(e.anchorTop - MAX_LIFT);
+  }
 }
 
 describe('resolveCollisions', () => {
@@ -50,6 +58,7 @@ describe('resolveCollisions', () => {
     expect(tops.get('b')).toBe(120);
     expect(tops.get('a')).toBe(12);
     assertNoOverlap(entries, tops);
+    assertLiftCapped(entries, tops);
   });
 
   it('shifts the active card down when cards above hit the floor', () => {
@@ -80,6 +89,7 @@ describe('resolveCollisions', () => {
     expect(tops.get('b')).toBe(200);
     expect(tops.get('a')).toBe(92);
     assertNoOverlap(entries, tops);
+    assertLiftCapped(entries, tops);
   });
 
   it('respects a custom gap', () => {
@@ -110,6 +120,7 @@ describe('resolveCollisions', () => {
     expect(tops.get('b')).toBe(176);
     expect(tops.get('c')).toBe(284);
     assertNoOverlap(entries, tops);
+    assertLiftCapped(entries, tops);
   });
 
   it('upward packing succeeds when there is room for the whole chain', () => {
@@ -119,14 +130,20 @@ describe('resolveCollisions', () => {
     expect(tops.get('b')).toBe(152);
     expect(tops.get('c')).toBe(210);
     assertNoOverlap(entries, tops);
+    assertLiftCapped(entries, tops);
   });
 
-  it('compresses a dense cluster toward the floor instead of abandoning the pin', () => {
+  it('caps upward lift and shifts the pinned card down by the residual', () => {
+    // Anchors 200/250/260, active c. Without a cap, a was dragged to 68
+    // (132px above its anchor). With MAX_LIFT=96: a bottoms out at 104,
+    // b at 212, and the pinned card c absorbs the residual by moving down.
     const entries = [entry('o', null, 60), entry('a', 200), entry('b', 250), entry('c', 260)];
     const tops = resolveCollisions(entries, 'c');
-    expect(tops.get('a')).toBe(68);
-    expect(tops.get('b')).toBe(176);
-    expect(tops.get('c')).toBe(284);
+    expect(tops.get('o')).toBe(0);
+    expect(tops.get('a')).toBe(104); // 200 - MAX_LIFT
+    expect(tops.get('b')).toBe(212); // stacked below a
+    expect(tops.get('c')).toBe(320); // pushed down past its 260 pin
     assertNoOverlap(entries, tops);
+    assertLiftCapped(entries, tops);
   });
 });
