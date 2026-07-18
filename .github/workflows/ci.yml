@@ -7,7 +7,9 @@ on:
   pull_request:
 
 jobs:
-  verify:
+  # OS-independent checks plus the web end-to-end suite. These do not vary by
+  # platform, so they run once on Linux to keep CI fast.
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -27,8 +29,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build and unit tests
-        run: npm test
+      - name: Build
+        run: npm run build
 
       - name: Validate eval fixtures
         run: npm run eval:dry
@@ -38,3 +40,39 @@ jobs:
 
       - name: End-to-end tests
         run: npm run test:e2e
+
+  # Unit and CLI tests across all three OSes. This is where platform-specific
+  # behaviour lives: process spawning, path handling, and the browser launcher
+  # (the class of bug that unit tests on a single OS cannot catch).
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit and CLI tests
+        if: runner.os != 'Windows'
+        run: npm run test:unit
+
+      # server/index.test.ts injects a fake platformName while creating real
+      # files, so it cannot run on a Windows host yet. Excluded here only;
+      # tracked in https://github.com/dejuknow/md-redline/issues/9.
+      - name: Unit and CLI tests (server suite excluded on Windows, see #9)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: npx vitest run --exclude '**/server/index.test.ts'

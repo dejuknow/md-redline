@@ -2,9 +2,11 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { spawn } from 'child_process';
 import { createServer } from 'http';
 import type { IncomingMessage, Server, ServerResponse } from 'http';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+import { createBrowserStub } from './cli-browser-stub.js';
 
 // Subprocess smoke test for the CLI's update notice. bin/md-redline prints
 // "Update available: ..." when the running server reports a newer `latest`
@@ -97,23 +99,21 @@ function closeStub(server: Server): Promise<void> {
   });
 }
 
-/** No-op `open` on PATH so the CLI's openInBrowser() never launches a real browser. */
-function createOpenStub(dir: string): void {
-  const scriptPath = join(dir, 'open');
-  writeFileSync(scriptPath, '#!/bin/sh\nexit 0\n');
-  chmodSync(scriptPath, 0o755);
-}
-
-function buildEnv(stubPort: number, isolatedTmp: string, openBinDir: string): NodeJS.ProcessEnv {
+function buildEnv(stubPort: number, isolatedTmp: string, browserStub: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    // Isolates the port file the CLI reads/writes under tmpdir() so this
-    // run never sees (or clobbers) a real md-redline.port from the dev box.
+    // Isolates the port file the CLI reads/writes under tmpdir() so this run
+    // never sees (or clobbers) a real md-redline.port from the dev box. TMPDIR
+    // covers macOS/Linux; TEMP/TMP cover Windows, whose os.tmpdir() ignores it.
     TMPDIR: isolatedTmp,
+    TEMP: isolatedTmp,
+    TMP: isolatedTmp,
     // The CLI's port scan starts here, landing straight on the stub.
     MD_REDLINE_PORT: String(stubPort),
-    // Shadow the real `open` so the run never launches a browser.
-    PATH: `${openBinDir}:${process.env.PATH ?? ''}`,
+    // No-op the browser launcher so the run never opens a real browser. Works
+    // on every OS, unlike shadowing `open` on PATH (Windows launches via
+    // `cmd /c start`, which PATH cannot intercept).
+    MDR_BROWSER: browserStub,
   };
 }
 
@@ -166,13 +166,13 @@ describe('mdr update notice (subprocess)', () => {
     stubServer = server;
 
     const isolatedTmp = freshTempDir('mdr-update-notice-tmp-');
-    const openBinDir = freshTempDir('mdr-update-notice-bin-');
+    const browserBinDir = freshTempDir('mdr-update-notice-bin-');
     const mdFileDir = freshTempDir('mdr-update-notice-md-');
-    createOpenStub(openBinDir);
+    const browserStub = createBrowserStub(browserBinDir);
     const mdFile = join(mdFileDir, 'spec.md');
     writeFileSync(mdFile, '# Test spec\n');
 
-    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, openBinDir));
+    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, browserStub));
 
     expect(
       result.stdout,
@@ -186,13 +186,13 @@ describe('mdr update notice (subprocess)', () => {
     stubServer = server;
 
     const isolatedTmp = freshTempDir('mdr-update-notice-tmp-');
-    const openBinDir = freshTempDir('mdr-update-notice-bin-');
+    const browserBinDir = freshTempDir('mdr-update-notice-bin-');
     const mdFileDir = freshTempDir('mdr-update-notice-md-');
-    createOpenStub(openBinDir);
+    const browserStub = createBrowserStub(browserBinDir);
     const mdFile = join(mdFileDir, 'spec.md');
     writeFileSync(mdFile, '# Test spec\n');
 
-    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, openBinDir));
+    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, browserStub));
 
     expect(
       result.stdout,
@@ -212,13 +212,13 @@ describe('mdr update notice (subprocess)', () => {
     stubServer = server;
 
     const isolatedTmp = freshTempDir('mdr-update-notice-tmp-');
-    const openBinDir = freshTempDir('mdr-update-notice-bin-');
+    const browserBinDir = freshTempDir('mdr-update-notice-bin-');
     const mdFileDir = freshTempDir('mdr-update-notice-md-');
-    createOpenStub(openBinDir);
+    const browserStub = createBrowserStub(browserBinDir);
     const mdFile = join(mdFileDir, 'spec.md');
     writeFileSync(mdFile, '# Test spec\n');
 
-    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, openBinDir));
+    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, browserStub));
 
     expect(versionCalls).toBeGreaterThanOrEqual(3);
     expect(result.stdout).toContain(

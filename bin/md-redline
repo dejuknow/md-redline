@@ -144,6 +144,14 @@ function spawnDetached(command, args, options = {}) {
     const child = isWin
       ? spawn(buildWindowsCommand(command, args), {
           cwd: spawnCwd,
+          // Opt-in only. On Windows `detached` gives the child its own console
+          // window that windowsHide can't reliably suppress under shell:true,
+          // so a long-lived child (the server) would leave a visible console.
+          // The browser launcher needs it: without detached, `cmd /c start` is
+          // torn down before ShellExecute fires because the CLI unrefs and
+          // exits within milliseconds. Its cmd exits instantly, so no window
+          // ever shows.
+          detached: options.detached === true,
           stdio: 'ignore',
           shell: true,
           windowsHide: true,
@@ -333,12 +341,20 @@ async function buildUrl(file, dir) {
 }
 
 async function openInBrowser(url) {
+  // MDR_BROWSER overrides the launcher with an explicit command that receives
+  // the URL as its argument (e.g. a specific browser binary). Spawned detached
+  // so it survives this process exiting, same as the platform defaults below.
+  const override = process.env.MDR_BROWSER?.trim();
+  if (override) {
+    await spawnDetached(override, [url], { detached: true });
+    return;
+  }
   if (process.platform === 'darwin') {
     await spawnDetached('open', [url]);
     return;
   }
   if (process.platform === 'win32') {
-    await spawnDetached('cmd', ['/c', 'start', '', url]);
+    await spawnDetached('cmd', ['/c', 'start', '', url], { detached: true });
     return;
   }
   if (process.platform === 'linux') {
@@ -598,6 +614,16 @@ async function main() {
 
   if (process.argv[2] === '--restrict') {
     await enableRestrictedMode();
+    return;
+  }
+
+  if (process.argv[2] === '__open') {
+    // Internal, undocumented seam: launch the browser for a URL and exit
+    // immediately, without booting a server. Lets the browser-open regression
+    // test drive openInBrowser() in isolation — the worst case for the Windows
+    // detached-teardown race — and honors MDR_BROWSER like every other path.
+    const target = process.argv[3];
+    if (target) await openInBrowser(target);
     return;
   }
 

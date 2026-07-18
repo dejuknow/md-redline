@@ -230,6 +230,19 @@ To use the strict per-folder model instead, run `mdr --restrict` once after inst
 
 File saves use atomic write-then-rename and mtime-based conflict detection to prevent data loss from concurrent edits. Mermaid SVG output is sanitized via DOMPurify before rendering. Only run md-redline in environments you trust.
 
+## Configuration
+
+All of these environment variables are optional.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MDR_BROWSER` | OS default browser | Command used to open the review URL. Set it to a specific browser binary (for example `MDR_BROWSER=firefox`); it is spawned with the URL as its argument. |
+| `MD_REDLINE_PORT` (or `PORT`) | `6373` | Port for the API server. It scans up to 10 ports upward from here if that one is taken. |
+| `MD_REDLINE_VITE_PORT` | `5188` | Port for the Vite dev client (development only). |
+| `MD_REDLINE_HOME` | your OS home directory | Base directory for md-redline's preferences file (`.md-redline.json`, which stores trusted roots and the update-check cache). |
+| `MD_REDLINE_REGISTRY_URL` | public npm registry | Registry base URL used for the background update check. |
+| `NO_UPDATE_NOTIFIER` or `CI` | unset | If either is present (any value, including empty), the background update check is disabled. |
+
 ## Troubleshooting
 
 - **The agent says it has no mdr tools.** Restart your MCP client after `mdr mcp install`; most clients only discover new servers at launch. For non-Claude clients, confirm `mdr` is on the `PATH` the client actually uses (see MCP setup above).
