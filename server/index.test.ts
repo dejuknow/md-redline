@@ -268,6 +268,44 @@ describe('/api/preferences', () => {
   });
 });
 
+describe('GET /api/version', () => {
+  it('omits latest when no newer version is known', async () => {
+    const res = await app.request('/api/version');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ version: expect.any(String) });
+  });
+
+  it('includes latest when the update checker reports one', async () => {
+    const versionApp = createApp({ homeDir: fakeHome, getLatestVersion: () => '99.0.0' });
+    const res = await versionApp.request('/api/version');
+    expect(await res.json()).toEqual({ version: expect.any(String), latest: '99.0.0' });
+  });
+
+  it('omits latest when the checker returns null', async () => {
+    const versionApp = createApp({ homeDir: fakeHome, getLatestVersion: () => null });
+    expect(await (await versionApp.request('/api/version')).json()).toEqual({
+      version: expect.any(String),
+    });
+  });
+});
+
+describe('update preferences over HTTP', () => {
+  it('strips the server-owned updateCheck key from client PUTs', async () => {
+    const res = await app.request('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        updateCheck: { latestKnown: '99.0.0', checkedAt: '2026-01-01T00:00:00.000Z' },
+        updateDismissedVersion: '0.7.0',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const prefs = await (await app.request('/api/preferences')).json();
+    expect(prefs.updateCheck).toBeUndefined();
+    expect(prefs.updateDismissedVersion).toBe('0.7.0');
+  });
+});
+
 describe('isPathInsideRoot', () => {
   it('accepts nested POSIX paths', () => {
     expect(isPathInsideRoot('/repo/docs/spec.md', '/repo')).toBe(true);

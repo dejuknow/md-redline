@@ -21,9 +21,13 @@ import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
+import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
 
 const require = createRequire(import.meta.url);
-const { version: APP_VERSION } = require('../package.json') as { version: string };
+const { version: APP_VERSION, name: PACKAGE_NAME } = require('../package.json') as {
+  version: string;
+  name: string;
+};
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -58,6 +62,10 @@ export interface CreateAppOptions {
   platformName?: NodeJS.Platform;
   staticDir?: string;
   defaultTrustHome?: boolean;
+  /** Injected by the boot path; returns the latest published version when it
+   * is strictly newer than APP_VERSION, else null. Absent in tests and when
+   * the update check is disabled. */
+  getLatestVersion?: () => string | null;
 }
 
 function canonicalize(p: string): string {
@@ -117,6 +125,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
   const initialArg = initialArgRaw ? resolve(cwd, initialArgRaw) : '';
   const platformName = options.platformName ?? platform();
   const execFileImpl = options.execFileImpl ?? execFile;
+  const getLatestVersion = options.getLatestVersion;
   const caseInsensitivePaths = platformName === 'win32';
 
   const app = new Hono();
@@ -566,7 +575,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
   });
 
   app.get('/api/version', (c) => {
-    return c.json({ version: APP_VERSION });
+    const latest = getLatestVersion?.() ?? null;
+    return c.json(latest ? { version: APP_VERSION, latest } : { version: APP_VERSION });
   });
 
   app.post('/api/shutdown', (c) => {
@@ -624,6 +634,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return c.json({ error: 'Body must be a JSON object' }, 400);
     }
+    // updateCheck is the server-owned registry cache; clients cannot write it.
+    delete body.updateCheck;
     try {
       const merged = await writePreferences(homeDir, body);
       return c.json(merged);
@@ -1383,7 +1395,16 @@ function detectStaticDir(): string | undefined {
   }
 }
 
-export const app = createApp({ staticDir: detectStaticDir(), defaultTrustHome: true });
+const updateChecker = createUpdateChecker({
+  currentVersion: APP_VERSION,
+  packageName: PACKAGE_NAME,
+});
+
+export const app = createApp({
+  staticDir: detectStaticDir(),
+  defaultTrustHome: true,
+  getLatestVersion: isUpdateCheckDisabled() ? undefined : updateChecker.getLatest,
+});
 
 // 6373 ("MDR" on a phone keypad) stays clear of the 3000-3010 range that
 // Next.js/Nest/CRA stacks contend for. Must match DEFAULT_SERVER_PORT in
@@ -1454,6 +1475,7 @@ if (isMainModule) {
           throw e;
         }
       }
+      if (!isUpdateCheckDisabled()) void updateChecker.start();
       console.log(`md-redline server running on http://127.0.0.1:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
       if (initialArg) {
