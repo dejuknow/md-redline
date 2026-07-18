@@ -656,7 +656,7 @@ body {
 .prose {
   --tw-prose-body: var(--theme-text-secondary);
   --tw-prose-headings: var(--theme-text);
-  --tw-prose-links: var(--theme-accent-text);
+  --tw-prose-links: var(--theme-text);
   --tw-prose-bold: var(--theme-text);
   --tw-prose-code: var(--theme-text);
   --tw-prose-quotes: var(--theme-text-secondary);
@@ -677,6 +677,22 @@ body {
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   color: var(--theme-text);
   background-color: var(--theme-bg-inset);
+}
+
+/* Links are content, not review chrome: ink text with a quiet accent
+   underline. Crimson is reserved for hover so the accent still answers
+   the pointer without flooding link-dense documents. */
+.prose :where(a):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  font-weight: 500;
+  text-decoration-color: color-mix(in srgb, var(--theme-accent) 45%, transparent);
+  text-underline-offset: 2px;
+  transition:
+    color 0.15s ease,
+    text-decoration-color 0.15s ease;
+}
+.prose :where(a:hover):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  color: var(--theme-accent-text);
+  text-decoration-color: var(--theme-accent);
 }
 
 .prose :where(th):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
@@ -1169,9 +1185,9 @@ body {
 }
 
 .raw-link {
-  color: var(--theme-accent-text);
+  color: var(--theme-text);
   text-decoration: underline;
-  text-decoration-color: var(--theme-accent-border);
+  text-decoration-color: color-mix(in srgb, var(--theme-accent) 45%, transparent);
   text-underline-offset: 2px;
 }
 
