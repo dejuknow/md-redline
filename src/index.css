@@ -86,6 +86,15 @@ body {
   font-family: var(--font-serif);
 }
 
+/* Prose size. The typography plugin's spacing is em-based, so scaling the
+   root font-size scales the whole column proportionally. */
+[data-prose-size='small'] .prose {
+  font-size: 0.875rem;
+}
+[data-prose-size='large'] .prose {
+  font-size: 1.125rem;
+}
+
 /* ========== Light Theme (default) ========== */
 :root, [data-theme="light"] {
   color-scheme: light;

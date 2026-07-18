@@ -13,6 +13,9 @@ export type DocWidth = (typeof DOC_WIDTHS)[number];
 export const PROSE_FONTS = ['serif', 'sans'] as const;
 export type ProseFont = (typeof PROSE_FONTS)[number];
 
+export const PROSE_SIZES = ['small', 'default', 'large'] as const;
+export type ProseSize = (typeof PROSE_SIZES)[number];
+
 export interface AppSettings {
   templates: CommentTemplate[];
   commentMaxLength: number;
@@ -27,6 +30,8 @@ export interface AppSettings {
   proseFont: ProseFont;
   /** Maximum prose column width in the rendered view (see DOC_WIDTH_COLS). */
   docWidth: DocWidth;
+  /** Font size for rendered document prose (small 14px, default 16px, large 18px). */
+  proseSize: ProseSize;
 }
 
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
@@ -68,6 +73,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mermaidFullscreenPanelCollapsed: false,
   proseFont: 'serif',
   docWidth: 'default',
+  proseSize: 'default',
 };
 
 /**
@@ -123,5 +129,8 @@ export function parseSettings(input: unknown): AppSettings {
     docWidth: DOC_WIDTHS.includes(parsed.docWidth as DocWidth)
       ? (parsed.docWidth as DocWidth)
       : DEFAULT_SETTINGS.docWidth,
+    proseSize: PROSE_SIZES.includes(parsed.proseSize as ProseSize)
+      ? (parsed.proseSize as ProseSize)
+      : DEFAULT_SETTINGS.proseSize,
   };
 }

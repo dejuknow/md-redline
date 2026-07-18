@@ -249,7 +249,7 @@ export default function App() {
   const [homeDir, setHomeDir] = useState<string>('');
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
-  const { settings, updateDocWidth } = useSettings();
+  const { settings, updateDocWidth, updateProseSize } = useSettings();
   const setTheme = useSetPersistedTheme();
   const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();
   const pageVisible = usePageVisible();
@@ -1904,6 +1904,24 @@ export default function App() {
         onExecute: () => updateDocWidth('wide'),
       },
       {
+        id: 'prose-size-small',
+        label: 'Prose size: Small',
+        section: 'View',
+        onExecute: () => updateProseSize('small'),
+      },
+      {
+        id: 'prose-size-default',
+        label: 'Prose size: Default',
+        section: 'View',
+        onExecute: () => updateProseSize('default'),
+      },
+      {
+        id: 'prose-size-large',
+        label: 'Prose size: Large',
+        section: 'View',
+        onExecute: () => updateProseSize('large'),
+      },
+      {
         id: 'view-raw',
         label: 'Switch to raw markdown',
         section: 'View',
@@ -1969,6 +1987,7 @@ export default function App() {
   }, [
     setViewMode,
     updateDocWidth,
+    updateProseSize,
     setExplorerVisibleGuarded,
     setLeftPanelView,
     explorerVisible,
@@ -2475,6 +2494,7 @@ export default function App() {
           <div
             className="flex-1 min-h-0 min-w-0 relative panel-center bg-surface-secondary"
             data-prose-font={settings.proseFont}
+            data-prose-size={settings.proseSize}
           >
             {showSearch && (
               <SearchBar

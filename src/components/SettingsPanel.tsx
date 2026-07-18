@@ -24,6 +24,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     updateQuickComment,
     updateProseFont,
     updateDocWidth,
+    updateProseSize,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -670,6 +671,38 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                           }`}
                         >
                           {width === 'narrow' ? 'Narrow' : width === 'default' ? 'Default' : 'Wide'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Prose Size */}
+                <div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Prose size</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Font size of rendered document text.
+                      </p>
+                    </div>
+                    <div
+                      role="group"
+                      aria-label="Prose size"
+                      className="flex rounded-lg border border-border overflow-hidden shrink-0"
+                    >
+                      {(['small', 'default', 'large'] as const).map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => updateProseSize(size)}
+                          aria-pressed={settings.proseSize === size}
+                          className={`px-3 py-1 text-xs font-medium transition-colors ${
+                            settings.proseSize === size
+                              ? 'bg-primary text-on-primary'
+                              : 'bg-surface text-content-secondary hover:bg-tint'
+                          }`}
+                        >
+                          {size === 'small' ? 'Small' : size === 'default' ? 'Default' : 'Large'}
                         </button>
                       ))}
                     </div>

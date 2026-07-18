@@ -96,6 +96,7 @@ describe('parseSettings', () => {
       mermaidFullscreenPanelCollapsed: false,
       proseFont: 'serif',
       docWidth: 'wide',
+      proseSize: 'large',
     };
     expect(parseSettings(full)).toEqual(full);
   });
@@ -141,5 +142,17 @@ describe('parseSettings proseFont', () => {
   it('falls back to serif on invalid values', () => {
     expect(parseSettings({ proseFont: 'comic-sans' }).proseFont).toBe('serif');
     expect(parseSettings({ proseFont: 42 }).proseFont).toBe('serif');
+  });
+});
+
+describe('parseSettings proseSize', () => {
+  it('defaults missing or invalid values', () => {
+    expect(parseSettings({}).proseSize).toBe('default');
+    expect(parseSettings({ proseSize: 'huge' }).proseSize).toBe('default');
+    expect(parseSettings({ proseSize: 7 }).proseSize).toBe('default');
+  });
+  it('accepts valid values', () => {
+    expect(parseSettings({ proseSize: 'small' }).proseSize).toBe('small');
+    expect(parseSettings({ proseSize: 'large' }).proseSize).toBe('large');
   });
 });

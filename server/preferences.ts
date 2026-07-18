@@ -5,6 +5,7 @@ import { join } from 'path';
 import {
   DOC_WIDTHS,
   PROSE_FONTS,
+  PROSE_SIZES,
   type AppSettings as ClientAppSettings,
   type CommentTemplate,
 } from '../src/lib/settings';
@@ -86,6 +87,7 @@ const SETTING_SANITIZERS: {
   mermaidFullscreenPanelCollapsed: sanitizeBoolean,
   proseFont: (v) => sanitizeEnum(PROSE_FONTS, v),
   docWidth: (v) => sanitizeEnum(DOC_WIDTHS, v),
+  proseSize: (v) => sanitizeEnum(PROSE_SIZES, v),
 };
 
 function sanitizeSettings(value: unknown): AppSettings | undefined {
