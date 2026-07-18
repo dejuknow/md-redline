@@ -12,6 +12,7 @@ import { createRequire } from 'module';
 
 import { checkServer, gracefulShutdown, killPort } from './server-control.js';
 import { buildWindowsCommand } from './spawn-command.js';
+import { isNewerVersion } from './version-compare.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -200,14 +201,19 @@ async function enableRestrictedMode() {
   console.log(`Wrote ${prefsPath}`);
 }
 
-async function getServerVersion(port) {
+async function getServerVersionInfo(port) {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/version`, {
       signal: AbortSignal.timeout(1_000),
     });
     if (response.ok) {
       const data = await response.json();
-      return data.version ?? null;
+      if (data && typeof data.version === 'string') {
+        return {
+          version: data.version,
+          latest: typeof data.latest === 'string' ? data.latest : null,
+        };
+      }
     }
   } catch {}
   return null;
@@ -225,13 +231,13 @@ function isProductionMode() {
 async function ensureServerRunning() {
   const existing = await findServerPort();
   if (existing) {
-    const serverVersion = await getServerVersion(existing);
-    if (serverVersion && serverVersion !== CLI_VERSION) {
-      console.log(`Upgrading mdr ${serverVersion} → ${CLI_VERSION}...`);
+    const info = await getServerVersionInfo(existing);
+    if (info && info.version !== CLI_VERSION) {
+      console.log(`Upgrading mdr ${info.version} → ${CLI_VERSION}...`);
       const stopped = await gracefulShutdown(existing);
       if (!stopped) await stopServer(true);
     } else {
-      return;
+      return info;
     }
   }
 
@@ -286,18 +292,19 @@ async function ensureServerRunning() {
   if (isProductionMode()) {
     // In production, server serves everything — no Vite client to wait for
     console.log('mdr is ready.');
-    return;
+    return null;
   }
   // Also wait for Vite client to be ready
   while (Date.now() < deadline) {
     if (await findClientPort()) {
       console.log('mdr is ready.');
-      return;
+      return null;
     }
     await delay(POLL_INTERVAL_MS);
   }
   // Server is up but client may still be starting — proceed anyway
   console.log('mdr is ready.');
+  return null;
 }
 
 async function buildUrl(file, dir) {
@@ -610,7 +617,7 @@ async function main() {
 
   try {
     const { file, dir } = await resolveTarget(process.argv[2] ?? '');
-    await ensureServerRunning();
+    let versionInfo = await ensureServerRunning();
 
     // Grant the server access to the target path before opening in browser
     const targetPath = file || dir;
@@ -640,6 +647,16 @@ async function main() {
       console.log(`Opened in browser: ${url}`);
     } catch {
       console.log(`Open in your browser: ${url}`);
+    }
+
+    if (!versionInfo) {
+      const serverPort = await findServerPort();
+      if (serverPort) versionInfo = await getServerVersionInfo(serverPort);
+    }
+    if (versionInfo?.latest && isNewerVersion(versionInfo.latest, CLI_VERSION)) {
+      console.log(
+        `Update available: ${CLI_VERSION} -> ${versionInfo.latest}. Run: npm install -g md-redline@latest`,
+      );
     }
   } catch (error) {
     console.error(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
