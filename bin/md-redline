@@ -183,13 +183,19 @@ function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
           '/d',
           '/s',
           '/c',
-          '"%MDR_INTERNAL_BROWSER_COMMAND%" "%MDR_INTERNAL_BROWSER_URL%"',
+          // Outer quote pair is required: with /s, cmd strips only the first and
+          // last quote of the /c string, leaving `"cmd" "url"` intact. Pair it
+          // with windowsVerbatimArguments so Node does not backslash-escape the
+          // inner quotes (\") — cmd reads those literally and the command name
+          // becomes unrecognized.
+          '""%MDR_INTERNAL_BROWSER_COMMAND%" "%MDR_INTERNAL_BROWSER_URL%""',
         ], {
           cwd: APP_DIR,
           detached: true,
           stdio: 'ignore',
           env,
           windowsHide: true,
+          windowsVerbatimArguments: true,
         })
       : spawn(command, [url], {
           cwd: APP_DIR,
@@ -211,17 +217,21 @@ function openWithWindowsShell(url) {
     // Keep the encoded URL out of cmd.exe's command string. cmd expands the
     // placeholder once and does not recursively expand percent signs in its
     // value, so URL escapes such as %3A and %5C reach the browser intact.
+    // The outer quote pair plus windowsVerbatimArguments keeps cmd's /s quote
+    // stripping and Node's argv escaping from mangling `start "" "url"` (without
+    // them Node emits \" and the browser receives a corrupted \"url\").
     const child = spawn(process.env.ComSpec ?? 'cmd.exe', [
       '/d',
       '/s',
       '/c',
-      'start "" "%MDR_INTERNAL_BROWSER_URL%"',
+      '"start "" "%MDR_INTERNAL_BROWSER_URL%""',
     ], {
       cwd: APP_DIR,
       detached: true,
       stdio: 'ignore',
       env: { ...process.env, MDR_INTERNAL_BROWSER_URL: url },
       windowsHide: true,
+      windowsVerbatimArguments: true,
     });
 
     child.once('error', rejectSpawn);
