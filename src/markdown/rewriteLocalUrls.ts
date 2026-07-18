@@ -215,7 +215,13 @@ function rewriteAnchor(node: Element, baseDir: string | null): void {
 
 export const rewriteLocalUrls: Plugin<[Options?], Root> = (options) => {
   const filePath = options?.filePath;
-  const baseDir = filePath ? posixDirname(filePath) : null;
+  // filePath is a real OS path. On Windows it uses backslashes
+  // (C:\Users\me\notes\index.md), which the POSIX dirname/resolve helpers
+  // don't understand — they'd find no '/' and collapse the base to '.',
+  // resolving relative images against the launch cwd instead of the
+  // document's directory. Normalize to forward slashes first; the server's
+  // path resolver accepts C:/... fine.
+  const baseDir = filePath ? posixDirname(filePath.replace(/\\/g, '/')) : null;
 
   return (tree) => {
     visit(tree, 'element', (node: Element) => {

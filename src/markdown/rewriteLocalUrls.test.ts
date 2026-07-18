@@ -348,3 +348,39 @@ describe('rewriteLocalUrls plugin', () => {
     expect(out).toContain('<img alt="">');
   });
 });
+
+describe('rewriteLocalUrls plugin — Windows base paths', () => {
+  // On Windows the server hands the client a backslash path
+  // (e.g. C:\Users\me\notes\index.md). The base directory for resolving
+  // relative image/link targets must be derived from it correctly, so a
+  // relative image resolves against the document's directory rather than
+  // collapsing to the launch cwd.
+  const WIN_FILE = 'C:\\Users\\me\\notes\\index.md';
+
+  it('resolves a relative image against the document directory', () => {
+    const out = runPlugin('<img src="./diagram.png" alt="d">', WIN_FILE);
+    expect(out).toContain(
+      `src="/api/asset?path=${encodeURIComponent('C:/Users/me/notes/diagram.png')}"`,
+    );
+  });
+
+  it('resolves a bare relative image (no leading dot)', () => {
+    const out = runPlugin('<img src="assets/logo.svg" alt="l">', WIN_FILE);
+    expect(out).toContain(
+      `src="/api/asset?path=${encodeURIComponent('C:/Users/me/notes/assets/logo.svg')}"`,
+    );
+  });
+
+  it('resolves a parent-directory relative image', () => {
+    const out = runPlugin('<img src="../assets/logo.svg" alt="l">', WIN_FILE);
+    expect(out).toContain(
+      `src="/api/asset?path=${encodeURIComponent('C:/Users/me/assets/logo.svg')}"`,
+    );
+  });
+
+  it('resolves a relative .md anchor against the document directory', () => {
+    const out = runPlugin('<a href="./other.md">x</a>', WIN_FILE);
+    expect(out).toContain('href="#"');
+    expect(out).toContain('data-mdr-local-md="C:/Users/me/notes/other.md"');
+  });
+});
