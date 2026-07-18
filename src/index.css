@@ -1132,12 +1132,12 @@ body {
   margin-bottom: 0;
 }
 
-/* Raw view toolbar — matches panel headers (h-10 = 2.5rem) */
+/* Panel toolbar: a slim utility strip below the title row */
 .raw-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 2.5rem;
+  height: 2rem;
   padding-left: 0.5rem;
   padding-right: 0.5rem;
   border-bottom: 1px solid var(--theme-border-subtle);
