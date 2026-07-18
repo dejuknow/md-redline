@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 
 import { checkServer, gracefulShutdown, killPort } from './server-control.js';
+import { buildWindowsCommand } from './spawn-command.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,7 +87,10 @@ async function resolveTarget(arg) {
   try {
     targetStat = await stat(target);
   } catch {
-    throw new Error(`not found: ${arg}`);
+    // Echo the resolved path too: `mdr ~/Desktop` on a OneDrive-redirected
+    // Windows profile fails because C:\Users\<u>\Desktop does not exist,
+    // which the raw argument alone cannot reveal.
+    throw new Error(target === arg ? `not found: ${arg}` : `not found: ${arg} (resolved to ${target})`);
   }
 
   if (targetStat.isDirectory()) return { file: '', dir: target };
@@ -135,7 +139,7 @@ function spawnDetached(command, args, options = {}) {
     const isWin = process.platform === 'win32';
     const spawnCwd = options.cwd ?? APP_DIR;
     const child = isWin
-      ? spawn([command, ...args].join(' '), {
+      ? spawn(buildWindowsCommand(command, args), {
           cwd: spawnCwd,
           stdio: 'ignore',
           shell: true,
@@ -267,7 +271,12 @@ async function ensureServerRunning() {
   while (Date.now() < deadline) {
     if (await findServerPort()) break;
     if (childExited) {
-      throw new Error("app failed to start. Run 'npm run dev' manually for details.");
+      // Point at the command that actually failed: a global npm install has
+      // no repo to run `npm run dev` in, only the bundled server.
+      const hint = isProductionMode()
+        ? `Run 'node "${DIST_SERVER}"' manually for details.`
+        : "Run 'npm run dev' manually for details.";
+      throw new Error(`app failed to start. ${hint}`);
     }
     await delay(POLL_INTERVAL_MS);
   }
