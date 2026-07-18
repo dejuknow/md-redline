@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'http';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -93,6 +93,31 @@ describe('createUpdateChecker', () => {
     expect(c.getLatest()).toBe('9.9.9'); // served from cache
   });
 
+  it('schedules a fresh cache from its remaining TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.parse('2026-07-17T12:00:00.000Z');
+      await seedCache('9.9.9', new Date(now - 750).toISOString());
+      const fetchImpl = vi.fn(async () => new Response(null, { status: 503 }));
+      checker = createUpdateChecker({
+        currentVersion: '0.6.0',
+        packageName: 'md-redline',
+        homeDir,
+        intervalMs: 1_000,
+        fetchImpl,
+        now: () => now,
+      });
+      await checker.start();
+      expect(fetchImpl).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(249);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('treats a future checkedAt as stale and refetches', async () => {
     const now = Date.parse('2026-07-17T12:00:00.000Z');
     await seedCache('9.9.9', new Date(now + DAY_MS).toISOString());
@@ -141,6 +166,15 @@ describe('createUpdateChecker', () => {
     await inFlight;
     await new Promise((r) => setTimeout(r, 100));
     expect(requestCount).toBe(1);
+  });
+
+  it('reports pending until an in-flight initial check settles', async () => {
+    const url = await startRegistryStub(JSON.stringify({ latest: '9.9.9' }), 200, 25);
+    const c = makeChecker(url);
+    const inFlight = c.start();
+    expect(c.isPending()).toBe(true);
+    await inFlight;
+    expect(c.isPending()).toBe(false);
   });
 
   it('ignores a 200 response with a malformed JSON body', async () => {

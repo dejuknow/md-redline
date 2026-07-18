@@ -18,10 +18,12 @@ export interface UpdateCheckerOptions {
 }
 
 export interface UpdateChecker {
-  /** Seed from the on-disk cache, fetch if stale, then re-check daily. Never throws; never blocks server startup (call without await). Overlapping calls are ignored; a stop() during an in-flight start() prevents the interval from arming. */
+  /** Seed from the on-disk cache, fetch if stale, then re-check daily. Never throws; never blocks server startup (call without await). Overlapping calls are ignored; a stop() during an in-flight start() prevents the timer from arming. */
   start(): Promise<void>;
   /** Latest published version, or null unless strictly newer than current. */
   getLatest(): string | null;
+  /** True until the initial cache/fetch pass settles, and during later fetches. */
+  isPending(): boolean;
   stop(): void;
 }
 
@@ -43,16 +45,17 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
   const now = options.now ?? Date.now;
 
   let latestKnown: string | null = null;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let starting = false;
   let stopped = false;
+  let pending = true;
 
   async function checkOnce(): Promise<void> {
+    pending = true;
     try {
-      const res = await fetchImpl(
-        `${registryUrl}/-/package/${options.packageName}/dist-tags`,
-        { signal: AbortSignal.timeout(timeoutMs) },
-      );
+      const res = await fetchImpl(`${registryUrl}/-/package/${options.packageName}/dist-tags`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
       if (!res.ok) return;
       const tags: unknown = await res.json();
       const latest = (tags as { latest?: unknown } | null)?.latest;
@@ -64,7 +67,18 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
     } catch {
       // Offline, registry down, timeout, unwritable prefs: all silent by
       // design. The next scheduled tick retries.
+    } finally {
+      pending = false;
     }
+  }
+
+  function scheduleNext(delayMs: number): void {
+    timer = setTimeout(async () => {
+      timer = null;
+      await checkOnce();
+      if (!stopped) scheduleNext(intervalMs);
+    }, delayMs);
+    timer.unref?.();
   }
 
   return {
@@ -72,22 +86,28 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
       if (starting || timer) return;
       starting = true;
       stopped = false;
+      pending = true;
       try {
         const cached = (await readPreferences(homeDir)).updateCheck;
         if (cached) latestKnown = cached.latestKnown;
         const checkedAt = Date.parse(cached?.checkedAt ?? '');
         // A future checkedAt (clock skew, hand-edited file) counts as stale.
-        const fresh =
-          Number.isFinite(checkedAt) && checkedAt <= now() && now() - checkedAt < intervalMs;
-        if (!fresh) await checkOnce();
+        const age = now() - checkedAt;
+        const fresh = Number.isFinite(checkedAt) && age >= 0 && age < intervalMs;
+        if (!fresh) {
+          await checkOnce();
+        } else {
+          pending = false;
+        }
         // A stop() issued while the awaits above were in flight wins: the
-        // interval must never arm after an explicit stop.
+        // timer must never arm after an explicit stop. For a fresh cache,
+        // schedule from its expiry rather than granting a new full interval.
         if (!stopped) {
-          timer = setInterval(() => void checkOnce(), intervalMs);
-          timer.unref?.();
+          scheduleNext(fresh ? intervalMs - age : intervalMs);
         }
       } finally {
         starting = false;
+        pending = false;
       }
     },
     getLatest() {
@@ -95,9 +115,13 @@ export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecke
         ? latestKnown
         : null;
     },
+    isPending() {
+      return pending;
+    },
     stop() {
       stopped = true;
-      if (timer) clearInterval(timer);
+      pending = false;
+      if (timer) clearTimeout(timer);
       timer = null;
     },
   };

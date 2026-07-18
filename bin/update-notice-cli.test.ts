@@ -43,7 +43,9 @@ function jsonBody(res: ServerResponse, status: number, body: unknown): void {
  * main flow touches. Everything else is a harmless 200 JSON `{}` so any
  * other probe the CLI happens to make does not blow up the run.
  */
-function startStub(versionResponse: Record<string, unknown>): Promise<{ server: Server; port: number }> {
+function startStub(
+  versionResponse: Record<string, unknown> | (() => Record<string, unknown>),
+): Promise<{ server: Server; port: number }> {
   return new Promise((resolvePromise, reject) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -56,7 +58,11 @@ function startStub(versionResponse: Record<string, unknown>): Promise<{ server: 
       }
 
       if (req.method === 'GET' && url.pathname === '/api/version') {
-        jsonBody(res, 200, versionResponse);
+        jsonBody(
+          res,
+          200,
+          typeof versionResponse === 'function' ? versionResponse() : versionResponse,
+        );
         return;
       }
 
@@ -192,6 +198,32 @@ describe('mdr update notice (subprocess)', () => {
       result.stdout,
       `expected no update notice; stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     ).not.toContain('Update available:');
+    expect(result.code).toBe(0);
+  }, 15_000);
+
+  it('waits for an in-flight server check before deciding whether to print', async () => {
+    let versionCalls = 0;
+    const { server, port } = await startStub(() => {
+      versionCalls++;
+      return versionCalls < 3
+        ? { version: CLI_VERSION, updateCheckPending: true }
+        : { version: CLI_VERSION, latest: '99.0.0' };
+    });
+    stubServer = server;
+
+    const isolatedTmp = freshTempDir('mdr-update-notice-tmp-');
+    const openBinDir = freshTempDir('mdr-update-notice-bin-');
+    const mdFileDir = freshTempDir('mdr-update-notice-md-');
+    createOpenStub(openBinDir);
+    const mdFile = join(mdFileDir, 'spec.md');
+    writeFileSync(mdFile, '# Test spec\n');
+
+    const result = await runCli([mdFile], buildEnv(port, isolatedTmp, openBinDir));
+
+    expect(versionCalls).toBeGreaterThanOrEqual(3);
+    expect(result.stdout).toContain(
+      `Update available: ${CLI_VERSION} -> 99.0.0. Run: npm install -g md-redline@latest`,
+    );
     expect(result.code).toBe(0);
   }, 15_000);
 });

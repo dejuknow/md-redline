@@ -287,6 +287,18 @@ describe('GET /api/version', () => {
       version: expect.any(String),
     });
   });
+
+  it('reports when the asynchronous update check is still pending', async () => {
+    const versionApp = createApp({
+      homeDir: fakeHome,
+      getLatestVersion: () => null,
+      isUpdateCheckPending: () => true,
+    });
+    expect(await (await versionApp.request('/api/version')).json()).toEqual({
+      version: expect.any(String),
+      updateCheckPending: true,
+    });
+  });
 });
 
 describe('update preferences over HTTP', () => {

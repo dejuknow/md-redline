@@ -35,6 +35,8 @@ const MAX_PORT_SCAN = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
+const UPDATE_CHECK_WAIT_MS = 6_000;
+const UPDATE_CHECK_POLL_MS = 100;
 
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
@@ -212,11 +214,22 @@ async function getServerVersionInfo(port) {
         return {
           version: data.version,
           latest: typeof data.latest === 'string' ? data.latest : null,
+          updateCheckPending: data.updateCheckPending === true,
         };
       }
     }
   } catch {}
   return null;
+}
+
+async function waitForUpdateCheck(port, initialInfo) {
+  let info = initialInfo;
+  const deadline = Date.now() + UPDATE_CHECK_WAIT_MS;
+  while (info?.updateCheckPending && Date.now() < deadline) {
+    await delay(UPDATE_CHECK_POLL_MS);
+    info = (await getServerVersionInfo(port)) ?? info;
+  }
+  return info;
 }
 
 function isProductionMode() {
@@ -652,6 +665,10 @@ async function main() {
     if (!versionInfo) {
       const serverPort = await findServerPort();
       if (serverPort) versionInfo = await getServerVersionInfo(serverPort);
+    }
+    if (versionInfo?.updateCheckPending) {
+      const serverPort = await findServerPort();
+      if (serverPort) versionInfo = await waitForUpdateCheck(serverPort, versionInfo);
     }
     if (versionInfo?.latest && isNewerVersion(versionInfo.latest, CLI_VERSION)) {
       console.log(

@@ -19,7 +19,10 @@ function stubFetch(version: { version: string; latest?: string }, prefs: Record<
   return calls;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('useUpdateNotice', () => {
   it('exposes latest when newer and not dismissed', async () => {
@@ -33,6 +36,58 @@ describe('useUpdateNotice', () => {
     const { result } = renderHook(() => useUpdateNotice());
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     expect(result.current.latest).toBeNull();
+  });
+
+  it('retries while the server update check is pending', async () => {
+    vi.useFakeTimers();
+    let versionCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/version')) {
+          versionCalls++;
+          const body =
+            versionCalls === 1
+              ? { version: '0.6.0', updateCheckPending: true }
+              : { version: '0.6.0', latest: '0.7.0' };
+          return new Response(JSON.stringify(body), { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useUpdateNotice());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(versionCalls).toBe(2);
+    expect(result.current.latest).toBe('0.7.0');
+    unmount();
+  });
+
+  it('polls for versions discovered after the viewer mounts', async () => {
+    vi.useFakeTimers();
+    let versionCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/version')) {
+          versionCalls++;
+          const body =
+            versionCalls === 1 ? { version: '0.6.0' } : { version: '0.6.0', latest: '0.7.0' };
+          return new Response(JSON.stringify(body), { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useUpdateNotice());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    });
+    expect(versionCalls).toBe(2);
+    expect(result.current.latest).toBe('0.7.0');
+    unmount();
   });
 
   it('stays hidden when that version was already dismissed', async () => {

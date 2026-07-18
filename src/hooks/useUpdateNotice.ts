@@ -5,7 +5,12 @@ import { readJsonResponse } from '../lib/http';
 interface VersionInfo {
   version: string;
   latest?: string;
+  updateCheckPending?: boolean;
 }
+
+const PENDING_RETRY_MS = 250;
+const VERSION_POLL_MS = 5 * 60 * 1000;
+const ERROR_RETRY_MS = 60 * 1000;
 
 /**
  * Update-available state for the viewer. The server only reports `latest`
@@ -18,20 +23,34 @@ export function useUpdateNotice(): { latest: string | null; dismiss: () => void 
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const refresh = async () => {
+      let nextDelay = ERROR_RETRY_MS;
       try {
         const res = await fetch('/api/version');
         const info = await readJsonResponse<VersionInfo>(res);
-        if (!res.ok || !info?.latest) return;
-        const prefs = await fetchPreferences();
-        if (cancelled) return;
-        if (prefs.updateDismissedVersion !== info.latest) setLatest(info.latest);
+        if (!res.ok || !info) return;
+        nextDelay = info.updateCheckPending ? PENDING_RETRY_MS : VERSION_POLL_MS;
+        if (info.latest) {
+          const prefs = await fetchPreferences();
+          if (!cancelled) {
+            setLatest(prefs.updateDismissedVersion === info.latest ? null : info.latest);
+          }
+        } else if (!info.updateCheckPending && !cancelled) {
+          setLatest(null);
+        }
       } catch {
         // Server unreachable or malformed response: no notice.
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void refresh(), nextDelay);
       }
-    })();
+    };
+
+    void refresh();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

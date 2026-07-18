@@ -66,6 +66,8 @@ export interface CreateAppOptions {
    * is strictly newer than APP_VERSION, else null. Absent in tests and when
    * the update check is disabled. */
   getLatestVersion?: () => string | null;
+  /** Whether the asynchronous update check has not settled yet. */
+  isUpdateCheckPending?: () => boolean;
 }
 
 function canonicalize(p: string): string {
@@ -126,6 +128,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
   const platformName = options.platformName ?? platform();
   const execFileImpl = options.execFileImpl ?? execFile;
   const getLatestVersion = options.getLatestVersion;
+  const isUpdateCheckPending = options.isUpdateCheckPending;
   const caseInsensitivePaths = platformName === 'win32';
 
   const app = new Hono();
@@ -576,7 +579,12 @@ export function createAppFull(options: CreateAppOptions = {}) {
 
   app.get('/api/version', (c) => {
     const latest = getLatestVersion?.() ?? null;
-    return c.json(latest ? { version: APP_VERSION, latest } : { version: APP_VERSION });
+    const updateCheckPending = isUpdateCheckPending?.() ?? false;
+    return c.json({
+      version: APP_VERSION,
+      ...(latest ? { latest } : {}),
+      ...(updateCheckPending ? { updateCheckPending: true } : {}),
+    });
   });
 
   app.post('/api/shutdown', (c) => {
@@ -1395,6 +1403,11 @@ function detectStaticDir(): string | undefined {
   }
 }
 
+const isMainModule =
+  typeof process.argv[1] === 'string' &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+const updatesEnabled = isMainModule && !isUpdateCheckDisabled();
+
 const updateChecker = createUpdateChecker({
   currentVersion: APP_VERSION,
   packageName: PACKAGE_NAME,
@@ -1403,7 +1416,8 @@ const updateChecker = createUpdateChecker({
 export const app = createApp({
   staticDir: detectStaticDir(),
   defaultTrustHome: true,
-  getLatestVersion: isUpdateCheckDisabled() ? undefined : updateChecker.getLatest,
+  getLatestVersion: updatesEnabled ? updateChecker.getLatest : undefined,
+  isUpdateCheckPending: updatesEnabled ? updateChecker.isPending : undefined,
 });
 
 // 6373 ("MDR" on a phone keypad) stays clear of the 3000-3010 range that
@@ -1451,10 +1465,6 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
   );
 }
 
-const isMainModule =
-  typeof process.argv[1] === 'string' &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
-
 if (isMainModule) {
   findAvailablePort(app.fetch)
     .then(async (port) => {
@@ -1475,7 +1485,7 @@ if (isMainModule) {
           throw e;
         }
       }
-      if (!isUpdateCheckDisabled()) void updateChecker.start();
+      if (updatesEnabled) void updateChecker.start();
       console.log(`md-redline server running on http://127.0.0.1:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
       if (initialArg) {
