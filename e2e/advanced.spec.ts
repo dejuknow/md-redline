@@ -415,7 +415,7 @@ test.describe('Session persistence', () => {
     });
   });
 
-  test('URL file parameter wins over restored tabs', async ({ page }) => {
+  test('URL file parameter opens on top of restored tabs', async ({ page }) => {
     await page.goto('/');
     await page.evaluate(
       ([fixture1, fixture2]) => {
@@ -433,11 +433,108 @@ test.describe('Session persistence', () => {
     await page.goto(`/?file=${FIXTURE_1}`);
 
     const tabBar = page.locator('.h-11');
+    // The URL file is the active tab...
     await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
       timeout: 10_000,
     });
-    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
+    // ...and the saved session is restored in the background, not dropped.
+    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible();
+  });
+
+  test('URL dir parameter re-roots the explorer and keeps restored tabs', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(
+      ([fixture1, fixture2]) => {
+        localStorage.setItem(
+          'md-redline-session',
+          JSON.stringify({
+            openTabs: [fixture1, fixture2],
+            activeFilePath: fixture2,
+          }),
+        );
+      },
+      [FIXTURE_1, FIXTURE_2],
+    );
+
+    await page.goto(`/?dir=${fixtureDir}`);
+
+    // The saved session is restored, with its saved active tab still active.
+    const tabBar = page.locator('.h-11');
+    await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+
+    // The explorer opens rooted at the URL dir.
+    await expect(page.locator('[data-sidebar-panel]')).toBeVisible();
+    await expect(page.locator(`button.w-full.text-left[title="${FIXTURE_1}"]`)).toBeVisible();
+  });
+
+  test('reopening a mid-order saved tab keeps the saved tab order', async ({ page }) => {
+    const savedOrder = [() => FIXTURE_1, () => FIXTURE_2, () => OVERFLOW_FIXTURES[0]].map((f) =>
+      f(),
+    );
+    await page.goto('/');
+    await page.evaluate(
+      ([fixture1, fixture2, overflow1]) => {
+        localStorage.setItem(
+          'md-redline-session',
+          JSON.stringify({
+            openTabs: [fixture1, fixture2, overflow1],
+            activeFilePath: overflow1,
+          }),
+        );
+      },
+      savedOrder,
+    );
+
+    // Reopen the MIDDLE saved tab via URL, as the desktop shell's first
+    // navigation does. It must activate in place, not jump to the end.
+    await page.goto(`/?file=${FIXTURE_2}`);
+
+    const tabBar = page.locator('.h-11');
+    await expect(tabBar.locator('button', { hasText: 'overflow-tab-1.md' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+
+    const texts = await tabBar.locator('button').allTextContents();
+    const tabTitles = texts.map((t) => /[\w.-]+\.md/.exec(t)?.[0] ?? '').filter(Boolean);
+    expect(tabTitles).toEqual(['test-doc.md', 'test-doc-2.md', 'overflow-tab-1.md']);
+  });
+
+  test('restore keeps saved order when the active tab is mid-list', async ({ page }) => {
+    // Guards the restore loop itself: a regression to the old
+    // "background-open the rest, open the active tab last" pattern passes
+    // every other test (they all seed the active tab as the last element)
+    // but reorders this arrangement to [test-doc, overflow-tab-1, test-doc-2].
+    await page.goto('/');
+    await page.evaluate(
+      ([fixture1, fixture2, overflow1]) => {
+        localStorage.setItem(
+          'md-redline-session',
+          JSON.stringify({
+            openTabs: [fixture1, fixture2, overflow1],
+            activeFilePath: fixture2,
+          }),
+        );
+      },
+      [FIXTURE_1, FIXTURE_2, OVERFLOW_FIXTURES[0]],
+    );
+
+    await page.goto('/');
+
+    const tabBar = page.locator('.h-11');
+    await expect(tabBar.locator('button', { hasText: 'overflow-tab-1.md' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+
+    const texts = await tabBar.locator('button').allTextContents();
+    const tabTitles = texts.map((t) => /[\w.-]+\.md/.exec(t)?.[0] ?? '').filter(Boolean);
+    expect(tabTitles).toEqual(['test-doc.md', 'test-doc-2.md', 'overflow-tab-1.md']);
   });
 });
 

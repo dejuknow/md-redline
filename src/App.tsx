@@ -348,25 +348,34 @@ export default function App() {
     });
   }, [tabs, activeFilePath, persist]);
 
-  // Restore session tabs on first mount
+  // Restore session tabs on first mount. A ?file or ?dir param does NOT
+  // discard the saved session: the new target lands on top of the restored
+  // tabs (?file is opened and activated by the initial-load effect below;
+  // ?dir only re-points the explorer). Only ?review skips restore, so a
+  // reload doesn't re-open the tabs of a completed review.
   const sessionRestoredRef = useRef(false);
   useEffect(() => {
     if (sessionRestoredRef.current) return;
     sessionRestoredRef.current = true;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('file') || params.get('dir') || params.get('review')) return;
-    if (savedSession && savedSession.openTabs.length > 0) {
-      // Open inactive tabs in background first, then the active tab last
-      // (openTab sets it active, avoiding the setTimeout race)
-      const activeTarget =
-        savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)
-          ? savedSession.activeFilePath
-          : savedSession.openTabs[0];
-      for (const path of savedSession.openTabs) {
-        if (path === activeTarget) continue;
+    if (params.get('review')) return;
+    if (!savedSession || savedSession.openTabs.length === 0) return;
+    // Restore in saved order: the saved active tab opens via openTab (which
+    // activates it) at its original position; background opens never steal
+    // activation, so order and active survive together. A ?file target is
+    // NOT special-cased here — the initial-load effect below opens it
+    // afterwards, which activates the already-restored tab in place (no
+    // reorder) or appends it when it is genuinely new.
+    const activeTarget =
+      savedSession.activeFilePath && savedSession.openTabs.includes(savedSession.activeFilePath)
+        ? savedSession.activeFilePath
+        : savedSession.openTabs[0];
+    for (const path of savedSession.openTabs) {
+      if (path === activeTarget) {
+        openTab(path);
+      } else {
         openTabInBackground(path);
       }
-      openTab(activeTarget);
     }
   }, [openTab, openTabInBackground, savedSession]);
 
