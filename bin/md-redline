@@ -341,6 +341,14 @@ async function buildUrl(file, dir) {
 }
 
 async function openInBrowser(url) {
+  // MDR_BROWSER overrides the launcher with an explicit command that receives
+  // the URL as its argument (e.g. a specific browser binary). Spawned detached
+  // so it survives this process exiting, same as the platform defaults below.
+  const override = process.env.MDR_BROWSER?.trim();
+  if (override) {
+    await spawnDetached(override, [url], { detached: true });
+    return;
+  }
   if (process.platform === 'darwin') {
     await spawnDetached('open', [url]);
     return;
@@ -606,6 +614,16 @@ async function main() {
 
   if (process.argv[2] === '--restrict') {
     await enableRestrictedMode();
+    return;
+  }
+
+  if (process.argv[2] === '__open') {
+    // Internal, undocumented seam: launch the browser for a URL and exit
+    // immediately, without booting a server. Lets the browser-open regression
+    // test drive openInBrowser() in isolation — the worst case for the Windows
+    // detached-teardown race — and honors MDR_BROWSER like every other path.
+    const target = process.argv[3];
+    if (target) await openInBrowser(target);
     return;
   }
 
