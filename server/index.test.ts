@@ -59,6 +59,35 @@ async function requestJson(appInstance: AppInstance, path: string, init?: Reques
   };
 }
 
+// Preference writes (addTrustedRoot, writePreferences) are fire-and-forget:
+// the request returns before the write lands on disk. Polling for the file to
+// exist and satisfy `predicate` replaces fixed sleeps that raced the write on
+// slow CI filesystems (Windows hit ENOENT at a 50ms wait). A concurrent read
+// during a non-atomic write can also surface a truncated file, so JSON.parse
+// failures are tolerated and retried. On timeout it does one final read so the
+// caller's own expect() reports a real diff (or a genuine ENOENT) rather than a
+// bare timeout.
+type PersistedPrefs = { trustedRoots?: string[]; recentFiles?: unknown[]; [key: string]: unknown };
+
+async function waitForPrefs(
+  realHome: string,
+  predicate: (parsed: PersistedPrefs) => unknown = () => true,
+  timeoutMs = 2000,
+): Promise<PersistedPrefs> {
+  const prefsPath = join(realHome, '.md-redline.json');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const parsed = JSON.parse(await readFile(prefsPath, 'utf-8'));
+      if (predicate(parsed)) return parsed;
+    } catch {
+      /* file absent or mid-write; retry until the deadline */
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return JSON.parse(await readFile(prefsPath, 'utf-8'));
+}
+
 beforeAll(async () => {
   cwdRoot = await mkdtemp(join(tmpdir(), 'md-redline-server-cwd-'));
   fakeHome = await mkdtemp(join(tmpdir(), 'md-redline-server-home-'));
@@ -1007,10 +1036,7 @@ describe('/api/pick-file', () => {
     expect(body.path).toBe(externalFile);
 
     // Allow fire-and-forget addTrustedRoot to flush.
-    await new Promise((r) => setTimeout(r, 50));
-
-    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed = await waitForPrefs(realHome, (p) => p.trustedRoots?.includes(externalDir));
     expect(parsed.trustedRoots).toContain(externalDir);
 
     await rm(realHome, { recursive: true, force: true });
@@ -1109,9 +1135,7 @@ describe('/api/pick-folder', () => {
     expect(response.status).toBe(200);
     expect(body.path).toBe(realPicked);
 
-    await new Promise((r) => setTimeout(r, 50));
-    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed = await waitForPrefs(realHome, (p) => p.trustedRoots?.includes(realPicked));
     expect(parsed.trustedRoots).toContain(realPicked);
 
     await rm(realHome, { recursive: true, force: true });
@@ -1500,11 +1524,12 @@ describe('persisted trustedRoots hydration', () => {
       platformName: 'linux',
     });
 
-    // Allow fire-and-forget writePreferences to flush.
-    await new Promise((r) => setTimeout(r, 50));
-
-    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
-    const parsed = JSON.parse(raw);
+    // Allow fire-and-forget writePreferences to flush (poll until the ghost
+    // root has been pruned, otherwise the read can see the pre-written pair).
+    const parsed = await waitForPrefs(
+      realHome,
+      (p) => p.trustedRoots?.length === 1 && p.trustedRoots[0] === externalDir,
+    );
     expect(parsed.trustedRoots).toEqual([externalDir]);
 
     await rm(realHome, { recursive: true, force: true });
@@ -1530,10 +1555,7 @@ describe('persisted trustedRoots hydration', () => {
       platformName: 'linux',
     });
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed = await waitForPrefs(realHome, (p) => p.trustedRoots?.includes(externalDir));
     expect(parsed.trustedRoots).toEqual([externalDir]);
 
     // Construct again with the same home dir — migration should NOT re-run.
@@ -1569,10 +1591,7 @@ describe('persisted trustedRoots hydration', () => {
       defaultTrustHome: true,
     });
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed = await waitForPrefs(realHome, (p) => p.trustedRoots?.includes(realHome));
     expect(parsed.trustedRoots).toEqual([realHome]);
 
     await rm(realHome, { recursive: true, force: true });
@@ -1647,10 +1666,10 @@ describe('persisted trustedRoots hydration', () => {
       defaultTrustHome: true,
     });
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    const raw = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
-    const parsed = JSON.parse(raw);
+    const parsed = await waitForPrefs(
+      realHome,
+      (p) => p.trustedRoots?.includes(realHome) && p.trustedRoots?.includes(externalDir),
+    );
     // Expect both the home dir AND the recent file's parent dir to be present
     expect(parsed.trustedRoots).toContain(realHome);
     expect(parsed.trustedRoots).toContain(externalDir);
