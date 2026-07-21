@@ -117,6 +117,13 @@ describe('renderMarkdown', () => {
     );
   });
 
+  it('preserves data: URI images through the sanitizer', () => {
+    const md = '![diagram](data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==)';
+    const html = renderMarkdown(md);
+    expect(html).toContain('src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=="');
+    expect(html).toContain('alt="diagram"');
+  });
+
   it('opens external links in a new tab through the full pipeline', () => {
     const md = '[ext](https://example.com)';
     const html = renderMarkdown(md);
