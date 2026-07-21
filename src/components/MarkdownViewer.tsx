@@ -1,4 +1,12 @@
-import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react';
+import {
+  memo,
+  useRef,
+  useLayoutEffect,
+  forwardRef,
+  useImperativeHandle,
+  useMemo,
+  useEffect,
+} from 'react';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
@@ -183,6 +191,18 @@ export const MarkdownViewer = memo(
       const container = containerRef.current;
       if (!container) return;
 
+      // Capture each wide table's horizontal scroll BEFORE the innerHTML
+      // rebuild below tears the subtree down. This effect re-runs on dep
+      // changes that don't touch table content (search query, active comment,
+      // text selection), so without this a reviewer scrolled into a hidden
+      // column snaps back to the left the moment they type into search.
+      // Captured with a content-identity key (not DOM position) so the restore
+      // below survives edits/agent rewrites that add or reorder tables.
+      const priorTableScroll = Array.from(
+        container.querySelectorAll<HTMLElement>('.table-scroll__viewport'),
+        (vp) => ({ key: tableScrollKey(vp), scrollLeft: vp.scrollLeft }),
+      );
+
       // Set innerHTML from scratch — guarantees a clean starting state
       // Defense-in-depth: rehype-sanitize is the primary sanitizer, but
       // DOMPurify provides a second layer in case of a remark/rehype bypass.
@@ -278,7 +298,9 @@ export const MarkdownViewer = memo(
       } of highlightGroups.values()) {
         const isActive = ids.includes(activeCommentId || '');
         const allSent =
-          sentCommentIds && sentCommentIds.length > 0 && ids.every((id) => sentCommentIds.includes(id));
+          sentCommentIds &&
+          sentCommentIds.length > 0 &&
+          ids.every((id) => sentCommentIds.includes(id));
         wrapText(
           container,
           anchor,
@@ -306,9 +328,7 @@ export const MarkdownViewer = memo(
             // Append (not replace) so two highlight groups on the same
             // <text> element both register their ids — the click handler
             // reads this list to decide which thread to activate.
-            const existing = textEl.dataset.commentIds
-              ? textEl.dataset.commentIds.split(',')
-              : [];
+            const existing = textEl.dataset.commentIds ? textEl.dataset.commentIds.split(',') : [];
             for (const id of ids) {
               if (!existing.includes(id)) existing.push(id);
             }
@@ -339,7 +359,11 @@ export const MarkdownViewer = memo(
       )) {
         const el = mark as HTMLElement;
         const isActive = el.classList.contains('comment-highlight-active');
-        el.classList.remove('comment-highlight', 'comment-highlight-sent', 'comment-highlight-active');
+        el.classList.remove(
+          'comment-highlight',
+          'comment-highlight-sent',
+          'comment-highlight-active',
+        );
         el.classList.add('mermaid-comment-highlight');
         if (isActive) {
           el.classList.add('mermaid-comment-highlight-active');
@@ -386,16 +410,46 @@ export const MarkdownViewer = memo(
       // Show an edge fade only when a table overflows, and only on the side(s)
       // with more content. This re-runs with the effect (innerHTML is rebuilt
       // each time), so listeners always target live nodes.
+      // Match the captured offsets to the rebuilt tables by identity, then
+      // restore each in the loop below. Runs inside useLayoutEffect (pre-paint),
+      // so there is no scroll-jump flash.
+      const restoredScroll = matchTableScroll(
+        priorTableScroll,
+        Array.from(
+          container.querySelectorAll<HTMLElement>('.table-scroll__viewport'),
+          tableScrollKey,
+        ),
+      );
       const tableCleanups: Array<() => void> = [];
+      let tableIndex = 0;
       for (const host of container.querySelectorAll<HTMLElement>('.table-scroll')) {
         const viewport = host.querySelector<HTMLElement>('.table-scroll__viewport');
         if (!viewport) continue;
+        const priorScroll = restoredScroll[tableIndex];
+        if (priorScroll) viewport.scrollLeft = priorScroll;
+        tableIndex += 1;
         const update = () => {
-          const max = viewport.scrollWidth - viewport.clientWidth;
-          const x = viewport.scrollLeft;
-          const overflowing = max > 1;
-          host.toggleAttribute('data-overflow-start', overflowing && x > 1);
-          host.toggleAttribute('data-overflow-end', overflowing && x < max - 1);
+          const { overflowing, overflowStart, overflowEnd } = computeTableOverflow(
+            viewport.scrollWidth,
+            viewport.clientWidth,
+            viewport.scrollLeft,
+          );
+          host.toggleAttribute('data-overflow-start', overflowStart);
+          host.toggleAttribute('data-overflow-end', overflowEnd);
+          // A scrollable region must be keyboard-reachable (axe:
+          // scrollable-region-focusable) — Chromium/Firefox auto-focus
+          // overflow containers, but Safari doesn't, so a wide table's hidden
+          // content is otherwise unreachable without a mouse. Make the
+          // viewport a labeled tab stop, but ONLY while it actually overflows,
+          // so narrow tables don't become pointless tab stops. Re-runs on
+          // scroll/resize keep this in sync as the window changes.
+          if (overflowing) {
+            viewport.setAttribute('tabindex', '0');
+            viewport.setAttribute('aria-label', 'Scrollable table');
+          } else {
+            viewport.removeAttribute('tabindex');
+            viewport.removeAttribute('aria-label');
+          }
         };
         update();
         viewport.addEventListener('scroll', update, { passive: true });
@@ -677,6 +731,66 @@ function getBlockParent(node: Node): Element | null {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/**
+ * Pure overflow arithmetic for a horizontally-scrollable table viewport.
+ * Returns whether the content overflows and which edge fade to show. The 1px
+ * slack on every comparison absorbs sub-pixel layout rounding so a table that
+ * fits exactly doesn't flicker a fade cue. Extracted and exported because
+ * jsdom can't measure real layout (scrollWidth/clientWidth are 0), so the DOM
+ * wiring in the effect stays browser-only while this arithmetic stays unit-
+ * testable — see MarkdownViewer.test.tsx.
+ */
+export function computeTableOverflow(
+  scrollWidth: number,
+  clientWidth: number,
+  scrollLeft: number,
+): { overflowing: boolean; overflowStart: boolean; overflowEnd: boolean } {
+  const max = scrollWidth - clientWidth;
+  const overflowing = max > 1;
+  return {
+    overflowing,
+    // Content is hidden to the left (fade the start edge) once scrolled away
+    // from 0; hidden to the right (fade the end edge) until scrolled to max.
+    overflowStart: overflowing && scrollLeft > 1,
+    overflowEnd: overflowing && scrollLeft < max - 1,
+  };
+}
+
+/** Stable-ish identity for a wrapped table, used to match its horizontal
+ *  scroll across an innerHTML rebuild by CONTENT rather than DOM position (see
+ *  matchTableScroll). The length prefix cheaply separates two tables that
+ *  share a 200-char prefix. */
+function tableScrollKey(viewport: HTMLElement): string {
+  const text = viewport.querySelector('table')?.textContent ?? '';
+  return `${text.length}:${text.slice(0, 200)}`;
+}
+
+/**
+ * Match the table horizontal-scroll offsets captured before an innerHTML
+ * rebuild to the tables present after it, by identity key rather than DOM
+ * position. `prior` is the pre-rebuild capture and `currentKeys` are the
+ * post-rebuild tables' identity keys, both in document order. Returns, per
+ * current table, the offset to restore (or undefined to leave it at 0).
+ *
+ * Keying by identity (not index) is what keeps a live content edit or agent
+ * rewrite that inserts/removes/reorders tables from applying a stale offset to
+ * the wrong table: an unchanged table keeps its place, a changed or new one
+ * starts at 0. Two identical tables consume offsets in order so each still
+ * restores. Pure and exported for unit tests.
+ */
+export function matchTableScroll(
+  prior: Array<{ key: string; scrollLeft: number }>,
+  currentKeys: string[],
+): Array<number | undefined> {
+  const buckets = new Map<string, number[]>();
+  for (const { key, scrollLeft } of prior) {
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(scrollLeft);
+    else buckets.set(key, [scrollLeft]);
+  }
+  return currentKeys.map((key) => buckets.get(key)?.shift());
+}
+
 /** Walk up from a text node; return the outermost SVG <text> ancestor, or null
  *  if not inside SVG text content (or if a <foreignObject> switches the context
  *  back to HTML before reaching an SVG text element). Used to redirect wraps
@@ -763,7 +877,10 @@ function pickLiteralOccurrence(
         }
       }
       if (contextAfter) {
-        const after = fullText.slice(occ + needle.length, occ + needle.length + contextAfter.length);
+        const after = fullText.slice(
+          occ + needle.length,
+          occ + needle.length + contextAfter.length,
+        );
         for (let j = 0; j < Math.min(after.length, contextAfter.length); j++) {
           if (after[j] === contextAfter[j]) score++;
           else break;
@@ -784,9 +901,7 @@ function pickLiteralOccurrence(
   const searchWindow = Math.max(20, needle.length);
   const windowed = fullText.indexOf(needle, Math.max(0, hintOffset - searchWindow));
   if (windowed !== -1 && windowed <= hintOffset + 20) return windowed;
-  return occs.reduce((b, idx) =>
-    Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-  );
+  return occs.reduce((b, idx) => (Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b));
 }
 
 /**
@@ -796,9 +911,7 @@ function pickLiteralOccurrence(
 function pickClosestOccurrence(occs: number[], hintOffset?: number): number {
   if (occs.length === 1) return occs[0];
   if (hintOffset == null) return occs[0];
-  return occs.reduce((b, idx) =>
-    Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-  );
+  return occs.reduce((b, idx) => (Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b));
 }
 
 // Mermaid node syntax: an identifier (capital-first is the Mermaid convention)
@@ -812,7 +925,8 @@ function pickClosestOccurrence(occs: number[], hintOffset?: number): number {
 // bracket classes is the textbook ReDoS shape — pathological inputs like
 // `A[xxxxxxxx...]` failing the final bracket would force catastrophic
 // backtracking on every iteration.
-const MERMAID_NODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*\s*[[{(>]+([^\]})]*[A-Za-z][^\]})]*)[\]})]+\s*$/s;
+const MERMAID_NODE_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_]*\s*[[{(>]+([^\]})]*[A-Za-z][^\]})]*)[\]})]+\s*$/s;
 
 // Hard bound on input length before invoking MERMAID_NODE_PATTERN. Real
 // Mermaid node anchors are short ("E[Clicks Discover Pages]"); anything

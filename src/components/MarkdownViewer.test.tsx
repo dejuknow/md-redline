@@ -2,8 +2,116 @@
 
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MarkdownViewer, isInsideSvgTextContent } from './MarkdownViewer';
+import {
+  MarkdownViewer,
+  isInsideSvgTextContent,
+  computeTableOverflow,
+  matchTableScroll,
+} from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
+
+describe('matchTableScroll', () => {
+  it('restores offsets to the same tables when nothing changed', () => {
+    const prior = [
+      { key: 'a', scrollLeft: 100 },
+      { key: 'b', scrollLeft: 50 },
+    ];
+    expect(matchTableScroll(prior, ['a', 'b'])).toEqual([100, 50]);
+  });
+
+  it('keeps an unchanged table at its offset when a table is inserted before it', () => {
+    // The reviewer's desync scenario: a new table appears at index 0. Positional
+    // restore would misapply 100 to the new table and reset the real one to 0;
+    // identity keying keeps table "a" at 100 and starts the new "c" at 0.
+    const prior = [
+      { key: 'a', scrollLeft: 100 },
+      { key: 'b', scrollLeft: 50 },
+    ];
+    expect(matchTableScroll(prior, ['c', 'a', 'b'])).toEqual([undefined, 100, 50]);
+  });
+
+  it('restores correctly when a table is removed or the tables are reordered', () => {
+    const prior = [
+      { key: 'a', scrollLeft: 100 },
+      { key: 'b', scrollLeft: 50 },
+    ];
+    expect(matchTableScroll(prior, ['b'])).toEqual([50]); // "a" removed
+    expect(matchTableScroll(prior, ['b', 'a'])).toEqual([50, 100]); // reordered
+  });
+
+  it('gives two identical tables their own offsets, in order', () => {
+    const prior = [
+      { key: 'dup', scrollLeft: 10 },
+      { key: 'dup', scrollLeft: 20 },
+    ];
+    expect(matchTableScroll(prior, ['dup', 'dup'])).toEqual([10, 20]);
+    expect(matchTableScroll(prior, ['dup'])).toEqual([10]);
+  });
+
+  it('leaves new tables unrestored when there is no prior capture', () => {
+    expect(matchTableScroll([], ['a', 'b'])).toEqual([undefined, undefined]);
+  });
+});
+
+describe('computeTableOverflow', () => {
+  it('reports no overflow when content fits, with 1px slack for rounding', () => {
+    expect(computeTableOverflow(500, 500, 0)).toEqual({
+      overflowing: false,
+      overflowStart: false,
+      overflowEnd: false,
+    });
+    // max === 1 is within slack (not > 1), so still not overflowing.
+    expect(computeTableOverflow(501, 500, 0)).toEqual({
+      overflowing: false,
+      overflowStart: false,
+      overflowEnd: false,
+    });
+  });
+
+  it('fades only the end edge when scrolled to the far left', () => {
+    // scrollWidth 800, clientWidth 500 → max 300; scrollLeft 0.
+    expect(computeTableOverflow(800, 500, 0)).toEqual({
+      overflowing: true,
+      overflowStart: false,
+      overflowEnd: true,
+    });
+  });
+
+  it('fades only the start edge when scrolled to the far right', () => {
+    expect(computeTableOverflow(800, 500, 300)).toEqual({
+      overflowing: true,
+      overflowStart: true,
+      overflowEnd: false,
+    });
+  });
+
+  it('fades both edges when scrolled to the middle', () => {
+    expect(computeTableOverflow(800, 500, 150)).toEqual({
+      overflowing: true,
+      overflowStart: true,
+      overflowEnd: true,
+    });
+  });
+
+  it('applies the 1px slack to the start/end edges, not just the overflow flag', () => {
+    // max = 800 - 500 = 300. Start fade needs scrollLeft > 1; end fade needs
+    // scrollLeft < max - 1 (299). At the exact 1px boundaries neither edge
+    // fades, so a sub-pixel rest position doesn't flicker a cue.
+    expect(computeTableOverflow(800, 500, 1)).toMatchObject({ overflowStart: false });
+    expect(computeTableOverflow(800, 500, 2)).toMatchObject({ overflowStart: true });
+    expect(computeTableOverflow(800, 500, 299)).toMatchObject({ overflowEnd: false });
+    expect(computeTableOverflow(800, 500, 298)).toMatchObject({ overflowEnd: true });
+  });
+
+  it('never reports overflow when the viewport is wider than its content', () => {
+    // Negative max (clientWidth > scrollWidth) must not spuriously fade.
+    expect(computeTableOverflow(400, 500, 0)).toEqual({
+      overflowing: false,
+      overflowStart: false,
+      overflowEnd: false,
+    });
+  });
+});
 
 describe('isInsideSvgTextContent', () => {
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -134,7 +242,9 @@ describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', (
     );
 
     await waitFor(() => {
-      const htmlMark = container.querySelector('mark.comment-highlight, mark.comment-highlight-sent');
+      const htmlMark = container.querySelector(
+        'mark.comment-highlight, mark.comment-highlight-sent',
+      );
       const svgMark = container.querySelector('.mermaid-comment-highlight');
       expect(htmlMark ?? svgMark).not.toBeNull();
     });
@@ -180,7 +290,9 @@ describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', (
     await waitFor(() => {
       // The mark may land on either an HTML <mark> (foreignObject) or a mermaid SVG
       // text element. Either way, the rendered label text must appear highlighted.
-      const htmlMark = container.querySelector('mark.comment-highlight, mark.comment-highlight-sent');
+      const htmlMark = container.querySelector(
+        'mark.comment-highlight, mark.comment-highlight-sent',
+      );
       const svgMark = container.querySelector('.mermaid-comment-highlight');
       // At least one highlight form must be present.
       expect(htmlMark ?? svgMark).not.toBeNull();

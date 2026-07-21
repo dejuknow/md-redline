@@ -500,6 +500,27 @@ truncating each segment past 28 characters. Each segment is a button that
 jumps to that heading. Hidden in raw view and while the diff overlay is
 showing, and disappears again once scrolled back above the first heading.
 
+### Handoff button
+`src/components/HandOffButton.tsx` (in the panel toolbar) is md-redline's
+"submit review": it copies the agent prompt for the review comments so they
+can be handed back to the agent. Its scope follows the **active tab**, never
+the whole set of open tabs, because reviewers keep unrelated docs from
+different projects open at once and a comment in a background tab must not
+light up or rename the button while you read something else. Nothing is
+stranded: comments live in the file markers and every tab carries its own
+count badge (`tabCommentCounts`), so pending work is surfaced by the tab.
+
+States, driven by the active file's sendable-comment count:
+- **Active tab has no sendable comments**: quiet disabled icon with an
+  explanatory tooltip, even if other tabs do have comments.
+- **Active tab has comments, no other tab does**: labeled CTA; clicking hands
+  off the active file immediately.
+- **Active tab has comments AND other tabs do**: the CTA (count is always the
+  active file) gains a chevron segment that opens a picker. The picker
+  pre-selects the active file only and lists other commented tabs unchecked,
+  so cross-project tabs are opted in per file rather than assumed to belong to
+  this review. The active row is tagged "· this file".
+
 ### Diff overlay
 After a review handoff, a diff overlay shows what changed since the handoff,
 available in both rendered and raw views via the panel toolbar. The handoff

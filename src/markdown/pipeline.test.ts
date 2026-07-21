@@ -83,9 +83,7 @@ describe('renderMarkdown', () => {
   it('rewrites a relative image src when filePath is provided', () => {
     const md = '![diagram](./diagram.png)';
     const html = renderMarkdown(md, '/abs/dir/file.md');
-    expect(html).toContain(
-      `src="/api/asset?path=${encodeURIComponent('/abs/dir/diagram.png')}"`,
-    );
+    expect(html).toContain(`src="/api/asset?path=${encodeURIComponent('/abs/dir/diagram.png')}"`);
   });
 
   it('rewrites a relative .md link to a data attribute when filePath is provided', () => {
@@ -112,9 +110,7 @@ describe('renderMarkdown', () => {
   it('still rewrites absolute paths when filePath is omitted', () => {
     const md = '![x](/abs/img.png)';
     const html = renderMarkdown(md);
-    expect(html).toContain(
-      `src="/api/asset?path=${encodeURIComponent('/abs/img.png')}"`,
-    );
+    expect(html).toContain(`src="/api/asset?path=${encodeURIComponent('/abs/img.png')}"`);
   });
 
   it('preserves data: URI images through the sanitizer', () => {
@@ -130,5 +126,38 @@ describe('renderMarkdown', () => {
     expect(html).toContain('href="https://example.com"');
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
+  });
+});
+
+describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {
+  it('wraps a table in div.table-scroll > div.table-scroll__viewport > table', () => {
+    const md = '| A | B |\n| --- | --- |\n| 1 | 2 |';
+    const html = renderMarkdown(md);
+    expect(html).toContain('<div class="table-scroll"><div class="table-scroll__viewport"><table>');
+    expect(html).toContain('</table></div></div>');
+  });
+
+  it('wraps multiple sibling tables independently, dropping none and nesting none', () => {
+    const md = '| A |\n| --- |\n| 1 |\n\n| B |\n| --- |\n| 2 |';
+    const html = renderMarkdown(md);
+    // Every table is wrapped exactly once (2 viewports for 2 tables).
+    expect((html.match(/table-scroll__viewport/g) ?? []).length).toBe(2);
+    expect((html.match(/<table>/g) ?? []).length).toBe(2);
+    // The SKIP/index+1 visitor must not descend into a wrapper it just
+    // inserted: a nested wrap would splice a second .table-scroll straight
+    // inside a viewport.
+    expect(html).not.toContain('table-scroll__viewport"><div class="table-scroll"');
+  });
+
+  it('wraps a table nested inside a blockquote', () => {
+    const md = '> | A |\n> | --- |\n> | 1 |';
+    const html = renderMarkdown(md);
+    expect(html).toContain('<blockquote>');
+    expect(html).toContain('<div class="table-scroll"><div class="table-scroll__viewport"><table>');
+  });
+
+  it('leaves content without tables unwrapped', () => {
+    const html = renderMarkdown('Just a paragraph, no table.');
+    expect(html).not.toContain('table-scroll');
   });
 });
