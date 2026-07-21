@@ -2,8 +2,56 @@
 
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MarkdownViewer, isInsideSvgTextContent, computeTableOverflow } from './MarkdownViewer';
+import {
+  MarkdownViewer,
+  isInsideSvgTextContent,
+  computeTableOverflow,
+  matchTableScroll,
+} from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
+
+describe('matchTableScroll', () => {
+  it('restores offsets to the same tables when nothing changed', () => {
+    const prior = [
+      { key: 'a', scrollLeft: 100 },
+      { key: 'b', scrollLeft: 50 },
+    ];
+    expect(matchTableScroll(prior, ['a', 'b'])).toEqual([100, 50]);
+  });
+
+  it('keeps an unchanged table at its offset when a table is inserted before it', () => {
+    // The reviewer's desync scenario: a new table appears at index 0. Positional
+    // restore would misapply 100 to the new table and reset the real one to 0;
+    // identity keying keeps table "a" at 100 and starts the new "c" at 0.
+    const prior = [
+      { key: 'a', scrollLeft: 100 },
+      { key: 'b', scrollLeft: 50 },
+    ];
+    expect(matchTableScroll(prior, ['c', 'a', 'b'])).toEqual([undefined, 100, 50]);
+  });
+
+  it('restores correctly when a table is removed or the tables are reordered', () => {
+    const prior = [
+      { key: 'a', scrollLeft: 100 },
+      { key: 'b', scrollLeft: 50 },
+    ];
+    expect(matchTableScroll(prior, ['b'])).toEqual([50]); // "a" removed
+    expect(matchTableScroll(prior, ['b', 'a'])).toEqual([50, 100]); // reordered
+  });
+
+  it('gives two identical tables their own offsets, in order', () => {
+    const prior = [
+      { key: 'dup', scrollLeft: 10 },
+      { key: 'dup', scrollLeft: 20 },
+    ];
+    expect(matchTableScroll(prior, ['dup', 'dup'])).toEqual([10, 20]);
+    expect(matchTableScroll(prior, ['dup'])).toEqual([10]);
+  });
+
+  it('leaves new tables unrestored when there is no prior capture', () => {
+    expect(matchTableScroll([], ['a', 'b'])).toEqual([undefined, undefined]);
+  });
+});
 
 describe('computeTableOverflow', () => {
   it('reports no overflow when content fits, with 1px slack for rounding', () => {

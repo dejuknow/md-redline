@@ -196,12 +196,12 @@ export const MarkdownViewer = memo(
       // changes that don't touch table content (search query, active comment,
       // text selection), so without this a reviewer scrolled into a hidden
       // column snaps back to the left the moment they type into search.
-      // Restored per table in the scroll-cue loop below, keyed by source-order
-      // index — stable because the same markdown re-renders the same tables in
-      // the same order.
+      // Captured with a content-identity key (not DOM position) so the restore
+      // below survives edits/agent rewrites that add or reorder tables.
       const priorTableScroll = Array.from(
         container.querySelectorAll<HTMLElement>('.table-scroll__viewport'),
-      ).map((vp) => vp.scrollLeft);
+        (vp) => ({ key: tableScrollKey(vp), scrollLeft: vp.scrollLeft }),
+      );
 
       // Set innerHTML from scratch — guarantees a clean starting state
       // Defense-in-depth: rehype-sanitize is the primary sanitizer, but
@@ -410,16 +410,22 @@ export const MarkdownViewer = memo(
       // Show an edge fade only when a table overflows, and only on the side(s)
       // with more content. This re-runs with the effect (innerHTML is rebuilt
       // each time), so listeners always target live nodes.
+      // Match the captured offsets to the rebuilt tables by identity, then
+      // restore each in the loop below. Runs inside useLayoutEffect (pre-paint),
+      // so there is no scroll-jump flash.
+      const restoredScroll = matchTableScroll(
+        priorTableScroll,
+        Array.from(
+          container.querySelectorAll<HTMLElement>('.table-scroll__viewport'),
+          tableScrollKey,
+        ),
+      );
       const tableCleanups: Array<() => void> = [];
       let tableIndex = 0;
       for (const host of container.querySelectorAll<HTMLElement>('.table-scroll')) {
         const viewport = host.querySelector<HTMLElement>('.table-scroll__viewport');
         if (!viewport) continue;
-        // Restore the horizontal scroll captured before the innerHTML rebuild
-        // (see priorTableScroll above), keyed by source-order index so a
-        // reviewer keeps their place across unrelated re-renders. Runs inside
-        // useLayoutEffect (pre-paint), so there is no scroll-jump flash.
-        const priorScroll = priorTableScroll[tableIndex];
+        const priorScroll = restoredScroll[tableIndex];
         if (priorScroll) viewport.scrollLeft = priorScroll;
         tableIndex += 1;
         const update = () => {
@@ -748,6 +754,41 @@ export function computeTableOverflow(
     overflowStart: overflowing && scrollLeft > 1,
     overflowEnd: overflowing && scrollLeft < max - 1,
   };
+}
+
+/** Stable-ish identity for a wrapped table, used to match its horizontal
+ *  scroll across an innerHTML rebuild by CONTENT rather than DOM position (see
+ *  matchTableScroll). The length prefix cheaply separates two tables that
+ *  share a 200-char prefix. */
+function tableScrollKey(viewport: HTMLElement): string {
+  const text = viewport.querySelector('table')?.textContent ?? '';
+  return `${text.length}:${text.slice(0, 200)}`;
+}
+
+/**
+ * Match the table horizontal-scroll offsets captured before an innerHTML
+ * rebuild to the tables present after it, by identity key rather than DOM
+ * position. `prior` is the pre-rebuild capture and `currentKeys` are the
+ * post-rebuild tables' identity keys, both in document order. Returns, per
+ * current table, the offset to restore (or undefined to leave it at 0).
+ *
+ * Keying by identity (not index) is what keeps a live content edit or agent
+ * rewrite that inserts/removes/reorders tables from applying a stale offset to
+ * the wrong table: an unchanged table keeps its place, a changed or new one
+ * starts at 0. Two identical tables consume offsets in order so each still
+ * restores. Pure and exported for unit tests.
+ */
+export function matchTableScroll(
+  prior: Array<{ key: string; scrollLeft: number }>,
+  currentKeys: string[],
+): Array<number | undefined> {
+  const buckets = new Map<string, number[]>();
+  for (const { key, scrollLeft } of prior) {
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(scrollLeft);
+    else buckets.set(key, [scrollLeft]);
+  }
+  return currentKeys.map((key) => buckets.get(key)?.shift());
 }
 
 /** Walk up from a text node; return the outermost SVG <text> ancestor, or null
