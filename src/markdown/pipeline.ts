@@ -23,6 +23,16 @@ const CLASS_NAME_ELEMENTS = [
 const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames || []), 'mark'],
+  // defaultSchema.protocols.src is ['http', 'https'], which strips the src off
+  // any <img> that uses a data: URI, so base64-embedded images render as a
+  // broken icon with only their alt text. Allow data: for src so inline images
+  // survive. Scripts inside an SVG loaded via <img src> cannot execute, and the
+  // DOMPurify pass in sanitize-html.ts independently permits data: only on the
+  // media tags (img, source, etc.), so this stays safe.
+  protocols: {
+    ...defaultSchema.protocols,
+    src: [...(defaultSchema.protocols?.src || []), 'data'],
+  },
   attributes: {
     ...defaultSchema.attributes,
     mark: ['className', 'dataCommentIds'],
