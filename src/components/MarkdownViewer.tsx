@@ -382,7 +382,35 @@ export const MarkdownViewer = memo(
 
       highlightsPaintedCb.current?.();
 
-      return cleanupMermaidLayout;
+      // --- Wide-table scroll cues ---
+      // Show an edge fade only when a table overflows, and only on the side(s)
+      // with more content. This re-runs with the effect (innerHTML is rebuilt
+      // each time), so listeners always target live nodes.
+      const tableCleanups: Array<() => void> = [];
+      for (const host of container.querySelectorAll<HTMLElement>('.table-scroll')) {
+        const viewport = host.querySelector<HTMLElement>('.table-scroll__viewport');
+        if (!viewport) continue;
+        const update = () => {
+          const max = viewport.scrollWidth - viewport.clientWidth;
+          const x = viewport.scrollLeft;
+          const overflowing = max > 1;
+          host.toggleAttribute('data-overflow-start', overflowing && x > 1);
+          host.toggleAttribute('data-overflow-end', overflowing && x < max - 1);
+        };
+        update();
+        viewport.addEventListener('scroll', update, { passive: true });
+        const ro = new ResizeObserver(update);
+        ro.observe(viewport);
+        tableCleanups.push(() => {
+          viewport.removeEventListener('scroll', update);
+          ro.disconnect();
+        });
+      }
+
+      return () => {
+        cleanupMermaidLayout?.();
+        for (const fn of tableCleanups) fn();
+      };
     }, [
       html,
       comments,

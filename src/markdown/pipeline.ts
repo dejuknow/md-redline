@@ -6,6 +6,8 @@ import remarkRehype from 'remark-rehype';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
+import { visit, SKIP } from 'unist-util-visit';
+import type { Root, Element } from 'hast';
 import { rewriteLocalUrls } from './rewriteLocalUrls';
 
 // Allow mark elements (used for comment highlights), data-* attributes, and
@@ -40,6 +42,42 @@ const sanitizeSchema = {
   },
 };
 
+/**
+ * Wrap every <table> in a horizontal-scroll container so wide tables scroll
+ * within their own box instead of being clipped by the sheet's `overflow: clip`
+ * (which can't become `auto` without capturing the sticky rail header — see the
+ * `.doc-sheet` comment in index.css). Structure:
+ *   div.table-scroll > div.table-scroll__viewport > table
+ * The outer div anchors the edge-fade cue; the inner div is the scrollport.
+ * Only elements are wrapped, so text nodes are untouched and comment anchoring
+ * is unaffected.
+ */
+function rehypeWrapTables() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element, index, parent) => {
+      if (node.tagName !== 'table' || parent == null || typeof index !== 'number') {
+        return;
+      }
+      const viewport: Element = {
+        type: 'element',
+        tagName: 'div',
+        properties: { className: ['table-scroll__viewport'] },
+        children: [node],
+      };
+      const wrapper: Element = {
+        type: 'element',
+        tagName: 'div',
+        properties: { className: ['table-scroll'] },
+        children: [viewport],
+      };
+      parent.children[index] = wrapper;
+      // Don't descend into the wrapper we just inserted (it re-contains the
+      // table); resume after it.
+      return [SKIP, index + 1];
+    });
+  };
+}
+
 function buildProcessor(filePath?: string) {
   return unified()
     .use(remarkParse)
@@ -49,6 +87,7 @@ function buildProcessor(filePath?: string) {
     .use(rehypeRaw)
     .use(rewriteLocalUrls, { filePath })
     .use(rehypeSanitize, sanitizeSchema)
+    .use(rehypeWrapTables)
     .use(rehypeStringify);
 }
 

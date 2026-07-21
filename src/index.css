@@ -739,6 +739,51 @@ body {
   height: auto;
 }
 
+/* Wide tables scroll within their own box instead of being clipped by the
+   sheet's `overflow: clip`. The remark pipeline wraps every table as
+   div.table-scroll > div.table-scroll__viewport > table. The outer div stays
+   in normal flow so the edge-fade pseudo-elements pin to the scrollport's
+   edges; MarkdownViewer toggles data-overflow-start/end from scroll position
+   so a fade only shows on the side that has more content. */
+.prose .table-scroll {
+  position: relative;
+  margin-block: 1.5rem;
+}
+.prose .table-scroll__viewport {
+  overflow-x: auto;
+}
+/* The wrapper owns the vertical rhythm; drop the table's own margin so it
+   isn't doubled up inside the scrollport. */
+.prose .table-scroll__viewport > :where(table) {
+  margin: 0;
+}
+.prose .table-scroll::before,
+.prose .table-scroll::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2rem;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 1;
+}
+.prose .table-scroll::before {
+  left: 0;
+  background: linear-gradient(to right, var(--theme-bg), transparent);
+}
+.prose .table-scroll::after {
+  right: 0;
+  background: linear-gradient(to left, var(--theme-bg), transparent);
+}
+.prose .table-scroll[data-overflow-start]::before {
+  opacity: 1;
+}
+.prose .table-scroll[data-overflow-end]::after {
+  opacity: 1;
+}
+
 /* Reset prose mark styling so our highlights aren't overridden by the
    Typography plugin or browser dark-mode defaults */
 .prose mark,
