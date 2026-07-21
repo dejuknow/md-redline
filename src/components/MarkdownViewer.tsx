@@ -1,4 +1,12 @@
-import { memo, useRef, useLayoutEffect, forwardRef, useImperativeHandle, useMemo, useEffect } from 'react';
+import {
+  memo,
+  useRef,
+  useLayoutEffect,
+  forwardRef,
+  useImperativeHandle,
+  useMemo,
+  useEffect,
+} from 'react';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
@@ -278,7 +286,9 @@ export const MarkdownViewer = memo(
       } of highlightGroups.values()) {
         const isActive = ids.includes(activeCommentId || '');
         const allSent =
-          sentCommentIds && sentCommentIds.length > 0 && ids.every((id) => sentCommentIds.includes(id));
+          sentCommentIds &&
+          sentCommentIds.length > 0 &&
+          ids.every((id) => sentCommentIds.includes(id));
         wrapText(
           container,
           anchor,
@@ -306,9 +316,7 @@ export const MarkdownViewer = memo(
             // Append (not replace) so two highlight groups on the same
             // <text> element both register their ids — the click handler
             // reads this list to decide which thread to activate.
-            const existing = textEl.dataset.commentIds
-              ? textEl.dataset.commentIds.split(',')
-              : [];
+            const existing = textEl.dataset.commentIds ? textEl.dataset.commentIds.split(',') : [];
             for (const id of ids) {
               if (!existing.includes(id)) existing.push(id);
             }
@@ -339,7 +347,11 @@ export const MarkdownViewer = memo(
       )) {
         const el = mark as HTMLElement;
         const isActive = el.classList.contains('comment-highlight-active');
-        el.classList.remove('comment-highlight', 'comment-highlight-sent', 'comment-highlight-active');
+        el.classList.remove(
+          'comment-highlight',
+          'comment-highlight-sent',
+          'comment-highlight-active',
+        );
         el.classList.add('mermaid-comment-highlight');
         if (isActive) {
           el.classList.add('mermaid-comment-highlight-active');
@@ -391,11 +403,27 @@ export const MarkdownViewer = memo(
         const viewport = host.querySelector<HTMLElement>('.table-scroll__viewport');
         if (!viewport) continue;
         const update = () => {
-          const max = viewport.scrollWidth - viewport.clientWidth;
-          const x = viewport.scrollLeft;
-          const overflowing = max > 1;
-          host.toggleAttribute('data-overflow-start', overflowing && x > 1);
-          host.toggleAttribute('data-overflow-end', overflowing && x < max - 1);
+          const { overflowing, overflowStart, overflowEnd } = computeTableOverflow(
+            viewport.scrollWidth,
+            viewport.clientWidth,
+            viewport.scrollLeft,
+          );
+          host.toggleAttribute('data-overflow-start', overflowStart);
+          host.toggleAttribute('data-overflow-end', overflowEnd);
+          // A scrollable region must be keyboard-reachable (axe:
+          // scrollable-region-focusable) — Chromium/Firefox auto-focus
+          // overflow containers, but Safari doesn't, so a wide table's hidden
+          // content is otherwise unreachable without a mouse. Make the
+          // viewport a labeled tab stop, but ONLY while it actually overflows,
+          // so narrow tables don't become pointless tab stops. Re-runs on
+          // scroll/resize keep this in sync as the window changes.
+          if (overflowing) {
+            viewport.setAttribute('tabindex', '0');
+            viewport.setAttribute('aria-label', 'Scrollable table');
+          } else {
+            viewport.removeAttribute('tabindex');
+            viewport.removeAttribute('aria-label');
+          }
         };
         update();
         viewport.addEventListener('scroll', update, { passive: true });
@@ -677,6 +705,31 @@ function getBlockParent(node: Node): Element | null {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/**
+ * Pure overflow arithmetic for a horizontally-scrollable table viewport.
+ * Returns whether the content overflows and which edge fade to show. The 1px
+ * slack on every comparison absorbs sub-pixel layout rounding so a table that
+ * fits exactly doesn't flicker a fade cue. Extracted and exported because
+ * jsdom can't measure real layout (scrollWidth/clientWidth are 0), so the DOM
+ * wiring in the effect stays browser-only while this arithmetic stays unit-
+ * testable — see MarkdownViewer.test.tsx.
+ */
+export function computeTableOverflow(
+  scrollWidth: number,
+  clientWidth: number,
+  scrollLeft: number,
+): { overflowing: boolean; overflowStart: boolean; overflowEnd: boolean } {
+  const max = scrollWidth - clientWidth;
+  const overflowing = max > 1;
+  return {
+    overflowing,
+    // Content is hidden to the left (fade the start edge) once scrolled away
+    // from 0; hidden to the right (fade the end edge) until scrolled to max.
+    overflowStart: overflowing && scrollLeft > 1,
+    overflowEnd: overflowing && scrollLeft < max - 1,
+  };
+}
+
 /** Walk up from a text node; return the outermost SVG <text> ancestor, or null
  *  if not inside SVG text content (or if a <foreignObject> switches the context
  *  back to HTML before reaching an SVG text element). Used to redirect wraps
@@ -763,7 +816,10 @@ function pickLiteralOccurrence(
         }
       }
       if (contextAfter) {
-        const after = fullText.slice(occ + needle.length, occ + needle.length + contextAfter.length);
+        const after = fullText.slice(
+          occ + needle.length,
+          occ + needle.length + contextAfter.length,
+        );
         for (let j = 0; j < Math.min(after.length, contextAfter.length); j++) {
           if (after[j] === contextAfter[j]) score++;
           else break;
@@ -784,9 +840,7 @@ function pickLiteralOccurrence(
   const searchWindow = Math.max(20, needle.length);
   const windowed = fullText.indexOf(needle, Math.max(0, hintOffset - searchWindow));
   if (windowed !== -1 && windowed <= hintOffset + 20) return windowed;
-  return occs.reduce((b, idx) =>
-    Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-  );
+  return occs.reduce((b, idx) => (Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b));
 }
 
 /**
@@ -796,9 +850,7 @@ function pickLiteralOccurrence(
 function pickClosestOccurrence(occs: number[], hintOffset?: number): number {
   if (occs.length === 1) return occs[0];
   if (hintOffset == null) return occs[0];
-  return occs.reduce((b, idx) =>
-    Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b,
-  );
+  return occs.reduce((b, idx) => (Math.abs(idx - hintOffset) < Math.abs(b - hintOffset) ? idx : b));
 }
 
 // Mermaid node syntax: an identifier (capital-first is the Mermaid convention)
@@ -812,7 +864,8 @@ function pickClosestOccurrence(occs: number[], hintOffset?: number): number {
 // bracket classes is the textbook ReDoS shape — pathological inputs like
 // `A[xxxxxxxx...]` failing the final bracket would force catastrophic
 // backtracking on every iteration.
-const MERMAID_NODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*\s*[[{(>]+([^\]})]*[A-Za-z][^\]})]*)[\]})]+\s*$/s;
+const MERMAID_NODE_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_]*\s*[[{(>]+([^\]})]*[A-Za-z][^\]})]*)[\]})]+\s*$/s;
 
 // Hard bound on input length before invoking MERMAID_NODE_PATTERN. Real
 // Mermaid node anchors are short ("E[Clicks Discover Pages]"); anything

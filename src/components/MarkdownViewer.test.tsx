@@ -2,8 +2,49 @@
 
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MarkdownViewer, isInsideSvgTextContent } from './MarkdownViewer';
+import { MarkdownViewer, isInsideSvgTextContent, computeTableOverflow } from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
+
+describe('computeTableOverflow', () => {
+  it('reports no overflow when content fits, with 1px slack for rounding', () => {
+    expect(computeTableOverflow(500, 500, 0)).toEqual({
+      overflowing: false,
+      overflowStart: false,
+      overflowEnd: false,
+    });
+    // max === 1 is within slack (not > 1), so still not overflowing.
+    expect(computeTableOverflow(501, 500, 0)).toEqual({
+      overflowing: false,
+      overflowStart: false,
+      overflowEnd: false,
+    });
+  });
+
+  it('fades only the end edge when scrolled to the far left', () => {
+    // scrollWidth 800, clientWidth 500 → max 300; scrollLeft 0.
+    expect(computeTableOverflow(800, 500, 0)).toEqual({
+      overflowing: true,
+      overflowStart: false,
+      overflowEnd: true,
+    });
+  });
+
+  it('fades only the start edge when scrolled to the far right', () => {
+    expect(computeTableOverflow(800, 500, 300)).toEqual({
+      overflowing: true,
+      overflowStart: true,
+      overflowEnd: false,
+    });
+  });
+
+  it('fades both edges when scrolled to the middle', () => {
+    expect(computeTableOverflow(800, 500, 150)).toEqual({
+      overflowing: true,
+      overflowStart: true,
+      overflowEnd: true,
+    });
+  });
+});
 
 describe('isInsideSvgTextContent', () => {
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -134,7 +175,9 @@ describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', (
     );
 
     await waitFor(() => {
-      const htmlMark = container.querySelector('mark.comment-highlight, mark.comment-highlight-sent');
+      const htmlMark = container.querySelector(
+        'mark.comment-highlight, mark.comment-highlight-sent',
+      );
       const svgMark = container.querySelector('.mermaid-comment-highlight');
       expect(htmlMark ?? svgMark).not.toBeNull();
     });
@@ -180,7 +223,9 @@ describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', (
     await waitFor(() => {
       // The mark may land on either an HTML <mark> (foreignObject) or a mermaid SVG
       // text element. Either way, the rendered label text must appear highlighted.
-      const htmlMark = container.querySelector('mark.comment-highlight, mark.comment-highlight-sent');
+      const htmlMark = container.querySelector(
+        'mark.comment-highlight, mark.comment-highlight-sent',
+      );
       const svgMark = container.querySelector('.mermaid-comment-highlight');
       // At least one highlight form must be present.
       expect(htmlMark ?? svgMark).not.toBeNull();
