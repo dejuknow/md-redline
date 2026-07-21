@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 interface Props {
@@ -60,7 +67,11 @@ function isScrubbing(): boolean {
 export function Tooltip({ text, children, delay = 600, side = 'bottom' }: Props) {
   const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  // Clamped horizontal center, resolved after we can measure the tooltip's
+  // width (null until then / while hidden). See the layout effect below.
+  const [clampedX, setClampedX] = useState<number | null>(null);
   const wrapperRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Restore the underlying button's `title` after hover so other code that
   // relies on it (screen readers, tests) keeps working.
@@ -83,6 +94,28 @@ export function Tooltip({ text, children, delay = 600, side = 'bottom' }: Props)
     setPos({ x, y });
     setVisible(true);
   }, [findTrigger, side]);
+
+  // The tooltip is centered on its trigger (transform: translate(-50%)). A
+  // wide label on a trigger near a viewport edge — e.g. the handoff button in
+  // the top-right — would push half the bubble off-screen and clip. Once it's
+  // mounted we can measure its width and pull the center back so the whole
+  // bubble stays within an 8px margin. useLayoutEffect runs before paint, so
+  // the correction is applied before the user ever sees the un-clamped spot.
+  useLayoutEffect(() => {
+    if (!visible || !pos) {
+      setClampedX(null);
+      return;
+    }
+    const el = tooltipRef.current;
+    if (!el) return;
+    const margin = 8;
+    const half = el.offsetWidth / 2;
+    const min = margin + half;
+    const max = window.innerWidth - margin - half;
+    // If the bubble is wider than the viewport (min > max), leave it centered —
+    // clamping either edge just trades one overflow for another.
+    setClampedX(max >= min ? Math.min(Math.max(pos.x, min), max) : pos.x);
+  }, [visible, pos]);
 
   const cancelTimer = useCallback(() => {
     if (showTimerRef.current) {
@@ -162,10 +195,11 @@ export function Tooltip({ text, children, delay = 600, side = 'bottom' }: Props)
       {visible && pos && text
         ? createPortal(
             <div
+              ref={tooltipRef}
               role="tooltip"
               style={{
                 position: 'fixed',
-                left: pos.x,
+                left: clampedX ?? pos.x,
                 top: pos.y,
                 transform: side === 'bottom' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
               }}
