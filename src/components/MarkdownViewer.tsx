@@ -191,6 +191,18 @@ export const MarkdownViewer = memo(
       const container = containerRef.current;
       if (!container) return;
 
+      // Capture each wide table's horizontal scroll BEFORE the innerHTML
+      // rebuild below tears the subtree down. This effect re-runs on dep
+      // changes that don't touch table content (search query, active comment,
+      // text selection), so without this a reviewer scrolled into a hidden
+      // column snaps back to the left the moment they type into search.
+      // Restored per table in the scroll-cue loop below, keyed by source-order
+      // index — stable because the same markdown re-renders the same tables in
+      // the same order.
+      const priorTableScroll = Array.from(
+        container.querySelectorAll<HTMLElement>('.table-scroll__viewport'),
+      ).map((vp) => vp.scrollLeft);
+
       // Set innerHTML from scratch — guarantees a clean starting state
       // Defense-in-depth: rehype-sanitize is the primary sanitizer, but
       // DOMPurify provides a second layer in case of a remark/rehype bypass.
@@ -399,9 +411,17 @@ export const MarkdownViewer = memo(
       // with more content. This re-runs with the effect (innerHTML is rebuilt
       // each time), so listeners always target live nodes.
       const tableCleanups: Array<() => void> = [];
+      let tableIndex = 0;
       for (const host of container.querySelectorAll<HTMLElement>('.table-scroll')) {
         const viewport = host.querySelector<HTMLElement>('.table-scroll__viewport');
         if (!viewport) continue;
+        // Restore the horizontal scroll captured before the innerHTML rebuild
+        // (see priorTableScroll above), keyed by source-order index so a
+        // reviewer keeps their place across unrelated re-renders. Runs inside
+        // useLayoutEffect (pre-paint), so there is no scroll-jump flash.
+        const priorScroll = priorTableScroll[tableIndex];
+        if (priorScroll) viewport.scrollLeft = priorScroll;
+        tableIndex += 1;
         const update = () => {
           const { overflowing, overflowStart, overflowEnd } = computeTableOverflow(
             viewport.scrollWidth,

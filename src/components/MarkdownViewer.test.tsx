@@ -44,6 +44,25 @@ describe('computeTableOverflow', () => {
       overflowEnd: true,
     });
   });
+
+  it('applies the 1px slack to the start/end edges, not just the overflow flag', () => {
+    // max = 800 - 500 = 300. Start fade needs scrollLeft > 1; end fade needs
+    // scrollLeft < max - 1 (299). At the exact 1px boundaries neither edge
+    // fades, so a sub-pixel rest position doesn't flicker a cue.
+    expect(computeTableOverflow(800, 500, 1)).toMatchObject({ overflowStart: false });
+    expect(computeTableOverflow(800, 500, 2)).toMatchObject({ overflowStart: true });
+    expect(computeTableOverflow(800, 500, 299)).toMatchObject({ overflowEnd: false });
+    expect(computeTableOverflow(800, 500, 298)).toMatchObject({ overflowEnd: true });
+  });
+
+  it('never reports overflow when the viewport is wider than its content', () => {
+    // Negative max (clientWidth > scrollWidth) must not spuriously fade.
+    expect(computeTableOverflow(400, 500, 0)).toEqual({
+      overflowing: false,
+      overflowStart: false,
+      overflowEnd: false,
+    });
+  });
 });
 
 describe('isInsideSvgTextContent', () => {
