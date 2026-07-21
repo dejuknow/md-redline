@@ -133,17 +133,17 @@ test.describe('Single-file hand-off', () => {
     await expect(btn).not.toHaveAttribute('aria-haspopup', 'true');
   });
 
-  test('stays enabled from a comment-free tab and names the commented file', async ({
+  test('is disabled on a comment-free active tab even if a background tab has comments', async ({
     page,
-    context,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openFixture(page, FIXTURE_1);
     await addComment(page, 'authentication system', 'Fix auth flow');
+    await expect(page.getByTestId('handoff-button')).toBeEnabled({ timeout: 10_000 });
 
-    // Open a second, comment-free file — the pending review now lives in a
-    // background tab. Handoff is session-scoped, so the CTA must stay
-    // enabled and announce which file it will send.
+    // Open a second, comment-free file and make it the active tab. Handoff is
+    // scoped to the ACTIVE tab, so it must go quiet here — a comment in a
+    // background tab (often an unrelated doc from another project) must never
+    // light up the button while you're reading something else.
     await page.locator('button[title="Open file"]').click();
     const input = page.getByPlaceholder('File path or name...');
     await expect(input).toBeVisible({ timeout: 5_000 });
@@ -154,13 +154,9 @@ test.describe('Single-file hand-off', () => {
     });
 
     const btn = page.getByTestId('handoff-button');
-    await expect(btn).toBeEnabled();
-    await expect(btn).toContainText('test-doc.md');
-
-    await btn.click();
-    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboard).toContain('test-doc.md');
-    expect(clipboard).not.toContain('test-doc-2.md');
+    await expect(btn).toBeDisabled();
+    // No background filename bleeds onto the resting button.
+    await expect(btn).not.toContainText('test-doc.md');
   });
 });
 
@@ -235,23 +231,50 @@ test.describe('Multi-file hand-off', () => {
     await expect(page.getByTestId('handoff-button')).toBeVisible({ timeout: 10_000 });
   }
 
-  test('label announces plural scope and click opens the picker', async ({ page }) => {
+  test('CTA shows the active-tab count; a chevron (not the primary click) opens the picker', async ({
+    page,
+  }) => {
     await setupTwoFilesWithComments(page);
 
+    // Active tab is test-doc-2 with 1 comment; the label reflects the active
+    // file only, never a plural "N files" scope or another tab's name.
     const btn = page.getByTestId('handoff-button');
-    await expect(btn).toContainText('Hand off 2 files');
-    await expect(btn).toHaveAttribute('aria-haspopup', 'true');
+    await expect(btn).toContainText('Hand off');
+    await expect(btn).toContainText('1');
+    await expect(btn).not.toContainText('files');
+    // The primary button is a direct action, not a menu trigger.
+    await expect(btn).not.toHaveAttribute('aria-haspopup', 'true');
 
-    // Primary click opens the picker instead of copying — multi-file scope
-    // is always confirmed, never sent blind.
-    await btn.click();
+    // The picker lives behind the chevron, which appears because another tab
+    // also has comments.
+    const chevron = page.getByTestId('handoff-chevron');
+    await expect(chevron).toHaveAttribute('aria-haspopup', 'true');
+    await chevron.click();
     await expect(page.locator('.absolute.right-0.top-full')).toBeVisible();
   });
 
-  test('dropdown shows all files with comments', async ({ page }) => {
+  test('primary click hands off only the active file, not other commented tabs', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await setupTwoFilesWithComments(page);
 
     await page.getByTestId('handoff-button').click();
+
+    await expect(
+      page.getByText('Copied agent instructions for 1 file. Now tracking changes.'),
+    ).toBeVisible();
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    // Active tab is test-doc-2; test-doc must NOT be swept in by the direct click.
+    expect(clipboard).toContain('test-doc-2.md');
+    expect(clipboard).not.toContain('Files to review');
+  });
+
+  test('picker shows all commented files', async ({ page }) => {
+    await setupTwoFilesWithComments(page);
+
+    await page.getByTestId('handoff-chevron').click();
 
     const dropdown = page.locator('.absolute.right-0.top-full');
     await expect(dropdown).toBeVisible();
@@ -259,51 +282,54 @@ test.describe('Multi-file hand-off', () => {
     await expect(dropdown.getByText('test-doc-2.md')).toBeVisible();
   });
 
-  test('all files are pre-selected in dropdown', async ({ page }) => {
+  test('only the active file is pre-selected in the picker', async ({ page }) => {
     await setupTwoFilesWithComments(page);
 
-    await page.getByTestId('handoff-button').click();
+    await page.getByTestId('handoff-chevron').click();
 
     const dropdown = page.locator('.absolute.right-0.top-full');
-    // The CTA should say 2 files
+    // Active-only preselected: the confirm CTA starts at a single file, and
+    // the active row is labeled so the reviewer knows why it's checked.
+    await expect(dropdown.getByText('Copy handoff for 1 file')).toBeVisible();
+    await expect(dropdown.getByText('this file')).toBeVisible();
+  });
+
+  test('checking another file grows the scope', async ({ page }) => {
+    await setupTwoFilesWithComments(page);
+
+    await page.getByTestId('handoff-chevron').click();
+
+    const dropdown = page.locator('.absolute.right-0.top-full');
+    // Opt the other tab in.
+    await dropdown.locator('button', { hasText: 'test-doc.md' }).first().click();
+
     await expect(dropdown.getByText('Copy handoff for 2 files')).toBeVisible();
   });
 
-  test('can deselect a file and button updates', async ({ page }) => {
+  test('confirm is disabled when the active file is deselected and nothing else is picked', async ({
+    page,
+  }) => {
     await setupTwoFilesWithComments(page);
 
-    await page.getByTestId('handoff-button').click();
+    await page.getByTestId('handoff-chevron').click();
 
     const dropdown = page.locator('.absolute.right-0.top-full');
-    // Deselect first file
-    await dropdown.locator('button', { hasText: 'test-doc.md' }).first().click();
-
-    // Button text should reflect 1 file
-    await expect(dropdown.getByText('Copy handoff for 1 file')).toBeVisible();
-  });
-
-  test('button is disabled when no files selected', async ({ page }) => {
-    await setupTwoFilesWithComments(page);
-
-    await page.getByTestId('handoff-button').click();
-
-    const dropdown = page.locator('.absolute.right-0.top-full');
-    // Deselect both files
-    await dropdown.locator('button', { hasText: 'test-doc.md' }).first().click();
-    await dropdown.locator('button', { hasText: 'test-doc-2.md' }).click();
+    // Deselect the only pre-selected (active) file.
+    await dropdown.locator('button', { hasText: 'test-doc-2.md' }).first().click();
 
     const copyBtn = dropdown.locator('button', { hasText: 'Select files to hand off' });
     await expect(copyBtn).toBeVisible();
     await expect(copyBtn).toBeDisabled();
   });
 
-  test('multi-file prompt includes file list', async ({ page, context }) => {
+  test('picking a second file hands off both', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await setupTwoFilesWithComments(page);
 
-    await page.getByTestId('handoff-button').click();
+    await page.getByTestId('handoff-chevron').click();
 
     const dropdown = page.locator('.absolute.right-0.top-full');
+    await dropdown.locator('button', { hasText: 'test-doc.md' }).first().click();
     await dropdown.getByText('Copy handoff for 2 files').click();
 
     await expect(
@@ -316,10 +342,10 @@ test.describe('Multi-file hand-off', () => {
     expect(clipboard).toContain('test-doc-2.md');
   });
 
-  test('dropdown closes on click outside', async ({ page }) => {
+  test('picker closes on click outside', async ({ page }) => {
     await setupTwoFilesWithComments(page);
 
-    await page.getByTestId('handoff-button').click();
+    await page.getByTestId('handoff-chevron').click();
     const dropdown = page.locator('.absolute.right-0.top-full');
     await expect(dropdown).toBeVisible();
 
@@ -390,9 +416,11 @@ test.describe('Handoff + snapshot', () => {
     });
     await addComment(page, 'second test document', 'Fix intro');
 
-    // Multi-file handoff — select both files
-    await page.getByTestId('handoff-button').click();
+    // Multi-file handoff — open the picker via the chevron, opt the other
+    // file in (only the active file is preselected), then confirm.
+    await page.getByTestId('handoff-chevron').click();
     const dropdown = page.locator('.absolute.right-0.top-full');
+    await dropdown.locator('button', { hasText: 'test-doc.md' }).first().click();
     await dropdown.getByText('Copy handoff for 2 files').click();
     await expect(page.getByText(/tracking changes/i)).toBeVisible({ timeout: 5_000 });
 
