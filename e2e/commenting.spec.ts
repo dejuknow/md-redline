@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -261,6 +262,53 @@ test.describe('Comment lifecycle', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByText('This will permanently delete all comments.')).not.toBeVisible();
     await expect(page.getByText('Escape test comment')).toBeVisible();
+  });
+});
+
+test.describe('Bulk actions outside List density', () => {
+  test('the rail kebab deletes every comment while Anchored density is active', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Kebab comment A');
+    await addComment(page, 'brute force attacks', 'Kebab comment B');
+
+    // No density switch: the point is that this works from Anchored, where
+    // the List footer's Delete All button doesn't exist.
+    await expect(page.locator('[data-rail-header] button', { hasText: 'Anchored' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.locator('[data-rail-actions]').click();
+    await page.getByText('Delete all comments…').click();
+    await page.locator('.fixed.inset-0').getByRole('button', { name: 'Delete All' }).click();
+
+    await expect(page.getByText('Kebab comment A')).not.toBeVisible();
+    await expect(page.getByText('Kebab comment B')).not.toBeVisible();
+  });
+
+  test('the rail kebab disappears once there are no comments left', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('[data-rail-actions]')).toHaveCount(0);
+
+    await addComment(page, 'valid credentials', 'Only comment');
+    await expect(page.locator('[data-rail-actions]')).toBeVisible();
+  });
+
+  test('the palette delete-all confirms first, and cancelling keeps the comments', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Palette comment');
+
+    await page.keyboard.press(withMod('k'));
+    await page.getByPlaceholder('Type a command...').fill('Delete all');
+    await page.getByText('Delete all comments').click();
+
+    const dialog = page.locator('.fixed.inset-0');
+    await expect(dialog.getByRole('heading', { name: 'Delete all comments' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByText('Palette comment')).toBeVisible();
   });
 });
 

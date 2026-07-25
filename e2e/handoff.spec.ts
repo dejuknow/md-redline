@@ -58,10 +58,11 @@ test.describe('Hand-off button', () => {
     const btn = page.getByTestId('handoff-button');
     await expect(btn).toBeEnabled({ timeout: 10_000 });
 
-    // Delete all comments via command palette
+    // Delete all comments via command palette (which confirms first)
     await page.keyboard.press(withMod('k'));
     await page.getByPlaceholder('Type a command...').fill('Delete all');
     await page.getByText('Delete all comments').click();
+    await page.getByRole('button', { name: 'Delete All' }).click();
 
     await expect(btn).toBeVisible();
     await expect(btn).toBeDisabled();

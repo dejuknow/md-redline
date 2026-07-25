@@ -590,6 +590,15 @@ export default function App() {
     requestCommentFocus,
   });
 
+  // `commentCount` is the OPEN count while the resolve workflow is on, so the
+  // resolved tail is whatever the total has beyond it. With resolve off there
+  // is no resolved state at all.
+  const resolvedCommentCount = settings.enableResolve ? comments.length - commentCount : 0;
+
+  // Bulk delete is unrecoverable, so every entry point (rail kebab, list
+  // footer, command palette) confirms first. This backs the palette's.
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+
   // Review frontier: when the active file's open comments cross to zero, advance
   // the diff reference to the current content so the diff resets for the next
   // round. Gated on the resolve feature so the "resolved" story is always true.
@@ -2077,13 +2086,27 @@ export default function App() {
         onExecute: handleBulkResolve,
       });
     }
-    if (commentCount > 0) {
+    if (settings.enableResolve && resolvedCommentCount > 0) {
+      cmds.push({
+        id: 'delete-resolved',
+        label: 'Clear resolved comments',
+        section: 'Comments',
+        onExecute: handleBulkDeleteResolved,
+      });
+    }
+    // Gated on the total, not the open count: with the resolve workflow on, a
+    // file whose comments are all resolved still has comments to delete.
+    if (comments.length > 0) {
       cmds.push({
         id: 'delete-all',
         label: 'Delete all comments',
         section: 'Comments',
-        onExecute: handleBulkDelete,
+        // Destructive and unrecoverable, so it routes through the same confirm
+        // step as the rail kebab and the list footer rather than firing bare.
+        onExecute: () => setConfirmDeleteAll(true),
       });
+    }
+    if (commentCount > 0) {
       cmds.push({
         id: 'copy-agent-prompt',
         label: 'Hand off to agent (copy instructions)',
@@ -2127,9 +2150,10 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
+    resolvedCommentCount,
     settings.enableResolve,
-    handleBulkDelete,
     handleBulkResolve,
+    handleBulkDeleteResolved,
     handleHandoff,
     activeFilePath,
     activeCommentId,
@@ -2581,6 +2605,14 @@ export default function App() {
                       density={railDensity}
                       onDensityChange={setRailDensity}
                       openCount={commentCount}
+                      resolvedCount={resolvedCommentCount}
+                      totalCount={comments.length}
+                      resolveEnabled={settings.enableResolve}
+                      onJumpPrev={handleJumpToPrev}
+                      onJumpNext={handleJumpToNext}
+                      onBulkResolve={handleBulkResolve}
+                      onBulkDeleteResolved={handleBulkDeleteResolved}
+                      onBulkDelete={handleBulkDelete}
                     />
                   ) : undefined
                 }
@@ -2931,6 +2963,20 @@ export default function App() {
         cancelLabel="Cancel"
         onConfirm={executePendingClose}
         onCancel={() => setPendingClose(null)}
+      />
+
+      {/* Backs the command palette's "Delete all comments". The rail kebab and
+          the list footer own their own copies of this dialog. */}
+      <ConfirmDialog
+        open={confirmDeleteAll}
+        title="Delete all comments"
+        message="This will permanently delete all comments. This cannot be undone."
+        confirmLabel="Delete All"
+        onConfirm={() => {
+          setConfirmDeleteAll(false);
+          handleBulkDelete();
+        }}
+        onCancel={() => setConfirmDeleteAll(false)}
       />
 
       {/* Keyboard shortcuts hint */}
