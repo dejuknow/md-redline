@@ -5,6 +5,9 @@ import type { RailDensity } from '../hooks/usePaneLayout';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { GAP, RAIL, PAD_R } from '../lib/page-geometry';
 import { ThreadCard } from './ThreadCard';
+import { ConfirmDialog } from './ConfirmDialog';
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
+import { Tooltip } from './Tooltip';
 import {
   CommentListSurface,
   type SidebarContextMenuInfo,
@@ -116,22 +119,108 @@ export function CommentsRail(props: CommentsRailProps) {
   );
 }
 
+const navButtonClass =
+  'p-1 rounded transition-colors text-content-muted enabled:hover:text-content-secondary ' +
+  'enabled:hover:bg-tint disabled:opacity-40 disabled:cursor-default ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring';
+
 /**
- * Density toggle + open count for the rail, rendered in the panel toolbar's
- * right group (not inside the rail: a header floating over the anchored
- * cards occluded them).
+ * Comment cluster for the rail, rendered in the panel toolbar's right group
+ * (not inside the rail: a header floating over the anchored cards occluded
+ * them). Holds prev/next navigation, the density toggle, the open count, and
+ * an overflow menu with the bulk actions.
+ *
+ * The bulk actions also live in CommentListSurface's footer, but that footer
+ * only exists in List density and the drawer. Putting them here too is the
+ * one place they are reachable regardless of density.
  */
 export function RailDensityControl({
   density,
   onDensityChange,
   openCount,
+  resolvedCount,
+  totalCount,
+  resolveEnabled,
+  onJumpPrev,
+  onJumpNext,
+  onBulkResolve,
+  onBulkDeleteResolved,
+  onBulkDelete,
 }: {
   density: RailDensity;
   onDensityChange: (d: RailDensity) => void;
   openCount: number;
+  resolvedCount: number;
+  totalCount: number;
+  resolveEnabled: boolean;
+  onJumpPrev: () => void;
+  onJumpNext: () => void;
+  onBulkResolve?: () => void;
+  onBulkDeleteResolved?: () => void;
+  onBulkDelete: () => void;
 }) {
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+
+  // The comments can go away without any click of ours: a file-watcher reload
+  // or an agent rewriting the document both drop the count to zero. The kebab
+  // unmounts with them, but the menu and dialog are fixed-position siblings
+  // that would otherwise keep floating with nothing left to act on (and
+  // ContextMenu only self-closes on an outside mousedown or window blur).
+  useEffect(() => {
+    if (totalCount === 0) {
+      setMenuPos(null);
+      setConfirmDeleteAll(false);
+    }
+  }, [totalCount]);
+
+  const menuItems: ContextMenuEntry[] = [];
+  if (resolveEnabled && openCount > 0 && onBulkResolve) {
+    menuItems.push({ label: 'Resolve all open', onClick: onBulkResolve });
+  }
+  if (resolveEnabled && resolvedCount > 0 && onBulkDeleteResolved) {
+    menuItems.push({ label: 'Clear resolved', onClick: onBulkDeleteResolved });
+  }
+  if (menuItems.length > 0) menuItems.push({ type: 'divider' });
+  menuItems.push({
+    label: 'Delete all comments…',
+    danger: true,
+    onClick: () => setConfirmDeleteAll(true),
+  });
+
   return (
     <div data-rail-header className="flex items-center gap-2 mr-1">
+      <div className="flex items-center">
+        <Tooltip text="Previous comment (P)">
+          <button
+            type="button"
+            data-rail-prev
+            className={navButtonClass}
+            onClick={onJumpPrev}
+            disabled={totalCount === 0}
+            aria-label="Previous comment"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+            </svg>
+          </button>
+        </Tooltip>
+        <Tooltip text="Next comment (N)">
+          <button
+            type="button"
+            data-rail-next
+            className={navButtonClass}
+            onClick={onJumpNext}
+            disabled={totalCount === 0}
+            aria-label="Next comment"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+        </Tooltip>
+      </div>
+
       <div role="group" aria-label="Comment layout density" className="flex rounded-md border border-border-subtle overflow-hidden">
         {(['anchored', 'list'] as const).map((d) => (
           <button
@@ -151,6 +240,53 @@ export function RailDensityControl({
       <span className="text-[10px] text-content-muted tabular-nums whitespace-nowrap">
         {openCount} open
       </span>
+
+      {/* Overflow menu: hidden with no comments, since every item needs one.
+          The tooltip is suppressed while the menu is open — the pointer is
+          still over the trigger, so it would sit behind the menu it just
+          spawned. */}
+      {totalCount > 0 && (
+        <Tooltip text={menuPos ? null : 'Comment actions'}>
+          <button
+            type="button"
+            data-rail-actions
+            className={navButtonClass}
+            aria-label="Comment actions"
+            aria-haspopup="menu"
+            aria-expanded={menuPos !== null}
+            onClick={(e) => {
+              if (menuPos) {
+                setMenuPos(null);
+                return;
+              }
+              const rect = e.currentTarget.getBoundingClientRect();
+              setMenuPos({ x: rect.right - 180, y: rect.bottom + 4 });
+            }}
+          >
+            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+              <circle cx="5" cy="12" r="1.75" />
+              <circle cx="12" cy="12" r="1.75" />
+              <circle cx="19" cy="12" r="1.75" />
+            </svg>
+          </button>
+        </Tooltip>
+      )}
+
+      {menuPos && (
+        <ContextMenu items={menuItems} position={menuPos} onClose={() => setMenuPos(null)} />
+      )}
+
+      <ConfirmDialog
+        open={confirmDeleteAll}
+        title="Delete all comments"
+        message="This will permanently delete all comments. This cannot be undone."
+        confirmLabel="Delete All"
+        onConfirm={() => {
+          setConfirmDeleteAll(false);
+          onBulkDelete();
+        }}
+        onCancel={() => setConfirmDeleteAll(false)}
+      />
     </div>
   );
 }

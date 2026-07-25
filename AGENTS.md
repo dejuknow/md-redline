@@ -371,7 +371,23 @@ densities, switched via the segmented control (`RailDensityControl`,
 `[data-rail-header]`) that renders in the panel toolbar's right group while
 the rail is shown (a header inside the rail occluded the anchored cards), and
 persisted per-user (see below). Each density segment shows a crimson
-focus-visible ring on keyboard focus. Tab badges count ALL open comments including
+focus-visible ring on keyboard focus.
+
+`RailDensityControl` is the whole comment cluster, not just the toggle. Left to
+right: prev/next comment buttons (`[data-rail-prev]`, `[data-rail-next]`, wired
+to the same `handleJumpToPrev` / `handleJumpToNext` as the `P`/`N` shortcuts,
+which their tooltips name; disabled when the file has no comments), the density
+segmented control, the open count, and an overflow kebab
+(`[data-rail-actions]`). The kebab opens a `ContextMenu` with the bulk actions:
+**Resolve all open** (resolve workflow on, open comments exist), **Clear
+resolved** (resolve workflow on, resolved comments exist), and **Delete all
+comments...** (always, behind the same `ConfirmDialog` the list footer uses).
+The kebab is hidden entirely when the file has no comments. These duplicate
+`CommentListSurface`'s footer buttons on purpose: the footer only exists in List
+density and the drawer, so the kebab is the one route that works in Anchored
+density too.
+
+Tab badges count ALL open comments including
 agent-initiated ones (`tabCommentCounts` in App); the handoff button keeps
 the sendable-only map. Inline code in prose renders neutral (`--theme-text`
 on `--theme-bg-inset`), never the crimson accent:
@@ -735,10 +751,18 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
 file ops (reload, open, mark reviewed), settings, keyboard help, all themes,
-comment bulk ops (resolve all, delete all, hand off to agent), active comment ops
+comment bulk ops (resolve all, clear resolved, delete all, hand off to agent),
+active comment ops
 (resolve, reopen, delete), heading jump, diagram view (open diagram in fullscreen),
 agent asks (jump to next agent question, which shows the pending count and cycles
 through questions on repeat invocations).
+
+The bulk ops mirror the rail kebab's gating: resolve-all and clear-resolved need
+the resolve workflow on plus a non-zero open / resolved count, and delete-all is
+gated on the TOTAL comment count rather than the open count, so it still appears
+for a file whose comments are all resolved. Delete-all opens the same
+`ConfirmDialog` the rail kebab and list footer use (owned by `App`) instead of
+firing immediately.
 
 ### Update notice
 A quiet, persistent pill (`UpdateNotice.tsx`, `data-update-notice`) sits

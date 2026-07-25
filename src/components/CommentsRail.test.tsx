@@ -104,11 +104,27 @@ afterEach(() => {
 });
 
 describe('RailDensityControl', () => {
+  const renderControl = (overrides: Partial<Parameters<typeof RailDensityControl>[0]> = {}) =>
+    render(
+      <RailDensityControl
+        density="anchored"
+        onDensityChange={vi.fn()}
+        openCount={3}
+        resolvedCount={0}
+        totalCount={3}
+        resolveEnabled
+        onJumpPrev={vi.fn()}
+        onJumpNext={vi.fn()}
+        onBulkResolve={vi.fn()}
+        onBulkDeleteResolved={vi.fn()}
+        onBulkDelete={vi.fn()}
+        {...overrides}
+      />,
+    );
+
   it('renders both density options, the open count, and switches on click', () => {
     const onDensityChange = vi.fn();
-    render(
-      <RailDensityControl density="anchored" onDensityChange={onDensityChange} openCount={3} />,
-    );
+    renderControl({ onDensityChange });
     expect(screen.getByRole('button', { name: 'Anchored' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'List' })).toBeTruthy();
     expect(screen.getByText('3 open')).toBeTruthy();
@@ -117,10 +133,95 @@ describe('RailDensityControl', () => {
   });
 
   it('density buttons carry a visible keyboard focus ring', () => {
-    render(<RailDensityControl density="anchored" onDensityChange={vi.fn()} openCount={2} />);
+    renderControl({ openCount: 2 });
     const anchored = screen.getByRole('button', { name: 'Anchored' });
     expect(anchored.className).toContain('focus-visible:ring-2');
     expect(anchored.className).toContain('focus-visible:ring-inset');
+  });
+
+  it('prev/next buttons jump between comments and disable when there are none', () => {
+    const onJumpPrev = vi.fn();
+    const onJumpNext = vi.fn();
+    const { rerender } = renderControl({ onJumpPrev, onJumpNext });
+    fireEvent.click(screen.getByRole('button', { name: 'Previous comment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next comment' }));
+    expect(onJumpPrev).toHaveBeenCalledTimes(1);
+    expect(onJumpNext).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <RailDensityControl
+        density="anchored"
+        onDensityChange={vi.fn()}
+        openCount={0}
+        resolvedCount={0}
+        totalCount={0}
+        resolveEnabled
+        onJumpPrev={onJumpPrev}
+        onJumpNext={onJumpNext}
+        onBulkDelete={vi.fn()}
+      />,
+    );
+    expect(
+      (screen.getByRole('button', { name: 'Next comment' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it('offers the bulk actions in an overflow menu, gated on the counts', () => {
+    const onBulkResolve = vi.fn();
+    renderControl({ onBulkResolve, resolvedCount: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Comment actions' }));
+    expect(screen.getByText('Resolve all open')).toBeTruthy();
+    // No resolved comments yet, so nothing to clear.
+    expect(screen.queryByText('Clear resolved')).toBeNull();
+    fireEvent.click(screen.getByText('Resolve all open'));
+    expect(onBulkResolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides resolve-only bulk actions when the resolve workflow is off', () => {
+    renderControl({ resolveEnabled: false, resolvedCount: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Comment actions' }));
+    expect(screen.queryByText('Resolve all open')).toBeNull();
+    expect(screen.getByText('Delete all comments…')).toBeTruthy();
+  });
+
+  it('confirms before deleting all comments', () => {
+    const onBulkDelete = vi.fn();
+    renderControl({ onBulkDelete });
+    fireEvent.click(screen.getByRole('button', { name: 'Comment actions' }));
+    fireEvent.click(screen.getByText('Delete all comments…'));
+    expect(onBulkDelete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete All' }));
+    expect(onBulkDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the overflow menu entirely when there are no comments', () => {
+    renderControl({ openCount: 0, totalCount: 0, resolvedCount: 0 });
+    expect(screen.queryByRole('button', { name: 'Comment actions' })).toBeNull();
+  });
+
+  it('drops an open menu and dialog when the comments disappear underneath them', () => {
+    // A file-watcher reload or an agent rewrite can empty the document with no
+    // click involved, so neither surface gets ContextMenu's outside-mousedown.
+    const { rerender } = renderControl();
+    fireEvent.click(screen.getByRole('button', { name: 'Comment actions' }));
+    fireEvent.click(screen.getByText('Delete all comments…'));
+    expect(screen.getByRole('button', { name: 'Delete All' })).toBeTruthy();
+
+    rerender(
+      <RailDensityControl
+        density="anchored"
+        onDensityChange={vi.fn()}
+        openCount={0}
+        resolvedCount={0}
+        totalCount={0}
+        resolveEnabled
+        onJumpPrev={vi.fn()}
+        onJumpNext={vi.fn()}
+        onBulkDelete={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('Resolve all open')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete All' })).toBeNull();
   });
 });
 
