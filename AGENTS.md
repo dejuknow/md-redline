@@ -428,6 +428,20 @@ browser's own range, so a plain Cmd/Ctrl+C would copy nothing. The document-leve
 
 Both flavors go on the clipboard, so pasting into a rich-text editor keeps
 headings, bold, links, tables, and list structure.
+#### Touch and pen selections
+Selections made by touch or pen route through a pending flow instead of the
+mouseup path (`useSelection.ts`): touch selection never fires `mouseup`, and
+native selection-handle drags emit no pointer events the page can see, so
+nothing auto-opens — a timer cannot distinguish "paused to think" from "done
+adjusting". While a touch/pen selection exists, a fixed **Comment** button
+(`data-testid="pending-selection-commit"`, bottom-right) is the explicit
+commit signal; tapping it promotes the pending `SelectionInfo` snapshot to the
+active selection, which opens the pill/form as usual. The modality is decided
+per gesture via the last `pointerdown`'s `pointerType` (not per device), so
+hybrid devices get mouse-immediate and touch-deferred behavior side by side.
+The commit works from the stored snapshot, so it survives the tap collapsing
+the native selection. `selectionchange` is debounced 150ms purely to coalesce
+handle-drag event streams; it gates nothing user-visible.
 
 ### Comments rail
 The single comment surface for the rendered view: a fixed-width column at the

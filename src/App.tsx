@@ -570,9 +570,8 @@ export default function App() {
     );
   }, []);
 
-  const { selection, clearSelection, lockSelection } = useSelection(
-    containerRef as RefObject<HTMLElement | null>,
-  );
+  const { selection, pendingSelection, clearSelection, lockSelection, commitPendingSelection } =
+    useSelection(containerRef as RefObject<HTMLElement | null>);
   const requestCommentFocus = useCallback(
     (commentId: string, origin: 'creation' | 'jump' = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -2826,6 +2825,26 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {/* Touch/pen: the selection is held as pending while the native
+            handles are adjusted; this button is the explicit "done selecting"
+            signal. touchend commits from the stored SelectionInfo snapshot,
+            so it works even if the tap collapses the native selection. */}
+          {pendingSelection && !selection && viewMode === 'rendered' && (
+            <button
+              type="button"
+              data-preserve-selection
+              data-testid="pending-selection-commit"
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                commitPendingSelection();
+              }}
+              onClick={commitPendingSelection}
+              className="fixed bottom-6 right-6 z-50 rounded-full bg-primary px-5 py-3 text-sm font-medium text-on-primary shadow-lg"
+            >
+              Comment
+            </button>
+          )}
 
           {/* Floating comment form (disabled in raw/diff view) */}
           {selection && viewMode === 'rendered' && (
