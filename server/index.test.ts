@@ -1239,6 +1239,78 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
     });
     expect(r.status).toBe(200);
   });
+
+  it('allows extra hostnames listed in allowedHosts (reverse-proxy fronting)', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['mac.tail1234.ts.net'],
+    });
+    const r1 = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'mac.tail1234.ts.net' },
+    });
+    expect(r1.status).toBe(200);
+    // Case-insensitive, port stripped like the loopback names
+    const r2 = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'MAC.Tail1234.TS.NET:8443' },
+    });
+    expect(r2.status).toBe(200);
+  });
+
+  it('still rejects unlisted hostnames when allowedHosts is set', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['mac.tail1234.ts.net'],
+    });
+    const r = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'attacker.example.com' },
+    });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: 'Invalid Host header' });
+  });
+
+  it('reads allowedHosts from MDR_ALLOWED_HOSTS when the option is absent', async () => {
+    vi.stubEnv('MDR_ALLOWED_HOSTS', 'proxy.example.internal, other.host ');
+    try {
+      const envApp = createApp({ cwd: cwdRoot, homeDir: fakeHome });
+      const r1 = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'proxy.example.internal' },
+      });
+      expect(r1.status).toBe(200);
+      const r2 = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'other.host:9000' },
+      });
+      expect(r2.status).toBe(200);
+      const r3 = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'attacker.example.com' },
+      });
+      expect(r3.status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('an explicit allowedHosts option overrides the env var', async () => {
+    vi.stubEnv('MDR_ALLOWED_HOSTS', 'env.example.internal');
+    try {
+      const optionApp = createApp({
+        cwd: cwdRoot,
+        homeDir: fakeHome,
+        allowedHosts: ['option.example.internal'],
+      });
+      const r1 = await optionApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'option.example.internal' },
+      });
+      expect(r1.status).toBe(200);
+      const r2 = await optionApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'env.example.internal' },
+      });
+      expect(r2.status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('cross-site API requests (Fetch Metadata guard)', () => {

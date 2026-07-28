@@ -68,6 +68,13 @@ export interface CreateAppOptions {
   getLatestVersion?: () => string | null;
   /** Whether the asynchronous update check has not settled yet. */
   isUpdateCheckPending?: () => boolean;
+  /** Extra hostnames accepted by the Host-header allowlist, for fronting the
+   * loopback-bound server with a trusted reverse proxy (`tailscale serve`,
+   * nginx, Caddy). Defaults to the comma-separated MDR_ALLOWED_HOSTS env var.
+   * Loopback names are always allowed; the DNS-rebinding defense is
+   * preserved because an attacker's rebinding domain never matches an
+   * explicitly listed hostname. */
+  allowedHosts?: string[];
 }
 
 function canonicalize(p: string): string {
@@ -130,6 +137,11 @@ export function createAppFull(options: CreateAppOptions = {}) {
   const getLatestVersion = options.getLatestVersion;
   const isUpdateCheckPending = options.isUpdateCheckPending;
   const caseInsensitivePaths = platformName === 'win32';
+  const extraAllowedHosts = (
+    options.allowedHosts ?? (process.env.MDR_ALLOWED_HOSTS ?? '').split(',')
+  )
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
 
   const app = new Hono();
   // Allow CORS only from Vite dev server ports (default 5188-5197, or custom via env)
@@ -180,7 +192,12 @@ export function createAppFull(options: CreateAppOptions = {}) {
     if (host) {
       // Strip an optional port. IPv6 hosts arrive as `[::1]:3001`.
       const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0];
-      if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1') {
+      if (
+        hostname !== 'localhost' &&
+        hostname !== '127.0.0.1' &&
+        hostname !== '::1' &&
+        !extraAllowedHosts.includes(hostname.toLowerCase())
+      ) {
         return c.json({ error: 'Invalid Host header' }, 400);
       }
     }
