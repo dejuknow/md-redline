@@ -34,7 +34,27 @@ export interface AppSettings {
   proseSize: ProseSize;
 }
 
+/**
+ * Shipped templates. The first two are the one-tap pills on the selection
+ * pill, so the two most-used verdicts lead: approve, then rewrite.
+ */
 export const DEFAULT_TEMPLATES: CommentTemplate[] = [
+  { label: 'Agreed', text: 'Agreed with this. No change needed here.' },
+  { label: 'Rewrite this', text: 'Rewrite this section to make it clearer and more specific.' },
+  { label: 'Add detail', text: 'Add more detail here.' },
+  { label: 'Remove', text: 'Remove this; it is not needed.' },
+  { label: 'Needs example', text: 'Add an example to illustrate this.' },
+  { label: 'Why this?', text: 'Why this approach over the alternatives? Explain the reasoning.' },
+  { label: 'Factually wrong', text: 'This is factually incorrect. Please verify and correct.' },
+  { label: 'Out of scope', text: 'This is out of scope. Remove it or move it to a separate doc.' },
+];
+
+/**
+ * The pre-2026-07-28 shipped set (post-em-dash cleanup). A stored list that
+ * still matches this exactly is an untouched default, so it is replaced with
+ * the current defaults at parse time; any customization keeps the list as-is.
+ */
+const SUPERSEDED_DEFAULT_TEMPLATES: CommentTemplate[] = [
   { label: 'Rewrite this', text: 'Rewrite this section to make it clearer.' },
   { label: 'Add detail', text: 'Add more detail here.' },
   { label: 'Remove', text: 'Remove this; it is not needed.' },
@@ -44,6 +64,17 @@ export const DEFAULT_TEMPLATES: CommentTemplate[] = [
   { label: 'Factually wrong', text: 'This is factually incorrect. Please verify and correct.' },
   { label: 'Out of scope', text: 'This is out of scope. Remove it or move it to a separate doc.' },
 ];
+
+function isSupersededDefaultSet(templates: CommentTemplate[]): boolean {
+  return (
+    templates.length === SUPERSEDED_DEFAULT_TEMPLATES.length &&
+    templates.every(
+      (t, i) =>
+        t.label === SUPERSEDED_DEFAULT_TEMPLATES[i].label &&
+        t.text === SUPERSEDED_DEFAULT_TEMPLATES[i].text,
+    )
+  );
+}
 
 /**
  * Earlier default template texts, upgraded in place at parse time. Only
@@ -101,8 +132,9 @@ export function parseSettings(input: unknown): AppSettings {
           return upgraded ? { ...template, text: upgraded } : template;
         })
     : DEFAULT_SETTINGS.templates;
+  const templates = validTemplates as CommentTemplate[];
   return {
-    templates: validTemplates as CommentTemplate[],
+    templates: isSupersededDefaultSet(templates) ? DEFAULT_TEMPLATES : templates,
     commentMaxLength:
       typeof parsed.commentMaxLength === 'number' && parsed.commentMaxLength > 0
         ? parsed.commentMaxLength

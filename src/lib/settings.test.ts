@@ -114,6 +114,38 @@ describe('parseSettings docWidth', () => {
   });
 });
 
+describe('parseSettings superseded default template set', () => {
+  const supersededDefaults = [
+    { label: 'Rewrite this', text: 'Rewrite this section to make it clearer.' },
+    { label: 'Add detail', text: 'Add more detail here.' },
+    { label: 'Remove', text: 'Remove this; it is not needed.' },
+    { label: 'Needs example', text: 'Add an example to illustrate this.' },
+    { label: 'Too vague', text: 'This is too vague. Be more specific.' },
+    { label: 'Fix formatting', text: 'Fix the formatting in this section.' },
+    { label: 'Factually wrong', text: 'This is factually incorrect. Please verify and correct.' },
+    { label: 'Out of scope', text: 'This is out of scope. Remove it or move it to a separate doc.' },
+  ];
+
+  it('replaces an untouched old default set with the current defaults', () => {
+    expect(parseSettings({ templates: supersededDefaults }).templates).toEqual(DEFAULT_TEMPLATES);
+  });
+
+  it('leaves the list alone once any template was customized', () => {
+    const customized = [
+      ...supersededDefaults.slice(0, 7),
+      { label: 'Out of scope', text: 'Move this to the appendix.' },
+    ];
+    expect(parseSettings({ templates: customized }).templates).toEqual(customized);
+  });
+
+  it('upgrades the em-dash era default set all the way to the current defaults', () => {
+    const emDashEra = supersededDefaults.map((t) =>
+      t.label === 'Too vague' ? { ...t, text: 'This is too vague — be more specific.' } : t,
+    );
+    expect(parseSettings({ templates: emDashEra }).templates).toEqual(DEFAULT_TEMPLATES);
+  });
+});
+
 describe('parseSettings legacy template migration', () => {
   it('rewrites persisted copies of the old em-dash default texts', () => {
     const parsed = parseSettings({
