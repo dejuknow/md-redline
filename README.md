@@ -196,6 +196,7 @@ This makes feedback:
 - Two-way agent review over MCP: agents request your review, review your docs, and ask anchored questions
 - Threaded replies and optional `open` / `resolved` review states
 - Adjustable anchors with drag handles
+- Touch and pen commenting: select with the native handles, then tap the floating **Comment** button when done (nothing pops up while you adjust)
 - Rendered, raw, and diff views
 - Hand-off prompt copying for one or multiple files
 
@@ -221,6 +222,7 @@ This makes feedback:
 - **macOS**: supported
 - **Linux**: supported; system file picker requires `zenity`
 - **Windows**: supported; system file picker uses PowerShell
+- **Touch browsers** (iPad Safari and similar): supported for reviewing and commenting; selections made by touch or pen use the floating **Comment** button flow
 
 ## Permissions
 

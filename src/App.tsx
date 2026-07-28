@@ -34,10 +34,7 @@ import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
 import { DragHandles } from './components/DragHandles';
 import { RawView, type RawViewHandle } from './components/RawView';
-import {
-  RenderedDiffView,
-  type RenderedDiffViewHandle,
-} from './components/RenderedDiffView';
+import { RenderedDiffView, type RenderedDiffViewHandle } from './components/RenderedDiffView';
 import { useDiffLines } from './hooks/useDiffLines';
 import { PanelToolbar } from './components/PanelToolbar';
 import { Toast } from './components/Toast';
@@ -99,12 +96,13 @@ const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
 const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 
-const ThemedMarkdownViewer = forwardRef<MarkdownViewerHandle, ComponentProps<typeof MarkdownViewer>>(
-  function ThemedMarkdownViewer(props, ref) {
-    const theme = usePersistedTheme();
-    return <MarkdownViewer ref={ref} {...props} theme={theme} />;
-  },
-);
+const ThemedMarkdownViewer = forwardRef<
+  MarkdownViewerHandle,
+  ComponentProps<typeof MarkdownViewer>
+>(function ThemedMarkdownViewer(props, ref) {
+  const theme = usePersistedTheme();
+  return <MarkdownViewer ref={ref} {...props} theme={theme} />;
+});
 
 export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
@@ -162,7 +160,13 @@ export default function App() {
         break;
     }
     setPendingClose(null);
-  }, [pendingClose, closeTabDirect, closeOtherTabsDirect, closeAllTabsDirect, closeTabsToRightDirect]);
+  }, [
+    pendingClose,
+    closeTabDirect,
+    closeOtherTabsDirect,
+    closeAllTabsDirect,
+    closeTabsToRightDirect,
+  ]);
 
   const closeTab = useCallback(
     (path: string) => {
@@ -218,8 +222,7 @@ export default function App() {
         // Only accept string overrides. The Toolbar binds this directly to a
         // button onClick, which passes a SyntheticEvent as the first arg —
         // we need to ignore it and fall back to deriving from activeFilePath.
-        const overrideDir =
-          typeof defaultPathOverride === 'string' ? defaultPathOverride : null;
+        const overrideDir = typeof defaultPathOverride === 'string' ? defaultPathOverride : null;
         let hint: string | null = null;
         if (overrideDir) {
           hint = overrideDir;
@@ -326,7 +329,14 @@ export default function App() {
       setExplorerVisible(true);
       setLeftPanelView('explorer');
     }
-  }, [focusMode, exitFocusMode, explorerVisible, leftPanelView, setExplorerVisible, setLeftPanelView]);
+  }, [
+    focusMode,
+    exitFocusMode,
+    explorerVisible,
+    leftPanelView,
+    setExplorerVisible,
+    setLeftPanelView,
+  ]);
 
   const toggleSidebarPane = useCallback(() => {
     if (focusMode) {
@@ -486,8 +496,10 @@ export default function App() {
   }, [rawMarkdown]);
 
   // Diff snapshot state
-  const { currentSnapshot, currentReference, captureReference, restoreReference } =
-    useDiffSnapshot(activeFilePath, rawMarkdownRef);
+  const { currentSnapshot, currentReference, captureReference, restoreReference } = useDiffSnapshot(
+    activeFilePath,
+    rawMarkdownRef,
+  );
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
   const currentSnapshotRef = useRef(currentSnapshot);
@@ -532,9 +544,8 @@ export default function App() {
     );
   }, []);
 
-  const { selection, clearSelection, lockSelection } = useSelection(
-    containerRef as RefObject<HTMLElement | null>,
-  );
+  const { selection, pendingSelection, clearSelection, lockSelection, commitPendingSelection } =
+    useSelection(containerRef as RefObject<HTMLElement | null>);
   const requestCommentFocus = useCallback(
     (commentId: string, origin: 'creation' | 'jump' = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -889,7 +900,6 @@ export default function App() {
     [comments, activeSession?.id],
   );
 
-
   // Derive per-session agent metadata from comment markers across all open
   // tabs (not just the active file):
   // - agentNamesBySession: first agent-initiated comment author. Used by
@@ -903,7 +913,8 @@ export default function App() {
       string,
       Array<{ commentId: string; filePath: string; author: string }>
     >();
-    if (reviewSessions.length === 0) return { agentNamesBySession: names, pendingAsksBySession: pending };
+    if (reviewSessions.length === 0)
+      return { agentNamesBySession: names, pendingAsksBySession: pending };
 
     const commentsByFile = new Map<string, typeof comments>();
     if (activeFilePath) commentsByFile.set(activeFilePath, comments);
@@ -911,7 +922,9 @@ export default function App() {
       if (commentsByFile.has(tab.filePath)) continue;
       try {
         commentsByFile.set(tab.filePath, parseComments(tab.rawMarkdown).comments);
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     for (const session of reviewSessions) {
@@ -970,8 +983,7 @@ export default function App() {
     const base = fileName ? `${fileName} · ${appName}` : appName;
     let total = 0;
     for (const asks of pendingAsksBySession.values()) total += asks.length;
-    document.title =
-      total > 0 ? `(${total} question${total === 1 ? '' : 's'}) ${base}` : base;
+    document.title = total > 0 ? `(${total} question${total === 1 ? '' : 's'}) ${base}` : base;
   }, [pendingAsksBySession, activeFilePath]);
 
   // Toast on new agent ask (debounced). `lastSeenAskIdsRef` accumulates all
@@ -1277,7 +1289,11 @@ export default function App() {
             const res = await fetch('/api/file', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ path: pathToSave, content: contentToSave, expectedMtime: mtimeToSave }),
+              body: JSON.stringify({
+                path: pathToSave,
+                content: contentToSave,
+                expectedMtime: mtimeToSave,
+              }),
             });
             // On success, sync the tab's mtime to the post-backfill value so
             // the next user-initiated save doesn't 409 against the stale
@@ -2270,123 +2286,185 @@ export default function App() {
           the window's left edge top to bottom (the chrome row starts to its
           right). Hidden entirely in focus mode. */}
       {!focusMode && (
-          <>
-            <div
-              className={`relative border-r border-border bg-surface-secondary shrink-0 overflow-hidden ${
-                isDragging ? '' : 'transition-[width] duration-200 ease-in-out'
-              }`}
-              style={{ width: explorerVisible ? explorerWidth : 40 }}
-            >
-              {/* Logo pinned to one spot so it never shifts between the
+        <>
+          <div
+            className={`relative border-r border-border bg-surface-secondary shrink-0 overflow-hidden ${
+              isDragging ? '' : 'transition-[width] duration-200 ease-in-out'
+            }`}
+            style={{ width: explorerVisible ? explorerWidth : 40 }}
+          >
+            {/* Logo pinned to one spot so it never shifts between the
                   expanded and collapsed states. */}
-              <div className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none">
-                <AppLogo />
-              </div>
+            <div className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none">
+              <AppLogo />
+            </div>
 
-              {/* Expanded panel. Fixed width so its content clips during the
+            {/* Expanded panel. Fixed width so its content clips during the
                   width animation instead of reflowing. Mounted only while
                   open (the container keeps animating). */}
-              {explorerVisible && (
+            {explorerVisible && (
               <div
                 className="h-full flex flex-col"
                 style={{ width: explorerWidth }}
                 data-sidebar-panel
               >
-              {/* Identity row: the pinned logo sits at its left; close at the
+                {/* Identity row: the pinned logo sits at its left; close at the
                   right. h-11 matches the chrome row so the hairline under
                   both aligns across the window. */}
-              <div className="h-11 border-b border-transparent flex items-center justify-end pr-2 shrink-0">
-                <button
-                  onClick={() => setExplorerVisible(false)}
-                  className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                  title="Close panel"
-                  aria-label="Close panel"
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              {/* View tabs */}
-              <div className="h-10 flex items-center pl-1 pr-2 shrink-0">
-                <div className="flex items-center gap-0.5">
+                <div className="h-11 border-b border-transparent flex items-center justify-end pr-2 shrink-0">
                   <button
-                    onClick={() => setLeftPanelView('explorer')}
-                    className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
-                      leftPanelView === 'explorer'
-                        ? 'bg-surface-inset text-content'
-                        : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
-                    }`}
-                    title="File explorer"
+                    onClick={() => setExplorerVisible(false)}
+                    className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    title="Close panel"
+                    aria-label="Close panel"
                   >
                     <svg
-                      className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
-                      fill="none"
+                      className="w-3.5 h-3.5"
                       viewBox="0 0 24 24"
+                      fill="none"
                       stroke="currentColor"
                       strokeWidth={2}
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                    Explorer
-                  </button>
-                  <button
-                    onClick={() => setLeftPanelView('outline')}
-                    className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
-                      leftPanelView === 'outline'
-                        ? 'bg-surface-inset text-content'
-                        : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
-                    }`}
-                    title="Document outline"
-                  >
-                    <svg
-                      className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-                      />
-                    </svg>
-                    Outline
                   </button>
                 </div>
+                {/* View tabs */}
+                <div className="h-10 flex items-center pl-1 pr-2 shrink-0">
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => setLeftPanelView('explorer')}
+                      className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        leftPanelView === 'explorer'
+                          ? 'bg-surface-inset text-content'
+                          : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
+                      }`}
+                      title="File explorer"
+                    >
+                      <svg
+                        className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
+                        />
+                      </svg>
+                      Explorer
+                    </button>
+                    <button
+                      onClick={() => setLeftPanelView('outline')}
+                      className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        leftPanelView === 'outline'
+                          ? 'bg-surface-inset text-content'
+                          : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
+                      }`}
+                      title="Document outline"
+                    >
+                      <svg
+                        className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+                        />
+                      </svg>
+                      Outline
+                    </button>
+                  </div>
+                </div>
+                {/* Panel content */}
+                {leftPanelView === 'explorer' ? (
+                  <FileExplorer
+                    initialDir={explorerDir}
+                    activeFilePath={activeFilePath}
+                    homeDir={homeDir}
+                    onOpenFile={handleExplorerOpenFile}
+                    onClose={() => setExplorerVisible(false)}
+                    onContextMenu={handleExplorerContextMenu}
+                    onTrustFolder={handleTrustFolder}
+                    hideHeader
+                  />
+                ) : (
+                  <TableOfContents
+                    headings={tocHeadings}
+                    activeHeadingId={activeHeadingId}
+                    onHeadingClick={handleHeadingNavigate}
+                  />
+                )}
+                {/* Settings pinned at the sidebar's bottom corner */}
+                <div className="shrink-0 border-t border-border-subtle flex items-center px-2 py-1">
+                  <IconButton
+                    size="md"
+                    onClick={() => setActiveModal('settings')}
+                    title={`Settings (${getPrimaryModifierLabel()}+,)`}
+                  >
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                    </svg>
+                  </IconButton>
+                </div>
               </div>
-              {/* Panel content */}
-              {leftPanelView === 'explorer' ? (
-                <FileExplorer
-                  initialDir={explorerDir}
-                  activeFilePath={activeFilePath}
-                  homeDir={homeDir}
-                  onOpenFile={handleExplorerOpenFile}
-                  onClose={() => setExplorerVisible(false)}
-                  onContextMenu={handleExplorerContextMenu}
-                  onTrustFolder={handleTrustFolder}
-                  hideHeader
-                />
-              ) : (
-                <TableOfContents
-                  headings={tocHeadings}
-                  activeHeadingId={activeHeadingId}
-                  onHeadingClick={handleHeadingNavigate}
-                />
-              )}
-              {/* Settings pinned at the sidebar's bottom corner */}
-              <div className="shrink-0 border-t border-border-subtle flex items-center px-2 py-1">
+            )}
+
+            {/* Collapsed icon rail: sits under the pinned logo, mounted only
+                while collapsed. */}
+            {!explorerVisible && (
+              <div
+                data-sidebar-rail
+                className="absolute inset-y-0 left-0 w-10 flex flex-col items-center pt-11 pb-1 gap-1.5"
+              >
+                <IconButton
+                  size="md"
+                  onClick={() => {
+                    setExplorerVisible(true);
+                    setLeftPanelView('explorer');
+                  }}
+                  title={`Show Explorer (${getPrimaryModifierLabel()}+B)`}
+                >
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
+                    />
+                  </svg>
+                </IconButton>
+                <IconButton
+                  size="md"
+                  onClick={() => {
+                    setExplorerVisible(true);
+                    setLeftPanelView('outline');
+                  }}
+                  title="Show Outline"
+                >
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+                    />
+                  </svg>
+                </IconButton>
+                <div className="flex-1" />
                 <IconButton
                   size="md"
                   onClick={() => setActiveModal('settings')}
@@ -2406,605 +2484,558 @@ export default function App() {
                   </svg>
                 </IconButton>
               </div>
-            </div>
-
             )}
-
-            {/* Collapsed icon rail: sits under the pinned logo, mounted only
-                while collapsed. */}
-            {!explorerVisible && (
+          </div>
+          {explorerVisible && (
             <div
-              data-sidebar-rail
-              className="absolute inset-y-0 left-0 w-10 flex flex-col items-center pt-11 pb-1 gap-1.5"
+              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
+              onMouseDown={(e) => onResizeStart('explorer', e)}
             >
-            <IconButton
-              size="md"
-              onClick={() => {
-                setExplorerVisible(true);
-                setLeftPanelView('explorer');
-              }}
-              title={`Show Explorer (${getPrimaryModifierLabel()}+B)`}
-            >
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
-                />
-              </svg>
-            </IconButton>
-            <IconButton
-              size="md"
-              onClick={() => {
-                setExplorerVisible(true);
-                setLeftPanelView('outline');
-              }}
-              title="Show Outline"
-            >
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-                />
-              </svg>
-            </IconButton>
-            <div className="flex-1" />
-            <IconButton
-              size="md"
-              onClick={() => setActiveModal('settings')}
-              title={`Settings (${getPrimaryModifierLabel()}+,)`}
-            >
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-            </IconButton>
+              <div className="absolute inset-y-0 -left-1 -right-1" />
             </div>
-            )}
-            </div>
-            {explorerVisible && (
-              <div
-                className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-                onMouseDown={(e) => onResizeStart('explorer', e)}
-              >
-                <div className="absolute inset-y-0 -left-1 -right-1" />
-              </div>
-            )}
-          </>
-        )}
+          )}
+        </>
+      )}
 
       {/* Main column: chrome row, document, status bar */}
       <div className="flex-1 min-w-0 flex flex-col">
-      <ReviewBanner
-        sessions={reviewSessions}
-        commentCounts={commentCounts}
-        agentCommentCounts={agentCommentCounts}
-        onHandoffSuccess={handleReviewHandoffSuccess}
-        onResolved={handleReviewResolved}
-        onBatchSent={handleBatchSent}
-        showToast={showToast}
-        commentIdsByFile={commentIdsByFile}
-        agentNamesBySession={agentNamesBySession}
-        pendingAskCountsBySession={pendingAskCountsBySession}
-        onJumpToAsk={handleJumpToAsk}
-      />
-      <Toolbar
-        error={error}
-        errorKind={errorKind}
-        accessDeniedDir={accessDeniedDir}
-        homeDir={homeDir}
-        isLoading={isLoading}
-        commentsSurfaceVisible={railShown || drawerOpen}
-        author={author}
-        onAuthorChange={setAuthor}
-        onToggleSidebar={toggleCommentsSurface}
-        onTrustFolder={handleTrustFolder}
-        tabs={
-          <TabBar
-            embedded
-            tabs={tabs}
-            activeFilePath={activeFilePath}
-            commentCounts={tabCommentCounts}
-            resolvedCommentCounts={resolvedCommentCounts}
-            onSwitchTab={switchTab}
-            onCloseTab={closeTab}
-            onOpenFile={openFilePicker}
-            onTabContextMenu={handleTabContextMenu}
-          />
-        }
-      />
+        <ReviewBanner
+          sessions={reviewSessions}
+          commentCounts={commentCounts}
+          agentCommentCounts={agentCommentCounts}
+          onHandoffSuccess={handleReviewHandoffSuccess}
+          onResolved={handleReviewResolved}
+          onBatchSent={handleBatchSent}
+          showToast={showToast}
+          commentIdsByFile={commentIdsByFile}
+          agentNamesBySession={agentNamesBySession}
+          pendingAskCountsBySession={pendingAskCountsBySession}
+          onJumpToAsk={handleJumpToAsk}
+        />
+        <Toolbar
+          error={error}
+          errorKind={errorKind}
+          accessDeniedDir={accessDeniedDir}
+          homeDir={homeDir}
+          isLoading={isLoading}
+          commentsSurfaceVisible={railShown || drawerOpen}
+          author={author}
+          onAuthorChange={setAuthor}
+          onToggleSidebar={toggleCommentsSurface}
+          onTrustFolder={handleTrustFolder}
+          tabs={
+            <TabBar
+              embedded
+              tabs={tabs}
+              activeFilePath={activeFilePath}
+              commentCounts={tabCommentCounts}
+              resolvedCommentCounts={resolvedCommentCounts}
+              onSwitchTab={switchTab}
+              onCloseTab={closeTab}
+              onOpenFile={openFilePicker}
+              onTabContextMenu={handleTabContextMenu}
+            />
+          }
+        />
 
-      <>
-        <div className="flex-1 flex min-h-0 relative">
-
-          {/* Markdown viewer */}
-          <div
-            className="flex-1 min-h-0 min-w-0 relative panel-center bg-surface-secondary"
-            data-prose-font={settings.proseFont}
-            data-prose-size={settings.proseSize}
-          >
-            {showSearch && (
-              <SearchBar
-                query={searchQuery}
-                onQueryChange={handleSearchQueryChange}
-                matchCount={searchMatchCount}
-                activeIndex={activeSearchIndex}
-                onNext={handleSearchNext}
-                onPrev={handleSearchPrev}
-                onClose={handleSearchClose}
-                focusTrigger={searchFocusTrigger}
-              />
-            )}
-            <div className="h-full flex flex-col">
-              <PanelToolbar
-                viewMode={viewMode}
-                onViewModeChange={(mode) => {
-                  setViewMode(mode);
-                  if (mode === 'raw') {
-                    clearSelection();
-                    if (diffChunkCount > 0) {
-                      setDiffEnabled(true);
-                      setDiffPending(false);
-                    }
-                  }
-                }}
-                searchActive={showSearch}
-                onSearch={() => {
-                  if (showSearch) {
-                    handleSearchClose();
-                  } else {
-                    setActiveModal('search');
-                    setSearchFocusTrigger((t) => t + 1);
-                  }
-                }}
-                commentCounts={commentCounts}
-                activeFilePath={activeFilePath}
-                onCopyAgentPrompt={handleHandoff}
-                hasDiffSnapshot={currentSnapshot != null}
-                diffEnabled={diffEnabled}
-                diffPending={diffPending}
-                diffChunkCount={diffChunkCount}
-                referenceLabel={
-                  diffEnabled && currentReference && diffChunkCount > 0
-                    ? formatReferenceLabel(currentReference)
-                    : undefined
-                }
-                onDiffToggle={handleDiffToggle}
-                onDiffPrev={() => {
-                  if (viewMode === 'raw') rawViewRef.current?.diffPrev();
-                  else renderedDiffRef.current?.prev();
-                }}
-                onDiffNext={() => {
-                  if (viewMode === 'raw') rawViewRef.current?.diffNext();
-                  else renderedDiffRef.current?.next();
-                }}
-                onMarkReviewed={handleMarkReviewed}
-                onCopyDocument={handleCopyDocument}
-                copyFeedback={copyFeedback}
-                breadcrumb={
-                  railCapable ? (
-                    <SectionBreadcrumb
-                      chain={breadcrumbChain}
-                      containerRef={containerRef}
-                      onJump={handleHeadingNavigate}
-                    />
-                  ) : undefined
-                }
-                railControls={
-                  railShown ? (
-                    <RailDensityControl
-                      density={railDensity}
-                      onDensityChange={setRailDensity}
-                      openCount={commentCount}
-                      resolvedCount={resolvedCommentCount}
-                      totalCount={comments.length}
-                      resolveEnabled={settings.enableResolve}
-                      onJumpPrev={handleJumpToPrev}
-                      onJumpNext={handleJumpToNext}
-                      onBulkResolve={handleBulkResolve}
-                      onBulkDeleteResolved={handleBulkDeleteResolved}
-                      onBulkDelete={handleBulkDelete}
-                    />
-                  ) : undefined
-                }
-              />
-              {viewMode === 'raw' ? (
-                <RawView
-                  ref={rawViewRef}
-                  scrollContainerRef={containerRef}
-                  rawMarkdown={rawMarkdown}
-                  searchQuery={showSearch ? searchQuery : undefined}
-                  searchActiveIndex={activeSearchIndex}
-                  onSearchCount={handleSearchCount}
-                  activeCommentId={activeCommentId}
-                  diffSnapshot={currentSnapshot}
-                  diffEnabled={diffEnabled}
-                  diffLines={diffLines}
-                  oldCleanToRawLine={oldCleanToRawLine}
-                  newCleanToRawLine={newCleanToRawLine}
+        <>
+          <div className="flex-1 flex min-h-0 relative">
+            {/* Markdown viewer */}
+            <div
+              className="flex-1 min-h-0 min-w-0 relative panel-center bg-surface-secondary"
+              data-prose-font={settings.proseFont}
+              data-prose-size={settings.proseSize}
+            >
+              {showSearch && (
+                <SearchBar
+                  query={searchQuery}
+                  onQueryChange={handleSearchQueryChange}
+                  matchCount={searchMatchCount}
+                  activeIndex={activeSearchIndex}
+                  onNext={handleSearchNext}
+                  onPrev={handleSearchPrev}
+                  onClose={handleSearchClose}
+                  focusTrigger={searchFocusTrigger}
                 />
-              ) : (
-                <div className="relative flex-1 min-h-0">
-                  <div
-                    ref={containerRef}
-                    className="h-full overflow-y-auto pt-3 relative"
-                  >
-                    <div
-                      ref={pageRef}
-                      data-doc-page
-                      className="doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] motion-safe:transition-[width] motion-safe:duration-150"
-                      style={{
-                        width: geometry.pageWidth,
-                        maxWidth: 'calc(100% - 24px)',
-                        minHeight: railShown
-                          ? `max(100%, ${marginLayout.layerHeight + 120}px)`
-                          : '100%',
-                      }}
-                    >
-                      <div
-                        className="motion-safe:transition-[width] motion-safe:duration-150"
-                        style={{ marginLeft: PAD_L, width: geometry.colWidth }}
-                      >
-                        {diffEnabled && currentSnapshot && diffLines ? (
-                          // key on activeFilePath forces a remount when the user
-                          // switches files while the diff overlay is on, so the
-                          // mount-time auto-scroll-to-first-chunk fires for each
-                          // file's diff. Without this, the [] effect in
-                          // RenderedDiffView only runs for the first file viewed.
-                          <RenderedDiffView
-                            key={activeFilePath ?? ''}
-                            ref={renderedDiffRef}
-                            rawMarkdown={rawMarkdown}
-                            diffSnapshot={currentSnapshot}
-                            diffLines={diffLines}
-                          />
-                        ) : (
-                          <>
-                            {viewerNeedsTheme ? (
-                              <ThemedMarkdownViewer
-                                ref={viewerRef}
-                                html={html}
-                                cleanMarkdown={cleanMarkdown}
-                                comments={comments}
-                                activeCommentId={activeCommentId}
-                                selectionText={selection?.text ?? null}
-                                selectionOffset={selection?.offset ?? null}
-                                onHighlightClick={handleHighlightClickWithPopover}
-                                // Fragment arg is intentionally ignored in v1; openTab
-                                // takes only the path. See spec §3 non-goals.
-                                onLocalLinkClick={openTab}
-                                onContextMenu={handleViewerContextMenu}
-                                enableResolve={settings.enableResolve}
-                                searchQuery={showSearch ? searchQuery : undefined}
-                                searchActiveIndex={activeSearchIndex}
-                                onSearchCount={handleSearchCount}
-                                sentCommentIds={sentCommentIds}
-                                mermaidSvgMap={mermaidSvgMap}
-                                onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                onHighlightsPainted={handleHighlightsPainted}
-                              />
-                            ) : (
-                              <MarkdownViewer
-                                ref={viewerRef}
-                                html={html}
-                                cleanMarkdown={cleanMarkdown}
-                                comments={comments}
-                                activeCommentId={activeCommentId}
-                                selectionText={selection?.text ?? null}
-                                selectionOffset={selection?.offset ?? null}
-                                onHighlightClick={handleHighlightClickWithPopover}
-                                // Fragment arg is intentionally ignored in v1; openTab
-                                // takes only the path. See spec §3 non-goals.
-                                onLocalLinkClick={openTab}
-                                onContextMenu={handleViewerContextMenu}
-                                enableResolve={settings.enableResolve}
-                                searchQuery={showSearch ? searchQuery : undefined}
-                                searchActiveIndex={activeSearchIndex}
-                                onSearchCount={handleSearchCount}
-                                sentCommentIds={sentCommentIds}
-                                mermaidSvgMap={mermaidSvgMap}
-                                onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                onHighlightsPainted={handleHighlightsPainted}
-                              />
-                            )}
-                            <DragHandles
-                              startPos={handlePositions?.start ?? null}
-                              endPos={handlePositions?.end ?? null}
-                              onMouseDown={onHandleMouseDown}
-                            />
-                          </>
-                        )}
-                      </div>
-                      {railShown && (
-                        <CommentsRail
-                          density={railDensity}
-                          scrollRef={containerRef as RefObject<HTMLElement | null>}
-                          layout={marginLayout}
-                          anchoredComments={marginComments}
-                          allComments={comments}
-                          activeCommentId={activeCommentId}
-                          missingAnchors={missingAnchors}
-                          sentCommentIds={sentCommentIds}
-                          onActivate={handleSidebarActivate}
-                          onReply={handleReply}
-                          onResolve={settings.enableResolve ? handleResolve : undefined}
-                          onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-                          onDelete={handleDelete}
-                          onEdit={handleEdit}
-                          onEditReply={handleEditReply}
-                          onDeleteReply={handleDeleteReply}
-                          onBulkDelete={handleBulkDelete}
-                          onBulkResolve={handleBulkResolve}
-                          onBulkDeleteResolved={handleBulkDeleteResolved}
-                          onContextMenu={handleSidebarContextMenu}
-                          selectionText={selection?.text ?? null}
-                          selectionOffset={selection?.offset ?? null}
-                          onReanchorToSelection={handleReanchorToSelection}
-                          requestedEditor={requestedEditor}
-                          requestedFocus={requestedCommentFocus}
-                          onFocusHandled={() => setRequestedCommentFocus(null)}
-                        />
-                      )}
-                      {popoverCommentId &&
-                        !railShown &&
-                        (() => {
-                          const c = comments.find((x) => x.id === popoverCommentId);
-                          if (!c) return null;
-                          return (
-                            <CommentPopover
-                              comment={c}
-                              pageRef={pageRef as RefObject<HTMLElement | null>}
-                              onClose={() => setPopoverCommentId(null)}
-                              sent={sentCommentIds.includes(c.id)}
-                              anchorMissing={missingAnchors.has(c.id)}
-                              onReply={handleReply}
-                              onResolve={settings.enableResolve ? handleResolve : undefined}
-                              onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-                              onDelete={handleDelete}
-                              onEdit={handleEdit}
-                              onEditReply={handleEditReply}
-                              onDeleteReply={handleDeleteReply}
-                            />
-                          );
-                        })()}
-                    </div>
-                  </div>
-                  <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />
-                </div>
               )}
+              <div className="h-full flex flex-col">
+                <PanelToolbar
+                  viewMode={viewMode}
+                  onViewModeChange={(mode) => {
+                    setViewMode(mode);
+                    if (mode === 'raw') {
+                      clearSelection();
+                      if (diffChunkCount > 0) {
+                        setDiffEnabled(true);
+                        setDiffPending(false);
+                      }
+                    }
+                  }}
+                  searchActive={showSearch}
+                  onSearch={() => {
+                    if (showSearch) {
+                      handleSearchClose();
+                    } else {
+                      setActiveModal('search');
+                      setSearchFocusTrigger((t) => t + 1);
+                    }
+                  }}
+                  commentCounts={commentCounts}
+                  activeFilePath={activeFilePath}
+                  onCopyAgentPrompt={handleHandoff}
+                  hasDiffSnapshot={currentSnapshot != null}
+                  diffEnabled={diffEnabled}
+                  diffPending={diffPending}
+                  diffChunkCount={diffChunkCount}
+                  referenceLabel={
+                    diffEnabled && currentReference && diffChunkCount > 0
+                      ? formatReferenceLabel(currentReference)
+                      : undefined
+                  }
+                  onDiffToggle={handleDiffToggle}
+                  onDiffPrev={() => {
+                    if (viewMode === 'raw') rawViewRef.current?.diffPrev();
+                    else renderedDiffRef.current?.prev();
+                  }}
+                  onDiffNext={() => {
+                    if (viewMode === 'raw') rawViewRef.current?.diffNext();
+                    else renderedDiffRef.current?.next();
+                  }}
+                  onMarkReviewed={handleMarkReviewed}
+                  onCopyDocument={handleCopyDocument}
+                  copyFeedback={copyFeedback}
+                  breadcrumb={
+                    railCapable ? (
+                      <SectionBreadcrumb
+                        chain={breadcrumbChain}
+                        containerRef={containerRef}
+                        onJump={handleHeadingNavigate}
+                      />
+                    ) : undefined
+                  }
+                  railControls={
+                    railShown ? (
+                      <RailDensityControl
+                        density={railDensity}
+                        onDensityChange={setRailDensity}
+                        openCount={commentCount}
+                        resolvedCount={resolvedCommentCount}
+                        totalCount={comments.length}
+                        resolveEnabled={settings.enableResolve}
+                        onJumpPrev={handleJumpToPrev}
+                        onJumpNext={handleJumpToNext}
+                        onBulkResolve={handleBulkResolve}
+                        onBulkDeleteResolved={handleBulkDeleteResolved}
+                        onBulkDelete={handleBulkDelete}
+                      />
+                    ) : undefined
+                  }
+                />
+                {viewMode === 'raw' ? (
+                  <RawView
+                    ref={rawViewRef}
+                    scrollContainerRef={containerRef}
+                    rawMarkdown={rawMarkdown}
+                    searchQuery={showSearch ? searchQuery : undefined}
+                    searchActiveIndex={activeSearchIndex}
+                    onSearchCount={handleSearchCount}
+                    activeCommentId={activeCommentId}
+                    diffSnapshot={currentSnapshot}
+                    diffEnabled={diffEnabled}
+                    diffLines={diffLines}
+                    oldCleanToRawLine={oldCleanToRawLine}
+                    newCleanToRawLine={newCleanToRawLine}
+                  />
+                ) : (
+                  <div className="relative flex-1 min-h-0">
+                    <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
+                      <div
+                        ref={pageRef}
+                        data-doc-page
+                        className="doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] motion-safe:transition-[width] motion-safe:duration-150"
+                        style={{
+                          width: geometry.pageWidth,
+                          maxWidth: 'calc(100% - 24px)',
+                          minHeight: railShown
+                            ? `max(100%, ${marginLayout.layerHeight + 120}px)`
+                            : '100%',
+                        }}
+                      >
+                        <div
+                          className="motion-safe:transition-[width] motion-safe:duration-150"
+                          style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                        >
+                          {diffEnabled && currentSnapshot && diffLines ? (
+                            // key on activeFilePath forces a remount when the user
+                            // switches files while the diff overlay is on, so the
+                            // mount-time auto-scroll-to-first-chunk fires for each
+                            // file's diff. Without this, the [] effect in
+                            // RenderedDiffView only runs for the first file viewed.
+                            <RenderedDiffView
+                              key={activeFilePath ?? ''}
+                              ref={renderedDiffRef}
+                              rawMarkdown={rawMarkdown}
+                              diffSnapshot={currentSnapshot}
+                              diffLines={diffLines}
+                            />
+                          ) : (
+                            <>
+                              {viewerNeedsTheme ? (
+                                <ThemedMarkdownViewer
+                                  ref={viewerRef}
+                                  html={html}
+                                  cleanMarkdown={cleanMarkdown}
+                                  comments={comments}
+                                  activeCommentId={activeCommentId}
+                                  selectionText={selection?.text ?? null}
+                                  selectionOffset={selection?.offset ?? null}
+                                  onHighlightClick={handleHighlightClickWithPopover}
+                                  // Fragment arg is intentionally ignored in v1; openTab
+                                  // takes only the path. See spec §3 non-goals.
+                                  onLocalLinkClick={openTab}
+                                  onContextMenu={handleViewerContextMenu}
+                                  enableResolve={settings.enableResolve}
+                                  searchQuery={showSearch ? searchQuery : undefined}
+                                  searchActiveIndex={activeSearchIndex}
+                                  onSearchCount={handleSearchCount}
+                                  sentCommentIds={sentCommentIds}
+                                  mermaidSvgMap={mermaidSvgMap}
+                                  onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                  onHighlightsPainted={handleHighlightsPainted}
+                                />
+                              ) : (
+                                <MarkdownViewer
+                                  ref={viewerRef}
+                                  html={html}
+                                  cleanMarkdown={cleanMarkdown}
+                                  comments={comments}
+                                  activeCommentId={activeCommentId}
+                                  selectionText={selection?.text ?? null}
+                                  selectionOffset={selection?.offset ?? null}
+                                  onHighlightClick={handleHighlightClickWithPopover}
+                                  // Fragment arg is intentionally ignored in v1; openTab
+                                  // takes only the path. See spec §3 non-goals.
+                                  onLocalLinkClick={openTab}
+                                  onContextMenu={handleViewerContextMenu}
+                                  enableResolve={settings.enableResolve}
+                                  searchQuery={showSearch ? searchQuery : undefined}
+                                  searchActiveIndex={activeSearchIndex}
+                                  onSearchCount={handleSearchCount}
+                                  sentCommentIds={sentCommentIds}
+                                  mermaidSvgMap={mermaidSvgMap}
+                                  onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                  onHighlightsPainted={handleHighlightsPainted}
+                                />
+                              )}
+                              <DragHandles
+                                startPos={handlePositions?.start ?? null}
+                                endPos={handlePositions?.end ?? null}
+                                onMouseDown={onHandleMouseDown}
+                              />
+                            </>
+                          )}
+                        </div>
+                        {railShown && (
+                          <CommentsRail
+                            density={railDensity}
+                            scrollRef={containerRef as RefObject<HTMLElement | null>}
+                            layout={marginLayout}
+                            anchoredComments={marginComments}
+                            allComments={comments}
+                            activeCommentId={activeCommentId}
+                            missingAnchors={missingAnchors}
+                            sentCommentIds={sentCommentIds}
+                            onActivate={handleSidebarActivate}
+                            onReply={handleReply}
+                            onResolve={settings.enableResolve ? handleResolve : undefined}
+                            onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                            onDelete={handleDelete}
+                            onEdit={handleEdit}
+                            onEditReply={handleEditReply}
+                            onDeleteReply={handleDeleteReply}
+                            onBulkDelete={handleBulkDelete}
+                            onBulkResolve={handleBulkResolve}
+                            onBulkDeleteResolved={handleBulkDeleteResolved}
+                            onContextMenu={handleSidebarContextMenu}
+                            selectionText={selection?.text ?? null}
+                            selectionOffset={selection?.offset ?? null}
+                            onReanchorToSelection={handleReanchorToSelection}
+                            requestedEditor={requestedEditor}
+                            requestedFocus={requestedCommentFocus}
+                            onFocusHandled={() => setRequestedCommentFocus(null)}
+                          />
+                        )}
+                        {popoverCommentId &&
+                          !railShown &&
+                          (() => {
+                            const c = comments.find((x) => x.id === popoverCommentId);
+                            if (!c) return null;
+                            return (
+                              <CommentPopover
+                                comment={c}
+                                pageRef={pageRef as RefObject<HTMLElement | null>}
+                                onClose={() => setPopoverCommentId(null)}
+                                sent={sentCommentIds.includes(c.id)}
+                                anchorMissing={missingAnchors.has(c.id)}
+                                onReply={handleReply}
+                                onResolve={settings.enableResolve ? handleResolve : undefined}
+                                onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                                onDelete={handleDelete}
+                                onEdit={handleEdit}
+                                onEditReply={handleEditReply}
+                                onDeleteReply={handleDeleteReply}
+                              />
+                            );
+                          })()}
+                      </div>
+                    </div>
+                    <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Floating comment form (disabled in raw/diff view) */}
-        {selection && viewMode === 'rendered' && (
-          <CommentForm
-            selection={selection}
-            autoExpand={autoExpandForm}
-            onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
-              handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
-              setAutoExpandForm(false);
-            }}
-            onCancel={() => {
-              clearSelection();
-              setAutoExpandForm(false);
-            }}
-            onLock={lockSelection}
+          {/* Touch/pen: the selection is held as pending while the native
+            handles are adjusted; this button is the explicit "done selecting"
+            signal. touchend commits from the stored SelectionInfo snapshot,
+            so it works even if the tap collapses the native selection. */}
+          {pendingSelection && !selection && viewMode === 'rendered' && (
+            <button
+              type="button"
+              data-preserve-selection
+              data-testid="pending-selection-commit"
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                commitPendingSelection();
+              }}
+              onClick={commitPendingSelection}
+              className="fixed bottom-6 right-6 z-50 rounded-full bg-primary px-5 py-3 text-sm font-medium text-on-primary shadow-lg"
+            >
+              Comment
+            </button>
+          )}
+
+          {/* Floating comment form (disabled in raw/diff view) */}
+          {selection && viewMode === 'rendered' && (
+            <CommentForm
+              selection={selection}
+              autoExpand={autoExpandForm}
+              onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
+                handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
+                setAutoExpandForm(false);
+              }}
+              onCancel={() => {
+                clearSelection();
+                setAutoExpandForm(false);
+              }}
+              onLock={lockSelection}
+            />
+          )}
+        </>
+
+        {/* Toast notification (Feature 8) */}
+        <Toast
+          message={toast.message}
+          visible={toast.visible}
+          onDismiss={dismissToast}
+          action={toast.action}
+          kind={toast.kind}
+        />
+
+        {/* Update-available notice: persistent sibling of the toast */}
+        <UpdateNotice latest={updateLatest} onDismiss={dismissUpdateNotice} showToast={showToast} />
+
+        {/* Comments drawer: the comment surface wherever the rail can't show */}
+        <CommentsDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          comments={comments}
+          activeCommentId={activeCommentId}
+          missingAnchors={missingAnchors}
+          selectionText={selection?.text ?? null}
+          selectionOffset={selection?.offset ?? null}
+          onReanchorToSelection={handleReanchorToSelection}
+          onActivate={handleSidebarActivate}
+          onResolve={handleResolve}
+          onUnresolve={handleUnresolve}
+          onDelete={handleDelete}
+          onEdit={handleEdit}
+          onReply={handleReply}
+          onEditReply={handleEditReply}
+          onDeleteReply={handleDeleteReply}
+          onBulkDelete={handleBulkDelete}
+          onBulkResolve={handleBulkResolve}
+          onBulkDeleteResolved={handleBulkDeleteResolved}
+          onContextMenu={handleSidebarContextMenu}
+          requestedEditor={requestedEditor}
+          requestedFocus={drawerOpen ? requestedCommentFocus : null}
+          onFocusHandled={() => setRequestedCommentFocus(null)}
+          sentCommentIds={sentCommentIds}
+        />
+
+        {/* Command palette */}
+        <CommandPalette
+          commands={paletteCommands}
+          open={activeModal === 'commandPalette'}
+          onClose={() => setActiveModal(null)}
+        />
+
+        {/* File opener */}
+        <FileOpener
+          open={activeModal === 'fileOpener'}
+          onClose={() => setActiveModal(null)}
+          onOpenFile={(path) => {
+            handleOpenFile(path);
+            setActiveModal(null);
+          }}
+          recentFiles={recentFiles}
+          activeFilePath={activeFilePath}
+          onClearRecent={clearRecentFiles}
+        />
+
+        {/* Mermaid fullscreen modal */}
+        <MermaidFullscreenModal
+          open={mermaidFullscreen.isOpen}
+          source={activeMermaidBlock?.source ?? mermaidFullscreen.activeSource}
+          blockIndex={activeMermaidBlock?.index ?? mermaidFullscreen.activeBlockIndex}
+          svgHtml={activeMermaidSvg}
+          cleanMarkdown={cleanMarkdown}
+          comments={comments}
+          activeCommentId={activeCommentId}
+          onClose={mermaidFullscreen.close}
+          onAddComment={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
+            // The hint offset coming out of the modal is in canvas-text-content
+            // coordinates and isn't meaningful in markdown space, so we ignore
+            // it and instead point insertComment at the anchor's position
+            // INSIDE this diagram's source block.
+            //
+            // insertComment expects the hint in plain-text coordinates (the
+            // text produced by stripInlineFormatting, which strips fenced-code
+            // delimiters), not raw clean-markdown coordinates. If we pass a
+            // raw source position, pickBestOccurrence ranks it against
+            // plain-text positions and can prefer a nearby prose occurrence —
+            // the comment then ends up filed against the prose, and
+            // commentsForDiagram filters it out of the diagram panel.
+            let adjustedHint = hintOffset;
+            if (activeMermaidBlock) {
+              // Point insertComment at the active fenced block as it exists now.
+              // The fullscreen modal may stay open while earlier diagrams are
+              // inserted or removed, so the original source-order index can drift.
+              const anchorInSource = activeMermaidBlock.source.indexOf(anchor);
+              const cleanHint =
+                activeMermaidBlock.sourceStart + (anchorInSource >= 0 ? anchorInSource : 0);
+              const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
+              adjustedHint = toPlainOffset(cleanHint);
+            }
+            handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
+          }}
+          onReply={handleReply}
+          onResolve={settings.enableResolve ? handleResolve : undefined}
+          onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+          onDelete={handleDelete}
+          onEdit={handleEdit}
+          onEditReply={handleEditReply}
+          onDeleteReply={handleDeleteReply}
+          onActivateComment={setActiveCommentId}
+          panelWidth={mermaidPanelWidth}
+          onPanelResizeStart={(e) => onResizeStart('mermaidPanel', e)}
+          isResizing={isDragging}
+        />
+
+        {/* Context menus */}
+        {viewerCtxMenu.isOpen && (
+          <ContextMenu
+            items={ctxMenuItems}
+            position={viewerCtxMenu.position}
+            onClose={viewerCtxMenu.close}
           />
         )}
-      </>
-
-      {/* Toast notification (Feature 8) */}
-      <Toast
-        message={toast.message}
-        visible={toast.visible}
-        onDismiss={dismissToast}
-        action={toast.action}
-        kind={toast.kind}
-      />
-
-      {/* Update-available notice: persistent sibling of the toast */}
-      <UpdateNotice latest={updateLatest} onDismiss={dismissUpdateNotice} showToast={showToast} />
-
-      {/* Comments drawer: the comment surface wherever the rail can't show */}
-      <CommentsDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        comments={comments}
-        activeCommentId={activeCommentId}
-        missingAnchors={missingAnchors}
-        selectionText={selection?.text ?? null}
-        selectionOffset={selection?.offset ?? null}
-        onReanchorToSelection={handleReanchorToSelection}
-        onActivate={handleSidebarActivate}
-        onResolve={handleResolve}
-        onUnresolve={handleUnresolve}
-        onDelete={handleDelete}
-        onEdit={handleEdit}
-        onReply={handleReply}
-        onEditReply={handleEditReply}
-        onDeleteReply={handleDeleteReply}
-        onBulkDelete={handleBulkDelete}
-        onBulkResolve={handleBulkResolve}
-        onBulkDeleteResolved={handleBulkDeleteResolved}
-        onContextMenu={handleSidebarContextMenu}
-        requestedEditor={requestedEditor}
-        requestedFocus={drawerOpen ? requestedCommentFocus : null}
-        onFocusHandled={() => setRequestedCommentFocus(null)}
-        sentCommentIds={sentCommentIds}
-      />
-
-      {/* Command palette */}
-      <CommandPalette
-        commands={paletteCommands}
-        open={activeModal === 'commandPalette'}
-        onClose={() => setActiveModal(null)}
-      />
-
-      {/* File opener */}
-      <FileOpener
-        open={activeModal === 'fileOpener'}
-        onClose={() => setActiveModal(null)}
-        onOpenFile={(path) => {
-          handleOpenFile(path);
-          setActiveModal(null);
-        }}
-        recentFiles={recentFiles}
-        activeFilePath={activeFilePath}
-        onClearRecent={clearRecentFiles}
-      />
-
-      {/* Mermaid fullscreen modal */}
-      <MermaidFullscreenModal
-        open={mermaidFullscreen.isOpen}
-        source={activeMermaidBlock?.source ?? mermaidFullscreen.activeSource}
-        blockIndex={activeMermaidBlock?.index ?? mermaidFullscreen.activeBlockIndex}
-        svgHtml={activeMermaidSvg}
-        cleanMarkdown={cleanMarkdown}
-        comments={comments}
-        activeCommentId={activeCommentId}
-        onClose={mermaidFullscreen.close}
-        onAddComment={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
-          // The hint offset coming out of the modal is in canvas-text-content
-          // coordinates and isn't meaningful in markdown space, so we ignore
-          // it and instead point insertComment at the anchor's position
-          // INSIDE this diagram's source block.
-          //
-          // insertComment expects the hint in plain-text coordinates (the
-          // text produced by stripInlineFormatting, which strips fenced-code
-          // delimiters), not raw clean-markdown coordinates. If we pass a
-          // raw source position, pickBestOccurrence ranks it against
-          // plain-text positions and can prefer a nearby prose occurrence —
-          // the comment then ends up filed against the prose, and
-          // commentsForDiagram filters it out of the diagram panel.
-          let adjustedHint = hintOffset;
-          if (activeMermaidBlock) {
-            // Point insertComment at the active fenced block as it exists now.
-            // The fullscreen modal may stay open while earlier diagrams are
-            // inserted or removed, so the original source-order index can drift.
-            const anchorInSource = activeMermaidBlock.source.indexOf(anchor);
-            const cleanHint =
-              activeMermaidBlock.sourceStart + (anchorInSource >= 0 ? anchorInSource : 0);
-            const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
-            adjustedHint = toPlainOffset(cleanHint);
-          }
-          handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
-        }}
-        onReply={handleReply}
-        onResolve={settings.enableResolve ? handleResolve : undefined}
-        onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-        onDelete={handleDelete}
-        onEdit={handleEdit}
-        onEditReply={handleEditReply}
-        onDeleteReply={handleDeleteReply}
-        onActivateComment={setActiveCommentId}
-        panelWidth={mermaidPanelWidth}
-        onPanelResizeStart={(e) => onResizeStart('mermaidPanel', e)}
-        isResizing={isDragging}
-      />
-
-      {/* Context menus */}
-      {viewerCtxMenu.isOpen && (
-        <ContextMenu
-          items={ctxMenuItems}
-          position={viewerCtxMenu.position}
-          onClose={viewerCtxMenu.close}
-        />
-      )}
-      {explorerCtxMenu.isOpen && (
-        <ContextMenu
-          items={explorerCtxMenuItems}
-          position={explorerCtxMenu.position}
-          onClose={explorerCtxMenu.close}
-        />
-      )}
-      {tabCtxMenu.isOpen && (
-        <ContextMenu
-          items={tabCtxMenuItems}
-          position={tabCtxMenu.position}
-          onClose={tabCtxMenu.close}
-        />
-      )}
-      {sidebarCtxMenu.isOpen && (
-        <ContextMenu
-          items={sidebarCtxMenuItems}
-          position={sidebarCtxMenu.position}
-          onClose={sidebarCtxMenu.close}
-        />
-      )}
-
-      {/* Settings panel */}
-      <SettingsPanel
-        open={activeModal === 'settings'}
-        onClose={() => setActiveModal(null)}
-        author={author}
-        onAuthorChange={setAuthor}
-      />
-      <KeyboardShortcutsPanel
-        open={activeModal === 'shortcuts'}
-        onClose={() => setActiveModal(null)}
-        resolveEnabled={settings.enableResolve}
-      />
-
-      <ConfirmDialog
-        open={pendingClose !== null}
-        title="Unsaved changes"
-        message="This file has unsaved changes that will be lost. Close anyway?"
-        confirmLabel="Close"
-        cancelLabel="Cancel"
-        onConfirm={executePendingClose}
-        onCancel={() => setPendingClose(null)}
-      />
-
-      {/* Backs the command palette's "Delete all comments". The rail kebab and
-          the list footer own their own copies of this dialog. */}
-      <ConfirmDialog
-        open={confirmDeleteAll}
-        title="Delete all comments"
-        message="This will permanently delete all comments. This cannot be undone."
-        confirmLabel="Delete All"
-        onConfirm={() => {
-          setConfirmDeleteAll(false);
-          handleBulkDelete();
-        }}
-        onCancel={() => setConfirmDeleteAll(false)}
-      />
-
-      {/* Keyboard shortcuts hint */}
-      <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-secondary shrink-0">
-        <span>
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
-            {modKey}+K
-          </kbd>{' '}
-          Commands
-        </span>
-        {focusMode && (
-          <button
-            type="button"
-            data-focus-chip
-            onClick={exitFocusMode}
-            title="Exit focus mode"
-            className="px-2 py-0.5 rounded-full bg-primary-bg text-primary-text text-[10px] font-medium hover:bg-primary-bg-strong transition-colors cursor-pointer"
-          >
-            Focus
-          </button>
+        {explorerCtxMenu.isOpen && (
+          <ContextMenu
+            items={explorerCtxMenuItems}
+            position={explorerCtxMenu.position}
+            onClose={explorerCtxMenu.close}
+          />
         )}
-        <span className="ml-auto">
-          <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
-            ?
-          </kbd>{' '}
-          Shortcuts
-        </span>
-      </div>
+        {tabCtxMenu.isOpen && (
+          <ContextMenu
+            items={tabCtxMenuItems}
+            position={tabCtxMenu.position}
+            onClose={tabCtxMenu.close}
+          />
+        )}
+        {sidebarCtxMenu.isOpen && (
+          <ContextMenu
+            items={sidebarCtxMenuItems}
+            position={sidebarCtxMenu.position}
+            onClose={sidebarCtxMenu.close}
+          />
+        )}
+
+        {/* Settings panel */}
+        <SettingsPanel
+          open={activeModal === 'settings'}
+          onClose={() => setActiveModal(null)}
+          author={author}
+          onAuthorChange={setAuthor}
+        />
+        <KeyboardShortcutsPanel
+          open={activeModal === 'shortcuts'}
+          onClose={() => setActiveModal(null)}
+          resolveEnabled={settings.enableResolve}
+        />
+
+        <ConfirmDialog
+          open={pendingClose !== null}
+          title="Unsaved changes"
+          message="This file has unsaved changes that will be lost. Close anyway?"
+          confirmLabel="Close"
+          cancelLabel="Cancel"
+          onConfirm={executePendingClose}
+          onCancel={() => setPendingClose(null)}
+        />
+
+        {/* Backs the command palette's "Delete all comments". The rail kebab and
+          the list footer own their own copies of this dialog. */}
+        <ConfirmDialog
+          open={confirmDeleteAll}
+          title="Delete all comments"
+          message="This will permanently delete all comments. This cannot be undone."
+          confirmLabel="Delete All"
+          onConfirm={() => {
+            setConfirmDeleteAll(false);
+            handleBulkDelete();
+          }}
+          onCancel={() => setConfirmDeleteAll(false)}
+        />
+
+        {/* Keyboard shortcuts hint */}
+        <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-secondary shrink-0">
+          <span>
+            <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
+              {modKey}+K
+            </kbd>{' '}
+            Commands
+          </span>
+          {focusMode && (
+            <button
+              type="button"
+              data-focus-chip
+              onClick={exitFocusMode}
+              title="Exit focus mode"
+              className="px-2 py-0.5 rounded-full bg-primary-bg text-primary-text text-[10px] font-medium hover:bg-primary-bg-strong transition-colors cursor-pointer"
+            >
+              Focus
+            </button>
+          )}
+          <span className="ml-auto">
+            <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
+              ?
+            </kbd>{' '}
+            Shortcuts
+          </span>
+        </div>
       </div>
     </div>
   );
