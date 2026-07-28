@@ -35,6 +35,45 @@ describe('getCopySelectionFallbackText', () => {
     ).toBeNull();
   });
 
+  it('applies in the comment composer when its caret is collapsed', () => {
+    expect(
+      getCopySelectionFallbackText({
+        nativeSelectionText: '',
+        viewerSelectionText: 'Selected review text',
+        activeElement: { tagName: 'TEXTAREA', isContentEditable: false },
+        viewMode: 'rendered',
+        inCommentComposer: true,
+        composerCaretCollapsed: true,
+      }),
+    ).toBe('Selected review text');
+  });
+
+  it('leaves the native copy alone when text is selected inside the composer', () => {
+    expect(
+      getCopySelectionFallbackText({
+        nativeSelectionText: '',
+        viewerSelectionText: 'Selected review text',
+        activeElement: { tagName: 'TEXTAREA', isContentEditable: false },
+        viewMode: 'rendered',
+        inCommentComposer: true,
+        composerCaretCollapsed: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('does not treat other textareas as the composer', () => {
+    expect(
+      getCopySelectionFallbackText({
+        nativeSelectionText: '',
+        viewerSelectionText: 'Selected review text',
+        activeElement: { tagName: 'TEXTAREA', isContentEditable: false },
+        viewMode: 'rendered',
+        inCommentComposer: false,
+        composerCaretCollapsed: true,
+      }),
+    ).toBeNull();
+  });
+
   it('does not apply outside rendered mode', () => {
     expect(
       getCopySelectionFallbackText({

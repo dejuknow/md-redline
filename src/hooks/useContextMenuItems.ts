@@ -66,6 +66,29 @@ export interface UseContextMenuItemsParams {
   sidebarCtxMenu: ContextMenuInstance;
 }
 
+/**
+ * Put a viewer selection on the clipboard with the same two flavors the
+ * Cmd/Ctrl+C path writes, so right-click Copy does not silently flatten a
+ * table or a nested list that the keyboard copy would have preserved.
+ * Falls back to plain text when the richer API is unavailable or rejects.
+ */
+function copySelectionToClipboard(sel: SelectionInfo): void {
+  const writePlain = () => void navigator.clipboard.writeText(sel.text).catch(() => {});
+  if (!sel.html || typeof ClipboardItem === 'undefined' || !navigator.clipboard.write) {
+    writePlain();
+    return;
+  }
+  try {
+    const item = new ClipboardItem({
+      'text/plain': new Blob([sel.text], { type: 'text/plain' }),
+      'text/html': new Blob([sel.html], { type: 'text/html' }),
+    });
+    navigator.clipboard.write([item]).catch(writePlain);
+  } catch {
+    writePlain();
+  }
+}
+
 export function useContextMenuItems(params: UseContextMenuItemsParams) {
   const {
     comments,
@@ -196,7 +219,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           {
             label: 'Copy',
             onClick: () => {
-              navigator.clipboard.writeText(sel.text);
+              copySelectionToClipboard(sel);
             },
           },
         ];

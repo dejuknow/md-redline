@@ -1840,18 +1840,30 @@ export default function App() {
 
   useEffect(() => {
     const handleCopy = (e: ClipboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      const composer =
+        active instanceof HTMLTextAreaElement && active.closest('[data-comment-form]') !== null
+          ? active
+          : null;
       const fallbackText = getCopySelectionFallbackText({
         nativeSelectionText: window.getSelection()?.toString() ?? '',
         viewerSelectionText: selectionRef.current?.text ?? null,
-        activeElement: document.activeElement as HTMLElement | null,
+        activeElement: active,
         viewMode,
+        inCommentComposer: composer !== null,
+        composerCaretCollapsed:
+          composer !== null && composer.selectionStart === composer.selectionEnd,
       });
       if (!fallbackText || !e.clipboardData) return;
 
       // The viewer paints its own selection highlight, which clears the native
-      // browser selection range. Restore expected copy behavior from app state.
+      // browser selection range. Restore expected copy behavior from app state,
+      // including the rich-text flavor snapshotted at selection time so
+      // formatting survives a paste into a rich-text editor.
       e.preventDefault();
       e.clipboardData.setData('text/plain', fallbackText);
+      const html = selectionRef.current?.html;
+      if (html) e.clipboardData.setData('text/html', html);
     };
 
     document.addEventListener('copy', handleCopy);
