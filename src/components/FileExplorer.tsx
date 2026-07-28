@@ -91,7 +91,7 @@ export function FileExplorer({
   const dirName = getPathBasename(data?.dir || '') || data?.dir || 'Files';
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex-1 min-h-0 flex flex-col">
       {/* Header */}
       {!hideHeader && (
         <div className="h-10 border-b border-border flex items-center justify-between pl-1 pr-2 shrink-0">
