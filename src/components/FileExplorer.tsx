@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getApiErrorMessage, readJsonResponse, type ApiErrorPayload } from '../lib/http';
-import { getPathBasename, tildeShortenPath } from '../lib/path-utils';
+import { getParentDir, getPathBasename, tildeShortenPath } from '../lib/path-utils';
 
 interface BrowseResult {
   dir: string;
@@ -21,6 +21,23 @@ export interface ExplorerContextMenuInfo {
 
 interface Props {
   initialDir?: string;
+  /**
+   * Bumped by the app on an explicit reveal. Forces a re-browse of `initialDir`
+   * even when it did not change, since the user may have navigated the panel
+   * somewhere else in the meantime.
+   */
+  revealNonce?: number;
+  /** File to scroll to on a reveal; falls back to the active file. */
+  revealPath?: string;
+  /**
+   * Nonce already consumed by an earlier mount. The panel unmounts whenever the
+   * sidebar is toggled, the Outline tab is selected, or focus mode is entered,
+   * so consumption has to be owned above this component or a spent reveal
+   * re-fires on every remount.
+   */
+  revealConsumedNonce?: number | null;
+  /** Reports the nonce this panel just consumed, so it survives the unmount. */
+  onRevealConsumed?: (nonce: number) => void;
   activeFilePath: string | null;
   /** User's home directory; used to tilde-shorten the path in the trust prompt. */
   homeDir?: string;
@@ -33,6 +50,10 @@ interface Props {
 
 export function FileExplorer({
   initialDir,
+  revealNonce = 0,
+  revealPath,
+  revealConsumedNonce = null,
+  onRevealConsumed,
   activeFilePath,
   homeDir = '',
   onOpenFile,
@@ -46,10 +67,23 @@ export function FileExplorer({
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<'access-denied' | 'generic' | null>(null);
   const [accessDeniedDir, setAccessDeniedDir] = useState<string | null>(null);
+  const [flashPath, setFlashPath] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const activeFileRef = useRef<HTMLButtonElement | null>(null);
+  const revealFileRef = useRef<HTMLButtonElement | null>(null);
+  // A reveal applies once. The app keeps `revealPath` set after the reveal
+  // lands, so without this the revealed row would keep winning every later
+  // scroll-into-view and re-flash whenever the active file changed. Seeded from
+  // the caller so a remount does not resurrect a spent reveal.
+  const consumedRevealRef = useRef<number | null>(revealConsumedNonce);
+  // Which reveal the listing in `data` was fetched for. A reveal into the
+  // directory already on screen runs the effect below against the stale
+  // listing first, and retiring on that would drop a reveal of a file the
+  // refresh is about to add.
+  const dataRevealNonceRef = useRef<number | null>(null);
 
-  const browse = useCallback(async (dir?: string) => {
+  const browse = useCallback(async (dir?: string, forRevealNonce?: number) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -66,6 +100,7 @@ export function FileExplorer({
         throw new Error(getApiErrorMessage(res, result, 'Failed to browse'));
       }
       setData(result);
+      dataRevealNonceRef.current = forRevealNonce ?? null;
     } catch (err) {
       if (controller.signal.aborted) return;
       const msg = err instanceof Error ? err.message : 'Failed to browse';
@@ -82,11 +117,56 @@ export function FileExplorer({
   }, []);
 
   useEffect(() => {
-    browse(initialDir);
+    browse(initialDir, revealNonce);
     return () => {
       abortRef.current?.abort();
     };
-  }, [browse, initialDir]);
+  }, [browse, initialDir, revealNonce]);
+
+  // Keep the open file visible when the listing changes or a reveal lands, so
+  // it is not stranded below the fold in a long directory. A revealed file that
+  // is not the active one gets a brief flash so the eye can find it.
+  useEffect(() => {
+    if (!data) return;
+    const revealPending = revealNonce !== consumedRevealRef.current;
+    const revealed = revealPending ? revealFileRef.current : null;
+    const target = revealed ?? activeFileRef.current;
+    target?.scrollIntoView({ block: 'nearest' });
+    if (!revealed) {
+      // The listing for the revealed file's own directory has arrived without
+      // it (deleted, filtered out), so the request is spent. Retiring it here
+      // stops a long-dead reveal from firing if that row ever appears later.
+      // A listing for some other directory means the browse is still in
+      // flight, so the reveal stays pending.
+      // Only retire against the listing this reveal actually fetched: the
+      // effect also runs against whatever was already on screen, which for a
+      // newly created file does not contain it yet.
+      const listingIsForThisReveal = dataRevealNonceRef.current === revealNonce;
+      if (
+        revealPending &&
+        revealPath &&
+        listingIsForThisReveal &&
+        data.dir === getParentDir(revealPath)
+      ) {
+        consumedRevealRef.current = revealNonce;
+        onRevealConsumed?.(revealNonce);
+      }
+      return;
+    }
+    consumedRevealRef.current = revealNonce;
+    onRevealConsumed?.(revealNonce);
+    setFlashPath(revealPath === activeFilePath ? null : (revealPath ?? null));
+  }, [data, activeFilePath, revealPath, revealNonce, onRevealConsumed]);
+
+  // The flash expires on its own clock. Owning the timer here rather than in
+  // the reveal effect above means an interruption (the user opening another
+  // file mid-flash) re-arms the timer instead of tearing it down and leaving
+  // the row highlighted for good.
+  useEffect(() => {
+    if (!flashPath) return;
+    const timer = window.setTimeout(() => setFlashPath(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [flashPath]);
 
   const dirName = getPathBasename(data?.dir || '') || data?.dir || 'Files';
 
@@ -235,6 +315,14 @@ export function FileExplorer({
             return (
               <button
                 key={file.path}
+                ref={(el) => {
+                  // A row can be both the reveal target and the active file, so
+                  // claim each ref independently. An either/or ternary left
+                  // activeFileRef null for that row, and the effect above then
+                  // had nothing to scroll to for the rest of the session.
+                  if (file.path === revealPath) revealFileRef.current = el;
+                  if (isActive) activeFileRef.current = el;
+                }}
                 onClick={() => onOpenFile(file.path)}
                 onContextMenu={(e) => {
                   if (!onCtxMenu) return;
@@ -250,7 +338,9 @@ export function FileExplorer({
                 className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                   isActive
                     ? 'bg-primary-bg text-primary-text font-medium'
-                    : 'text-content hover:bg-tint'
+                    : file.path === flashPath
+                      ? 'bg-tint text-content font-medium'
+                      : 'text-content hover:bg-tint'
                 }`}
                 title={file.path}
               >
