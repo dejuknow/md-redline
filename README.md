@@ -241,6 +241,7 @@ All of these environment variables are optional.
 | `MD_REDLINE_VITE_PORT` | `5188` | Port for the Vite dev client (development only). |
 | `MD_REDLINE_HOME` | your OS home directory | Base directory for md-redline's preferences file (`.md-redline.json`, which stores trusted roots and the update-check cache). |
 | `MD_REDLINE_REGISTRY_URL` | public npm registry | Registry base URL used for the background update check. |
+| `MDR_ALLOWED_HOSTS` | unset | Comma-separated extra hostnames accepted by the Host-header check, for fronting the loopback-bound server with a trusted reverse proxy (for example `tailscale serve`, nginx, or Caddy). Only list hostnames you control; the server still binds to `127.0.0.1` only. |
 | `NO_UPDATE_NOTIFIER` or `CI` | unset | If either is present (any value, including empty), the background update check is disabled. |
 
 ## Troubleshooting

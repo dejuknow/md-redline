@@ -1080,10 +1080,7 @@ describe('/api/pick-file', () => {
     });
 
     const trickyPath = '/tmp/has "quote" and \\back/file.md';
-    await requestJson(
-      pickApp,
-      `/api/pick-file?defaultPath=${encodeURIComponent(trickyPath)}`,
-    );
+    await requestJson(pickApp, `/api/pick-file?defaultPath=${encodeURIComponent(trickyPath)}`);
     expect(calls).toHaveLength(1);
     const argsJoined = calls[0].args.join(' ');
     // Quotes should be backslash-escaped, backslashes doubled.
@@ -1230,6 +1227,78 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
       headers: { Host: '[::1]:3001' },
     });
     expect(r.status).toBe(200);
+  });
+
+  it('allows extra hostnames listed in allowedHosts (reverse-proxy fronting)', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['mac.tail1234.ts.net'],
+    });
+    const r1 = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'mac.tail1234.ts.net' },
+    });
+    expect(r1.status).toBe(200);
+    // Case-insensitive, port stripped like the loopback names
+    const r2 = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'MAC.Tail1234.TS.NET:8443' },
+    });
+    expect(r2.status).toBe(200);
+  });
+
+  it('still rejects unlisted hostnames when allowedHosts is set', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['mac.tail1234.ts.net'],
+    });
+    const r = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'attacker.example.com' },
+    });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: 'Invalid Host header' });
+  });
+
+  it('reads allowedHosts from MDR_ALLOWED_HOSTS when the option is absent', async () => {
+    vi.stubEnv('MDR_ALLOWED_HOSTS', 'proxy.example.internal, other.host ');
+    try {
+      const envApp = createApp({ cwd: cwdRoot, homeDir: fakeHome });
+      const r1 = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'proxy.example.internal' },
+      });
+      expect(r1.status).toBe(200);
+      const r2 = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'other.host:9000' },
+      });
+      expect(r2.status).toBe(200);
+      const r3 = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'attacker.example.com' },
+      });
+      expect(r3.status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('an explicit allowedHosts option overrides the env var', async () => {
+    vi.stubEnv('MDR_ALLOWED_HOSTS', 'env.example.internal');
+    try {
+      const optionApp = createApp({
+        cwd: cwdRoot,
+        homeDir: fakeHome,
+        allowedHosts: ['option.example.internal'],
+      });
+      const r1 = await optionApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'option.example.internal' },
+      });
+      expect(r1.status).toBe(200);
+      const r2 = await optionApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'env.example.internal' },
+      });
+      expect(r2.status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
@@ -1383,10 +1452,7 @@ describe('/api/grant-access', () => {
     expect(grant.body).toEqual({ error: 'Cannot grant access outside allowed directories' });
 
     // External file should still be blocked
-    const after = await requestJson(
-      freshApp,
-      `/api/file?path=${encodeURIComponent(externalFile)}`,
-    );
+    const after = await requestJson(freshApp, `/api/file?path=${encodeURIComponent(externalFile)}`);
     expect(after.response.status).toBe(403);
   });
 
@@ -1491,10 +1557,7 @@ describe('persisted trustedRoots hydration', () => {
     });
 
     // The real path is still accessible.
-    const ok = await requestJson(
-      skipApp,
-      `/api/file?path=${encodeURIComponent(externalFile)}`,
-    );
+    const ok = await requestJson(skipApp, `/api/file?path=${encodeURIComponent(externalFile)}`);
     expect(ok.response.status).toBe(200);
 
     // The ghost path 403s — it was NOT silently pushed into allowedRoots.
@@ -1543,9 +1606,7 @@ describe('persisted trustedRoots hydration', () => {
     await writeFile(
       join(realHome, '.md-redline.json'),
       JSON.stringify({
-        recentFiles: [
-          { path: externalFile, name: 'outside.md', openedAt: '2026-01-01T00:00:00Z' },
-        ],
+        recentFiles: [{ path: externalFile, name: 'outside.md', openedAt: '2026-01-01T00:00:00Z' }],
       }),
     );
 
@@ -1626,10 +1687,7 @@ describe('persisted trustedRoots hydration', () => {
   it('does not re-seed home directory when trustedRoots is already defined as empty', async () => {
     const localHome = await mkdtemp(join(tmpdir(), 'md-redline-empty-trust-'));
     const realHome = await realpath(localHome);
-    await writeFile(
-      join(realHome, '.md-redline.json'),
-      JSON.stringify({ trustedRoots: [] }),
-    );
+    await writeFile(join(realHome, '.md-redline.json'), JSON.stringify({ trustedRoots: [] }));
 
     createApp({
       cwd: cwdRoot,
@@ -1653,9 +1711,7 @@ describe('persisted trustedRoots hydration', () => {
     await writeFile(
       join(realHome, '.md-redline.json'),
       JSON.stringify({
-        recentFiles: [
-          { path: externalFile, name: 'outside.md', openedAt: '2026-01-01T00:00:00Z' },
-        ],
+        recentFiles: [{ path: externalFile, name: 'outside.md', openedAt: '2026-01-01T00:00:00Z' }],
       }),
     );
 
@@ -1857,7 +1913,11 @@ describe('review sessions API', () => {
     const queued = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'queued batch', commentIds: ['c2'], commentCounts: { [writtenFile]: 2 } }),
+      body: JSON.stringify({
+        prompt: 'queued batch',
+        commentIds: ['c2'],
+        commentCounts: { [writtenFile]: 2 },
+      }),
     });
     expect(queued.body).toMatchObject({ ok: true, queued: true });
 
@@ -2488,9 +2548,7 @@ describe('POST /agent-comments mode rejection contracts', () => {
       replies: Array<{ questionIndex: number; text: string }>;
     };
     expect(body.status).toBe('reply');
-    expect(body.replies).toEqual([
-      { questionIndex: 0, text: 'Inline answer on a user session.' },
-    ]);
+    expect(body.replies).toEqual([{ questionIndex: 0, text: 'Inline answer on a user session.' }]);
     expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
   });
 
@@ -2612,7 +2670,11 @@ describe('POST /agent-comments with replies and expectsReply=false', () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { askId?: string; commentsWritten: number; repliesWritten: number };
+    const body = (await res.json()) as {
+      askId?: string;
+      commentsWritten: number;
+      repliesWritten: number;
+    };
     expect(body.askId).toBeUndefined();
     expect(body.commentsWritten).toBe(1);
     expect(body.repliesWritten).toBe(1);
@@ -2735,7 +2797,11 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
     }, 10);
 
     const wait = await waitPromise;
-    const body = (await wait.json()) as { status: string; replies: unknown; totalQuestions: number };
+    const body = (await wait.json()) as {
+      status: string;
+      replies: unknown;
+      totalQuestions: number;
+    };
     expect(body).toEqual({
       status: 'reply',
       replies: [{ questionIndex: 0, text: 'reply text' }],
@@ -2783,7 +2849,9 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
     const post = await app.request(`/api/review-sessions/${sessionB}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ questions: [{ filePath: fileB, anchor: 'B unique anchor', text: 'q?' }] }),
+      body: JSON.stringify({
+        questions: [{ filePath: fileB, anchor: 'B unique anchor', text: 'q?' }],
+      }),
     });
     const { askId } = (await post.json()) as { askId: string };
 
@@ -3055,7 +3123,10 @@ describe('agentCommentCount rollback when addAsk fails', () => {
     const first = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'First anchor', text: 'q1' }] }),
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'First anchor', text: 'q1' }],
+      }),
     });
     expect(first.status).toBe(201);
 
@@ -3067,7 +3138,10 @@ describe('agentCommentCount rollback when addAsk fails', () => {
     const second = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'Second anchor', text: 'q2' }] }),
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'Second anchor', text: 'q2' }],
+      }),
     });
     expect(second.status).toBe(409);
 
@@ -3152,7 +3226,10 @@ describe('rollback path when addAsk throws after marker write', () => {
     const first = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'First anchor', text: 'q1' }] }),
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'First anchor', text: 'q1' }],
+      }),
     });
     expect(first.status).toBe(201);
 
@@ -3161,7 +3238,10 @@ describe('rollback path when addAsk throws after marker write', () => {
     const second = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'Second anchor', text: 'q2' }] }),
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'Second anchor', text: 'q2' }],
+      }),
     });
     expect(second.status).toBe(409);
 
@@ -3192,7 +3272,10 @@ describe('rollback path when addAsk throws after marker write', () => {
     const first = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'First anchor', text: 'q1' }] }),
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'First anchor', text: 'q1' }],
+      }),
     });
     expect(first.status).toBe(201);
 
@@ -3308,9 +3391,7 @@ describe('POST /api/review-sessions/:id/finish (pending asks)', () => {
     };
     expect(waitBody.status).toBe('reply');
     expect(waitBody.totalQuestions).toBe(2);
-    expect(waitBody.replies).toEqual([
-      { questionIndex: 0, text: 'Answer before finishing.' },
-    ]);
+    expect(waitBody.replies).toEqual([{ questionIndex: 0, text: 'Answer before finishing.' }]);
   });
 });
 
@@ -3332,7 +3413,10 @@ describe('Done-with-pending-ask preserves marker and clears expectsReply on disk
     const ask = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', questions: [{ filePath, anchor: 'single anchor', text: 'q?' }] }),
+      body: JSON.stringify({
+        mode: 'ask',
+        questions: [{ filePath, anchor: 'single anchor', text: 'q?' }],
+      }),
     });
     expect(ask.status).toBe(201);
 
@@ -3601,7 +3685,11 @@ describe('Inline reply delivery to pending asks', () => {
   it('partially answered ask stays pending on save, then /agent-done delivers the partial replies', async () => {
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-partial-reply-')));
     const filePath = join(tmp, 'spec.md');
-    await writeFile(filePath, '# Title\n\nFirst anchor sentence.\n\nSecond anchor sentence.\n', 'utf8');
+    await writeFile(
+      filePath,
+      '# Title\n\nFirst anchor sentence.\n\nSecond anchor sentence.\n',
+      'utf8',
+    );
     const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
 
     const create = await testApp.request('/api/review-sessions', {
@@ -3841,7 +3929,7 @@ describe('/api/review-sessions/:id/agent-done + /agent-wait', () => {
     expect(waitBody.reason).toBe('user_cancelled');
   });
 
-  it('GET /agent-wait returns done for a session that was marked done before the store gc\'d it', async () => {
+  it("GET /agent-wait returns done for a session that was marked done before the store gc'd it", async () => {
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-agent-wait-late-')));
     const filePath = join(tmp, 'spec.md');
     await writeFile(filePath, '# Spec\n', 'utf8');
@@ -3917,7 +4005,7 @@ describe('static file serving CSP (img-src https: for remote images)', () => {
 });
 
 describe('removePortFileIfOwned', () => {
-  it('deletes the port file when it holds this server\'s port', async () => {
+  it("deletes the port file when it holds this server's port", async () => {
     const dir = await mkdtemp(join(tmpdir(), 'md-redline-portfile-'));
     const portFile = join(dir, 'md-redline.port');
     await writeFile(portFile, '6373\n');
@@ -3939,6 +4027,8 @@ describe('removePortFileIfOwned', () => {
   });
 
   it('is a no-op when the port file is missing', () => {
-    expect(() => removePortFileIfOwned(join(tmpdir(), 'md-redline-portfile-nonexistent'), 6373)).not.toThrow();
+    expect(() =>
+      removePortFileIfOwned(join(tmpdir(), 'md-redline-portfile-nonexistent'), 6373),
+    ).not.toThrow();
   });
 });
