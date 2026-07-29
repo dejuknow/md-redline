@@ -2159,6 +2159,19 @@ describe('insertComment inside fenced code blocks', () => {
       expect(parseComments(result).comments).toHaveLength(1);
     });
 
+    it('keeps a marker out of frontmatter that contains an unclosed <!--', () => {
+      // The container passes run in sequence over one mutable offset. An
+      // unclosed `<!--` in a YAML value would otherwise open a protected range
+      // reaching EOF, and the HTML pass would drag the offset back INTO the
+      // frontmatter that the frontmatter pass had just moved it out of.
+      const raw = '---\nnote: <!-- unclosed\ntitle: Spec\n---\n\n# Body\n\nSome body text.\n';
+      const result = insertComment(raw, 'unclosed', 'why?');
+      const fenceEnd = result.indexOf('\n---\n') + '\n---\n'.length;
+      expect(result.slice(0, fenceEnd)).not.toContain('@comment');
+      expect(result.startsWith('---\nnote: <!-- unclosed\ntitle: Spec\n---\n')).toBe(true);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+
     it('treats a <!-- inside a code fence as sample text, not a comment', () => {
       // Otherwise an unclosed `<!--` in a code sample would mark the entire
       // rest of the document as protected.

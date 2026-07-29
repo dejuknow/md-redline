@@ -81,16 +81,20 @@ export function getFrontmatterRange(markdown: string): CodeBlockRange | null {
  */
 function getHtmlCommentRanges(
   markdown: string,
-  fencedRanges: CodeBlockRange[] = [],
+  nonHtmlRegions: CodeBlockRange[] = [],
 ): CodeBlockRange[] {
   const ranges: CodeBlockRange[] = [];
   let from = 0;
   while (from < markdown.length) {
     const start = markdown.indexOf('<!--', from);
     if (start === -1) break;
-    // A `<!--` inside a fenced block is sample text, not a comment. It also
-    // can't need protecting: the fence pass has already moved the marker out.
-    if (isInsideCodeBlock(start, fencedRanges)) {
+    // Regions where `<!--` is not an HTML comment: a fenced block, where it is
+    // sample text, and frontmatter, which is YAML or TOML. Treating a stray
+    // `<!--` in a YAML value as a comment would extend a protected range from
+    // inside the frontmatter to EOF, and the pass below would then drag the
+    // marker back INTO the frontmatter, undoing the very protection the
+    // frontmatter pass just applied.
+    if (isInsideCodeBlock(start, nonHtmlRegions)) {
       from = start + 4;
       continue;
     }
@@ -615,6 +619,7 @@ export function insertComment(
   let leadingNewline = false;
   {
     const fencedRanges = getCodeBlockRanges(cleanMarkdown);
+    const frontmatter = getFrontmatterRange(cleanMarkdown);
     // Fenced blocks: before the opening fence.
     for (const range of fencedRanges) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset <= range.end) {
@@ -625,7 +630,6 @@ export function insertComment(
     // Frontmatter: after the closing fence. It cannot go before, since
     // frontmatter is only recognized at offset 0, so this is the one
     // container the marker trails rather than leads.
-    const frontmatter = getFrontmatterRange(cleanMarkdown);
     if (
       frontmatter &&
       insertionCleanOffset >= frontmatter.start &&
@@ -639,7 +643,12 @@ export function insertComment(
     }
     // HTML comments: before the block. Only claim a whole line when the
     // comment owns one; an inline note keeps its paragraph intact.
-    for (const range of getHtmlCommentRanges(cleanMarkdown, fencedRanges)) {
+    // Order matters and is safe in exactly one direction: this pass can only
+    // move the offset to a `<!--` that lies outside every fence and outside
+    // the frontmatter, so it can never undo the two passes above. Reordering
+    // these three, or dropping the exclusions, breaks that.
+    const nonHtmlRegions = frontmatter ? [...fencedRanges, frontmatter] : fencedRanges;
+    for (const range of getHtmlCommentRanges(cleanMarkdown, nonHtmlRegions)) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset < range.end) {
         insertionCleanOffset = range.start;
         ownLine = range.start === 0 || cleanMarkdown[range.start - 1] === '\n';
