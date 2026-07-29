@@ -355,6 +355,36 @@ describe('useComments', () => {
   // 8. handleAddComment — calls insertComment and updateAndSave
   // -----------------------------------------------------------------------
   describe('handleAddComment', () => {
+    it('reports a failure instead of saving a no-op when the anchor is not found', () => {
+      // insertComment returns the document unchanged when it cannot place the
+      // marker. Saving that as success loses the comment with no marker and no
+      // error, and asks focus for an id that was never written.
+      const setRawMarkdown = vi.fn();
+      const saveFile = vi.fn();
+      const showToast = vi.fn();
+      const requestCommentFocus = vi.fn();
+      const raw = 'Hello world';
+      const rawMarkdownRef = { current: raw };
+      const params = defaultParams({
+        rawMarkdown: raw,
+        rawMarkdownRef: rawMarkdownRef as unknown as UseCommentsParams['rawMarkdownRef'],
+        setRawMarkdown,
+        saveFile,
+        showToast,
+        requestCommentFocus,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      act(() => {
+        result.current.handleAddComment('text that is not in the document', 'note');
+      });
+
+      expect(saveFile).not.toHaveBeenCalled();
+      expect(setRawMarkdown).not.toHaveBeenCalled();
+      expect(requestCommentFocus).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining("Couldn't anchor"), 'error');
+    });
+
     it('calls setRawMarkdown, saveFile, and sets activeCommentId', () => {
       const setRawMarkdown = vi.fn();
       const saveFile = vi.fn();

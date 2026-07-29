@@ -5,6 +5,8 @@ import {
   segmentDiffFenceAware,
   countChunks,
   findFenceRanges,
+  segmentIsDocumentStart,
+  type DiffSegment,
 } from './RenderedDiffView';
 import { renderMarkdown } from '../markdown/pipeline';
 
@@ -105,11 +107,13 @@ describe('findFenceRanges', () => {
 });
 
 /** Mirrors RenderedDiffView's render loop: only leading segments sit at offset 0. */
-function renderSegments(segments: { type: string; text: string }[]): string {
-  const documentStartCount =
-    segments[0]?.type === 'removed' && segments[1]?.type === 'added' ? 2 : 1;
+function renderSegments(segments: DiffSegment[]): string {
   return segments
-    .map((seg, i) => renderMarkdown(seg.text, undefined, { allowFrontmatter: i < documentStartCount }))
+    .map((seg, i) =>
+      renderMarkdown(seg.text, undefined, {
+        allowFrontmatter: segmentIsDocumentStart(segments, i),
+      }),
+    )
     .join('');
 }
 

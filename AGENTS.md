@@ -715,8 +715,9 @@ keep them apart:
 Neither is frontmatter-specific: the same collapse reproduces with two comments
 on repeated text inside one code fence.
 
-The plain-text offset drift is a red herring here: it measures 4 characters and
-the creation path resolves correctly.
+The plain-text offset drift is a red herring here: the two `---` fences stay in
+plain space and are absent from the DOM, and the creation path resolves
+correctly either way.
 
 ### Mermaid fullscreen view
 Click the expand button (top-right of any Mermaid diagram on hover) to open the
