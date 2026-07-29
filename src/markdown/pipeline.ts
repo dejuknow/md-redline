@@ -160,10 +160,15 @@ function frontmatterHandler(_state: unknown, node: { value: string }): Element |
   };
 }
 
-function buildProcessor(filePath?: string) {
-  return unified()
-    .use(remarkParse)
-    .use(remarkFrontmatter, ['yaml', 'toml'])
+function buildProcessor(filePath?: string, allowFrontmatter = true) {
+  const processor = unified().use(remarkParse);
+  // Frontmatter is defined as being at offset 0 of the DOCUMENT. A caller
+  // rendering a fragment (the diff overlay renders one segment at a time) has
+  // a string whose offset 0 is somewhere in the middle of the file, so leaving
+  // this on invents a frontmatter block out of any `---` that happens to start
+  // a segment.
+  if (allowFrontmatter) processor.use(remarkFrontmatter, ['yaml', 'toml']);
+  return processor
     .use(remarkGfm)
     .use(remarkRehype, {
       allowDangerousHtml: true,
@@ -176,7 +181,21 @@ function buildProcessor(filePath?: string) {
     .use(rehypeStringify);
 }
 
-export function renderMarkdown(markdown: string, filePath?: string): string {
-  const file = buildProcessor(filePath).processSync(markdown);
+export interface RenderOptions {
+  /**
+   * Whether the string being rendered is a whole document. Fragments (a diff
+   * segment, say) must pass false: frontmatter is an offset-0 construct and a
+   * fragment's offset 0 is not the document's.
+   */
+  allowFrontmatter?: boolean;
+}
+
+export function renderMarkdown(
+  markdown: string,
+  filePath?: string,
+  options: RenderOptions = {},
+): string {
+  const { allowFrontmatter = true } = options;
+  const file = buildProcessor(filePath, allowFrontmatter).processSync(markdown);
   return String(file);
 }

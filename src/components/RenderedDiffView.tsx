@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { type DiffLine } from '../lib/diff';
 import { renderMarkdown } from '../markdown/pipeline';
+import { getFrontmatterRange } from '../lib/comment-parser';
 
 export type DiffSegmentType = 'same' | 'added' | 'removed';
 
@@ -95,6 +96,17 @@ interface FenceRange {
 export function findFenceRanges(text: string): FenceRange[] {
   const lines = text.split('\n');
   const ranges: FenceRange[] = [];
+  // Frontmatter is atomic for the same reason a code fence is: split it across
+  // segments and each piece renders as something it is not, with the closing
+  // delimiter turning the last field into a Setext heading and disappearing.
+  const frontmatter = getFrontmatterRange(text);
+  if (frontmatter) {
+    const linesBefore = text.slice(0, frontmatter.end).split('\n');
+    // end is exclusive of the trailing newline's own line, so drop the empty
+    // trailing element the split leaves behind.
+    const lastLine = linesBefore[linesBefore.length - 1] === '' ? linesBefore.length - 1 : linesBefore.length;
+    ranges.push({ start: 1, end: lastLine });
+  }
   let openLine = -1;
   let openMarkerChar = '';
   let openMarkerLen = 0;
@@ -282,8 +294,14 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
 
     const html = useMemo(() => {
       const parts: string[] = [];
-      for (const seg of segments) {
-        const inner = renderMarkdown(seg.text);
+      // Only the leading segment starts at the document's offset 0, so only it
+      // may render frontmatter. When frontmatter itself changed, the removed
+      // and added versions are the first pair and both qualify.
+      const documentStartCount = segments[0]?.type === 'removed' && segments[1]?.type === 'added' ? 2 : 1;
+      for (const [segIndex, seg] of segments.entries()) {
+        const inner = renderMarkdown(seg.text, undefined, {
+          allowFrontmatter: segIndex < documentStartCount,
+        });
         if (seg.type === 'same') {
           parts.push(inner);
         } else {

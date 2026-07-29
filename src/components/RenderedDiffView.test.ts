@@ -6,6 +6,7 @@ import {
   countChunks,
   findFenceRanges,
 } from './RenderedDiffView';
+import { renderMarkdown } from '../markdown/pipeline';
 
 describe('segmentDiff', () => {
   it('returns a single same segment for identical text', () => {
@@ -100,6 +101,41 @@ describe('findFenceRanges', () => {
     const ranges = findFenceRanges(text);
     // Unclosed backtick fence — extends to EOF
     expect(ranges).toEqual([{ start: 1, end: 3 }]);
+  });
+});
+
+/** Mirrors RenderedDiffView's render loop: only leading segments sit at offset 0. */
+function renderSegments(segments: { type: string; text: string }[]): string {
+  const documentStartCount =
+    segments[0]?.type === 'removed' && segments[1]?.type === 'added' ? 2 : 1;
+  return segments
+    .map((seg, i) => renderMarkdown(seg.text, undefined, { allowFrontmatter: i < documentStartCount }))
+    .join('');
+}
+
+describe('frontmatter in the diff overlay', () => {
+  it('does not invent a frontmatter box from a mid-document ---', () => {
+    // The changed first line isolates the rest into a segment that happens to
+    // begin with `---`. Rendered as a whole document that text is two Setext
+    // headings, not frontmatter.
+    const oldText = 'Line-old\n---\nkey: value\n---\nTrailer unchanged';
+    const newText = 'Line-new\n---\nkey: value\n---\nTrailer unchanged';
+    const segments = segmentDiffFenceAware(computeDiff(oldText, newText), oldText, newText);
+    expect(renderSegments(segments)).not.toContain('doc-frontmatter');
+  });
+
+  it('keeps real frontmatter in one segment when a field is edited', () => {
+    // Split across segments, the leading `---` renders as a rule, the changed
+    // lines as bare paragraphs, and the closing `---` turns the last field
+    // into a Setext heading and vanishes.
+    const oldText = '---\ntitle: Old Title\nstatus: draft\n---\n\nBody text.\n';
+    const newText = '---\ntitle: New Title\nstatus: draft\n---\n\nBody text.\n';
+    const segments = segmentDiffFenceAware(computeDiff(oldText, newText), oldText, newText);
+    expect(segments[0].text).toBe('---\ntitle: Old Title\nstatus: draft\n---');
+    expect(segments[1].text).toBe('---\ntitle: New Title\nstatus: draft\n---');
+    const html = renderSegments(segments);
+    expect(html).toContain('doc-frontmatter');
+    expect(html).not.toMatch(/<h2>status/);
   });
 });
 
