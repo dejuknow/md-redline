@@ -237,6 +237,67 @@ describe('MarkdownViewer comment highlights — frontmatter fields', () => {
   });
 });
 
+describe('MarkdownViewer comment highlights — comments that relocate to a shared offset', () => {
+  it('keeps two comments on repeated text inside one code fence on separate highlights', async () => {
+    // insertComment pushes both markers to the opening fence line, so both
+    // comments carry the same cleanOffset. Grouping on offset + anchor alone
+    // merged them into one <mark> on the first occurrence.
+    const doc = '# Config\n\n```yaml\ndraft: false\narchived: false\n```\n\nBody.\n';
+    let raw = insertComment(doc, 'false', 'first', 'User', 'draft: ', '\narchived');
+    raw = insertComment(raw, 'false', 'second', 'User', 'archived: ', '\n```');
+    const { comments, cleanMarkdown } = parseComments(raw);
+    expect(comments).toHaveLength(2);
+    expect(comments[0].cleanOffset).toBe(comments[1].cleanOffset);
+
+    const { container } = render(
+      <MarkdownViewer
+        html={renderMarkdown(cleanMarkdown)}
+        cleanMarkdown={cleanMarkdown}
+        comments={comments}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const marks = Array.from(container.querySelectorAll('mark'));
+      expect(marks).toHaveLength(2);
+      // One id per mark: neither comment rides along on the other's highlight.
+      for (const mark of marks) {
+        expect((mark as HTMLElement).dataset.commentIds?.split(',')).toHaveLength(1);
+      }
+    });
+  });
+
+  it('still merges two comments that genuinely share one anchor occurrence', async () => {
+    // Same offset, same anchor, same context: one highlight carrying both ids.
+    const doc = '# Doc\n\nThe quick brown fox.\n';
+    let raw = insertComment(doc, 'quick', 'first', 'User');
+    raw = insertComment(raw, 'quick', 'second', 'User');
+    const { comments, cleanMarkdown } = parseComments(raw);
+
+    const { container } = render(
+      <MarkdownViewer
+        html={renderMarkdown(cleanMarkdown)}
+        cleanMarkdown={cleanMarkdown}
+        comments={comments}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const marks = Array.from(container.querySelectorAll('mark'));
+      expect(marks).toHaveLength(1);
+      expect((marks[0] as HTMLElement).dataset.commentIds?.split(',')).toHaveLength(2);
+    });
+  });
+});
+
 describe('MarkdownViewer comment highlights — numbered heading anchors', () => {
   it('highlights a multi-block anchor whose heading opens with a list-like number', async () => {
     // stripInlineFormatting reads "1. " at a line start as an ordered-list

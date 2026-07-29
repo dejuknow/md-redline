@@ -261,6 +261,16 @@ export const MarkdownViewer = memo(
       // Group comments that share the same anchor AND cleanOffset (exact same highlight).
       // Convert cleanOffset (clean markdown space) → plainOffset (rendered text space)
       // so wrapText can correctly match against DOM text node positions.
+      //
+      // Context is part of the key, not just the payload. insertComment
+      // relocates markers out of containers that can't hold them (code fences,
+      // frontmatter), which lands every marker from one container on the same
+      // offset. Keying on offset and anchor alone then collapses two comments
+      // on two different lines that happen to share a value: they merge into
+      // one group, paint a single <mark> on the first occurrence, and the
+      // second comment silently rides along on it. Their contexts differ, so
+      // including them keeps the groups apart and lets findMatchRange resolve
+      // each one to its own occurrence.
       const highlightGroups = new Map<
         string,
         {
@@ -275,7 +285,12 @@ export const MarkdownViewer = memo(
         if (enableResolve && getEffectiveStatus(comment) === 'resolved') continue;
         const plainOffset =
           comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
-        const key = `${comment.cleanOffset ?? ''}:${comment.anchor}`;
+        const key = [
+          comment.cleanOffset ?? '',
+          comment.anchor,
+          comment.contextBefore ?? '',
+          comment.contextAfter ?? '',
+        ].join(' ');
         const group = highlightGroups.get(key) || {
           ids: [],
           anchor: comment.anchor,
