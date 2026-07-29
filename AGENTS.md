@@ -1048,11 +1048,24 @@ Useful checks:
 
 ```bash
 npm run lint
+npm run format:check
 npm test         # build + unit tests
 npm run test:unit
 npm run test:e2e
 npm run eval:dry
 ```
+
+Formatting is enforced. CI runs `format:check` before lint, so unformatted
+code fails the build; run `npm run format` before pushing. The globs cover
+`src`, `server`, `e2e`, `eval`, `scripts`, `bin` and `demo` plus root-level
+config, for `.ts`, `.tsx`, `.js` and `.mjs`. Markdown is deliberately excluded
+because this file and the README are hand-wrapped, and `bin/md-redline` is
+excluded because it has no extension for Prettier to infer a parser from.
+
+The repo-wide reformat that introduced this is listed in
+`.git-blame-ignore-revs`. GitHub honours that file automatically; locally,
+run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so `git
+blame` skips it too.
 
 Type checking gotcha: the root `tsconfig.json` is a solution-style file
 (references only), so `npx tsc --noEmit` at the repo root checks NOTHING and
