@@ -105,7 +105,8 @@ describe('SVG sanitization (DOMPurify config)', () => {
   });
 
   it('preserves safe SVG elements', () => {
-    const safe = '<svg viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="blue"/><text x="10" y="50">Hello</text></svg>';
+    const safe =
+      '<svg viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="blue"/><text x="10" y="50">Hello</text></svg>';
     const clean = sanitize(safe);
     expect(clean).toContain('<rect');
     expect(clean).toContain('<text');

@@ -179,9 +179,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // has full code execution and there's nothing to defend against.
     if (host) {
       // Strip an optional port. IPv6 hosts arrive as `[::1]:3001`.
-      const hostname = host.startsWith('[')
-        ? host.slice(1, host.indexOf(']'))
-        : host.split(':')[0];
+      const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0];
       if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1') {
         return c.json({ error: 'Invalid Host header' }, 400);
       }
@@ -393,7 +391,9 @@ export function createAppFull(options: CreateAppOptions = {}) {
           console.warn(`[review-session] clear expectsReply failed for ${filePath}:`, err);
         }
       }),
-    ).catch(() => { /* per-file errors already logged */ });
+    ).catch(() => {
+      /* per-file errors already logged */
+    });
   });
 
   async function cleanupAgentMarkers(asks: PendingAsk[]): Promise<void> {
@@ -943,14 +943,10 @@ export function createAppFull(options: CreateAppOptions = {}) {
             '--file-filter=Markdown files | *.md *.markdown',
           ];
           if (defaultPath) args.push(`--filename=${defaultPath}`);
-          execFileImpl(
-            'zenity',
-            args,
-            (err, stdout) => {
-              if (err) return reject(err);
-              promiseResolve(stdout.trim());
-            },
-          );
+          execFileImpl('zenity', args, (err, stdout) => {
+            if (err) return reject(err);
+            promiseResolve(stdout.trim());
+          });
         } else if (platformName === 'win32') {
           // PowerShell single-quoted strings escape ' by doubling.
           const escaped = defaultPath ? defaultPath.replace(/'/g, "''") : '';
@@ -1044,14 +1040,10 @@ export function createAppFull(options: CreateAppOptions = {}) {
             '--title=Allow md-redline to access this folder',
           ];
           if (defaultPath) args.push(`--filename=${defaultPath}/`);
-          execFileImpl(
-            'zenity',
-            args,
-            (err, stdout) => {
-              if (err) return reject(err);
-              promiseResolve(stdout.trim());
-            },
-          );
+          execFileImpl('zenity', args, (err, stdout) => {
+            if (err) return reject(err);
+            promiseResolve(stdout.trim());
+          });
         } else if (platformName === 'win32') {
           // PowerShell single-quoted strings escape ' by doubling.
           const escaped = defaultPath ? defaultPath.replace(/'/g, "''") : '';
@@ -1308,10 +1300,14 @@ export function createAppFull(options: CreateAppOptions = {}) {
           execFileImpl(
             'osascript',
             [
-              '-e', 'on run argv',
-              '-e', 'tell application "Finder" to reveal (POSIX file (item 1 of argv) as alias)',
-              '-e', 'tell application "Finder" to activate',
-              '-e', 'end run',
+              '-e',
+              'on run argv',
+              '-e',
+              'tell application "Finder" to reveal (POSIX file (item 1 of argv) as alias)',
+              '-e',
+              'tell application "Finder" to activate',
+              '-e',
+              'end run',
               resolved,
             ],
             (err) => {
@@ -1356,7 +1352,9 @@ export function createAppFull(options: CreateAppOptions = {}) {
       if (urlPath.startsWith('/api/')) {
         return c.json({ error: 'Not Found' }, 404);
       }
-      const filePath = resolve(join(resolvedStaticDir, urlPath === '/' ? 'index.html' : urlPath.slice(1)));
+      const filePath = resolve(
+        join(resolvedStaticDir, urlPath === '/' ? 'index.html' : urlPath.slice(1)),
+      );
       if (!filePath.startsWith(resolvedStaticDir)) {
         return new Response('Not Found', { status: 404 });
       }

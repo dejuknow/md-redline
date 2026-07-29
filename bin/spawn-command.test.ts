@@ -20,7 +20,9 @@ describe('buildWindowsCommand', () => {
       'C:\\mdr\\dist\\server.js',
       'C:\\Users\\John Smith\\specs',
     ]);
-    expect(cmd).toBe('C:\\nodejs\\node.exe C:\\mdr\\dist\\server.js "C:\\Users\\John Smith\\specs"');
+    expect(cmd).toBe(
+      'C:\\nodejs\\node.exe C:\\mdr\\dist\\server.js "C:\\Users\\John Smith\\specs"',
+    );
   });
 
   it('leaves the dev-mode npm invocation untouched', () => {

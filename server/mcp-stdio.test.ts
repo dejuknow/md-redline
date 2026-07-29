@@ -73,7 +73,10 @@ describe('mcp-stdio: validateAskInput', () => {
   });
 
   it('rejects empty sessionId', () => {
-    const result = validateAskInput({ sessionId: '', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] });
+    const result = validateAskInput({
+      sessionId: '',
+      questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }],
+    });
     expect(result.ok).toBe(false);
   });
 
@@ -117,7 +120,10 @@ describe('mcp-stdio: createMdrClient', () => {
   });
 
   it('grantAccess POSTs to /api/grant-access for each path', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ granted: '/abs/a.md' }) } as Response);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ granted: '/abs/a.md' }),
+    } as Response);
     const client = createMdrClient('http://localhost:3001');
 
     await client.grantAccess(['/abs/a.md', '/abs/b.md']);

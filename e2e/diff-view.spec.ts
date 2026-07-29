@@ -363,7 +363,10 @@ test.describe('Diff overlay', () => {
     await expect(page.getByTestId('diff-reference-label')).toContainText('Since last handoff');
   });
 
-  test('diff reference label is absent when the diff overlay is closed', async ({ page, context }) => {
+  test('diff reference label is absent when the diff overlay is closed', async ({
+    page,
+    context,
+  }) => {
     await openFixture(page);
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);

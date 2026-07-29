@@ -162,7 +162,10 @@ export function PanelToolbar({
         </Tooltip>
 
         {referenceLabel && (
-          <span className="text-[11px] text-content-muted ml-1 whitespace-nowrap" data-testid="diff-reference-label">
+          <span
+            className="text-[11px] text-content-muted ml-1 whitespace-nowrap"
+            data-testid="diff-reference-label"
+          >
             {referenceLabel}
           </span>
         )}
@@ -281,11 +284,7 @@ export function PanelToolbar({
                 stroke="currentColor"
                 strokeWidth={2}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4.5 12.75l6 6 9-13.5"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
               </svg>
             ) : (
               <svg

@@ -123,8 +123,7 @@ describe('findFenceRanges with frontmatter', () => {
     // real ```js line closes, swallowing the prose between them as code and
     // leaving the actual block unranged. getCodeBlockRanges skips these lines
     // for the same reason; the two must agree.
-    const doc =
-      '---\ncode: |\n  ```\n---\n\nPara one.\n\nPara two.\n\n```js\nconst x = 1;\n```\n';
+    const doc = '---\ncode: |\n  ```\n---\n\nPara one.\n\nPara two.\n\n```js\nconst x = 1;\n```\n';
     expect(findFenceRanges(doc)).toEqual([
       { start: 1, end: 4 },
       { start: 10, end: 12 },
@@ -233,9 +232,7 @@ describe('segmentDiffFenceAware', () => {
     // The fence is emitted as a single atomic segment containing the
     // full ```...``` block. Other added segments may exist for the blank
     // line introduced before the fence.
-    const fenceSeg = segs.find(
-      (s) => s.type === 'added' && s.text === '```\nnew block\n```',
-    );
+    const fenceSeg = segs.find((s) => s.type === 'added' && s.text === '```\nnew block\n```');
     expect(fenceSeg).toBeDefined();
     expect(segs.find((s) => s.type === 'removed')).toBeUndefined();
   });
@@ -244,9 +241,7 @@ describe('segmentDiffFenceAware', () => {
     const old = 'paragraph\n\n```\ngone block\n```\n';
     const next = 'paragraph\n';
     const segs = segmentDiffFenceAware(computeDiff(old, next), old, next);
-    const fenceSeg = segs.find(
-      (s) => s.type === 'removed' && s.text === '```\ngone block\n```',
-    );
+    const fenceSeg = segs.find((s) => s.type === 'removed' && s.text === '```\ngone block\n```');
     expect(fenceSeg).toBeDefined();
     expect(segs.find((s) => s.type === 'added')).toBeUndefined();
   });

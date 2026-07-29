@@ -75,7 +75,7 @@ export function ThreadCard({
 
   const externalEditorMode = externalEditor !== undefined;
 
-  const editor = externalEditorMode ? externalEditor ?? null : internalEditor;
+  const editor = externalEditorMode ? (externalEditor ?? null) : internalEditor;
 
   const openCommentEdit = externalEditorMode
     ? (externalRequestCommentEdit ?? (() => {}))

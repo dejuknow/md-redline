@@ -32,10 +32,20 @@ describe('ReviewBanner', () => {
     const { container } = render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 2],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']], ['/tmp/spec-b.md', []]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1', 'c2']],
+            ['/tmp/spec-b.md', []],
+          ])
+        }
       />,
     );
 
@@ -66,11 +76,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 1]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 2],
+            ['/tmp/spec-b.md', 1],
+          ])
+        }
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']], ['/tmp/spec-b.md', ['c3']]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1', 'c2']],
+            ['/tmp/spec-b.md', ['c3']],
+          ])
+        }
       />,
     );
 
@@ -112,10 +132,20 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[sessionAllSent]}
-        commentCounts={new Map([['/tmp/spec-a.md', 0], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 0],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', ['c2']]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', ['c2']],
+          ])
+        }
       />,
     );
 
@@ -144,10 +174,20 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[waitingSession]}
-        commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 2],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', []],
+          ])
+        }
       />,
     );
 
@@ -164,10 +204,20 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[sessionAllSent]}
-        commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 1]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 1],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', ['c2']]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', ['c2']],
+          ])
+        }
       />,
     );
 
@@ -184,11 +234,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 1]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 1],
+          ])
+        }
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', ['c2']]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', ['c2']],
+          ])
+        }
       />,
     );
 
@@ -277,11 +337,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', []],
+          ])
+        }
       />,
     );
 
@@ -307,11 +377,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={onHandoffSuccess}
         onResolved={onResolved}
         showToast={showToast}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', []],
+          ])
+        }
       />,
     );
 
@@ -353,7 +433,7 @@ describe('ReviewBanner', () => {
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
     });
-    expect((showToast.mock.calls[0][0] as string)).toContain('Cancel failed');
+    expect(showToast.mock.calls[0][0] as string).toContain('Cancel failed');
     expect(onResolved).not.toHaveBeenCalled();
   });
 
@@ -364,11 +444,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 2], ['/tmp/spec-b.md', 1]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 2],
+            ['/tmp/spec-b.md', 1],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
         onBatchSent={onBatchSent}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1', 'c2']], ['/tmp/spec-b.md', ['c3']]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1', 'c2']],
+            ['/tmp/spec-b.md', ['c3']],
+          ])
+        }
       />,
     );
 
@@ -391,11 +481,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[session]}
-        commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
         showToast={showToast}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', []],
+          ])
+        }
       />,
     );
 
@@ -404,7 +504,7 @@ describe('ReviewBanner', () => {
     await waitFor(() => {
       expect(showToast).toHaveBeenCalled();
     });
-    expect((showToast.mock.calls[0][0] as string)).toContain('Finish failed');
+    expect(showToast.mock.calls[0][0] as string).toContain('Finish failed');
     expect(onResolved).not.toHaveBeenCalled();
   });
 
@@ -421,11 +521,21 @@ describe('ReviewBanner', () => {
     render(
       <ReviewBanner
         sessions={[sessionAllSent]}
-        commentCounts={new Map([['/tmp/spec-a.md', 1], ['/tmp/spec-b.md', 0]])}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
         onHandoffSuccess={() => {}}
         onResolved={onResolved}
         showToast={showToast}
-        commentIdsByFile={new Map([['/tmp/spec-a.md', ['c1']], ['/tmp/spec-b.md', []]])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', []],
+          ])
+        }
       />,
     );
 
@@ -465,11 +575,13 @@ describe('ReviewBanner', () => {
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
         onBatchSent={onBatchSent}
-        commentIdsByFile={new Map([
-          ['/tmp/spec-a.md', ['c1']],
-          ['/tmp/spec-b.md', ['c2', 'c3']],
-          ['/tmp/spec-c.md', ['c4']],
-        ])}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', ['c2', 'c3']],
+            ['/tmp/spec-c.md', ['c4']],
+          ])
+        }
       />,
     );
 
@@ -606,13 +718,18 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
   it('button is disabled while request is in flight', async () => {
     let resolveDone: (value: Response) => void = () => {};
     fetchMock.mockImplementation(
-      () => new Promise<Response>((r) => { resolveDone = r; }),
+      () =>
+        new Promise<Response>((r) => {
+          resolveDone = r;
+        }),
     );
     renderAgentBanner();
 
     const btn = screen.getByRole('button', { name: /end review/i });
     fireEvent.click(btn);
-    expect((screen.getByRole('button', { name: /end review/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: /end review/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     resolveDone({ ok: true, json: async () => ({ ok: true }) } as Response);
   });
 

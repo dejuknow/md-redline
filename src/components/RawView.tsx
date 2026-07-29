@@ -192,8 +192,7 @@ export function buildHighlightedHtml(raw: string): string {
         region.id = parsed.id;
         const author =
           typeof parsed.author === 'string' && parsed.author ? parsed.author : 'Comment';
-        const text =
-          typeof parsed.text === 'string' ? parsed.text.replace(/\s+/g, ' ').trim() : '';
+        const text = typeof parsed.text === 'string' ? parsed.text.replace(/\s+/g, ' ').trim() : '';
         const full = text ? `${author}: ${text}` : author;
         const units = [...full];
         region.summary = units.length > 44 ? `${units.slice(0, 44).join('').trimEnd()}…` : full;
@@ -739,40 +738,40 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
         <div ref={scrollRef} className={scrollClass}>
           <div className={sheetClass}>
             <div className="flex flex-col items-center justify-center text-content-muted py-16">
-            <svg
-              className="w-12 h-12 mb-3 text-content-faint"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            {onlyCommentsChanged ? (
-              <>
-                <p className="text-sm font-medium text-content-secondary mb-1">
-                  No content changes
-                </p>
-                <p className="text-xs text-center leading-relaxed max-w-xs">
-                  Comment threads were updated.
-                  <br />
-                  Open Comments to review.
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
-                <p className="text-xs text-center leading-relaxed max-w-xs">
-                  This view updates automatically when the file is modified.
-                  <br />
-                  Hand off to an agent and changes will appear here.
-                </p>
-              </>
-            )}
+              <svg
+                className="w-12 h-12 mb-3 text-content-faint"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              {onlyCommentsChanged ? (
+                <>
+                  <p className="text-sm font-medium text-content-secondary mb-1">
+                    No content changes
+                  </p>
+                  <p className="text-xs text-center leading-relaxed max-w-xs">
+                    Comment threads were updated.
+                    <br />
+                    Open Comments to review.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
+                  <p className="text-xs text-center leading-relaxed max-w-xs">
+                    This view updates automatically when the file is modified.
+                    <br />
+                    Hand off to an agent and changes will appear here.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -784,32 +783,32 @@ export const RawView = forwardRef<RawViewHandle, Props>(function RawView(
     <div ref={containerRef} className={outerClass}>
       <div ref={scrollRef} className={scrollClass}>
         <div className={sheetClass}>
-        <div className="max-w-3xl mx-auto">
-          <div ref={tableRef} className="raw-view-table" onClick={toggleMarkerFold}>
-            {displayRows.map((row, i) => {
-              const diffClass =
-                row.type === 'added'
-                  ? 'raw-line-diff-added'
-                  : row.type === 'removed'
-                    ? 'raw-line-diff-removed'
-                    : '';
-              return (
-                <div
-                  key={i}
-                  className={`raw-line ${diffClass}`}
-                  data-heading-id={
-                    row.sourceLineIndex != null
-                      ? headingIdsByLine.get(row.sourceLineIndex)
-                      : undefined
-                  }
-                >
-                  <span className="raw-line-number">{row.lineNo}</span>
-                  <span className="raw-line-content" />
-                </div>
-              );
-            })}
+          <div className="max-w-3xl mx-auto">
+            <div ref={tableRef} className="raw-view-table" onClick={toggleMarkerFold}>
+              {displayRows.map((row, i) => {
+                const diffClass =
+                  row.type === 'added'
+                    ? 'raw-line-diff-added'
+                    : row.type === 'removed'
+                      ? 'raw-line-diff-removed'
+                      : '';
+                return (
+                  <div
+                    key={i}
+                    className={`raw-line ${diffClass}`}
+                    data-heading-id={
+                      row.sourceLineIndex != null
+                        ? headingIdsByLine.get(row.sourceLineIndex)
+                        : undefined
+                    }
+                  >
+                    <span className="raw-line-number">{row.lineNo}</span>
+                    <span className="raw-line-content" />
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
         </div>
       </div>
     </div>

@@ -68,9 +68,7 @@ test.describe('Hand-off button', () => {
     await expect(btn).toBeDisabled();
   });
 
-  test('hovering the disabled handoff button reveals the explanatory tooltip', async ({
-    page,
-  }) => {
+  test('hovering the disabled handoff button reveals the explanatory tooltip', async ({ page }) => {
     await openFixture(page);
     // Hover the wrapping span (Tooltip wrapper). Disabled buttons don't fire
     // mouseenter natively, so the wrapper has to do it — that's the whole

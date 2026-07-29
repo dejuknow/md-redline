@@ -154,15 +154,13 @@ function verifyCiGreen() {
 
   let raw;
   try {
-    raw = run(
-      'gh',
-      ['api', `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`],
-      { capture: true },
-    );
+    raw = run('gh', ['api', `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`], {
+      capture: true,
+    });
   } catch (e) {
     throw new Error(
       `Could not query CI status for ${shortSha} via gh: ${e.message}\n` +
-      `If you are genuinely offline, set RELEASE_SKIP_CI_CHECK=1 to bypass (not recommended).`,
+        `If you are genuinely offline, set RELEASE_SKIP_CI_CHECK=1 to bypass (not recommended).`,
     );
   }
 
@@ -177,7 +175,7 @@ function verifyCiGreen() {
   if (!result.ok) {
     throw new Error(
       `CI gate failed for ${shortSha}: ${result.message}\n` +
-      `Release only from a commit whose CI matrix is fully green (check the Actions tab or \`gh pr checks\`).`,
+        `Release only from a commit whose CI matrix is fully green (check the Actions tab or \`gh pr checks\`).`,
     );
   }
   console.log(`  ✓ ${result.message} (${shortSha})`);
@@ -195,16 +193,20 @@ function computeNextVersion(type) {
   if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
     throw new Error(
       `Cannot bump version '${current}'. ` +
-      `release.mjs only handles plain X.Y.Z. ` +
-      `If you're shipping a prerelease, do it manually or extend the script.`
+        `release.mjs only handles plain X.Y.Z. ` +
+        `If you're shipping a prerelease, do it manually or extend the script.`,
     );
   }
   const [major, minor, patch] = parts;
   switch (type) {
-    case 'patch': return `${major}.${minor}.${patch + 1}`;
-    case 'minor': return `${major}.${minor + 1}.0`;
-    case 'major': return `${major + 1}.0.0`;
-    default: throw new Error(`Unknown bump type: ${type}`);
+    case 'patch':
+      return `${major}.${minor}.${patch + 1}`;
+    case 'minor':
+      return `${major}.${minor + 1}.0`;
+    case 'major':
+      return `${major + 1}.0.0`;
+    default:
+      throw new Error(`Unknown bump type: ${type}`);
   }
 }
 
@@ -229,7 +231,7 @@ function generateNotes(currentVersion, nextVersion) {
       input: body,
       stdio: ['pipe', 'pipe', 'inherit'],
       encoding: 'utf8',
-    }
+    },
   );
   if (result.error) {
     throw new Error(`Failed to spawn gh: ${result.error.message}`);
@@ -277,19 +279,23 @@ function rewriteNotesWithClaude(notesPath, currentVersion, nextVersion) {
   const result = spawnSync(
     'claude',
     [
-      '-p', prompt,
-      '--allowed-tools', 'Read Write Bash(git log:*)',
-      '--permission-mode', 'acceptEdits',
+      '-p',
+      prompt,
+      '--allowed-tools',
+      'Read Write Bash(git log:*)',
+      '--permission-mode',
+      'acceptEdits',
     ],
     {
       cwd: PROJECT_ROOT,
       stdio: ['ignore', 'ignore', 'inherit'],
-    }
+    },
   );
   if (result.error) {
-    const reason = result.error.code === 'ENOENT'
-      ? 'claude CLI not found (install Claude Code or set RELEASE_SKIP_CLAUDE=1)'
-      : result.error.message;
+    const reason =
+      result.error.code === 'ENOENT'
+        ? 'claude CLI not found (install Claude Code or set RELEASE_SKIP_CLAUDE=1)'
+        : result.error.message;
     console.warn(`  ! Claude rewrite skipped: ${reason}`);
     return false;
   }
@@ -378,7 +384,9 @@ function printPublishRecovery(stage, version) {
       console.error(`'npm version' failed. No state changed. Safe to retry.`);
       break;
     case 'push':
-      console.error(`'git push --follow-tags --atomic' failed AFTER 'npm version' created a local commit and tag.`);
+      console.error(
+        `'git push --follow-tags --atomic' failed AFTER 'npm version' created a local commit and tag.`,
+      );
       console.error(`Nothing was published. To roll back the local commit and tag:`);
       console.error(`  git reset --hard HEAD~1`);
       console.error(`  git tag -d v${version}`);
@@ -481,7 +489,9 @@ try {
     console.error('\n─────────────────────────────────────');
     console.error('PUBLISHED BUT GITHUB RELEASE NOT CREATED');
     console.error('─────────────────────────────────────');
-    console.error(`v${e.version} is on npm and pushed to git, but the GitHub release was not created.`);
+    console.error(
+      `v${e.version} is on npm and pushed to git, but the GitHub release was not created.`,
+    );
     console.error(`To create it manually:`);
     console.error(`  gh release create v${e.version} --notes-file ${e.notesPath}`);
     console.error('─────────────────────────────────────');

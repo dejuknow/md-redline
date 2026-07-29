@@ -45,9 +45,7 @@ async function runCase(
 
   const inputRaw = await readFile(evalCase.inputPath, 'utf-8');
   const prompt = await readFile(evalCase.promptPath, 'utf-8');
-  const expected: ExpectedCriteria = JSON.parse(
-    await readFile(evalCase.expectedPath, 'utf-8'),
-  );
+  const expected: ExpectedCriteria = JSON.parse(await readFile(evalCase.expectedPath, 'utf-8'));
 
   // Transform input to the target format variant
   const inputVariant = format.toVariant(inputRaw);
@@ -73,13 +71,7 @@ async function runCase(
 }
 
 function printTable(results: ScoringResult[]) {
-  const header = [
-    'Case'.padEnd(28),
-    'Parse',
-    ' Exec',
-    'Integ',
-    'Overall',
-  ].join(' | ');
+  const header = ['Case'.padEnd(28), 'Parse', ' Exec', 'Integ', 'Overall'].join(' | ');
 
   const divider = '-'.repeat(header.length);
 
@@ -104,8 +96,7 @@ function printTable(results: ScoringResult[]) {
   if (results.length > 1) {
     const avg = (key: keyof ScoringResult['scores']) =>
       results.reduce((s, r) => s + r.scores[key], 0) / results.length;
-    const avgOverall =
-      results.reduce((s, r) => s + r.overall, 0) / results.length;
+    const avgOverall = results.reduce((s, r) => s + r.overall, 0) / results.length;
     const row = [
       'AVERAGE'.padEnd(28),
       fmtPct(avg('parsing')),
@@ -188,9 +179,7 @@ async function main() {
   const agentName = values.agent!;
   const agent = agents[agentName];
   if (!agent) {
-    console.error(
-      `Unknown agent: ${agentName}. Available: ${Object.keys(agents).join(', ')}`,
-    );
+    console.error(`Unknown agent: ${agentName}. Available: ${Object.keys(agents).join(', ')}`);
     process.exit(1);
   }
 
@@ -214,10 +203,7 @@ async function main() {
       // Save per-case results
       const caseDir = join(runDir, evalCase.name);
       await mkdir(caseDir, { recursive: true });
-      await writeFile(
-        join(caseDir, 'scores.json'),
-        JSON.stringify(result, null, 2),
-      );
+      await writeFile(join(caseDir, 'scores.json'), JSON.stringify(result, null, 2));
 
       if (values.verbose) {
         for (const d of result.details) {
@@ -240,10 +226,7 @@ async function main() {
 
       const caseDir = join(runDir, evalCase.name);
       await mkdir(caseDir, { recursive: true });
-      await writeFile(
-        join(caseDir, 'scores.json'),
-        JSON.stringify(errorResult, null, 2),
-      );
+      await writeFile(join(caseDir, 'scores.json'), JSON.stringify(errorResult, null, 2));
     }
   }
 
@@ -256,8 +239,7 @@ async function main() {
     agent: agentName,
     format: formatName,
     cases: results.length,
-    averageOverall:
-      results.reduce((s, r) => s + r.overall, 0) / results.length,
+    averageOverall: results.reduce((s, r) => s + r.overall, 0) / results.length,
     results,
   };
   await writeFile(join(runDir, 'summary.json'), JSON.stringify(summary, null, 2));

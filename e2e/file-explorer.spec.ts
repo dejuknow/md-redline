@@ -101,9 +101,9 @@ test.describe('File explorer', () => {
     // Its visibility in the explorer panel confirms the explorer is pointing
     // at e2e/fixtures, the file's actual parent directory. If the regression
     // returns (explorer falls back to cwd), this assertion fails.
-    await expect(
-      page.locator(`button.w-full[title$="/test-doc.md"]`),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(`button.w-full[title$="/test-doc.md"]`)).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test('clicking a file in explorer opens it', async ({ page }) => {

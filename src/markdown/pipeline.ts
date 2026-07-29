@@ -16,8 +16,18 @@ import { rewriteLocalUrls } from './rewriteLocalUrls';
 // highlight pipeline actually emit classes on. A wildcard `*` would let
 // markdown authors apply arbitrary CSS classes for UI spoofing.
 const CLASS_NAME_ELEMENTS = [
-  'code', 'pre', 'span', 'li', 'input', 'div',
-  'table', 'thead', 'tbody', 'tr', 'td', 'th',
+  'code',
+  'pre',
+  'span',
+  'li',
+  'input',
+  'div',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'td',
+  'th',
 ] as const;
 
 const sanitizeSchema = {

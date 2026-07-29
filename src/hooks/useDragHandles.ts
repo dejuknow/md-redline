@@ -66,10 +66,7 @@ export function isSvgTextMark(markEl: Element): boolean {
  * so unlike the old scroll-container-relative calc, no scrollTop/scrollLeft
  * term is needed here.
  */
-function computePositions(
-  markEls: Element[],
-  positionRoot: HTMLElement,
-): HandlePositions | null {
+function computePositions(markEls: Element[], positionRoot: HTMLElement): HandlePositions | null {
   const draggable = markEls.filter((el) => !isSvgTextMark(el));
   if (draggable.length === 0) return null;
 

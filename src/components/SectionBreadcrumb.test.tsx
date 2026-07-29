@@ -16,12 +16,7 @@ describe('SectionBreadcrumb', () => {
   it('renders chain segments when visible and fires onJump', () => {
     const onJump = vi.fn();
     render(
-      <SectionBreadcrumb
-        chain={CHAIN}
-        containerRef={createRef()}
-        onJump={onJump}
-        initialVisible
-      />,
+      <SectionBreadcrumb chain={CHAIN} containerRef={createRef()} onJump={onJump} initialVisible />,
     );
     expect(document.querySelector('[data-section-breadcrumb]')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Background' }));

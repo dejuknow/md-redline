@@ -142,9 +142,7 @@ export function findActiveSessionForFile(
   // today, this keeps the invariant local — a terminal session sitting in
   // the local cache (e.g. between the abort and the next poll) must not be
   // returned as "active."
-  const matches = sessions.filter(
-    (s) => s.status === 'open' && s.filePaths.includes(filePath),
-  );
+  const matches = sessions.filter((s) => s.status === 'open' && s.filePaths.includes(filePath));
   if (matches.length === 0) return null;
   if (matches.length === 1) return matches[0];
   const parsedCreatedAt = (s: ReviewSession): number => {

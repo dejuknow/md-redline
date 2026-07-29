@@ -17,10 +17,7 @@ test.use({ viewport: { width: 1700, height: 950 } });
 
 test.beforeEach(async ({ page }, testInfo) => {
   mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
-  fixtureDir = resolve(
-    TEMP_FIXTURE_DIR,
-    `layout-${process.pid}-${testInfo.retry}-${Date.now()}`,
-  );
+  fixtureDir = resolve(TEMP_FIXTURE_DIR, `layout-${process.pid}-${testInfo.retry}-${Date.now()}`);
   mkdirSync(fixtureDir, { recursive: true });
   fixturePath = resolve(fixtureDir, 'test-doc.md');
   tocPath = resolve(fixtureDir, 'toc-doc.md');
@@ -88,9 +85,7 @@ test.describe('Density strip', () => {
 });
 
 test.describe('Section breadcrumb', () => {
-  test('appears after scrolling past the first heading and names the section', async ({
-    page,
-  }) => {
+  test('appears after scrolling past the first heading and names the section', async ({ page }) => {
     await openFile(page, tocPath);
     await expect(page.locator('[data-section-breadcrumb]')).not.toBeVisible();
 

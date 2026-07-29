@@ -6,7 +6,7 @@ const COMMENT_MARKER_RE = /<!-- @comment(\{.*?\}) -->/gs;
 
 const WEIGHTS: Record<keyof DimensionScores, number> = {
   parsing: 0.25,
-  execution: 0.50,
+  execution: 0.5,
   integrity: 0.25,
 };
 
@@ -32,8 +32,13 @@ export function score(
     details.push('parsing: no comments expected, score=1.0');
   } else {
     const actionable = expected.comments.filter((c) => c.expectedAction === 'address');
-    if (expected.actionableComments !== undefined && actionable.length !== expected.actionableComments) {
-      details.push(`warning: actionableComments (${expected.actionableComments}) does not match computed count (${actionable.length})`);
+    if (
+      expected.actionableComments !== undefined &&
+      actionable.length !== expected.actionableComments
+    ) {
+      details.push(
+        `warning: actionableComments (${expected.actionableComments}) does not match computed count (${actionable.length})`,
+      );
     }
     let correct = 0;
     for (const exp of actionable) {
@@ -46,17 +51,14 @@ export function score(
       }
     }
     parsingScore = actionable.length > 0 ? correct / actionable.length : 1.0;
-    details.push(
-      `parsing: ${correct}/${actionable.length} markers correctly handled`,
-    );
+    details.push(`parsing: ${correct}/${actionable.length} markers correctly handled`);
   }
 
   // --- 2. Execution: Did content changes address the feedback? ---
   let executionScore: number;
   if (!expected.contentShouldChange) {
     // Content should NOT have changed
-    const unchanged =
-      inputParsed.cleanMarkdown.trim() === outputParsed.cleanMarkdown.trim();
+    const unchanged = inputParsed.cleanMarkdown.trim() === outputParsed.cleanMarkdown.trim();
     executionScore = unchanged ? 1.0 : 0.0;
     details.push(
       `execution: content should be unchanged — ${unchanged ? 'pass' : 'FAIL (content was modified)'}`,
@@ -107,12 +109,9 @@ export function score(
 
     if (allChecks.length === 0) {
       // No specific assertions — just check that content changed at all
-      const changed =
-        inputParsed.cleanMarkdown.trim() !== outputParsed.cleanMarkdown.trim();
+      const changed = inputParsed.cleanMarkdown.trim() !== outputParsed.cleanMarkdown.trim();
       executionScore = changed ? 1.0 : 0.0;
-      details.push(
-        `execution: content should change — ${changed ? 'pass' : 'FAIL'}`,
-      );
+      details.push(`execution: content should change — ${changed ? 'pass' : 'FAIL'}`);
     } else {
       const passed = allChecks.filter((c) => c.pass).length;
       executionScore = passed / allChecks.length;
@@ -135,18 +134,14 @@ export function score(
         if (data.id && data.anchor !== undefined && data.text !== undefined) {
           valid++;
         } else {
-          details.push(
-            `integrity: marker missing essential fields (id/anchor/text)`,
-          );
+          details.push(`integrity: marker missing essential fields (id/anchor/text)`);
         }
       } catch {
         details.push(`integrity: malformed JSON in marker`);
       }
     }
     integrityScore = valid / rawMarkers.length;
-    details.push(
-      `integrity: ${valid}/${rawMarkers.length} markers valid`,
-    );
+    details.push(`integrity: ${valid}/${rawMarkers.length} markers valid`);
   }
 
   const scores: DimensionScores = {

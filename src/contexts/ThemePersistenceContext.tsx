@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from 'react';
 import { useTheme } from 'next-themes';
 import {
   fetchPreferences,

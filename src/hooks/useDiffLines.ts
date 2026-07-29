@@ -50,10 +50,7 @@ function buildCleanToRawLineMap(rawText: string, cleanText: string): number[] {
   return map;
 }
 
-export function useDiffLines(
-  rawMarkdown: string,
-  diffSnapshot: string | null,
-): DiffState {
+export function useDiffLines(rawMarkdown: string, diffSnapshot: string | null): DiffState {
   return useMemo<DiffState>(() => {
     if (diffSnapshot == null) {
       return {

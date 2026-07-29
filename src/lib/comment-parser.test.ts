@@ -2205,8 +2205,7 @@ describe('insertComment inside fenced code blocks', () => {
     });
 
     it('still relocates a comment on code inside the real fence of that document', () => {
-      const raw =
-        '---\ncode: |\n  ```\n---\n\nPara one.\n\n```js\nconst x = 1;\n```\n';
+      const raw = '---\ncode: |\n  ```\n---\n\nPara one.\n\n```js\nconst x = 1;\n```\n';
       const result = insertComment(raw, 'const x = 1;', 'note');
       expect(result).not.toMatch(/```js\n<!-- @comment/);
       expect(parseComments(result).comments).toHaveLength(1);

@@ -27,9 +27,13 @@ describe('mermaid block helpers', () => {
 
   it('does not retarget to a surviving duplicate when the active duplicate is removed', () => {
     const source = 'graph TD\nA-->B';
-    const original = ['before first', fence(source), 'between copies', fence(source), 'after second'].join(
-      '\n\n',
-    );
+    const original = [
+      'before first',
+      fence(source),
+      'between copies',
+      fence(source),
+      'after second',
+    ].join('\n\n');
     const originalBlocks = collectMermaidBlocks(original);
     const identity = getMermaidBlockIdentity(originalBlocks[0]);
 

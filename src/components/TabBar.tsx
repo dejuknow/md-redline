@@ -374,7 +374,6 @@ export function TabBar({
           </>
         )}
       </div>
-
     </div>
   );
 }

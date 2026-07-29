@@ -63,9 +63,7 @@ describe('SettingsContext hydrate race', () => {
 
     // Final state must include BOTH the disk template AND the
     // pre-hydrate user toggle.
-    expect(result.current.settings.templates).toEqual([
-      { label: 'Saved', text: 'from disk' },
-    ]);
+    expect(result.current.settings.templates).toEqual([{ label: 'Saved', text: 'from disk' }]);
     expect(result.current.settings.quickComment).toBe(true);
 
     // And exactly one persist should have fired (the post-hydrate replay)
@@ -75,9 +73,7 @@ describe('SettingsContext hydrate race', () => {
       settings: { templates: unknown; quickComment: boolean };
     };
     expect(persistedArg.settings.quickComment).toBe(true);
-    expect(persistedArg.settings.templates).toEqual([
-      { label: 'Saved', text: 'from disk' },
-    ]);
+    expect(persistedArg.settings.templates).toEqual([{ label: 'Saved', text: 'from disk' }]);
   });
 
   it('persists immediately on mutations made after hydrate completes', async () => {

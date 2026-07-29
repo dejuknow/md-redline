@@ -68,9 +68,7 @@ async function selectText(page: Page, text: string) {
 }
 
 test.describe('Selection pill', () => {
-  test('one-tap template prefills the form and the comment lands in the file', async ({
-    page,
-  }) => {
+  test('one-tap template prefills the form and the comment lands in the file', async ({ page }) => {
     await openFixture(page);
     await selectText(page, 'valid credentials');
 
@@ -84,14 +82,14 @@ test.describe('Selection pill', () => {
     await expect(textarea).toBeVisible();
     await expect(textarea).toHaveValue(/Rewrite/);
     // Grid stays hidden when a pill template was tapped
-    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).not.toBeVisible();
+    await expect(
+      page.locator('[data-comment-form]').getByText('Quick templates:'),
+    ).not.toBeVisible();
 
     await pill.getByRole('button', { name: 'Comment', exact: true }).click();
 
     await expect(page.locator('mark.comment-highlight')).toBeVisible();
-    await expect
-      .poll(() => readFileSync(fixturePath, 'utf-8'))
-      .toContain('@comment{');
+    await expect.poll(() => readFileSync(fixturePath, 'utf-8')).toContain('@comment{');
   });
 
   test('Comment opens the form without the grid; overflow lists the remaining templates in place', async ({
@@ -103,7 +101,9 @@ test.describe('Selection pill', () => {
     const pill = page.locator('[data-comment-form]');
     await pill.getByRole('button', { name: /Comment/ }).click();
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible();
-    await expect(page.locator('[data-comment-form]').getByText('Quick templates:')).not.toBeVisible();
+    await expect(
+      page.locator('[data-comment-form]').getByText('Quick templates:'),
+    ).not.toBeVisible();
 
     // The footer toggle still summons the grid on demand
     await page.locator('[data-comment-form] button[title="Quick templates"]').click();

@@ -87,7 +87,11 @@ export type AskNoReplyReason =
   | 'agent_silent';
 
 export type AskResult =
-  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
+  | {
+      status: 'reply';
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    }
   | { status: 'no_reply'; reason: AskNoReplyReason };
 
 export interface PendingAsk {
@@ -299,10 +303,7 @@ export class ReviewSessionStore {
       if ((s.clientId ?? null) !== (clientId ?? null)) continue;
       if (s.lastHeartbeatAt.getTime() < freshCutoff) continue;
       const existing = [...s.filePaths].sort();
-      if (
-        sorted.length === existing.length &&
-        sorted.every((p, i) => p === existing[i])
-      ) {
+      if (sorted.length === existing.length && sorted.every((p, i) => p === existing[i])) {
         return this.toPublic(s);
       }
     }
@@ -470,10 +471,7 @@ export class ReviewSessionStore {
    * live map. Cap and FIFO eviction keep memory bounded over a long-lived
    * server.
    */
-  private recentlyDoneIds = new Map<
-    string,
-    NonNullable<InternalSession['terminalReason']>
-  >();
+  private recentlyDoneIds = new Map<string, NonNullable<InternalSession['terminalReason']>>();
   private static RECENTLY_DONE_CAP = 1000;
   private rememberDoneSession(
     id: string,
@@ -565,11 +563,7 @@ export class ReviewSessionStore {
    * rebuilt at delivery time (in waitForSession) so back-to-back queue
    * merges don't double-up the system-instructions preamble.
    */
-  queueBatch(
-    id: string,
-    commentIds: string[],
-    commentCountsByPath: Map<string, number>,
-  ): boolean {
+  queueBatch(id: string, commentIds: string[], commentCountsByPath: Map<string, number>): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
     // Update sentCommentIds so the UI correctly disables the button after queuing.
@@ -577,9 +571,7 @@ export class ReviewSessionStore {
       if (!s.sentCommentIds.includes(cid)) s.sentCommentIds.push(cid);
     }
     if (s.queuedBatch) {
-      const mergedIds = Array.from(
-        new Set([...s.queuedBatch.commentIds, ...commentIds]),
-      );
+      const mergedIds = Array.from(new Set([...s.queuedBatch.commentIds, ...commentIds]));
       const mergedCounts = new Map(s.queuedBatch.commentCountsByPath);
       for (const [path, count] of commentCountsByPath) {
         const prev = mergedCounts.get(path) ?? 0;
@@ -608,7 +600,7 @@ export class ReviewSessionStore {
    */
   deliverQueuedBatchIfAny(id: string): boolean {
     const s = this.sessions.get(id);
-    return !!(s?.queuedBatch);
+    return !!s?.queuedBatch;
   }
 
   getQueuedBatch(
@@ -753,9 +745,7 @@ export class ReviewSessionStore {
     // Otherwise the agent_silent → tab_closed reason mapping in abortAsks
     // would silently mis-tag any racing ask result.
     if (s.origin === 'agent' && s.agentCommentCount === 0) {
-      throw new Error(
-        'addAsk requires the agent to have posted at least one comment first',
-      );
+      throw new Error('addAsk requires the agent to have posted at least one comment first');
     }
     for (const ask of this.pendingAsks.values()) {
       if (ask.sessionId === sessionId) {

@@ -103,7 +103,10 @@ test.describe.configure({ timeout: 120_000 });
 
 test.beforeEach(async ({ page }, testInfo) => {
   mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
-  fixturePath = resolve(TEMP_FIXTURE_DIR, `extreme-mermaid-stress-${process.pid}-${testInfo.retry}-${Date.now()}.md`);
+  fixturePath = resolve(
+    TEMP_FIXTURE_DIR,
+    `extreme-mermaid-stress-${process.pid}-${testInfo.retry}-${Date.now()}.md`,
+  );
   writeFileSync(fixturePath, FIXTURE_CONTENT);
   await resetTestAppState(page);
 });

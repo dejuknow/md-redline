@@ -85,20 +85,17 @@ test.describe('Agent asks', () => {
     await page.waitForTimeout(500);
 
     // Post agent-comments
-    const ask = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          questions: [
-            {
-              filePath: file,
-              anchor: 'rate limit is 100 req/min',
-              text: 'per-user or per-tenant?',
-            },
-          ],
-        },
+    const ask = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        questions: [
+          {
+            filePath: file,
+            anchor: 'rate limit is 100 req/min',
+            text: 'per-user or per-tenant?',
+          },
+        ],
       },
-    );
+    });
     expect(ask.status()).toBe(201);
     const { askId } = (await ask.json()) as { askId: string };
 
@@ -119,11 +116,22 @@ test.describe('Agent asks', () => {
     // Reply to the ask via the standard Reply button on the comment card.
     await commentCards.first().click(); // activate
     // Open the reply form
-    await commentCards.first().getByRole('button', { name: /^reply$/i }).first().click();
+    await commentCards
+      .first()
+      .getByRole('button', { name: /^reply$/i })
+      .first()
+      .click();
     // Fill the reply text
-    await commentCards.first().getByPlaceholder('Write a reply...').fill('per-tenant, see section 4.2');
+    await commentCards
+      .first()
+      .getByPlaceholder('Write a reply...')
+      .fill('per-tenant, see section 4.2');
     // Submit the reply (the primary/highlighted Reply button)
-    await commentCards.first().getByRole('button', { name: /^reply$/i }).last().click();
+    await commentCards
+      .first()
+      .getByRole('button', { name: /^reply$/i })
+      .last()
+      .click();
 
     // The inline reply saves the file, and the save resolves the pending ask
     // immediately (every question now has an answer). The agent's long-poll
@@ -136,9 +144,7 @@ test.describe('Agent asks', () => {
       totalQuestions: number;
     };
     expect(waitBody.status).toBe('reply');
-    expect(waitBody.replies).toEqual([
-      { questionIndex: 0, text: 'per-tenant, see section 4.2' },
-    ]);
+    expect(waitBody.replies).toEqual([{ questionIndex: 0, text: 'per-tenant, see section 4.2' }]);
 
     // The marker on disk keeps the question and the reply as a record, with
     // the pending flag cleared.
@@ -339,7 +345,8 @@ test.describe('Agent asks', () => {
     // screen at load, so a real scroll is required to bring it into view.
     const filler = Array.from(
       { length: 40 },
-      (_, i) => `Filler paragraph ${i} padding out the document so the anchor below starts off screen.`,
+      (_, i) =>
+        `Filler paragraph ${i} padding out the document so the anchor below starts off screen.`,
     ).join('\n\n');
     writeFileSync(file, `# Spec\n\n${filler}\n\nThe rate limit is 100 req/min today.\n`, 'utf8');
     await page.setViewportSize({ width: 1700, height: 950 });
@@ -366,7 +373,9 @@ test.describe('Agent asks', () => {
 
     // The rail is showing (Anchored density is the default), so the ask lands
     // as a margin card rather than a drawer/list row.
-    const marginCard = page.locator('[data-margin-card-id]', { hasText: 'per-user or per-tenant?' });
+    const marginCard = page.locator('[data-margin-card-id]', {
+      hasText: 'per-user or per-tenant?',
+    });
     await expect(marginCard).toBeVisible({ timeout: 10_000 });
 
     // Before the jump: the ask was never activated, so its card isn't marked

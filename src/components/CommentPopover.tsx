@@ -59,10 +59,7 @@ export function CommentPopover({ comment, pageRef, onClose, sent, anchorMissing,
       return;
     }
     const markRect = mark.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(markRect.left - pageRect.left, 12),
-      pageRect.width - WIDTH - 12,
-    );
+    const left = Math.min(Math.max(markRect.left - pageRect.left, 12), pageRect.width - WIDTH - 12);
     const height = measuredHeight ?? 220;
     const clipsBelow = markRect.bottom + 10 + height > window.innerHeight - 12;
     const fitsAbove = markRect.top - 10 - height >= 12;

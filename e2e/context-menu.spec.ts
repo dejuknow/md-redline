@@ -140,7 +140,9 @@ test.describe('Context menu on tab', () => {
     await expect(menu.getByText('Copy File Name')).toBeVisible();
   });
 
-  test('Reveal in Explorer Sidebar opens the Explorer at the file\'s parent dir', async ({ page }) => {
+  test("Reveal in Explorer Sidebar opens the Explorer at the file's parent dir", async ({
+    page,
+  }) => {
     await openFixture(page);
 
     // Start with the Explorer closed so we can verify the action opens it.
@@ -161,9 +163,9 @@ test.describe('Context menu on tab', () => {
 
     // Explorer should be navigated to the fixture's parent dir — the fixture
     // file row (w-full text-left, titled with its full path) should be listed.
-    await expect(
-      page.locator(`button.w-full.text-left[title="${FIXTURE_1}"]`),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(`button.w-full.text-left[title="${FIXTURE_1}"]`)).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test('Close Others closes all except the right-clicked tab', async ({ page }) => {

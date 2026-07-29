@@ -632,7 +632,11 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         Typeface for rendered document text.
                       </p>
                     </div>
-                    <div role="group" aria-label="Prose typeface" className="flex rounded-lg border border-border overflow-hidden shrink-0">
+                    <div
+                      role="group"
+                      aria-label="Prose typeface"
+                      className="flex rounded-lg border border-border overflow-hidden shrink-0"
+                    >
                       {(['serif', 'sans'] as const).map((font) => (
                         <button
                           key={font}
@@ -660,7 +664,11 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         Maximum width of the rendered text column.
                       </p>
                     </div>
-                    <div role="group" aria-label="Document width" className="flex rounded-lg border border-border overflow-hidden shrink-0">
+                    <div
+                      role="group"
+                      aria-label="Document width"
+                      className="flex rounded-lg border border-border overflow-hidden shrink-0"
+                    >
                       {(['narrow', 'default', 'wide'] as const).map((width) => (
                         <button
                           key={width}
@@ -736,7 +744,6 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                   />
                   <span className="text-xs text-content-muted ml-2">characters</span>
                 </div>
-
               </div>
             )}
 

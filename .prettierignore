@@ -1,0 +1,14 @@
+# Build output and test artefacts. These sit under directories the format
+# globs cover, so without this they get scanned whenever they happen to exist.
+dist
+test-results
+playwright-report
+demo/output
+eval/results
+
+# Markdown is deliberately not formatted. AGENTS.md and README.md are
+# hand-wrapped, and reflowing them turns every prose edit into a churn diff.
+
+# bin/md-redline is the CLI entry point and has no extension, so Prettier
+# cannot infer a parser for it. It is excluded by the globs already; this note
+# is here so the omission reads as deliberate rather than forgotten.

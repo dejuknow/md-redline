@@ -2,7 +2,14 @@ import { randomUUID } from 'crypto';
 import type { Hono } from 'hono';
 import { extname } from 'path';
 import type { PendingAsk, ReviewSessionStore, SessionOrigin } from '../review-sessions';
-import { appendReply, insertComment, parseComments, removeComment, removeReply, transformCommentMarkers } from '../../src/lib/comment-parser';
+import {
+  appendReply,
+  insertComment,
+  parseComments,
+  removeComment,
+  removeReply,
+  transformCommentMarkers,
+} from '../../src/lib/comment-parser';
 
 /**
  * Deliver inline replies to pending asks.
@@ -153,12 +160,7 @@ export function registerReviewSessionRoutes(
   reviewSessions: ReviewSessionStore,
   deps: ReviewSessionRoutesDeps,
 ): void {
-  const {
-    resolveAndValidate,
-    readFileText,
-    transformFile,
-    notifyFileChanged,
-  } = deps;
+  const { resolveAndValidate, readFileText, transformFile, notifyFileChanged } = deps;
 
   /**
    * Clear the on-disk `expectsReply` flag on the given questions' markers,
@@ -193,7 +195,12 @@ export function registerReviewSessionRoutes(
     }
   }
   app.post('/api/review-sessions', async (c) => {
-    let body: { filePaths?: unknown; enableResolve?: unknown; origin?: unknown; clientId?: unknown };
+    let body: {
+      filePaths?: unknown;
+      enableResolve?: unknown;
+      origin?: unknown;
+      clientId?: unknown;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -218,7 +225,11 @@ export function registerReviewSessionRoutes(
     // the same files get distinct sessions.
     let clientId: string | undefined;
     if (body.clientId !== undefined) {
-      if (typeof body.clientId !== 'string' || body.clientId.length === 0 || body.clientId.length > 256) {
+      if (
+        typeof body.clientId !== 'string' ||
+        body.clientId.length === 0 ||
+        body.clientId.length > 256
+      ) {
         return c.json({ error: 'clientId must be a non-empty string of at most 256 chars' }, 400);
       }
       clientId = body.clientId;
@@ -357,10 +368,14 @@ export function registerReviewSessionRoutes(
       if (!queued) {
         return c.json({ error: 'Session is not open' }, 409);
       }
-      console.log(`[review-session] batch queued for ${id} (${(body.commentIds as string[]).length} comments)`);
+      console.log(
+        `[review-session] batch queued for ${id} (${(body.commentIds as string[]).length} comments)`,
+      );
       return c.json({ ok: true, queued: true });
     }
-    console.log(`[review-session] batch sent for ${id} (${(body.commentIds as string[]).length} comments)`);
+    console.log(
+      `[review-session] batch sent for ${id} (${(body.commentIds as string[]).length} comments)`,
+    );
     return c.json({ ok: true });
   });
 
@@ -399,7 +414,8 @@ export function registerReviewSessionRoutes(
         console.warn(`[review-session] inline-reply delivery on finish failed for ${id}:`, err);
       }
     }
-    const prompt = typeof body.prompt === 'string' && body.prompt.length > 0 ? body.prompt : undefined;
+    const prompt =
+      typeof body.prompt === 'string' && body.prompt.length > 0 ? body.prompt : undefined;
     const commentIds = Array.isArray(body.commentIds)
       ? (body.commentIds.filter((id): id is string => typeof id === 'string') as string[])
       : undefined;
@@ -407,7 +423,9 @@ export function registerReviewSessionRoutes(
     if (!ok) {
       return c.json({ error: 'Session is not open' }, 409);
     }
-    console.log(`[review-session] finished ${id}${prompt ? ` (${prompt.length} chars)` : ' (no final comments)'}`);
+    console.log(
+      `[review-session] finished ${id}${prompt ? ` (${prompt.length} chars)` : ' (no final comments)'}`,
+    );
     return c.json({ ok: true });
   });
 
@@ -485,7 +503,7 @@ export function registerReviewSessionRoutes(
         {
           error:
             "mode:'ask' must use the `questions:` array, not `comments:`. " +
-            'For fire-and-forget review-mode posts use mode:\'review\'.',
+            "For fire-and-forget review-mode posts use mode:'review'.",
         },
         400,
       );
@@ -504,8 +522,7 @@ export function registerReviewSessionRoutes(
       );
     }
     const isAskRequest =
-      explicitMode === 'ask' ||
-      (explicitMode === null && hasQuestionsArray && !hasCommentsArray);
+      explicitMode === 'ask' || (explicitMode === null && hasQuestionsArray && !hasCommentsArray);
     // If `mode` was omitted AND neither questions[] nor comments[] is
     // present, the caller's intent is ambiguous (replies-only? error?).
     // Treat as review-mode replies-only ONLY if the caller is explicit
@@ -516,7 +533,7 @@ export function registerReviewSessionRoutes(
       return c.json(
         {
           error:
-            "replies-only request without explicit mode is ambiguous. " +
+            'replies-only request without explicit mode is ambiguous. ' +
             "Pass mode:'review' to confirm fire-and-forget reply intent.",
         },
         400,
@@ -542,7 +559,7 @@ export function registerReviewSessionRoutes(
       return c.json(
         {
           error:
-            "ask-mode request with expectsReply:false is contradictory. " +
+            'ask-mode request with expectsReply:false is contradictory. ' +
             "Use mode:'review' for fire-and-forget posts.",
         },
         400,
@@ -552,12 +569,13 @@ export function registerReviewSessionRoutes(
     // paired with expectsReply:true was previously silently downgraded to
     // fire-and-forget — the caller asked for a blocking reply on the wrong
     // tool. Surface as 400 so caller drift doesn't fail open.
-    const isReviewRequest = explicitMode === 'review' || (explicitMode === null && hasCommentsArray);
+    const isReviewRequest =
+      explicitMode === 'review' || (explicitMode === null && hasCommentsArray);
     if (isReviewRequest && body.expectsReply === true) {
       return c.json(
         {
           error:
-            "review-mode request with expectsReply:true is contradictory. " +
+            'review-mode request with expectsReply:true is contradictory. ' +
             "Use mode:'ask' (with `questions:`) for blocking reply semantics.",
         },
         400,
@@ -573,7 +591,10 @@ export function registerReviewSessionRoutes(
     const repliesArr = Array.isArray(rawReplies) ? rawReplies : [];
 
     if (commentsArr.length === 0 && repliesArr.length === 0) {
-      return c.json({ error: 'at least one of comments or replies must be a non-empty array' }, 400);
+      return c.json(
+        { error: 'at least one of comments or replies must be a non-empty array' },
+        400,
+      );
     }
 
     // Validate and resolve each comment (new top-level marker).
@@ -597,7 +618,11 @@ export function registerReviewSessionRoutes(
         contextBefore?: unknown;
         contextAfter?: unknown;
       };
-      if (typeof q.filePath !== 'string' || typeof q.anchor !== 'string' || typeof q.text !== 'string') {
+      if (
+        typeof q.filePath !== 'string' ||
+        typeof q.anchor !== 'string' ||
+        typeof q.text !== 'string'
+      ) {
         return c.json({ error: `comment ${i}: filePath, anchor, text must be strings` }, 400);
       }
       const oversize =
@@ -626,7 +651,8 @@ export function registerReviewSessionRoutes(
         filePath: canonicalPath,
         anchor: q.anchor,
         text: q.text,
-        author: typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : 'Agent',
+        author:
+          typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : 'Agent',
         contextBefore: typeof q.contextBefore === 'string' ? q.contextBefore : undefined,
         contextAfter: typeof q.contextAfter === 'string' ? q.contextAfter : undefined,
       });
@@ -642,8 +668,17 @@ export function registerReviewSessionRoutes(
     };
     const resolvedReplies: ResolvedReply[] = [];
     for (let i = 0; i < repliesArr.length; i++) {
-      const r = repliesArr[i] as { filePath?: unknown; commentId?: unknown; text?: unknown; author?: unknown };
-      if (typeof r.filePath !== 'string' || typeof r.commentId !== 'string' || typeof r.text !== 'string') {
+      const r = repliesArr[i] as {
+        filePath?: unknown;
+        commentId?: unknown;
+        text?: unknown;
+        author?: unknown;
+      };
+      if (
+        typeof r.filePath !== 'string' ||
+        typeof r.commentId !== 'string' ||
+        typeof r.text !== 'string'
+      ) {
         return c.json({ error: `reply ${i}: filePath, commentId, text must be strings` }, 400);
       }
       const oversizeReply = fieldTooLong(`reply ${i}: text`, r.text, MAX_TEXT_LEN);
@@ -665,7 +700,8 @@ export function registerReviewSessionRoutes(
         filePath: canonicalPath,
         commentId: r.commentId,
         text: r.text,
-        author: typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : 'Agent',
+        author:
+          typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : 'Agent',
       });
     }
 
@@ -766,10 +802,7 @@ export function registerReviewSessionRoutes(
             notifyFileChanged(w.filePath);
           }
         } catch (rollbackErr) {
-          console.error(
-            `[review-session] rollback failed for ${w.filePath}:`,
-            rollbackErr,
-          );
+          console.error(`[review-session] rollback failed for ${w.filePath}:`, rollbackErr);
         }
       }
     };
@@ -879,10 +912,7 @@ export function registerReviewSessionRoutes(
     } catch (err) {
       await rollbackCompletedWrites();
       const msg = err instanceof Error ? err.message : 'agent batch write failed';
-      return c.json(
-        { error: `agent batch write failed and was rolled back: ${msg}` },
-        500,
-      );
+      return c.json({ error: `agent batch write failed and was rolled back: ${msg}` }, 500);
     }
 
     // Bump the agent comment counter so gcSilentAgentSessions won't abort
@@ -1083,7 +1113,11 @@ export function registerReviewSessionRoutes(
     type FileGroup = { filePath: string; toRemove: string[]; toCloseFlag: string[] };
     const byFile = new Map<string, FileGroup>();
     for (const q of pending.questions) {
-      const group = byFile.get(q.filePath) ?? { filePath: q.filePath, toRemove: [], toCloseFlag: [] };
+      const group = byFile.get(q.filePath) ?? {
+        filePath: q.filePath,
+        toRemove: [],
+        toCloseFlag: [],
+      };
       if (repliedIds.has(q.commentId)) group.toRemove.push(q.commentId);
       else group.toCloseFlag.push(q.commentId);
       byFile.set(q.filePath, group);
@@ -1159,7 +1193,10 @@ export function registerReviewSessionRoutes(
           });
           if (updated !== null && updated !== original) notifyFileChanged(filePath);
         } catch (err) {
-          console.warn(`[review-session] release expectsReply-cleanup failed for ${filePath}:`, err);
+          console.warn(
+            `[review-session] release expectsReply-cleanup failed for ${filePath}:`,
+            err,
+          );
         }
       }
     }
@@ -1202,10 +1239,7 @@ export function registerReviewSessionRoutes(
     // timeout because setSessionDone never resolves the legacy ReviewResult
     // waiter. Mirror /agent-wait's 409.
     if (session.origin !== 'user') {
-      return c.json(
-        { error: '/wait only applies to user-origin sessions; use /agent-wait' },
-        409,
-      );
+      return c.json({ error: '/wait only applies to user-origin sessions; use /agent-wait' }, 409);
     }
 
     // Optional ?timeout=<seconds> lets polling clients (e.g. Codex, which
@@ -1221,7 +1255,10 @@ export function registerReviewSessionRoutes(
     if (timeoutParam !== undefined) {
       const parsedSec = parseInt(timeoutParam, 10);
       if (!Number.isFinite(parsedSec) || parsedSec <= 0) {
-        return c.json({ error: 'timeout query parameter must be a positive integer (seconds)' }, 400);
+        return c.json(
+          { error: 'timeout query parameter must be a positive integer (seconds)' },
+          400,
+        );
       }
       timeoutMs = parsedSec * 1000;
     }
@@ -1370,10 +1407,7 @@ export function registerReviewSessionRoutes(
     // a misdirected mdr_wait would long-poll for the full 30-minute heartbeat
     // timeout before responding.
     if (session.origin !== 'agent') {
-      return c.json(
-        { error: '/agent-wait only applies to agent-origin sessions' },
-        409,
-      );
+      return c.json({ error: '/agent-wait only applies to agent-origin sessions' }, 409);
     }
 
     let doneWaiter: Promise<void>;
@@ -1392,7 +1426,10 @@ export function registerReviewSessionRoutes(
     if (timeoutParam !== undefined) {
       const parsedSec = parseInt(timeoutParam, 10);
       if (!Number.isFinite(parsedSec) || parsedSec <= 0) {
-        return c.json({ error: 'timeout query parameter must be a positive integer (seconds)' }, 400);
+        return c.json(
+          { error: 'timeout query parameter must be a positive integer (seconds)' },
+          400,
+        );
       }
       timeoutMs = parsedSec * 1000;
     }
@@ -1414,10 +1451,7 @@ export function registerReviewSessionRoutes(
         const t = setTimeout(() => resolve('pending'), timeoutMs);
         if (typeof t === 'object' && 'unref' in t) (t as { unref: () => void }).unref();
       });
-      const winner = await Promise.race([
-        doneWaiter.then(() => 'settled' as const),
-        pending,
-      ]);
+      const winner = await Promise.race([doneWaiter.then(() => 'settled' as const), pending]);
       if (winner === 'pending') return c.json({ status: 'pending' });
       return c.json(buildSettledResponse());
     }

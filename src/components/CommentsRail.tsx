@@ -200,7 +200,13 @@ export function RailDensityControl({
             disabled={totalCount === 0}
             aria-label="Previous comment"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
             </svg>
           </button>
@@ -214,14 +220,24 @@ export function RailDensityControl({
             disabled={totalCount === 0}
             aria-label="Next comment"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
             </svg>
           </button>
         </Tooltip>
       </div>
 
-      <div role="group" aria-label="Comment layout density" className="flex rounded-md border border-border-subtle overflow-hidden">
+      <div
+        role="group"
+        aria-label="Comment layout density"
+        className="flex rounded-md border border-border-subtle overflow-hidden"
+      >
         {(['anchored', 'list'] as const).map((d) => (
           <button
             key={d}
@@ -383,8 +399,7 @@ function AnchoredCards({
 
   // One connector at a time: the active card wins over the hovered card.
   const connectorId = activeCommentId ?? hoveredId;
-  const connectorAnchorTop =
-    connectorId !== null ? layout.anchorTops.get(connectorId) : undefined;
+  const connectorAnchorTop = connectorId !== null ? layout.anchorTops.get(connectorId) : undefined;
   const connectorCardTop = connectorId !== null ? layout.tops.get(connectorId) : undefined;
   const connectorIsActive = connectorId !== null && connectorId === activeCommentId;
 
@@ -447,7 +462,9 @@ function AnchoredCards({
               thread={comment}
               active={active}
               compact={!active}
-              anchorMissing={layout.orphanIds.includes(comment.id) || missingAnchors.has(comment.id)}
+              anchorMissing={
+                layout.orphanIds.includes(comment.id) || missingAnchors.has(comment.id)
+              }
               sent={sentCommentIds.includes(comment.id)}
               onSelect={onActivate}
               onReply={onReply}

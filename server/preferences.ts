@@ -288,8 +288,7 @@ export async function writePreferences(
       const releaseLock = await acquireFileLock(filePath);
       try {
         const existing = await readAndQuarantineIfCorrupt(filePath);
-        const rawPatch: unknown =
-          typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
+        const rawPatch: unknown = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
         // Sanitize the patch even when it comes from a function callback,
         // because the callback can be passed untrusted data via writePreferences
         // call sites that forward HTTP request bodies.

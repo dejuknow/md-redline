@@ -137,10 +137,7 @@ export function findFenceRanges(text: string): FenceRange[] {
   return ranges;
 }
 
-function fenceContaining(
-  line: number | undefined,
-  ranges: FenceRange[],
-): FenceRange | null {
+function fenceContaining(line: number | undefined, ranges: FenceRange[]): FenceRange | null {
   if (line == null) return null;
   for (const r of ranges) {
     if (line >= r.start && line <= r.end) return r;
@@ -292,161 +289,160 @@ function escapeHtmlAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
-  function RenderedDiffView({ rawMarkdown, diffSnapshot, diffLines }, ref) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [activeChunk, setActiveChunk] = useState(0);
+export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(function RenderedDiffView(
+  { rawMarkdown, diffSnapshot, diffLines },
+  ref,
+) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [activeChunk, setActiveChunk] = useState(0);
 
-    const segments = useMemo<DiffSegment[]>(
-      // Fence-aware so a one-line edit inside a code fence doesn't shred
-      // the fence into three malformed markdown documents (open, body,
-      // close). The fence-aware path falls back to the original segmenter
-      // when neither side has any fences.
-      () => segmentDiffFenceAware(diffLines, diffSnapshot, rawMarkdown),
-      [diffLines, diffSnapshot, rawMarkdown],
-    );
+  const segments = useMemo<DiffSegment[]>(
+    // Fence-aware so a one-line edit inside a code fence doesn't shred
+    // the fence into three malformed markdown documents (open, body,
+    // close). The fence-aware path falls back to the original segmenter
+    // when neither side has any fences.
+    () => segmentDiffFenceAware(diffLines, diffSnapshot, rawMarkdown),
+    [diffLines, diffSnapshot, rawMarkdown],
+  );
 
-    const chunkCount = useMemo(() => countChunks(segments), [segments]);
-    const hasChanges = chunkCount > 0;
-    // Snapshot vs current differ at the raw level but cleanMarkdown is identical:
-    // the agent only edited inside comment markers (resolves, replies, edits).
-    // Distinct from "snapshot is current and nothing has happened."
-    const onlyCommentsChanged = !hasChanges && diffSnapshot !== rawMarkdown;
+  const chunkCount = useMemo(() => countChunks(segments), [segments]);
+  const hasChanges = chunkCount > 0;
+  // Snapshot vs current differ at the raw level but cleanMarkdown is identical:
+  // the agent only edited inside comment markers (resolves, replies, edits).
+  // Distinct from "snapshot is current and nothing has happened."
+  const onlyCommentsChanged = !hasChanges && diffSnapshot !== rawMarkdown;
 
-    const html = useMemo(() => {
-      const parts: string[] = [];
-      for (const [segIndex, seg] of segments.entries()) {
-        const inner = renderMarkdown(seg.text, undefined, {
-          allowFrontmatter: segmentIsDocumentStart(segments, segIndex),
-        });
-        if (seg.type === 'same') {
-          parts.push(inner);
-        } else {
-          const cls =
-            seg.type === 'added' ? 'rendered-diff-added' : 'rendered-diff-removed';
-          const idx = seg.chunkIndex ?? 0;
-          parts.push(
-            `<div class="${cls}" data-chunk-index="${escapeHtmlAttr(String(idx))}">${inner}</div>`,
-          );
-        }
-      }
-      return parts.join('');
-    }, [segments]);
-
-    // Reset active chunk when the diff itself changes.
-    useEffect(() => {
-      setActiveChunk(0);
-    }, [chunkCount]);
-
-    // Manage innerHTML directly so React's reconciliation never touches it.
-    useLayoutEffect(() => {
-      if (!containerRef.current) return;
-      containerRef.current.innerHTML = html;
-    }, [html]);
-
-    /** Find the scrollable container (descendant or ancestor). */
-    const getScrollParent = useCallback((): Element | null => {
-      if (!containerRef.current) return null;
-      return (
-        containerRef.current.querySelector('.overflow-y-auto') ??
-        containerRef.current.closest('.overflow-y-auto')
-      );
-    }, []);
-
-    const scrollToChunk = useCallback(
-      (index: number) => {
-        if (!containerRef.current) return;
-        const target = containerRef.current.querySelector(
-          `[data-chunk-index="${CSS.escape(String(index))}"]`,
+  const html = useMemo(() => {
+    const parts: string[] = [];
+    for (const [segIndex, seg] of segments.entries()) {
+      const inner = renderMarkdown(seg.text, undefined, {
+        allowFrontmatter: segmentIsDocumentStart(segments, segIndex),
+      });
+      if (seg.type === 'same') {
+        parts.push(inner);
+      } else {
+        const cls = seg.type === 'added' ? 'rendered-diff-added' : 'rendered-diff-removed';
+        const idx = seg.chunkIndex ?? 0;
+        parts.push(
+          `<div class="${cls}" data-chunk-index="${escapeHtmlAttr(String(idx))}">${inner}</div>`,
         );
-        if (!target) return;
-        const scrollParent = getScrollParent();
-        if (!scrollParent) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          return;
-        }
-        const targetRect = target.getBoundingClientRect();
-        const parentRect = scrollParent.getBoundingClientRect();
-        scrollParent.scrollTo({
-          top: scrollParent.scrollTop + targetRect.top - parentRect.top - 40,
-          behavior: 'smooth',
-        });
-      },
-      [getScrollParent],
-    );
-
-    // Auto-scroll to the first change on mount (RenderedDiffView only mounts
-    // when diff is enabled, so this fires the moment the user enters diff
-    // mode). Declared after scrollToChunk so the closure isn't reading a
-    // forward reference.
-    useEffect(() => {
-      if (chunkCount === 0) return;
-      const id = requestAnimationFrame(() => scrollToChunk(0));
-      return () => cancelAnimationFrame(id);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const next = useCallback(() => {
-      if (chunkCount === 0) return;
-      const n = activeChunk < chunkCount - 1 ? activeChunk + 1 : 0;
-      setActiveChunk(n);
-      scrollToChunk(n);
-    }, [activeChunk, chunkCount, scrollToChunk]);
-
-    const prev = useCallback(() => {
-      if (chunkCount === 0) return;
-      const n = activeChunk > 0 ? activeChunk - 1 : chunkCount - 1;
-      setActiveChunk(n);
-      scrollToChunk(n);
-    }, [activeChunk, chunkCount, scrollToChunk]);
-
-    useImperativeHandle(ref, () => ({ next, prev }), [next, prev]);
-
-    if (!hasChanges) {
-      return (
-        <div className="flex flex-col items-center justify-center py-16 text-content-muted">
-          <svg
-            className="w-12 h-12 mb-3 text-content-faint"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          {onlyCommentsChanged ? (
-            <>
-              <p className="text-sm font-medium text-content-secondary mb-1">
-                No content changes
-              </p>
-              <p className="text-xs text-center leading-relaxed max-w-xs">
-                Comment threads were updated.
-                <br />
-                Open Comments to review.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
-              <p className="text-xs text-center leading-relaxed max-w-xs">
-                This view updates automatically when the file is modified.
-                <br />
-                Hand off to an agent and changes will appear here.
-              </p>
-            </>
-          )}
-        </div>
-      );
+      }
     }
+    return parts.join('');
+  }, [segments]);
 
+  // Reset active chunk when the diff itself changes.
+  useEffect(() => {
+    setActiveChunk(0);
+  }, [chunkCount]);
+
+  // Manage innerHTML directly so React's reconciliation never touches it.
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    containerRef.current.innerHTML = html;
+  }, [html]);
+
+  /** Find the scrollable container (descendant or ancestor). */
+  const getScrollParent = useCallback((): Element | null => {
+    if (!containerRef.current) return null;
     return (
-      <div
-        ref={containerRef}
-        className="prose max-w-none prose-headings:scroll-mt-4 prose-headings:tracking-tight
+      containerRef.current.querySelector('.overflow-y-auto') ??
+      containerRef.current.closest('.overflow-y-auto')
+    );
+  }, []);
+
+  const scrollToChunk = useCallback(
+    (index: number) => {
+      if (!containerRef.current) return;
+      const target = containerRef.current.querySelector(
+        `[data-chunk-index="${CSS.escape(String(index))}"]`,
+      );
+      if (!target) return;
+      const scrollParent = getScrollParent();
+      if (!scrollParent) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const targetRect = target.getBoundingClientRect();
+      const parentRect = scrollParent.getBoundingClientRect();
+      scrollParent.scrollTo({
+        top: scrollParent.scrollTop + targetRect.top - parentRect.top - 40,
+        behavior: 'smooth',
+      });
+    },
+    [getScrollParent],
+  );
+
+  // Auto-scroll to the first change on mount (RenderedDiffView only mounts
+  // when diff is enabled, so this fires the moment the user enters diff
+  // mode). Declared after scrollToChunk so the closure isn't reading a
+  // forward reference.
+  useEffect(() => {
+    if (chunkCount === 0) return;
+    const id = requestAnimationFrame(() => scrollToChunk(0));
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const next = useCallback(() => {
+    if (chunkCount === 0) return;
+    const n = activeChunk < chunkCount - 1 ? activeChunk + 1 : 0;
+    setActiveChunk(n);
+    scrollToChunk(n);
+  }, [activeChunk, chunkCount, scrollToChunk]);
+
+  const prev = useCallback(() => {
+    if (chunkCount === 0) return;
+    const n = activeChunk > 0 ? activeChunk - 1 : chunkCount - 1;
+    setActiveChunk(n);
+    scrollToChunk(n);
+  }, [activeChunk, chunkCount, scrollToChunk]);
+
+  useImperativeHandle(ref, () => ({ next, prev }), [next, prev]);
+
+  if (!hasChanges) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-content-muted">
+        <svg
+          className="w-12 h-12 mb-3 text-content-faint"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        {onlyCommentsChanged ? (
+          <>
+            <p className="text-sm font-medium text-content-secondary mb-1">No content changes</p>
+            <p className="text-xs text-center leading-relaxed max-w-xs">
+              Comment threads were updated.
+              <br />
+              Open Comments to review.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-content-secondary mb-1">No changes yet</p>
+            <p className="text-xs text-center leading-relaxed max-w-xs">
+              This view updates automatically when the file is modified.
+              <br />
+              Hand off to an agent and changes will appear here.
+            </p>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="prose max-w-none prose-headings:scroll-mt-4 prose-headings:tracking-tight
           prose-h1:text-2xl prose-h1:font-bold
           prose-h2:text-xl prose-h2:font-semibold prose-h2:mt-8
           prose-h3:text-lg prose-h3:font-medium
@@ -454,7 +450,6 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
           prose-table:text-sm
           prose-th:font-semibold
           prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-code:text-sm prose-code:font-normal prose-code:before:content-none prose-code:after:content-none"
-      />
-    );
-  },
-);
+    />
+  );
+});

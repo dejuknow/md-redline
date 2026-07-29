@@ -115,11 +115,7 @@ interface BBox {
 /** Compute the bbox of characters [start, end) within an SVG text element
  *  using SVGTextContentElement APIs. Returns null if the range is invalid
  *  or the browser can't resolve character extents (e.g. offscreen). */
-function getSvgCharRangeBBox(
-  el: SVGElement,
-  start: number,
-  end: number,
-): BBox | null {
+function getSvgCharRangeBBox(el: SVGElement, start: number, end: number): BBox | null {
   const text = el as unknown as SVGTextContentElement;
   if (typeof text.getNumberOfChars !== 'function') return null;
   let nChars: number;

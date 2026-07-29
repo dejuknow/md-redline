@@ -15,7 +15,10 @@ let fixturePath = '';
 // Restore the fixture file before each test so tests are independent
 test.beforeEach(async ({ page }, testInfo) => {
   mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
-  fixtureDir = resolve(TEMP_FIXTURE_DIR, `commenting-${process.pid}-${testInfo.retry}-${Date.now()}`);
+  fixtureDir = resolve(
+    TEMP_FIXTURE_DIR,
+    `commenting-${process.pid}-${testInfo.retry}-${Date.now()}`,
+  );
   mkdirSync(fixtureDir, { recursive: true });
   fixturePath = resolve(fixtureDir, 'test-doc.md');
   writeFileSync(fixturePath, FIXTURE_ORIGINAL);
@@ -27,7 +30,8 @@ test.afterEach(async () => {
   // (temp file + rename under a lock), so a debounced save can land in
   // fixtureDir between readdir and rmdir and raise ENOTEMPTY. Retrying lets
   // the in-flight write settle before the directory is removed.
-  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  if (fixtureDir)
+    rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 /** Open the test fixture file and wait for it to render */
@@ -275,10 +279,9 @@ test.describe('Bulk actions outside List density', () => {
 
     // No density switch: the point is that this works from Anchored, where
     // the List footer's Delete All button doesn't exist.
-    await expect(page.locator('[data-rail-header] button', { hasText: 'Anchored' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    await expect(
+      page.locator('[data-rail-header] button', { hasText: 'Anchored' }),
+    ).toHaveAttribute('aria-pressed', 'true');
     await page.locator('[data-rail-actions]').click();
     await page.getByText('Delete all comments…').click();
     await page.locator('.fixed.inset-0').getByRole('button', { name: 'Delete All' }).click();

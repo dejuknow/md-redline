@@ -93,7 +93,10 @@ export function createMdrClient(baseUrl: string): MdrClient {
         body: JSON.stringify({ mode: 'ask', questions }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string; failedComments?: number[] };
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          failedComments?: number[];
+        };
         const err = new Error(body.error ?? `postAgentComments failed (HTTP ${res.status})`);
         if (body.failedComments) {
           (err as Error & { failedComments?: number[] }).failedComments = body.failedComments;

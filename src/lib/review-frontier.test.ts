@@ -41,10 +41,14 @@ describe('shouldAdvanceFrontier', () => {
 describe('formatReferenceLabel', () => {
   it('labels a handoff reference', () => {
     const at = new Date('2026-07-12T15:14:00').getTime();
-    expect(formatReferenceLabel({ origin: 'handoff', capturedAt: at })).toMatch(/^Since last handoff, /);
+    expect(formatReferenceLabel({ origin: 'handoff', capturedAt: at })).toMatch(
+      /^Since last handoff, /,
+    );
   });
   it('labels a review reference', () => {
     const at = new Date('2026-07-12T15:14:00').getTime();
-    expect(formatReferenceLabel({ origin: 'review', capturedAt: at })).toMatch(/^Since last review, /);
+    expect(formatReferenceLabel({ origin: 'review', capturedAt: at })).toMatch(
+      /^Since last review, /,
+    );
   });
 });

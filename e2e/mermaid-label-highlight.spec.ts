@@ -183,9 +183,7 @@ for (const diag of DIAGRAMS) {
 
       await expect(page.getByText(commentText, { exact: true })).toBeVisible();
 
-      const svgText = page
-        .locator('.mermaid-block svg text', { hasText: diag.labelText })
-        .first();
+      const svgText = page.locator('.mermaid-block svg text', { hasText: diag.labelText }).first();
       await expect(svgText).toHaveClass(/mermaid-comment-highlight/);
       expect(await svgText.locator('mark').count()).toBe(0);
 

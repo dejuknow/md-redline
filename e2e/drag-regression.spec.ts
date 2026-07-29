@@ -228,9 +228,7 @@ test.describe('Drag start handle backwards - regression', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Drag handles reposition on container resize', () => {
-  test('handles stay aligned with the mark after toggling the explorer pane', async ({
-    page,
-  }) => {
+  test('handles stay aligned with the mark after toggling the explorer pane', async ({ page }) => {
     await openFixture(page);
 
     await addComment(page, 'followed by regular text', 'Resize reposition test');

@@ -83,7 +83,9 @@ test.describe('Frontmatter in the rendered view', () => {
     const fenceEnd = content.indexOf('\n---\n') + '\n---\n'.length;
     expect(content.slice(0, fenceEnd)).not.toContain('@comment');
     expect(content.startsWith('---\nname: mcp2cli\n')).toBe(true);
-    expect(content).toContain('description: Use when an MCP server should be driven from the shell');
+    expect(content).toContain(
+      'description: Use when an MCP server should be driven from the shell',
+    );
 
     // And the highlight paints on the field itself.
     const mark = page.locator('.doc-frontmatter mark');
