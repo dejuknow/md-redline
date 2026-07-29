@@ -233,7 +233,13 @@ export default function App() {
         const url = hint
           ? `/api/pick-folder?defaultPath=${encodeURIComponent(hint)}`
           : '/api/pick-folder';
-        const res = await fetch(url);
+        // POST, not GET: this spawns a native dialog and persists a trusted
+        // root on selection, so it must sit behind the application/json guard
+        // that a cross-site page cannot satisfy without a preflight.
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
         const data = (await res.json()) as { path?: string; cancelled?: boolean };
         if (!res.ok || data.cancelled || !data.path) {
           // Cancelled, failed, or returned no path. Leave the existing error

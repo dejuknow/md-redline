@@ -68,6 +68,23 @@ export interface CreateAppOptions {
   getLatestVersion?: () => string | null;
   /** Whether the asynchronous update check has not settled yet. */
   isUpdateCheckPending?: () => boolean;
+  /** Extra hostnames accepted by the Host-header allowlist, for fronting the
+   * loopback-bound server with a trusted reverse proxy (`tailscale serve`,
+   * nginx, Caddy). Defaults to the comma-separated MD_REDLINE_ALLOWED_HOSTS env var.
+   * Entries are normalized like the Host header itself, so a port, a bracketed
+   * IPv6 literal, or a trailing dot on an entry is fine.
+   *
+   * Loopback names are always allowed, and the DNS-rebinding defense is
+   * preserved because an attacker's rebinding domain never matches an
+   * explicitly listed hostname. Setting this does NOT change the bind address.
+   *
+   * SECURITY: this server has no authentication of any kind. Setting this moves
+   * the trust boundary from "this machine" to "anything that can reach the
+   * proxy", which then has unauthenticated read/write over every markdown file
+   * under the trusted roots and can trigger native dialogs on the host. Put
+   * authentication in front of it yourself. See the README section "Reaching
+   * md-redline from another device". */
+  allowedHosts?: string[];
 }
 
 function canonicalize(p: string): string {
@@ -103,6 +120,53 @@ function expandHomePath(inputPath: string, homeDir: string): string {
   return inputPath;
 }
 
+/**
+ * Reduce a Host header value, or an allowlist entry, to a bare comparable
+ * hostname: strip an optional port, unwrap a bracketed IPv6 literal, drop the
+ * trailing dot of an absolute FQDN, and lowercase.
+ *
+ * Both sides of the Host allowlist check go through this, which is the point.
+ * The loopback names used to be compared case-sensitively against a value that
+ * kept its original case, so `Host: LOCALHOST` was rejected; and allowlist
+ * entries were only trimmed and lowercased, so an entry copied verbatim out of
+ * a proxy config (`mac.tail1234.ts.net:8443`) silently never matched. Running
+ * both through one function is what makes the comparison actually uniform.
+ */
+export function normalizeHostname(value: string): string {
+  // Accept a whole URL, because that is what an operator has in hand: the
+  // browser address bar and `tailscale serve status` both give you
+  // `https://mac.tail1234.ts.net/`. Strip the scheme, then everything from the
+  // first path, query or fragment delimiter, so the trailing slash does not
+  // survive into the comparison and silently never match.
+  //
+  // Truncating at `/` is safe on the Host-header side too. This check exists
+  // only to stop browser-driven DNS rebinding, and a browser builds Host from
+  // the URL authority, which cannot contain a path. A non-browser client could
+  // send anything, but it could equally send `Host: localhost`, so there is
+  // nothing here for it to bypass.
+  let host = value
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .replace(/^\/\//, '');
+  // Cut the path, query and fragment before anything else, so an `@` or `:`
+  // appearing later in a URL cannot be mistaken for userinfo or a port.
+  host = host.split(/[/?#]/)[0];
+  // Drop userinfo. `user:pass@host` is a legal authority, and without this a
+  // pasted credentialed URL allowlists the username instead of the host, which
+  // fails in both directions at once. Browsers already strip userinfo before
+  // building the Host header, so doing the same here just matches them.
+  const at = host.lastIndexOf('@');
+  if (at !== -1) host = host.slice(at + 1);
+  if (host.startsWith('[')) {
+    // Bracketed IPv6 literal, e.g. `[::1]:3001`.
+    const close = host.indexOf(']');
+    host = close === -1 ? host.slice(1) : host.slice(1, close);
+  } else {
+    host = host.split(':')[0];
+  }
+  return host.replace(/\.+$/, '').toLowerCase();
+}
+
 function sseFrame(event: string, data: string): Uint8Array {
   const lines = data.split('\n');
   const frame = `event: ${event}\n${lines.map((l) => `data: ${l}`).join('\n')}\n\n`;
@@ -130,6 +194,16 @@ export function createAppFull(options: CreateAppOptions = {}) {
   const getLatestVersion = options.getLatestVersion;
   const isUpdateCheckPending = options.isUpdateCheckPending;
   const caseInsensitivePaths = platformName === 'win32';
+  const rawAllowedHosts =
+    options.allowedHosts ?? (process.env.MD_REDLINE_ALLOWED_HOSTS ?? '').split(',');
+  const extraAllowedHosts = rawAllowedHosts.map(normalizeHostname).filter(Boolean);
+  // An entry that normalizes to nothing would otherwise vanish in silence, and
+  // the symptom (every proxied request 400s) points nowhere near the typo.
+  for (const entry of rawAllowedHosts) {
+    if (entry.trim() && !normalizeHostname(entry)) {
+      console.warn(`[md-redline] ignoring unparseable allowed host: ${JSON.stringify(entry)}`);
+    }
+  }
 
   const app = new Hono();
   // Allow CORS only from Vite dev server ports (default 5188-5197, or custom via env)
@@ -177,12 +251,40 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // browser, which always sets Host. Allow it through. The threat model
     // here is browser-driven DNS rebinding; an in-process caller already
     // has full code execution and there's nothing to defend against.
-    if (host) {
-      // Strip an optional port. IPv6 hosts arrive as `[::1]:3001`.
-      const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0];
-      if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1') {
+    // Note the `!== undefined`: a header that is present but EMPTY must still
+    // be checked (and will fail closed), where a truthy test would skip the
+    // allowlist entirely. Only a genuinely absent Host takes the exemption.
+    if (host !== undefined) {
+      const hostname = normalizeHostname(host);
+      if (
+        hostname !== 'localhost' &&
+        hostname !== '127.0.0.1' &&
+        hostname !== '::1' &&
+        !extraAllowedHosts.includes(hostname)
+      ) {
         return c.json({ error: 'Invalid Host header' }, 400);
       }
+    }
+    await next();
+  });
+  // Reject cross-site API requests using the browser's own Fetch Metadata.
+  // Defence in depth only, and deliberately shallow: it rejects what a browser
+  // itself labels cross-site, which costs nothing and catches casual embedding.
+  //
+  // It is NOT what protects the state-changing routes. This check fails open
+  // when the headers are absent, and the clients that send nothing include curl,
+  // the CLI, the MCP server, and Safari before 16.4. Anything that actually
+  // mutates state is a POST guarded by the application/json requirement below,
+  // which a cross-site page cannot satisfy without a preflight. Do not add route
+  // exceptions here or push more of the security burden onto it; make the route
+  // a POST instead.
+  //
+  // Scoped to /api/* so a cross-site link to the app itself still opens. The
+  // Vite dev proxy forwards the browser's own value.
+  app.use('/api/*', async (c, next) => {
+    const site = c.req.header('sec-fetch-site');
+    if (site && site !== 'same-origin' && site !== 'none') {
+      return c.json({ error: 'Cross-site requests are not allowed' }, 403);
     }
     await next();
   });
@@ -644,6 +746,15 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     // updateCheck is the server-owned registry cache; clients cannot write it.
     delete body.updateCheck;
+    // trustedRoots is the filesystem access boundary and is only ever widened
+    // through an explicit local consent flow (/api/pick-file, /api/pick-folder,
+    // /api/grant-access). A bulk preferences write must never touch it: the
+    // persisted value hydrates straight into allowedRoots on the next launch,
+    // so accepting it here would let any client that can reach this endpoint
+    // grant itself arbitrary roots and read them back after a restart. Whether
+    // anything other than this machine can reach the endpoint is a property of
+    // how the server is deployed, not something this handler should rely on.
+    delete body.trustedRoots;
     try {
       const merged = await writePreferences(homeDir, body);
       return c.json(merged);
@@ -912,7 +1023,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/api/pick-file', async (c) => {
+  app.post('/api/pick-file', async (c) => {
     const defaultPath = c.req.query('defaultPath') ?? '';
     try {
       const path = await new Promise<string>((promiseResolve, reject) => {
@@ -1009,7 +1120,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/api/pick-folder', async (c) => {
+  app.post('/api/pick-folder', async (c) => {
     const defaultPath = c.req.query('defaultPath') ?? '';
     try {
       const path = await new Promise<string>((promiseResolve, reject) => {
@@ -1273,6 +1384,10 @@ export function createAppFull(options: CreateAppOptions = {}) {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
+        // nginx buffers proxied responses by default, which holds SSE frames
+        // until the buffer fills and makes live file updates look broken
+        // behind a reverse proxy. Ignored by proxies that do not need it.
+        'X-Accel-Buffering': 'no',
       },
     });
   });

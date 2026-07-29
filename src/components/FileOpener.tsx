@@ -85,7 +85,11 @@ export function FileOpener({
 
   const handleSystemPicker = useCallback(async () => {
     try {
-      const res = await fetch('/api/pick-file');
+      // POST, not GET: see the note on the pick-folder call in App.tsx.
+      const res = await fetch('/api/pick-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
       const data = await readJsonResponse<PickFileResponse>(res);
       if (!res.ok || !data) {
         throw new Error(getApiErrorMessage(res, data, 'Failed to open system file picker'));

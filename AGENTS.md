@@ -98,8 +98,30 @@ highlighting, orphan detection, and agent handoff are unaffected.
 - `GET /api/browse?dir=` — browse directory structure (files + folders)
 - `GET /api/asset?path=` — serve image assets (PNG, JPG, SVG, etc.)
 - `GET /api/watch?path=` — SSE stream of external file changes
-- `GET /api/pick-file` — native file picker (macOS/Linux/Windows)
-- `GET /api/pick-folder` — native folder picker
+- `POST /api/pick-file` — native file picker (macOS/Linux/Windows)
+- `POST /api/pick-folder` — native folder picker
+
+These two are POST despite reading like reads. They spawn a native OS dialog and
+persist a new trusted root once the user picks, so they must sit behind the
+`application/json` Content-Type guard, which a cross-site page cannot satisfy
+without a CORS preflight. As GETs they were reachable from any markup that can
+emit a URL, including an `<img>` in a reviewed markdown document, which the
+renderer passes through verbatim when the URL carries a scheme.
+
+Any new route that lets a caller direct a change must use POST or PUT, because
+those are exactly the two verbs the Content-Type guard checks (`server/index.ts`,
+the middleware after the Fetch Metadata one). `PUT /api/file` and
+`PUT /api/preferences` are the existing PUTs and are covered. A route added on
+DELETE or PATCH would NOT be covered, so extend the guard's method list before
+reaching for one. Do not rely on the `Sec-Fetch-Site` check instead: it fails
+open for clients that send no Fetch Metadata.
+
+One existing GET does write: `GET /api/file` calls `sweepStrandedAskMarkers`,
+which can rewrite the file to clear an `expectsReply` flag whose review session
+has already closed. That stays a GET deliberately. It is idempotent self-healing
+triggered by server-side session state, the caller cannot direct what it writes,
+and it only ever removes a stale flag. The rule above is about writes a caller
+chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
 - `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `origin` defaults to `'user'`; the `mdr_review` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
@@ -164,6 +186,32 @@ file(s)" result instead of an error.
 - `GET /__mdr__` — health check
 
 Security defaults in `server/index.ts`: path validation against allowed roots, localhost-only CORS, 10 MB body limit.
+
+**Host allowlist and reverse-proxy fronting** — a Host-header check closes DNS
+rebinding by rejecting any hostname that is not loopback. `CreateAppOptions.allowedHosts`,
+defaulting from the comma-separated `MD_REDLINE_ALLOWED_HOSTS`, adds extra names
+so the loopback-bound server can sit behind a trusted proxy (`tailscale serve`,
+nginx, Caddy). Both the header and the allowlist entries are normalized through
+the exported `normalizeHostname`, so the two sides cannot drift apart. It strips
+a scheme, a protocol-relative `//`, any path, query or fragment, userinfo, a
+port, IPv6 brackets and trailing dots, then lowercases. That list is deliberately
+generous: an operator pastes whatever `tailscale serve status` or the address bar
+gave them, and every form that silently fails to match is a support ticket whose
+symptom (all proxied requests 400) points nowhere near the typo. Entries that
+normalize to nothing are dropped with a warning. Non-ASCII hostnames must be
+written in punycode, since that is what a browser puts in the Host header. A Host
+header that is present but empty is checked and fails closed. The bind address is
+never affected.
+
+There is no authentication anywhere in the server, so setting `allowedHosts`
+moves the trust boundary from this machine to whatever can reach the proxy.
+Two consequences worth keeping in mind when adding routes: `trustedRoots` is
+stripped from `PUT /api/preferences` because persisted roots hydrate into
+`allowedRoots` on the next launch (accepting it let a client grant itself a
+directory and read it back after a restart), and every route that lets a caller
+direct a change must use POST or PUT, the two verbs the `application/json` guard
+checks. See the README section "Reaching md-redline from another device" for the
+operator-facing version.
 
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
 (`127.0.0.1`), default port 6373 ("MDR" on a phone keypad; overridable via

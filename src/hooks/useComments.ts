@@ -311,7 +311,10 @@ export function useComments(params: UseCommentsParams) {
             `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}. Now tracking changes.`,
             'success',
           ),
-        () => showToast("Couldn't copy to clipboard. Try from localhost.", 'error'),
+        // The clipboard API needs a secure context. "Try from localhost" was
+        // wrong advice for anyone reaching md-redline through a proxy, which
+        // MD_REDLINE_ALLOWED_HOSTS now makes a supported setup.
+        () => showToast("Couldn't copy to clipboard. Needs https:// or localhost.", 'error'),
       );
     },
     [commentCounts, showToast, enableResolve],

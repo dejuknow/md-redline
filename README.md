@@ -242,7 +242,74 @@ All of these environment variables are optional.
 | `MD_REDLINE_VITE_PORT` | `5188` | Port for the Vite dev client (development only). |
 | `MD_REDLINE_HOME` | your OS home directory | Base directory for md-redline's preferences file (`.md-redline.json`, which stores trusted roots and the update-check cache). |
 | `MD_REDLINE_REGISTRY_URL` | public npm registry | Registry base URL used for the background update check. |
+| `MD_REDLINE_ALLOWED_HOSTS` | unset | Comma-separated extra hostnames accepted by the Host-header check, so the loopback-bound server can sit behind a trusted reverse proxy. Read [Reaching md-redline from another device](#reaching-md-redline-from-another-device) before setting it. |
 | `NO_UPDATE_NOTIFIER` or `CI` | unset | If either is present (any value, including empty), the background update check is disabled. |
+
+### Reaching md-redline from another device
+
+md-redline binds to `127.0.0.1` and has **no authentication of any kind**. That is
+safe today because only your own machine can reach it.
+
+`MD_REDLINE_ALLOWED_HOSTS` exists so you can put a reverse proxy in front of it
+(`tailscale serve`, nginx, Caddy) and review from a tablet. Setting it does not
+change the bind address, so the proxy still has to run on the same machine. What
+it does change is the security boundary: it moves from "my machine" to "anything
+that can reach the proxy".
+
+Whatever can reach the proxy gets unauthenticated access to:
+
+- Reading and writing any markdown file under your trusted roots (`GET` and `PUT /api/file`)
+- Listing and browsing directories under those roots (`GET /api/browse`, `GET /api/files`)
+- Reading any image under those roots (`GET /api/asset`)
+- Learning where those roots are, plus every file you recently opened, as absolute
+  paths (`GET /api/preferences`)
+- Changing your stored author name, theme, recent files and settings (`PUT /api/preferences`)
+- Opening native file and folder pickers **on your machine** (`POST /api/pick-file`, `POST /api/pick-folder`)
+- Revealing files in Finder or Explorer **on your machine** (`POST /api/reveal`)
+- Reading and answering agent review sessions (`/api/review-sessions/*`), watching
+  files for changes (`GET /api/watch`), and shutting the server down (`POST /api/shutdown`)
+
+So if you set this:
+
+- Prefer `tailscale serve`, which is reachable only from devices on your own
+  tailnet. Do **not** use `tailscale funnel`, which publishes to the open internet.
+- With nginx or Caddy, terminate TLS and put authentication in front of md-redline
+  yourself. It will not do it for you.
+- Only list hostnames you actually control. The DNS-rebinding defense still holds
+  for everything else, because an attacker's rebinding domain never matches a
+  hostname you listed explicitly.
+
+Two practical notes on the proxy itself:
+
+- **Whether you need this variable at all depends on your proxy.** `tailscale serve`
+  and Caddy preserve the original `Host`, so you must list the public hostname.
+  nginx's default `proxy_set_header Host $proxy_host` rewrites it to `127.0.0.1:6373`,
+  which already passes, so you only need the variable if you forward the original
+  host (`proxy_set_header Host $host`).
+- **Turn off response buffering for `/api/watch`.** Live file updates arrive over
+  Server-Sent Events. md-redline sends `X-Accel-Buffering: no`, which nginx honours;
+  if your proxy ignores it, disable buffering for that path or edits will not appear
+  until a buffer fills.
+
+Serve it over HTTPS if you can. The clipboard API that the hand-off prompt copy
+relies on only works in a secure context, so over plain HTTP that button fails on
+the tablet you set this up for.
+
+Every endpoint that changes something is a `POST` or a `PUT` requiring a JSON
+content type, which a web page cannot send to another origin without the browser
+asking this server for permission first. That is what stops a page you visit, or
+a link in a chat message, or an image embedded in a markdown file you are
+reviewing, from quietly triggering an endpoint here. md-redline additionally
+rejects requests a browser labels cross-site, but only as a second layer: clients
+that send no such metadata, like the CLI and the MCP server, are deliberately
+unaffected by it.
+
+What a reachable client **cannot** do is widen its own filesystem access. Trusted
+roots grow only when you pick a file or folder in the native dialog
+(`/api/pick-file`, `/api/pick-folder`). A bulk `PUT /api/preferences` cannot write
+`trustedRoots`, and `/api/grant-access` only re-checks a path against the roots
+you already approved rather than adding new ones. So the set of readable
+directories is whatever you approved locally and nothing more.
 
 ## Troubleshooting
 
