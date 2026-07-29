@@ -9,6 +9,7 @@ import {
   matchTableScroll,
 } from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
+import { insertComment, parseComments } from '../lib/comment-parser';
 
 describe('matchTableScroll', () => {
   it('restores offsets to the same tables when nothing changed', () => {
@@ -199,6 +200,39 @@ describe('MarkdownViewer comment highlights — markdown-formatted anchor fallba
       const mark = container.querySelector('mark.comment-highlight');
       expect(mark).not.toBeNull();
       expect(mark?.textContent).toBe('Hello world');
+    });
+  });
+});
+
+describe('MarkdownViewer comment highlights — frontmatter fields', () => {
+  it('paints a highlight on a frontmatter value, from a marker parsed out of the file', async () => {
+    // End to end for the frontmatter feature: insertComment relocates the
+    // marker past the closing fence, parseComments reads it back, and the
+    // highlight has to land on the rendered field rather than nowhere.
+    const source =
+      '---\nname: mcp2cli\ndescription: Use when a server should be driven from the shell\n---\n\n# Overview\n\nBody text.\n';
+    const raw = insertComment(source, 'Use when a server should be driven from the shell', 'too vague?');
+    const { comments, cleanMarkdown } = parseComments(raw);
+    expect(comments).toHaveLength(1);
+    expect(cleanMarkdown).toBe(source);
+
+    const { container } = render(
+      <MarkdownViewer
+        html={renderMarkdown(cleanMarkdown)}
+        cleanMarkdown={cleanMarkdown}
+        comments={comments}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const mark = container.querySelector('mark.comment-highlight');
+      expect(mark).not.toBeNull();
+      expect(mark?.textContent).toBe('Use when a server should be driven from the shell');
+      expect(mark?.closest('.doc-frontmatter')).not.toBeNull();
     });
   });
 });

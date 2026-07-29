@@ -674,6 +674,39 @@ the default baked into the generated HTML. The active-comment highlight and
 the scroll-to jump flash still target the marker span itself, so both keep
 working regardless of fold state.
 
+### Frontmatter
+YAML and TOML frontmatter renders as document content above the first heading
+(`.doc-frontmatter`), not hidden the way most renderers treat it. In a review
+tool it is content: a skill file's `description` is the text an agent reads to
+decide whether to load the skill, an ADR's `status` is a claim worth arguing
+with. `remark-rehype` has no handler for `yaml` / `toml` nodes, so
+`pipeline.ts` supplies one; keys get a `.doc-frontmatter__key` span for
+styling and everything else passes through as text.
+
+The emitted text is byte-identical to the source, fences excluded, and that is
+a correctness requirement rather than a style choice. Comments anchor by
+searching the raw markdown for the text the DOM handed over, so any
+transformation (a prettified key, a stripped quote, a re-wrapped fold) means
+`insertComment` can't find the anchor and returns the document unchanged: the
+comment vanishes with no marker and no error. Style it with CSS, never by
+rewriting the string. `white-space: pre-wrap` is load-bearing for the same
+reason.
+
+Commenting on a field works through the normal selection flow. The marker
+lands after the closing fence (see Protected containers under Comment format).
+
+Known gap, pre-existing and not specific to frontmatter: relocation makes
+`cleanOffset` non-unique, since every marker pushed out of the same container
+lands on the same offset. `MarkdownViewer` groups highlights by
+`` `${cleanOffset}:${anchor}` ``, so two comments on different fields that share
+a value (`false` in two booleans) collide into one group and paint a single
+highlight on the first occurrence, with the second comment's id riding along on
+the same `<mark>`. The `contextBefore` that would separate them is stored but
+never consulted, because grouping happens before matching. The same collapse
+reproduces with two comments on repeated text inside one code fence, so it
+predates frontmatter rendering. The plain-text offset drift is a red herring
+here: it measures 4 characters and the creation path resolves correctly.
+
 ### Mermaid fullscreen view
 Click the expand button (top-right of any Mermaid diagram on hover) to open the
 diagram in a fullscreen modal with pan/zoom and a docked comment panel. The modal

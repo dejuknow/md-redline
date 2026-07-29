@@ -798,6 +798,31 @@ body {
   color: inherit;
 }
 
+/* Frontmatter block.
+   Rendered as document content because in a review tool it is content: a skill
+   file's `description` is what an agent reads, an ADR's `status` is a claim
+   worth arguing with. Styled as a quiet preamble rather than a table so it
+   reads as metadata about the document and never competes with the first
+   heading. `pre-wrap` is load-bearing, not cosmetic: the DOM text has to stay
+   byte-identical to the source or comment anchoring can't find it, so the
+   newlines and nesting indentation must survive layout. */
+.doc-frontmatter {
+  white-space: pre-wrap;
+  margin-bottom: 1.75em;
+  padding: 0.6em 0.85em;
+  border-radius: 6px;
+  background-color: var(--theme-bg-secondary);
+  color: var(--theme-text-muted);
+  font-size: 0.75em;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.doc-frontmatter__key {
+  color: var(--theme-text-secondary);
+  font-weight: 500;
+}
+
 /* Image sizing.
    Constrain to the prose container width and preserve aspect ratio.
    The server-side /api/asset route injects width/height attributes for

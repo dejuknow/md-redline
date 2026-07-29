@@ -88,12 +88,70 @@ function rehypeWrapTables() {
   };
 }
 
+/**
+ * Render a frontmatter block as visible document content.
+ *
+ * Frontmatter is content in a review tool: a skill file's `description` is the
+ * text an agent reads to decide whether to load the skill, an ADR's `status`
+ * is a claim someone will want to argue with. remark-rehype has no handler for
+ * `yaml` / `toml` nodes, so without this they never reach the HTML.
+ *
+ * The emitted text is byte-identical to the source, fences excluded. That is a
+ * hard requirement, not a stylistic one: comments anchor by searching the raw
+ * markdown for the text the DOM handed us, so any transformation here (a
+ * prettified key, a stripped quote, a re-wrapped fold) means `insertComment`
+ * can't find the anchor and returns the document unchanged, so the comment
+ * vanishes with no marker and no error. Style it with CSS, never by rewriting
+ * the string.
+ *
+ * Keys are wrapped in a span for styling only; the delimiter and value stay in
+ * their own text nodes so the concatenated text still matches the source.
+ */
+function frontmatterHandler(_state: unknown, node: { value: string }): Element | undefined {
+  // An empty block (`---\n---`) would otherwise render as a bare tinted box
+  // above the first heading. Returning undefined drops the node entirely.
+  if (node.value.trim() === '') return undefined;
+
+  const children: (Element | { type: 'text'; value: string })[] = [];
+  const lines = node.value.split('\n');
+
+  lines.forEach((line, index) => {
+    // `key:` for YAML, `key =` for TOML. Anything else (list items, nested
+    // maps, folded continuation lines) passes through untouched.
+    const keyed = /^([ \t]*)([A-Za-z0-9_.-]+)([ \t]*[:=])(.*)$/.exec(line);
+    if (keyed) {
+      const [, indent, key, delimiter, rest] = keyed;
+      if (indent) children.push({ type: 'text', value: indent });
+      children.push({
+        type: 'element',
+        tagName: 'span',
+        properties: { className: ['doc-frontmatter__key'] },
+        children: [{ type: 'text', value: key }],
+      });
+      children.push({ type: 'text', value: delimiter + rest });
+    } else if (line) {
+      children.push({ type: 'text', value: line });
+    }
+    if (index < lines.length - 1) children.push({ type: 'text', value: '\n' });
+  });
+
+  return {
+    type: 'element',
+    tagName: 'div',
+    properties: { className: ['doc-frontmatter'] },
+    children: children as Element['children'],
+  };
+}
+
 function buildProcessor(filePath?: string) {
   return unified()
     .use(remarkParse)
     .use(remarkFrontmatter, ['yaml', 'toml'])
     .use(remarkGfm)
-    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(remarkRehype, {
+      allowDangerousHtml: true,
+      handlers: { yaml: frontmatterHandler, toml: frontmatterHandler },
+    })
     .use(rehypeRaw)
     .use(rewriteLocalUrls, { filePath })
     .use(rehypeSanitize, sanitizeSchema)
