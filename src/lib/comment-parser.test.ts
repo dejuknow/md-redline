@@ -2159,6 +2159,29 @@ describe('insertComment inside fenced code blocks', () => {
       expect(parseComments(result).comments).toHaveLength(1);
     });
 
+    it('does not let a fence line inside frontmatter mis-pair the real fences', () => {
+      // `  ```" in a YAML block scalar used to open a range that the real
+      // ```js line closed. Everything between them counted as code and the
+      // real block did not, so a body comment was hoisted out of its paragraph
+      // and then skipped on the way back in: written to disk, parsed as zero
+      // comments, marker text stranded in the document.
+      const raw =
+        '---\ncode: |\n  ```\n---\n\nPara one.\n\nPara two.\n\n```js\nconst x = 1;\n```\n';
+      const result = insertComment(raw, 'Para two.', 'note');
+      const parsed = parseComments(result);
+      expect(parsed.comments).toHaveLength(1);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      expect(result).toMatch(/@comment.*-->Para two\./);
+    });
+
+    it('still relocates a comment on code inside the real fence of that document', () => {
+      const raw =
+        '---\ncode: |\n  ```\n---\n\nPara one.\n\n```js\nconst x = 1;\n```\n';
+      const result = insertComment(raw, 'const x = 1;', 'note');
+      expect(result).not.toMatch(/```js\n<!-- @comment/);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+
     it('keeps a marker out of frontmatter that contains an unclosed <!--', () => {
       // The container passes run in sequence over one mutable offset. An
       // unclosed `<!--` in a YAML value would otherwise open a protected range

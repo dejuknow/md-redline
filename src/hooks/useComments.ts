@@ -193,12 +193,31 @@ export function useComments(params: UseCommentsParams) {
         hintOffset,
         newCommentId,
       );
+      // insertComment returns the document unchanged when it cannot place the
+      // marker (anchor not found in the source). Saving that as if it worked
+      // loses the comment with no marker, no error, and a focus request for an
+      // id that was never written. The MCP route already reports this case;
+      // the UI used to swallow it.
+      if (newRaw === (rawMarkdownRef.current ?? '')) {
+        showToast("Couldn't anchor that comment. Try selecting the text again.", 'error');
+        clearSelection();
+        setAutoExpandForm(false);
+        return;
+      }
       updateAndSave(newRaw);
       requestCommentFocus(newCommentId, 'creation');
       clearSelection();
       setAutoExpandForm(false);
     },
-    [updateAndSave, clearSelection, author, rawMarkdownRef, requestCommentFocus, setAutoExpandForm],
+    [
+      updateAndSave,
+      clearSelection,
+      author,
+      rawMarkdownRef,
+      requestCommentFocus,
+      setAutoExpandForm,
+      showToast,
+    ],
   );
 
   const handleResolve = useCallback(

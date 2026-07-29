@@ -37,8 +37,19 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
   const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
   let fenceMatch: RegExpExecArray | null;
   let openFence: { marker: string; start: number } | null = null;
+  // A fence line inside frontmatter is YAML or TOML content (a block scalar
+  // holding a code sample, say), not a real fence. Counting it opens a range
+  // that the next real fence in the document closes, which mis-pairs every
+  // fence after it: text between them is treated as code, and the block that
+  // actually is code is not. Both insertComment and collectCommentRegions read
+  // these ranges, so a mismatch there loses comments silently rather than
+  // noisily. See the "fence line inside frontmatter" tests.
+  const frontmatter = getFrontmatterRange(rawMarkdown);
 
   while ((fenceMatch = fenceRegex.exec(rawMarkdown)) !== null) {
+    if (frontmatter && fenceMatch.index >= frontmatter.start && fenceMatch.index < frontmatter.end) {
+      continue;
+    }
     const marker = fenceMatch[1];
     if (!openFence) {
       openFence = { marker: marker[0].repeat(marker.length), start: fenceMatch.index };
