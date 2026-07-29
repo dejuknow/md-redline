@@ -203,6 +203,48 @@ describe('MarkdownViewer comment highlights — markdown-formatted anchor fallba
   });
 });
 
+describe('MarkdownViewer comment highlights — numbered heading anchors', () => {
+  it('highlights a multi-block anchor whose heading opens with a list-like number', async () => {
+    // stripInlineFormatting reads "1. " at a line start as an ordered-list
+    // marker, so the stripped variant of this anchor loses it and matches
+    // nothing. findMatchRange must fall through to the flexible search on the
+    // original text rather than giving up, or the anchor is reported lost.
+    const markdown = '## 1. Current Strategy\n\n### 1.1 The thesis\n\nOwn the lead journey.\n';
+    // Block tags butt against each other, as they do once the viewer has
+    // re-rendered: the concatenated text nodes carry no separator, so the
+    // anchor's newlines cannot match literally and the tiered search runs.
+    const html =
+      '<h2>1. Current Strategy</h2><h3>1.1 The thesis</h3><p>Own the lead journey.</p>';
+
+    const comment = {
+      id: 'cmt_numbered',
+      anchor: '1. Current Strategy\n1.1 The thesis\nOwn the lead journey.',
+      text: 'Section note',
+      author: 'Dennis',
+      timestamp: new Date().toISOString(),
+      cleanOffset: 0,
+    };
+
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const marks = container.querySelectorAll('mark.comment-highlight');
+      expect(marks.length).toBeGreaterThan(0);
+      expect(marks[0].textContent).toContain('1. Current Strategy');
+    });
+  });
+});
+
 describe('MarkdownViewer comment highlights — mermaid-node anchor fallback', () => {
   it('highlights a Mermaid label even when the anchor includes markdown formatting inside the brackets', async () => {
     // Covers the deepest fallback branch in findMatchRange: Mermaid node
