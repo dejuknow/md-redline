@@ -163,17 +163,6 @@ function assignChunkIndices(segments: DiffSegment[]): void {
 }
 
 /**
- * Fence-aware segmenter. Like segmentDiff, but never splits a code fence
- * across segments. When any line inside a fenced block is added or removed,
- * the entire fence is emitted as a single removed segment (full old fence)
- * + a single added segment (full new fence). Without this, per-segment
- * markdown rendering produces nonsense for fences whose body changes —
- * the opening ``` line, the changed line, and the closing ``` end up as
- * three separate markdown documents and the fence never opens.
- *
- * Exported for unit testing.
- */
-/**
  * Whether a segment begins at the document's offset 0, and may therefore
  * render frontmatter.
  *
@@ -186,6 +175,17 @@ export function segmentIsDocumentStart(segments: DiffSegment[], index: number): 
   return index < (changedAtTop ? 2 : 1);
 }
 
+/**
+ * Fence-aware segmenter. Like segmentDiff, but never splits a code fence
+ * across segments. When any line inside a fenced block is added or removed,
+ * the entire fence is emitted as a single removed segment (full old fence)
+ * + a single added segment (full new fence). Without this, per-segment
+ * markdown rendering produces nonsense for fences whose body changes —
+ * the opening ``` line, the changed line, and the closing ``` end up as
+ * three separate markdown documents and the fence never opens.
+ *
+ * Exported for unit testing.
+ */
 export function segmentDiffFenceAware(
   diffLines: DiffLine[],
   oldText: string,

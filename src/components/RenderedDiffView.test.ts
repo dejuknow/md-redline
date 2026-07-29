@@ -117,6 +117,21 @@ function renderSegments(segments: DiffSegment[]): string {
     .join('');
 }
 
+describe('findFenceRanges with frontmatter', () => {
+  it('does not pair a fence line inside frontmatter with a real one below', () => {
+    // `  ``` ` in a YAML block scalar would otherwise open a range that the
+    // real ```js line closes, swallowing the prose between them as code and
+    // leaving the actual block unranged. getCodeBlockRanges skips these lines
+    // for the same reason; the two must agree.
+    const doc =
+      '---\ncode: |\n  ```\n---\n\nPara one.\n\nPara two.\n\n```js\nconst x = 1;\n```\n';
+    expect(findFenceRanges(doc)).toEqual([
+      { start: 1, end: 4 },
+      { start: 10, end: 12 },
+    ]);
+  });
+});
+
 describe('frontmatter in the diff overlay', () => {
   it('does not invent a frontmatter box from a mid-document ---', () => {
     // The changed first line isolates the rest into a segment that happens to
@@ -138,8 +153,14 @@ describe('frontmatter in the diff overlay', () => {
     expect(segments[0].text).toBe('---\ntitle: Old Title\nstatus: draft\n---');
     expect(segments[1].text).toBe('---\ntitle: New Title\nstatus: draft\n---');
     const html = renderSegments(segments);
-    expect(html).toContain('doc-frontmatter');
-    expect(html).not.toMatch(/<h2>status/);
+    // BOTH versions must render as frontmatter: the removed one and the added
+    // one are each at the document's start. Asserting only that the string
+    // appears somewhere passes with the second segment rendered as a stray
+    // rule plus a Setext heading.
+    expect([...html.matchAll(/class="doc-frontmatter"/g)]).toHaveLength(2);
+    expect(html).toContain('Old Title');
+    expect(html).toContain('New Title');
+    expect(html).not.toMatch(/<h2>/);
   });
 });
 
