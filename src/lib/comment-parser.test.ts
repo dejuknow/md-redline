@@ -21,6 +21,7 @@ import {
   backfillReplyTimestamps,
   findNewReplyIds,
   moveComment,
+  orderCommentsByAnchor,
   transformCommentMarkers,
   extractMermaidText,
 } from './comment-parser';
@@ -769,6 +770,35 @@ describe('edge cases', () => {
     const reparsed = parseComments(rebuilt);
     expect(reparsed.comments).toHaveLength(2);
     expect(reparsed.cleanMarkdown).toBe(cleanMarkdown);
+  });
+});
+
+describe('orderCommentsByAnchor', () => {
+  it('visits two frontmatter comments top-down even when written bottom-up', () => {
+    const doc = '---\ntitle: Login flow\ndescription: A spec\n---\n\n# Body\n\nText.\n';
+    let raw = insertComment(doc, 'A spec', 'lower field', 'User', 'description: ', '\n---');
+    raw = insertComment(raw, 'Login flow', 'upper field', 'User', 'title: ', '\ndescription');
+    const { comments, cleanMarkdown } = parseComments(raw);
+    // Both markers park on the same offset, so array order is insertion order.
+    expect(comments[0].cleanOffset).toBe(comments[1].cleanOffset);
+    expect(comments.map((c) => c.text)).toEqual(['lower field', 'upper field']);
+    expect(orderCommentsByAnchor(cleanMarkdown, comments).map((c) => c.text)).toEqual([
+      'upper field',
+      'lower field',
+    ]);
+  });
+
+  it('leaves ordinary comments in document order untouched', () => {
+    const doc = '# T\n\nAlpha here.\n\nBeta there.\n\nGamma too.\n';
+    let raw = insertComment(doc, 'Gamma', 'third', 'User');
+    raw = insertComment(raw, 'Alpha', 'first', 'User');
+    raw = insertComment(raw, 'Beta', 'second', 'User');
+    const { comments, cleanMarkdown } = parseComments(raw);
+    expect(orderCommentsByAnchor(cleanMarkdown, comments).map((c) => c.text)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
   });
 });
 
@@ -2091,6 +2121,37 @@ describe('insertComment inside fenced code blocks', () => {
     });
   });
 
+  describe('two no-context comments on the same anchor', () => {
+    it('resolve to the same occurrence, so sharing one highlight is correct', () => {
+      // Agents over MCP pass no hint offset, so insertComment takes the first
+      // match. Two such comments therefore refer to the SAME `false`, not to
+      // one field each, and downstream merging them onto a single highlight is
+      // right. Recorded because it looks like the offset-collapse bug and
+      // isn't: the cure would be for the agent to pass context, which the MCP
+      // route already forwards.
+      const doc = '# Config\n\n```yaml\ndraft: false\narchived: false\n```\n';
+      let raw = insertComment(doc, 'false', 'first', 'Agent');
+      raw = insertComment(raw, 'false', 'second', 'Agent');
+      const { comments, cleanMarkdown } = parseComments(raw);
+      expect(comments).toHaveLength(2);
+      const firstFalse = cleanMarkdown.indexOf('false');
+      for (const c of comments) {
+        expect(cleanMarkdown.startsWith('false', firstFalse)).toBe(true);
+        expect(c.contextBefore).toBeUndefined();
+      }
+    });
+
+    it('stay distinct when the agent does supply context', () => {
+      const doc = '# Config\n\n```yaml\ndraft: false\narchived: false\n```\n';
+      let raw = insertComment(doc, 'false', 'first', 'Agent', 'draft: ', '\narchived');
+      raw = insertComment(raw, 'false', 'second', 'Agent', 'archived: ', '\n```');
+      const { comments } = parseComments(raw);
+      const keyOf = (c: (typeof comments)[number]) =>
+        [c.cleanOffset, c.anchor, c.contextBefore ?? '', c.contextAfter ?? ''].join('|');
+      expect(keyOf(comments[0])).not.toBe(keyOf(comments[1]));
+    });
+  });
+
   describe('inside HTML comments', () => {
     it('places the marker before a block-level comment, not nested inside it', () => {
       const raw = '# Notes\n\n<!-- TODO: decide on the retry loop -->\n\nBody.\n';
@@ -2116,6 +2177,64 @@ describe('insertComment inside fenced code blocks', () => {
       // The paragraph must stay on one line, with no newline injected mid-sentence.
       expect(result.split('\n')[0]).toContain('text after.');
       expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('does not nest inside an UNCLOSED html comment', () => {
+      // Every HTML parser reads an unclosed comment as running to EOF. A
+      // marker placed inside would close it early with its own `-->` and spill
+      // the remainder as visible text.
+      const raw = '# T\n\n<!-- TODO: decide the retry loop\n\nBody.\n';
+      const result = insertComment(raw, 'decide the retry loop', 'why?');
+      expect(result).not.toMatch(/<!-- TODO: <!--/);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+
+    it('does not let a fence line inside frontmatter mis-pair the real fences', () => {
+      // `  ```" in a YAML block scalar used to open a range that the real
+      // ```js line closed. Everything between them counted as code and the
+      // real block did not, so a body comment was hoisted out of its paragraph
+      // and then skipped on the way back in: written to disk, parsed as zero
+      // comments, marker text stranded in the document.
+      const raw =
+        '---\ncode: |\n  ```\n---\n\nPara one.\n\nPara two.\n\n```js\nconst x = 1;\n```\n';
+      const result = insertComment(raw, 'Para two.', 'note');
+      const parsed = parseComments(result);
+      expect(parsed.comments).toHaveLength(1);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      expect(result).toMatch(/@comment.*-->Para two\./);
+    });
+
+    it('still relocates a comment on code inside the real fence of that document', () => {
+      const raw =
+        '---\ncode: |\n  ```\n---\n\nPara one.\n\n```js\nconst x = 1;\n```\n';
+      const result = insertComment(raw, 'const x = 1;', 'note');
+      expect(result).not.toMatch(/```js\n<!-- @comment/);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+
+    it('keeps a marker out of frontmatter that contains an unclosed <!--', () => {
+      // The container passes run in sequence over one mutable offset. An
+      // unclosed `<!--` in a YAML value would otherwise open a protected range
+      // reaching EOF, and the HTML pass would drag the offset back INTO the
+      // frontmatter that the frontmatter pass had just moved it out of.
+      const raw = '---\nnote: <!-- unclosed\ntitle: Spec\n---\n\n# Body\n\nSome body text.\n';
+      const result = insertComment(raw, 'unclosed', 'why?');
+      const fenceEnd = result.indexOf('\n---\n') + '\n---\n'.length;
+      expect(result.slice(0, fenceEnd)).not.toContain('@comment');
+      expect(result.startsWith('---\nnote: <!-- unclosed\ntitle: Spec\n---\n')).toBe(true);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+
+    it('treats a <!-- inside a code fence as sample text, not a comment', () => {
+      // Otherwise an unclosed `<!--` in a code sample would mark the entire
+      // rest of the document as protected.
+      const raw = '# T\n\n```html\n<!-- sample\n```\n\nReal body text here.\n';
+      const result = insertComment(raw, 'Real body text', 'note');
+      const parsed = parseComments(result);
+      expect(parsed.comments).toHaveLength(1);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      // The marker belongs next to its anchor, not hoisted to the stray `<!--`.
+      expect(result).toMatch(/@comment.*-->Real body text/);
     });
 
     it('does not nest inside a malformed @comment marker left in the document', () => {

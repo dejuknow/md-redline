@@ -285,12 +285,17 @@ export const MarkdownViewer = memo(
         if (enableResolve && getEffectiveStatus(comment) === 'resolved') continue;
         const plainOffset =
           comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
+        // Joined on an explicit NUL escape, never a raw NUL byte in the
+        // source (that made the whole file read as binary to grep and other
+        // tooling) and never a space, since a space separator lets
+        // ["a b", "c"] and ["a", "b c"] produce the same key: the very
+        // collision class this key exists to prevent.
         const key = [
           comment.cleanOffset ?? '',
           comment.anchor,
           comment.contextBefore ?? '',
           comment.contextAfter ?? '',
-        ].join(' ');
+        ].join('\u0000');
         const group = highlightGroups.get(key) || {
           ids: [],
           anchor: comment.anchor,

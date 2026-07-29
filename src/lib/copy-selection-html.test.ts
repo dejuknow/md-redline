@@ -321,6 +321,24 @@ describe('buildRangeHtml', () => {
     expect(html).toContain('after');
   });
 
+  it('unwraps the frontmatter box the pipeline injects', () => {
+    // Same class of wrapper as the table scroll containers: a presentation box
+    // around document text. A selection crossing out of it reconstructs the
+    // div via cloneContents and would paste an app class into someone else's
+    // document.
+    const container = mount(
+      '<div class="doc-frontmatter"><span class="doc-frontmatter__key">title</span>: Spec</div><p>after</p>',
+    );
+    const field = container.querySelector('.doc-frontmatter')!;
+    const tail = container.querySelector('p')!;
+    const range = document.createRange();
+    range.setStart(field.lastChild!, 0);
+    range.setEnd(tail.firstChild!, tail.textContent!.length);
+    const html = buildRangeHtml(range, container) ?? '';
+    expect(html).not.toContain('doc-frontmatter');
+    expect(html).toContain('after');
+  });
+
   it('keeps table structure', () => {
     const container = mount(
       '<table><tbody><tr><td>Autonomous</td><td>EasyMate</td></tr></tbody></table>',

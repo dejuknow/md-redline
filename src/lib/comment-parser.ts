@@ -37,8 +37,19 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
   const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
   let fenceMatch: RegExpExecArray | null;
   let openFence: { marker: string; start: number } | null = null;
+  // A fence line inside frontmatter is YAML or TOML content (a block scalar
+  // holding a code sample, say), not a real fence. Counting it opens a range
+  // that the next real fence in the document closes, which mis-pairs every
+  // fence after it: text between them is treated as code, and the block that
+  // actually is code is not. Both insertComment and collectCommentRegions read
+  // these ranges, so a mismatch there loses comments silently rather than
+  // noisily. See the "fence line inside frontmatter" tests.
+  const frontmatter = getFrontmatterRange(rawMarkdown);
 
   while ((fenceMatch = fenceRegex.exec(rawMarkdown)) !== null) {
+    if (frontmatter && fenceMatch.index >= frontmatter.start && fenceMatch.index < frontmatter.end) {
+      continue;
+    }
     const marker = fenceMatch[1];
     if (!openFence) {
       openFence = { marker: marker[0].repeat(marker.length), start: fenceMatch.index };
@@ -63,8 +74,15 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
  * thematic break and a `+++` is ordinary text, so this deliberately anchors
  * to the start of the string.
  */
+export function createFrontmatterRegex(flags = ''): RegExp {
+  // One definition, because two consumers drifting is how the raw view ended
+  // up recognising only `---` while the renderer had learned `+++`. No `m`
+  // flag ever: `^` must anchor to the start of the document.
+  return new RegExp(String.raw`^(---|\+\+\+)[ \t]*\r?\n[\s\S]*?\r?\n\1[ \t]*(?:\r?\n|$)`, flags);
+}
+
 export function getFrontmatterRange(markdown: string): CodeBlockRange | null {
-  const match = /^(---|\+\+\+)[ \t]*\r?\n[\s\S]*?\r?\n\1[ \t]*(?:\r?\n|$)/.exec(markdown);
+  const match = createFrontmatterRegex().exec(markdown);
   if (!match) return null;
   return { start: 0, end: match[0].length };
 }
@@ -79,12 +97,34 @@ export function getFrontmatterRange(markdown: string): CodeBlockRange | null {
  * here as an ordinary comment, which is what we want: nothing should be
  * inserted inside it either.
  */
-function getHtmlCommentRanges(markdown: string): CodeBlockRange[] {
+function getHtmlCommentRanges(
+  markdown: string,
+  nonHtmlRegions: CodeBlockRange[] = [],
+): CodeBlockRange[] {
   const ranges: CodeBlockRange[] = [];
-  const regex = /<!--[\s\S]*?-->/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(markdown)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+  let from = 0;
+  while (from < markdown.length) {
+    const start = markdown.indexOf('<!--', from);
+    if (start === -1) break;
+    // Regions where `<!--` is not an HTML comment: a fenced block, where it is
+    // sample text, and frontmatter, which is YAML or TOML. Treating a stray
+    // `<!--` in a YAML value as a comment would extend a protected range from
+    // inside the frontmatter to EOF, and the pass below would then drag the
+    // marker back INTO the frontmatter, undoing the very protection the
+    // frontmatter pass just applied.
+    if (isInsideCodeBlock(start, nonHtmlRegions)) {
+      from = start + 4;
+      continue;
+    }
+    const closer = markdown.indexOf('-->', start + 4);
+    // An unclosed comment runs to the end of the document, because that is how
+    // every HTML parser reads it. Treating it as unprotected would let a
+    // marker land inside, and the marker's own `-->` would then close the
+    // outer comment early and expose the remainder as visible text: exactly
+    // the corruption the closed-comment case exists to prevent.
+    const end = closer === -1 ? markdown.length : closer + 3;
+    ranges.push({ start, end });
+    from = end;
   }
   return ranges;
 }
@@ -596,8 +636,10 @@ export function insertComment(
   let ownLine = false;
   let leadingNewline = false;
   {
+    const fencedRanges = getCodeBlockRanges(cleanMarkdown);
+    const frontmatter = getFrontmatterRange(cleanMarkdown);
     // Fenced blocks: before the opening fence.
-    for (const range of getCodeBlockRanges(cleanMarkdown)) {
+    for (const range of fencedRanges) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset <= range.end) {
         insertionCleanOffset = range.start;
         ownLine = true;
@@ -606,7 +648,6 @@ export function insertComment(
     // Frontmatter: after the closing fence. It cannot go before, since
     // frontmatter is only recognized at offset 0, so this is the one
     // container the marker trails rather than leads.
-    const frontmatter = getFrontmatterRange(cleanMarkdown);
     if (
       frontmatter &&
       insertionCleanOffset >= frontmatter.start &&
@@ -620,7 +661,12 @@ export function insertComment(
     }
     // HTML comments: before the block. Only claim a whole line when the
     // comment owns one; an inline note keeps its paragraph intact.
-    for (const range of getHtmlCommentRanges(cleanMarkdown)) {
+    // Order matters and is safe in exactly one direction: this pass can only
+    // move the offset to a `<!--` that lies outside every fence and outside
+    // the frontmatter, so it can never undo the two passes above. Reordering
+    // these three, or dropping the exclusions, breaks that.
+    const nonHtmlRegions = frontmatter ? [...fencedRanges, frontmatter] : fencedRanges;
+    for (const range of getHtmlCommentRanges(cleanMarkdown, nonHtmlRegions)) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset < range.end) {
         insertionCleanOffset = range.start;
         ownLine = range.start === 0 || cleanMarkdown[range.start - 1] === '\n';
@@ -1663,6 +1709,35 @@ export function extractMermaidText(cleanMarkdown: string): string {
  * Returns a set of comment IDs with missing anchors.
  * Parts must appear contiguously (with only whitespace between them) to count as found.
  */
+/**
+ * Comments in the order a reader meets them in the document.
+ *
+ * `cleanOffset` is the MARKER's position, which for an ordinary comment is
+ * also its anchor's. Relocated markers break that: every marker pushed out of
+ * one container parks on the same offset, so ordering by it alone falls back
+ * to insertion order and two comments on two frontmatter fields are visited
+ * bottom-up if they were written bottom-up. The rail stacks its cards by
+ * measured DOM position and gets this right, so navigation that disagrees
+ * contradicts the cards sitting in front of the user.
+ *
+ * Offsets decide as before; the anchor's own position only breaks ties, so
+ * nothing changes for comments that were never relocated.
+ */
+export function orderCommentsByAnchor(cleanMarkdown: string, comments: MdComment[]): MdComment[] {
+  const anchorPosition = (comment: MdComment): number => {
+    if (comment.contextBefore) {
+      const withContext = cleanMarkdown.indexOf(comment.contextBefore + comment.anchor);
+      if (withContext !== -1) return withContext + comment.contextBefore.length;
+    }
+    const direct = cleanMarkdown.indexOf(comment.anchor);
+    return direct === -1 ? (comment.cleanOffset ?? 0) : direct;
+  };
+  return [...comments].sort(
+    (a, b) =>
+      (a.cleanOffset ?? 0) - (b.cleanOffset ?? 0) || anchorPosition(a) - anchorPosition(b),
+  );
+}
+
 export function detectMissingAnchors(cleanMarkdown: string, comments: MdComment[]): Set<string> {
   const missing = new Set<string>();
   if (!cleanMarkdown) return missing;

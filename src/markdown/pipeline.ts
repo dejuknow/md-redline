@@ -105,7 +105,10 @@ function rehypeWrapTables() {
  * the string.
  *
  * Keys are wrapped in a span for styling only; the delimiter and value stay in
- * their own text nodes so the concatenated text still matches the source.
+ * their own text nodes so the concatenated text still matches the source. Key
+ * detection is a line-shape heuristic, not a YAML parse, so it is deliberately
+ * confined to styling: nothing downstream may depend on which runs get the
+ * span.
  */
 function frontmatterHandler(_state: unknown, node: { value: string }): Element | undefined {
   // An empty block (`---\n---`) would otherwise render as a bare tinted box
@@ -115,13 +118,27 @@ function frontmatterHandler(_state: unknown, node: { value: string }): Element |
   const children: (Element | { type: 'text'; value: string })[] = [];
   const lines = node.value.split('\n');
 
+  // A folded value continues on deeper-indented lines, and those lines
+  // routinely contain a colon of their own: a URL, a ratio, a time, a wrapped
+  // "Note: ...". Matching key shape alone paints `http` and `3` as keys. A
+  // continuation is a deeper-indented line following a key that already had a
+  // value on it; a deeper-indented line under a key with NO inline value is a
+  // nested key or a list item, which is a different thing. Presentation only:
+  // either way the emitted text is unchanged.
+  let lastKeyIndent = -1;
+  let lastKeyHadValue = false;
+
   lines.forEach((line, index) => {
     // `key:` for YAML, `key =` for TOML. Anything else (list items, nested
     // maps, folded continuation lines) passes through untouched.
     const keyed = /^([ \t]*)([A-Za-z0-9_.-]+)([ \t]*[:=])(.*)$/.exec(line);
-    if (keyed) {
-      const [, indent, key, delimiter, rest] = keyed;
-      if (indent) children.push({ type: 'text', value: indent });
+    const indent = /^[ \t]*/.exec(line)?.[0].length ?? 0;
+    const isContinuation = lastKeyHadValue && indent > lastKeyIndent;
+    if (keyed && !isContinuation) {
+      const [, leading, key, delimiter, rest] = keyed;
+      lastKeyIndent = indent;
+      lastKeyHadValue = rest.trim().length > 0;
+      if (leading) children.push({ type: 'text', value: leading });
       children.push({
         type: 'element',
         tagName: 'span',
@@ -143,10 +160,15 @@ function frontmatterHandler(_state: unknown, node: { value: string }): Element |
   };
 }
 
-function buildProcessor(filePath?: string) {
-  return unified()
-    .use(remarkParse)
-    .use(remarkFrontmatter, ['yaml', 'toml'])
+function buildProcessor(filePath?: string, allowFrontmatter = true) {
+  const processor = unified().use(remarkParse);
+  // Frontmatter is defined as being at offset 0 of the DOCUMENT. A caller
+  // rendering a fragment (the diff overlay renders one segment at a time) has
+  // a string whose offset 0 is somewhere in the middle of the file, so leaving
+  // this on invents a frontmatter block out of any `---` that happens to start
+  // a segment.
+  if (allowFrontmatter) processor.use(remarkFrontmatter, ['yaml', 'toml']);
+  return processor
     .use(remarkGfm)
     .use(remarkRehype, {
       allowDangerousHtml: true,
@@ -159,7 +181,21 @@ function buildProcessor(filePath?: string) {
     .use(rehypeStringify);
 }
 
-export function renderMarkdown(markdown: string, filePath?: string): string {
-  const file = buildProcessor(filePath).processSync(markdown);
+export interface RenderOptions {
+  /**
+   * Whether the string being rendered is a whole document. Fragments (a diff
+   * segment, say) must pass false: frontmatter is an offset-0 construct and a
+   * fragment's offset 0 is not the document's.
+   */
+  allowFrontmatter?: boolean;
+}
+
+export function renderMarkdown(
+  markdown: string,
+  filePath?: string,
+  options: RenderOptions = {},
+): string {
+  const { allowFrontmatter = true } = options;
+  const file = buildProcessor(filePath, allowFrontmatter).processSync(markdown);
   return String(file);
 }

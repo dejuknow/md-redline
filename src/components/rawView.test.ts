@@ -126,6 +126,20 @@ describe('buildHighlightedHtml', () => {
       expect(html).toContain('class="raw-heading"');
     });
 
+    it('highlights TOML frontmatter', () => {
+      // The rendered view learned `+++` when frontmatter rendering landed; the
+      // raw view kept its own YAML-only regex until both were pointed at one
+      // shared definition. Without it, a `# heading` inside a TOML block was
+      // styled as a real heading.
+      const html = buildHighlightedHtml('+++\ntitle = "Post"\n# not a heading\n+++\n\n# Real\n');
+      expect(html).toContain('class="raw-frontmatter"');
+    });
+
+    it('highlights CRLF frontmatter', () => {
+      const html = buildHighlightedHtml('---\r\nname: x\r\n---\r\n\r\n# Real\r\n');
+      expect(html).toContain('class="raw-frontmatter"');
+    });
+
     it('does not highlight --- in middle of file as frontmatter', () => {
       const html = buildHighlightedHtml('# Title\n\n---\n\nMore text');
       // The --- should be an HR, not frontmatter

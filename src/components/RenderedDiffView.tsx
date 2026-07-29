@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { type DiffLine } from '../lib/diff';
 import { renderMarkdown } from '../markdown/pipeline';
+import { getFrontmatterRange } from '../lib/comment-parser';
 
 export type DiffSegmentType = 'same' | 'added' | 'removed';
 
@@ -95,10 +96,29 @@ interface FenceRange {
 export function findFenceRanges(text: string): FenceRange[] {
   const lines = text.split('\n');
   const ranges: FenceRange[] = [];
+  // Frontmatter is atomic for the same reason a code fence is: split it across
+  // segments and each piece renders as something it is not, with the closing
+  // delimiter turning the last field into a Setext heading and disappearing.
+  const frontmatter = getFrontmatterRange(text);
+  let frontmatterLastLine = 0;
+  if (frontmatter) {
+    const linesBefore = text.slice(0, frontmatter.end).split('\n');
+    // end is exclusive of the trailing newline's own line, so drop the empty
+    // trailing element the split leaves behind.
+    frontmatterLastLine =
+      linesBefore[linesBefore.length - 1] === '' ? linesBefore.length - 1 : linesBefore.length;
+    ranges.push({ start: 1, end: frontmatterLastLine });
+  }
   let openLine = -1;
   let openMarkerChar = '';
   let openMarkerLen = 0;
   for (let i = 0; i < lines.length; i++) {
+    // A fence line inside frontmatter is YAML or TOML content, not a fence.
+    // Counting it pairs it with the next real fence in the document, which
+    // both mis-ranges the body and, since the frontmatter range above already
+    // covers these lines, emits them a second time. getCodeBlockRanges skips
+    // them for the same reason.
+    if (i < frontmatterLastLine) continue;
     const m = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i]);
     if (!m) continue;
     const marker = m[1];
@@ -140,6 +160,19 @@ function assignChunkIndices(segments: DiffSegment[]): void {
     s.chunkIndex = chunkIdx;
     lastWasChange = true;
   }
+}
+
+/**
+ * Whether a segment begins at the document's offset 0, and may therefore
+ * render frontmatter.
+ *
+ * Only the leading segment does. When frontmatter itself is what changed, the
+ * removed and added versions are the leading pair and both qualify. Exported
+ * so the tests exercise this rule rather than restating it.
+ */
+export function segmentIsDocumentStart(segments: DiffSegment[], index: number): boolean {
+  const changedAtTop = segments[0]?.type === 'removed' && segments[1]?.type === 'added';
+  return index < (changedAtTop ? 2 : 1);
 }
 
 /**
@@ -282,8 +315,10 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(
 
     const html = useMemo(() => {
       const parts: string[] = [];
-      for (const seg of segments) {
-        const inner = renderMarkdown(seg.text);
+      for (const [segIndex, seg] of segments.entries()) {
+        const inner = renderMarkdown(seg.text, undefined, {
+          allowFrontmatter: segmentIsDocumentStart(segments, segIndex),
+        });
         if (seg.type === 'same') {
           parts.push(inner);
         } else {

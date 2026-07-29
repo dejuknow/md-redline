@@ -101,8 +101,16 @@ export function commentsForDiagram(
     // comment relocated out of the block, or a frontmatter comment pushed
     // down past the closing `---` onto the same offset. Position alone can't
     // separate them, so defer to where the anchor text actually lives.
-    if (c.cleanOffset === claimStart && anchorLivesInFrontmatter(cleanMarkdown, c.anchor)) {
-      return false;
+    //
+    // The diagram gets asked first. A frontmatter field that echoes a node
+    // label ("title: Login flow" over a diagram containing "A[Login]") is
+    // ordinary, not exotic, and asking the frontmatter first drops that
+    // diagram comment on the floor. Only when the label is NOT the diagram's
+    // does the frontmatter test decide.
+    if (c.cleanOffset === claimStart) {
+      const haystack = extractMermaidText(`\`\`\`mermaid\n${diagramSource}\n\`\`\``);
+      if (haystack.includes(c.anchor)) return true;
+      if (anchorLivesInFrontmatter(cleanMarkdown, c.anchor)) return false;
     }
     return true;
   });

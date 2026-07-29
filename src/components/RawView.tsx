@@ -14,7 +14,7 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
-import { createCommentMarkerRegex } from '../lib/comment-parser';
+import { createCommentMarkerRegex, createFrontmatterRegex } from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
 import { type DiffLine } from '../lib/diff';
 
@@ -49,8 +49,10 @@ const SYNTAX_RULES: SyntaxRule[] = [
   { pattern: /^(-{3,}|\*{3,}|_{3,})\s*$/gm, className: 'raw-hr' },
   // Table pipes
   { pattern: /^\|.*\|$/gm, className: 'raw-table' },
-  // Frontmatter — no `m` flag so ^ only matches start of string
-  { pattern: /^---\n[\s\S]*?\n---/g, className: 'raw-frontmatter' },
+  // Frontmatter. Shares its pattern with getFrontmatterRange so the raw view
+  // and the renderer cannot disagree about what counts: `+++` as well as
+  // `---`, CRLF, and trailing whitespace on the fence line.
+  { pattern: createFrontmatterRegex('g'), className: 'raw-frontmatter' },
   // HTML comments (non-@comment ones)
   { pattern: /<!--(?! @comment)[\s\S]*?-->/g, className: 'raw-html-comment' },
 ];
