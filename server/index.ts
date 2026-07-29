@@ -186,6 +186,27 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     await next();
   });
+  // Reject cross-site API requests using the browser's own Fetch Metadata.
+  // Defence in depth only, and deliberately shallow: it rejects what a browser
+  // itself labels cross-site, which costs nothing and catches casual embedding.
+  //
+  // It is NOT what protects the state-changing routes. This check fails open
+  // when the headers are absent, and the clients that send nothing include curl,
+  // the CLI, the MCP server, and Safari before 16.4. Anything that actually
+  // mutates state is a POST guarded by the application/json requirement below,
+  // which a cross-site page cannot satisfy without a preflight. Do not add route
+  // exceptions here or push more of the security burden onto it; make the route
+  // a POST instead.
+  //
+  // Scoped to /api/* so a cross-site link to the app itself still opens. The
+  // Vite dev proxy forwards the browser's own value.
+  app.use('/api/*', async (c, next) => {
+    const site = c.req.header('sec-fetch-site');
+    if (site && site !== 'same-origin' && site !== 'none') {
+      return c.json({ error: 'Cross-site requests are not allowed' }, 403);
+    }
+    await next();
+  });
   // Enforce application/json Content-Type on POST/PUT to block CSRF via text/plain forms
   app.use('*', async (c, next) => {
     if (c.req.method === 'POST' || c.req.method === 'PUT') {
@@ -644,6 +665,15 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     // updateCheck is the server-owned registry cache; clients cannot write it.
     delete body.updateCheck;
+    // trustedRoots is the filesystem access boundary and is only ever widened
+    // through an explicit local consent flow (/api/pick-file, /api/pick-folder,
+    // /api/grant-access). A bulk preferences write must never touch it: the
+    // persisted value hydrates straight into allowedRoots on the next launch,
+    // so accepting it here would let any client that can reach this endpoint
+    // grant itself arbitrary roots and read them back after a restart. Whether
+    // anything other than this machine can reach the endpoint is a property of
+    // how the server is deployed, not something this handler should rely on.
+    delete body.trustedRoots;
     try {
       const merged = await writePreferences(homeDir, body);
       return c.json(merged);
@@ -912,7 +942,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/api/pick-file', async (c) => {
+  app.post('/api/pick-file', async (c) => {
     const defaultPath = c.req.query('defaultPath') ?? '';
     try {
       const path = await new Promise<string>((promiseResolve, reject) => {
@@ -1009,7 +1039,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/api/pick-folder', async (c) => {
+  app.post('/api/pick-folder', async (c) => {
     const defaultPath = c.req.query('defaultPath') ?? '';
     try {
       const path = await new Promise<string>((promiseResolve, reject) => {

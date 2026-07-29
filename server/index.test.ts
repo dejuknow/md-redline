@@ -59,6 +59,11 @@ async function requestJson(appInstance: AppInstance, path: string, init?: Reques
   };
 }
 
+// The pickers are POST: they spawn a native OS dialog and persist a trusted
+// root on selection, so they sit behind the application/json guard that a
+// cross-site page cannot satisfy without a preflight.
+const PICK: RequestInit = { method: 'POST', headers: { 'content-type': 'application/json' } };
+
 // Preference writes (addTrustedRoot, writePreferences) are fire-and-forget:
 // the request returns before the write lands on disk. Polling for the file to
 // exist and satisfy `predicate` replaces fixed sleeps that raced the write on
@@ -1008,7 +1013,7 @@ describe('/api/pick-file', () => {
       execFileImpl,
     });
 
-    const { response, body } = await requestJson(windowsApp, '/api/pick-file');
+    const { response, body } = await requestJson(windowsApp, '/api/pick-file', PICK);
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ path: 'C:\\docs\\spec.md' });
@@ -1031,7 +1036,7 @@ describe('/api/pick-file', () => {
       execFileImpl,
     });
 
-    const { response, body } = await requestJson(pickApp, '/api/pick-file');
+    const { response, body } = await requestJson(pickApp, '/api/pick-file', PICK);
     expect(response.status).toBe(200);
     expect(body.path).toBe(externalFile);
 
@@ -1057,6 +1062,7 @@ describe('/api/pick-file', () => {
     const { response } = await requestJson(
       pickApp,
       `/api/pick-file?defaultPath=${encodeURIComponent(targetPath)}`,
+      PICK,
     );
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
@@ -1080,7 +1086,11 @@ describe('/api/pick-file', () => {
     });
 
     const trickyPath = '/tmp/has "quote" and \\back/file.md';
-    await requestJson(pickApp, `/api/pick-file?defaultPath=${encodeURIComponent(trickyPath)}`);
+    await requestJson(
+      pickApp,
+      `/api/pick-file?defaultPath=${encodeURIComponent(trickyPath)}`,
+      PICK,
+    );
     expect(calls).toHaveLength(1);
     const argsJoined = calls[0].args.join(' ');
     // Quotes should be backslash-escaped, backslashes doubled.
@@ -1102,7 +1112,7 @@ describe('/api/pick-file', () => {
       execFileImpl,
     });
 
-    await requestJson(pickApp, '/api/pick-file');
+    await requestJson(pickApp, '/api/pick-file', PICK);
     expect(calls).toHaveLength(1);
     const argsJoined = calls[0].args.join(' ');
     expect(argsJoined).not.toContain('default location');
@@ -1128,7 +1138,7 @@ describe('/api/pick-folder', () => {
       execFileImpl,
     });
 
-    const { response, body } = await requestJson(pickApp, '/api/pick-folder');
+    const { response, body } = await requestJson(pickApp, '/api/pick-folder', PICK);
     expect(response.status).toBe(200);
     expect(body.path).toBe(realPicked);
 
@@ -1156,6 +1166,7 @@ describe('/api/pick-folder', () => {
     const { response } = await requestJson(
       pickApp,
       `/api/pick-folder?defaultPath=${encodeURIComponent(targetPath)}`,
+      PICK,
     );
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
@@ -1180,7 +1191,7 @@ describe('/api/pick-folder', () => {
       execFileImpl,
     });
 
-    const { response, body } = await requestJson(pickApp, '/api/pick-folder');
+    const { response, body } = await requestJson(pickApp, '/api/pick-folder', PICK);
     expect(response.status).toBe(400);
     expect(body.error).toMatch(/not a directory/);
 
@@ -1227,6 +1238,118 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
       headers: { Host: '[::1]:3001' },
     });
     expect(r.status).toBe(200);
+  });
+});
+
+describe('cross-site API requests (Fetch Metadata guard)', () => {
+  // Runs before routing, so a cross-site request is rejected whatever its
+  // method or target. Asserting 403 rather than the 404 this path would
+  // otherwise return is what makes the middleware load-bearing here.
+  it('rejects a cross-site request before it reaches a route', async () => {
+    const r = await app.request(`http://localhost/api/pick-folder`, {
+      headers: { 'sec-fetch-site': 'cross-site' },
+    });
+    expect(r.status).toBe(403);
+    expect(await r.json()).toEqual({ error: 'Cross-site requests are not allowed' });
+  });
+
+  it('rejects same-site as well as cross-site', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { 'sec-fetch-site': 'same-site' },
+    });
+    expect(r.status).toBe(403);
+  });
+
+  it('allows the app own same-origin requests', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { 'sec-fetch-site': 'same-origin' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('allows direct navigation (sec-fetch-site: none)', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { 'sec-fetch-site': 'none' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('allows non-browser callers that send no Fetch Metadata at all', async () => {
+    const r = await app.request(`http://localhost/api/config`);
+    expect(r.status).toBe(200);
+  });
+
+  it('still allows the image requests the markdown renderer emits for /api/asset', async () => {
+    const r = await app.request(
+      `http://localhost/api/asset?path=${encodeURIComponent(join(docsDir, 'nope.png'))}`,
+      { headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'image' } },
+    );
+    // The file does not exist, so this 404s. The point is that a legitimately
+    // embedded image is NOT blocked.
+    expect(r.status).not.toBe(403);
+  });
+});
+
+describe('routes with side effects are not reachable by embedding a URL', () => {
+  // The documents this app renders are untrusted input, and a markdown file can
+  // contain `![](http://127.0.0.1:6373/api/pick-folder)`. A URL with a scheme is
+  // "external" to the renderer so it survives verbatim, and the resulting <img>
+  // request is honestly same-origin, which no origin heuristic can distinguish.
+  // What actually stops it is that a browser cannot issue a POST with a JSON
+  // content type from a markup embed or a navigation.
+  it('the native file picker cannot be reached by a GET', async () => {
+    const r = await app.request(`http://localhost/api/pick-file`);
+    expect(r.status).toBe(404);
+  });
+
+  it('the native folder picker cannot be reached by a GET', async () => {
+    const r = await app.request(`http://localhost/api/pick-folder`);
+    expect(r.status).toBe(404);
+  });
+
+  it('a form-style POST without a JSON content type is rejected', async () => {
+    // The only cross-origin POST a page can send without a preflight.
+    const r = await app.request(`http://localhost/api/pick-folder`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+    });
+    expect(r.status).toBe(415);
+  });
+});
+
+describe('PUT /api/preferences cannot widen filesystem access', () => {
+  it('ignores a client-supplied trustedRoots, so access cannot escalate across a restart', async () => {
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-prefs-escalate-home-')));
+    const projectRoot = await realpath(await mkdtemp(join(tmpdir(), 'mdr-prefs-escalate-cwd-')));
+    const outsideDir = await realpath(await mkdtemp(join(tmpdir(), 'mdr-prefs-escalate-out-')));
+    const outsideFile = join(outsideDir, 'private.md');
+    await writeFile(outsideFile, '# Private\n', 'utf8');
+
+    const first = createApp({ cwd: projectRoot, homeDir: home });
+
+    // Baseline: the file sits outside every trusted root.
+    const before = await first.request(`/api/file?path=${encodeURIComponent(outsideFile)}`);
+    expect(before.status).toBe(403);
+
+    // A client tries to grant itself the directory via a bulk preferences write.
+    const write = await first.request('/api/preferences', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ trustedRoots: [outsideDir], author: 'someone' }),
+    });
+    expect(write.status).toBe(200);
+    // The rest of the patch still applies; only trustedRoots is dropped.
+    expect((await write.json()).author).toBe('someone');
+
+    // Restarting is what would have activated a poisoned root, since
+    // allowedRoots hydrates from persisted trustedRoots on launch.
+    const second = createApp({ cwd: projectRoot, homeDir: home });
+    const after = await second.request(`/api/file?path=${encodeURIComponent(outsideFile)}`);
+    expect(after.status).toBe(403);
+
+    await rm(home, { recursive: true, force: true });
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
   });
 });
 

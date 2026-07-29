@@ -98,8 +98,30 @@ highlighting, orphan detection, and agent handoff are unaffected.
 - `GET /api/browse?dir=` — browse directory structure (files + folders)
 - `GET /api/asset?path=` — serve image assets (PNG, JPG, SVG, etc.)
 - `GET /api/watch?path=` — SSE stream of external file changes
-- `GET /api/pick-file` — native file picker (macOS/Linux/Windows)
-- `GET /api/pick-folder` — native folder picker
+- `POST /api/pick-file` — native file picker (macOS/Linux/Windows)
+- `POST /api/pick-folder` — native folder picker
+
+These two are POST despite reading like reads. They spawn a native OS dialog and
+persist a new trusted root once the user picks, so they must sit behind the
+`application/json` Content-Type guard, which a cross-site page cannot satisfy
+without a CORS preflight. As GETs they were reachable from any markup that can
+emit a URL, including an `<img>` in a reviewed markdown document, which the
+renderer passes through verbatim when the URL carries a scheme.
+
+Any new route that lets a caller direct a change must use POST or PUT, because
+those are exactly the two verbs the Content-Type guard checks (`server/index.ts`,
+the middleware after the Fetch Metadata one). `PUT /api/file` and
+`PUT /api/preferences` are the existing PUTs and are covered. A route added on
+DELETE or PATCH would NOT be covered, so extend the guard's method list before
+reaching for one. Do not rely on the `Sec-Fetch-Site` check instead: it fails
+open for clients that send no Fetch Metadata.
+
+One existing GET does write: `GET /api/file` calls `sweepStrandedAskMarkers`,
+which can rewrite the file to clear an `expectsReply` flag whose review session
+has already closed. That stays a GET deliberately. It is idempotent self-healing
+triggered by server-side session state, the caller cannot direct what it writes,
+and it only ever removes a stale flag. The rule above is about writes a caller
+chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
 - `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `origin` defaults to `'user'`; the `mdr_review` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
