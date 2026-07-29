@@ -77,6 +77,18 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
 - Strip all `<!-- @comment{...} -->` markers to get clean content
 - Marker position disambiguates when the same text appears multiple times
 
+### Protected containers
+
+Some containers can't hold an inline marker, so `insertComment` relocates one that
+resolves inside them. The `anchor` is never rewritten: it stays the real text, so
+highlighting, orphan detection, and agent handoff are unaffected.
+
+| Container | Where the marker goes | Why |
+|---|---|---|
+| Fenced code block | Before the opening fence, own line | A marker inside is literal text |
+| YAML/TOML frontmatter (offset 0 only) | After the closing fence, own line | It can't go before, and a comment body containing `: ` breaks the YAML parse |
+| HTML comment | Before the block; own line only when the comment owns its line | Nested comments don't exist: the first `-->` closes the outer one and the rest becomes visible text |
+
 ## API endpoints
 
 **Files**

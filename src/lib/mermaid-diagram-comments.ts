@@ -1,5 +1,15 @@
 import type { MdComment } from '../types';
-import { extractMermaidText } from './comment-parser';
+import { extractMermaidText, getFrontmatterRange } from './comment-parser';
+
+/**
+ * Whether an anchor's text comes from the document's frontmatter. Used to
+ * break the tie when a marker sits exactly on a diagram's opening fence.
+ */
+function anchorLivesInFrontmatter(cleanMarkdown: string, anchor: string): boolean {
+  const range = getFrontmatterRange(cleanMarkdown);
+  if (!range) return false;
+  return cleanMarkdown.slice(range.start, range.end).includes(anchor);
+}
 
 /**
  * Filter comments down to those that belong to a specific Mermaid diagram.
@@ -85,7 +95,16 @@ export function commentsForDiagram(
     // Exclusive upper bound: a marker AT claimEnd lives in the trailing
     // newline / whitespace AFTER the closing fence, which belongs to the
     // following prose, not to the diagram.
-    return c.cleanOffset >= claimStart && c.cleanOffset < claimEnd;
+    if (c.cleanOffset < claimStart || c.cleanOffset >= claimEnd) return false;
+    // A marker sitting exactly ON the opening fence is ambiguous when the
+    // block is the first thing after frontmatter: it could be a diagram
+    // comment relocated out of the block, or a frontmatter comment pushed
+    // down past the closing `---` onto the same offset. Position alone can't
+    // separate them, so defer to where the anchor text actually lives.
+    if (c.cleanOffset === claimStart && anchorLivesInFrontmatter(cleanMarkdown, c.anchor)) {
+      return false;
+    }
+    return true;
   });
 }
 

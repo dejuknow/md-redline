@@ -2033,6 +2033,99 @@ describe('insertComment inside fenced code blocks', () => {
     expect(fenceLine).toBe('~~~');
   });
 
+  describe('inside frontmatter', () => {
+    const skillFile =
+      '---\nname: mcp2cli\ndescription: Use when an MCP server should be driven\n  from the shell.\n---\n\n# Overview\n\nBody text.\n';
+
+    it('places the marker after the closing fence, not inside the block', () => {
+      const result = insertComment(skillFile, 'Use when an MCP server should be driven', 'why?');
+      const block = result.slice(0, result.indexOf('\n---\n') + 5);
+      expect(block).not.toContain('@comment');
+      expect(result).toContain('---\n<!-- @comment');
+    });
+
+    it('leaves the frontmatter block byte-identical', () => {
+      const result = insertComment(skillFile, 'Use when an MCP server should be driven', 'why?');
+      expect(result.startsWith(skillFile.slice(0, skillFile.indexOf('\n---\n') + 5))).toBe(true);
+    });
+
+    it('keeps the YAML parseable when the comment body contains a colon', () => {
+      // `: ` inside the fences is what breaks a YAML parse outright, so this
+      // is the case that matters most.
+      const result = insertComment(skillFile, 'mcp2cli', 'Note: rename this');
+      const fenceEnd = result.indexOf('\n---\n') + 5;
+      expect(result.slice(0, fenceEnd)).not.toContain('@comment');
+    });
+
+    it('round-trips and keeps the anchor resolvable', () => {
+      const result = insertComment(skillFile, 'Use when an MCP server should be driven', 'why?');
+      const parsed = parseComments(result);
+      expect(parsed.comments).toHaveLength(1);
+      expect(parsed.comments[0].anchor).toBe('Use when an MCP server should be driven');
+      expect(parsed.cleanMarkdown).toBe(skillFile);
+      expect(detectMissingAnchors(parsed.cleanMarkdown, parsed.comments).size).toBe(0);
+    });
+
+    it('handles TOML frontmatter', () => {
+      const raw = '+++\ntitle = "Post"\n+++\n\n# Heading\n';
+      const result = insertComment(raw, 'Post', 'rename');
+      expect(result.slice(0, result.indexOf('\n+++\n') + 5)).not.toContain('@comment');
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('handles a frontmatter-only document with no trailing newline', () => {
+      const raw = '---\nname: stub\n---';
+      const result = insertComment(raw, 'stub', 'flesh this out');
+      expect(result.startsWith('---\nname: stub\n---\n')).toBe(true);
+      // The marker can't share the closing fence's line, so the file gains a
+      // final newline. Everything above it is untouched.
+      expect(parseComments(result).cleanMarkdown).toBe(raw + '\n');
+    });
+
+    it('treats a mid-document --- as a thematic break, not frontmatter', () => {
+      const raw = '# Title\n\nIntro text.\n\n---\n\nMore text.\n';
+      const result = insertComment(raw, 'More text', 'expand');
+      // No relocation: the marker sits inline immediately before the anchor.
+      expect(result).toMatch(/@comment.*-->More text/);
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+  });
+
+  describe('inside HTML comments', () => {
+    it('places the marker before a block-level comment, not nested inside it', () => {
+      const raw = '# Notes\n\n<!-- TODO: decide on the retry loop -->\n\nBody.\n';
+      const result = insertComment(raw, 'decide on the retry loop', 'why?');
+      expect(result).toContain('<!-- TODO: decide on the retry loop -->');
+      expect(result).not.toMatch(/<!-- TODO: <!--/);
+      const parsed = parseComments(result);
+      expect(parsed.comments).toHaveLength(1);
+      expect(parsed.cleanMarkdown).toBe(raw);
+    });
+
+    it('gives a block-level comment marker its own line', () => {
+      const raw = '# Notes\n\n<!-- TODO: decide on the retry loop -->\n\nBody.\n';
+      const result = insertComment(raw, 'decide on the retry loop', 'why?');
+      const markerLine = result.split('\n').find((l) => l.includes('@comment'));
+      expect(markerLine).not.toContain('TODO');
+    });
+
+    it('keeps an inline comment inline', () => {
+      const raw = 'Text before <!-- inline note --> text after.\n';
+      const result = insertComment(raw, 'inline note', 'clarify');
+      expect(result).not.toMatch(/<!-- <!--/);
+      // The paragraph must stay on one line, with no newline injected mid-sentence.
+      expect(result.split('\n')[0]).toContain('text after.');
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('does not nest inside a malformed @comment marker left in the document', () => {
+      const raw = '# H\n\n<!-- @comment{"id":"x","text":"unclosed -->\n\nbody\n';
+      const result = insertComment(raw, 'unclosed', 'broken marker');
+      expect(result).not.toMatch(/<!-- @comment\{"id":"x","text":"<!--/);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+  });
+
   it('preserves fence when code block is at document start', () => {
     const raw = '```js\nconst x = 1;\n```\n\nEnd.';
     const result = insertComment(raw, 'const x = 1;', 'refactor');
