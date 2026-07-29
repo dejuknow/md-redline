@@ -69,6 +69,27 @@ describe('commentsForDiagram', () => {
     expect(commentsForDiagram(diagram, [c], md).map((c) => c.id)).toEqual([]);
   });
 
+  it('does not attribute a frontmatter comment to a diagram that opens the body', () => {
+    // insertComment pushes a frontmatter-anchored marker past the closing
+    // `---`. When the body starts with a fence on the very next line, that
+    // lands on the same offset the diagram claims as its own.
+    const diagram = 'graph TD\n    A --> B';
+    const md = '---\ntitle: Flow spec\n---\n```mermaid\n' + diagram + '\n```\n';
+    const fenceOffset = md.indexOf('```mermaid');
+    const c: MdComment = { ...makeComment('fm', 'Flow spec'), cleanOffset: fenceOffset };
+    expect(commentsForDiagram(diagram, [c], md).map((c) => c.id)).toEqual([]);
+  });
+
+  it('still attributes a diagram comment sitting on the fence below frontmatter', () => {
+    // Same geometry, but the anchor is a node label rather than a field value,
+    // so the tie-break must keep it.
+    const diagram = 'graph TD\n    A[Login] --> B';
+    const md = '---\ntitle: Flow spec\n---\n```mermaid\n' + diagram + '\n```\n';
+    const fenceOffset = md.indexOf('```mermaid');
+    const c: MdComment = { ...makeComment('node', 'Login'), cleanOffset: fenceOffset };
+    expect(commentsForDiagram(diagram, [c], md).map((c) => c.id)).toEqual(['node']);
+  });
+
   it('without cleanMarkdown, falls back to plain anchor matching (no disambiguation)', () => {
     const diagram = `flowchart TD\n  A[API Gateway]`;
     const c1: MdComment = { ...makeComment('c1', 'API Gateway'), cleanOffset: 9999 };

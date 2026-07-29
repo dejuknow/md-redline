@@ -54,6 +54,41 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
   return codeBlockRanges;
 }
 
+/**
+ * Range of the document's leading YAML/TOML frontmatter block, fences
+ * included, extending through the newline after the closing fence. Returns
+ * null when there is none.
+ *
+ * Frontmatter is only frontmatter at offset 0. A `---` further down is a
+ * thematic break and a `+++` is ordinary text, so this deliberately anchors
+ * to the start of the string.
+ */
+export function getFrontmatterRange(markdown: string): CodeBlockRange | null {
+  const match = /^(---|\+\+\+)[ \t]*\r?\n[\s\S]*?\r?\n\1[ \t]*(?:\r?\n|$)/.exec(markdown);
+  if (!match) return null;
+  return { start: 0, end: match[0].length };
+}
+
+/**
+ * Ranges of ordinary HTML comments. A marker cannot nest inside one: the
+ * first `-->` closes the outer comment, so everything after it becomes
+ * visible text in other renderers even though mdr itself round-trips fine.
+ *
+ * Callers pass clean markdown, where well-formed `@comment` markers are
+ * already stripped. A malformed marker survives stripping and is matched
+ * here as an ordinary comment, which is what we want: nothing should be
+ * inserted inside it either.
+ */
+function getHtmlCommentRanges(markdown: string): CodeBlockRange[] {
+  const ranges: CodeBlockRange[] = [];
+  const regex = /<!--[\s\S]*?-->/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(markdown)) !== null) {
+    ranges.push({ start: match.index, end: match.index + match[0].length });
+  }
+  return ranges;
+}
+
 function isInsideCodeBlock(offset: number, codeBlockRanges: CodeBlockRange[]): boolean {
   for (const range of codeBlockRanges) {
     if (offset >= range.start && offset < range.end) return true;
@@ -550,42 +585,64 @@ export function insertComment(
 
   if (insertionCleanOffset === null) return rawMarkdown;
 
-  // If the insertion point falls inside a fenced code block, move it before the block.
-  // HTML comment markers are literal text inside code blocks, so the marker must go outside.
-  let movedBeforeFence = false;
+  // Some containers cannot hold an inline marker: it is literal text inside a
+  // fenced code block, illegal nesting inside an HTML comment (the first
+  // `-->` closes the outer comment and the rest becomes visible text), and
+  // invalid syntax inside frontmatter (a comment body containing `: ` breaks
+  // the YAML parse outright). When the resolved insertion point lands in one,
+  // relocate it to the nearest legal position outside the container. The
+  // anchor is unaffected: it stays the real text, so highlighting, orphan
+  // detection, and agent handoff all keep working.
+  let ownLine = false;
+  let leadingNewline = false;
   {
-    const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
-    let fm: RegExpExecArray | null;
-    let openF: { marker: string; start: number } | null = null;
-    while ((fm = fenceRegex.exec(cleanMarkdown)) !== null) {
-      const marker = fm[1];
-      if (!openF) {
-        openF = { marker: marker[0].repeat(marker.length), start: fm.index };
-      } else if (marker[0] === openF.marker[0] && marker.length >= openF.marker.length) {
-        if (
-          insertionCleanOffset >= openF.start &&
-          insertionCleanOffset <= fm.index + fm[0].length
-        ) {
-          insertionCleanOffset = openF.start;
-          movedBeforeFence = true;
-        }
-        openF = null;
+    // Fenced blocks: before the opening fence.
+    for (const range of getCodeBlockRanges(cleanMarkdown)) {
+      if (insertionCleanOffset >= range.start && insertionCleanOffset <= range.end) {
+        insertionCleanOffset = range.start;
+        ownLine = true;
+      }
+    }
+    // Frontmatter: after the closing fence. It cannot go before, since
+    // frontmatter is only recognized at offset 0, so this is the one
+    // container the marker trails rather than leads.
+    const frontmatter = getFrontmatterRange(cleanMarkdown);
+    if (
+      frontmatter &&
+      insertionCleanOffset >= frontmatter.start &&
+      insertionCleanOffset < frontmatter.end
+    ) {
+      insertionCleanOffset = frontmatter.end;
+      ownLine = true;
+      // A frontmatter-only document has no newline after the closing fence,
+      // so break the line first or the marker lands on the `---` itself.
+      leadingNewline = cleanMarkdown[frontmatter.end - 1] !== '\n';
+    }
+    // HTML comments: before the block. Only claim a whole line when the
+    // comment owns one; an inline note keeps its paragraph intact.
+    for (const range of getHtmlCommentRanges(cleanMarkdown)) {
+      if (insertionCleanOffset >= range.start && insertionCleanOffset < range.end) {
+        insertionCleanOffset = range.start;
+        ownLine = range.start === 0 || cleanMarkdown[range.start - 1] === '\n';
       }
     }
   }
 
   // Insert marker BEFORE the anchor text in the raw markdown.
-  // When moved before a code fence, place the marker on its own line so the
+  // When relocated out of a container, place the marker on its own line so the
   // opening fence stays at column 0 (otherwise other renderers won't parse it).
   const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
-  if (movedBeforeFence) {
-    return (
-      rawMarkdown.slice(0, rawInsertionPoint) + marker + '\n' + rawMarkdown.slice(rawInsertionPoint)
-    );
-  }
-  return rawMarkdown.slice(0, rawInsertionPoint) + marker + rawMarkdown.slice(rawInsertionPoint);
+  const before = leadingNewline ? '\n' : '';
+  const after = ownLine ? '\n' : '';
+  return (
+    rawMarkdown.slice(0, rawInsertionPoint) +
+    before +
+    marker +
+    after +
+    rawMarkdown.slice(rawInsertionPoint)
+  );
 }
 
 export function removeComment(rawMarkdown: string, commentId: string): string {
