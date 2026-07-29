@@ -161,9 +161,7 @@ test.describe('Filter auto-widen', () => {
     await clickCardAction(page, 'Auto-widen resolved comment', 'Resolve');
 
     // Filter to Resolved: the open comment's card leaves the list.
-    await page
-      .locator('[data-comments-rail] .flex.gap-1 button', { hasText: 'Resolved' })
-      .click();
+    await page.locator('[data-comments-rail] .flex.gap-1 button', { hasText: 'Resolved' }).click();
     await expect(getCard(page, 'Auto-widen resolved comment')).toBeVisible();
     await expect(getCard(page, 'Auto-widen open comment')).not.toBeVisible();
 

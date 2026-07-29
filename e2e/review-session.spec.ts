@@ -9,7 +9,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // roots (the cwd root). Files in /tmp are outside allowed roots and cannot be
 // granted access via /api/grant-access.
 const FIXTURE_PATH = resolve(__dirname, 'fixtures/review-session-fixture.md');
-const FIXTURE_CONTENT = '# Review Session Fixture\n\nThis file is used by the review-session E2E tests.\n\n<!-- @comment{"id":"e2e-c1","anchor":"Fixture","text":"Test comment for E2E","author":"e2e-test","replies":[]} -->Fixture paragraph.\n';
+const FIXTURE_CONTENT =
+  '# Review Session Fixture\n\nThis file is used by the review-session E2E tests.\n\n<!-- @comment{"id":"e2e-c1","anchor":"Fixture","text":"Test comment for E2E","author":"e2e-test","replies":[]} -->Fixture paragraph.\n';
 const FIXTURE_BASENAME = basename(FIXTURE_PATH);
 
 test.beforeAll(() => {
@@ -27,7 +28,10 @@ test.afterAll(() => {
 // ---------------------------------------------------------------------------
 
 /** Abort every open session so retries don't see stale sessions from a prior run. */
-async function abortAllSessions(baseURL: string, request: import('@playwright/test').APIRequestContext) {
+async function abortAllSessions(
+  baseURL: string,
+  request: import('@playwright/test').APIRequestContext,
+) {
   const res = await request.get(`${baseURL}/api/review-sessions`);
   if (!res.ok()) return;
   const { sessions } = (await res.json()) as { sessions: { id: string; status: string }[] };
@@ -38,12 +42,15 @@ async function abortAllSessions(baseURL: string, request: import('@playwright/te
   }
 }
 
-async function createSession(baseURL: string, request: import('@playwright/test').APIRequestContext): Promise<string> {
+async function createSession(
+  baseURL: string,
+  request: import('@playwright/test').APIRequestContext,
+): Promise<string> {
   const res = await request.post(`${baseURL}/api/review-sessions`, {
     data: { filePaths: [FIXTURE_PATH], enableResolve: false },
   });
   expect(res.status()).toBe(201);
-  const body = await res.json() as { sessionId: string };
+  const body = (await res.json()) as { sessionId: string };
   return body.sessionId;
 }
 
@@ -76,17 +83,13 @@ test.describe('Review session banner', () => {
 
     const waitRes = await waitPromise;
     expect(waitRes.status()).toBe(200);
-    const waitBody = await waitRes.json() as { status: string; prompt?: string };
+    const waitBody = (await waitRes.json()) as { status: string; prompt?: string };
     expect(waitBody.status).toBe('done');
     expect(typeof waitBody.prompt).toBe('string');
     expect(waitBody.prompt).toContain(FIXTURE_PATH);
   });
 
-  test('cancel path: Cancel review aborts the session', async ({
-    page,
-    request,
-    baseURL,
-  }) => {
+  test('cancel path: Cancel review aborts the session', async ({ page, request, baseURL }) => {
     const sessionId = await createSession(baseURL!, request);
 
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
@@ -103,12 +106,16 @@ test.describe('Review session banner', () => {
     // Await the /wait response
     const waitRes = await waitPromise;
     expect(waitRes.status()).toBe(200);
-    const waitBody = await waitRes.json() as { status: string; reason?: string };
+    const waitBody = (await waitRes.json()) as { status: string; reason?: string };
     expect(waitBody.status).toBe('aborted');
     expect(waitBody.reason).toBe('user_cancelled');
   });
 
-  test('batched review: send batch keeps session open, send & finish closes it', async ({ page, request, baseURL }) => {
+  test('batched review: send batch keeps session open, send & finish closes it', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
     const sessionId = await createSession(baseURL!, request);
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
 
@@ -125,7 +132,7 @@ test.describe('Review session banner', () => {
 
     const batchResponse = await waitPromise;
     expect(batchResponse.status()).toBe(200);
-    const batchBody = await batchResponse.json() as { status: string };
+    const batchBody = (await batchResponse.json()) as { status: string };
     expect(batchBody.status).toBe('batch');
 
     // Banner should still be visible (session still open)
@@ -143,11 +150,11 @@ test.describe('Review session banner', () => {
 
     const finishResponse = await waitPromise2;
     expect(finishResponse.status()).toBe(200);
-    const finishBody = await finishResponse.json() as { status: string };
+    const finishBody = (await finishResponse.json()) as { status: string };
     expect(finishBody.status).toBe('done');
   });
 
-  test('review session navigates the Explorer to the file\'s parent directory', async ({
+  test("review session navigates the Explorer to the file's parent directory", async ({
     page,
     request,
     baseURL,
@@ -162,9 +169,9 @@ test.describe('Review session banner', () => {
     // fixture's parent directory, listing the fixture file as a sibling entry.
     // Scope to the Explorer's file-row styling to disambiguate from the tab
     // button, which also uses the file path as its title.
-    await expect(
-      page.locator(`button.w-full.text-left[title="${FIXTURE_PATH}"]`),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(`button.w-full.text-left[title="${FIXTURE_PATH}"]`)).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test('no banner without an active session', async ({ page }) => {

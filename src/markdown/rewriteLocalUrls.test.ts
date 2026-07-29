@@ -226,16 +226,12 @@ describe('rewriteLocalUrls plugin', () => {
 
   it('rewrites a POSIX-absolute image src', () => {
     const out = runPlugin('<img src="/abs/img.png" alt="">', FILE);
-    expect(out).toContain(
-      `src="/api/asset?path=${encodeURIComponent('/abs/img.png')}"`,
-    );
+    expect(out).toContain(`src="/api/asset?path=${encodeURIComponent('/abs/img.png')}"`);
   });
 
   it('drops the fragment from an image src', () => {
     const out = runPlugin('<img src="./img.png#small" alt="">', FILE);
-    expect(out).toContain(
-      `src="/api/asset?path=${encodeURIComponent('/Users/me/notes/img.png')}"`,
-    );
+    expect(out).toContain(`src="/api/asset?path=${encodeURIComponent('/Users/me/notes/img.png')}"`);
     expect(out).not.toContain('#small');
   });
 
@@ -259,9 +255,7 @@ describe('rewriteLocalUrls plugin', () => {
   it('rewrites a relative .md anchor href to data attributes', () => {
     const out = runPlugin('<a href="./other.md">x</a>', FILE);
     expect(out).toContain('href="#"');
-    expect(out).toContain(
-      `data-mdr-local-md="${'/Users/me/notes/other.md'}"`,
-    );
+    expect(out).toContain(`data-mdr-local-md="${'/Users/me/notes/other.md'}"`);
     expect(out).not.toContain('data-mdr-fragment');
   });
 
@@ -342,9 +336,7 @@ describe('rewriteLocalUrls plugin', () => {
 
   it('still rewrites absolute paths when filePath is undefined', () => {
     const out = runPlugin('<img src="/abs/img.png" alt="">');
-    expect(out).toContain(
-      `src="/api/asset?path=${encodeURIComponent('/abs/img.png')}"`,
-    );
+    expect(out).toContain(`src="/api/asset?path=${encodeURIComponent('/abs/img.png')}"`);
   });
 
   it('leaves an anchor without href alone', () => {
@@ -395,9 +387,7 @@ describe('rewriteLocalUrls plugin — Windows base paths', () => {
 
   it('does not climb above the drive root', () => {
     const out = runPlugin('<img src="../../diagram.png" alt="d">', 'C:\\notes\\index.md');
-    expect(out).toContain(
-      `src="/api/asset?path=${encodeURIComponent('C:/diagram.png')}"`,
-    );
+    expect(out).toContain(`src="/api/asset?path=${encodeURIComponent('C:/diagram.png')}"`);
   });
 
   it('preserves UNC share roots', () => {

@@ -29,10 +29,9 @@ describe('useMermaidRenderer', () => {
 
   it('does not re-render mermaid when switching between app themes that share the same mermaid theme', async () => {
     const markdown = '```mermaid\nflowchart TD\nA-->B\n```';
-    const { result, rerender } = renderHook(
-      ({ theme }) => useMermaidRenderer(markdown, theme),
-      { initialProps: { theme: 'dark' } },
-    );
+    const { result, rerender } = renderHook(({ theme }) => useMermaidRenderer(markdown, theme), {
+      initialProps: { theme: 'dark' },
+    });
 
     await waitFor(() => {
       expect(result.current.size).toBe(1);
@@ -50,10 +49,9 @@ describe('useMermaidRenderer', () => {
 
   it('re-renders mermaid when switching to a different normalized mermaid theme', async () => {
     const markdown = '```mermaid\nflowchart TD\nA-->B\n```';
-    const { result, rerender } = renderHook(
-      ({ theme }) => useMermaidRenderer(markdown, theme),
-      { initialProps: { theme: 'dark' } },
-    );
+    const { result, rerender } = renderHook(({ theme }) => useMermaidRenderer(markdown, theme), {
+      initialProps: { theme: 'dark' },
+    });
 
     await waitFor(() => {
       expect(result.current.size).toBe(1);

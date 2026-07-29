@@ -79,7 +79,8 @@ describe('renderMarkdown', () => {
     // Comment anchoring searches the raw markdown for text the DOM handed it,
     // so any transformation here silently breaks comment creation. Compare the
     // element's text content against the source block verbatim.
-    const body = 'name: mcp2cli\ndescription: Use when a server should be driven\n  from the shell.\ntools:\n  - Read';
+    const body =
+      'name: mcp2cli\ndescription: Use when a server should be driven\n  from the shell.\ntools:\n  - Read';
     const html = renderMarkdown(`---\n${body}\n---\n\n# Overview`);
     const inner = html.slice(
       html.indexOf('<div class="doc-frontmatter">') + '<div class="doc-frontmatter">'.length,

@@ -20,7 +20,10 @@ import { getEffectiveStatus, type MdComment } from '../types';
  * Comments authored by older code that did not stamp `expectsReply` are not
  * surfaced as asks (safe default — no spurious toasts).
  */
-export function selectAgentAsks(comments: MdComment[], activeSessionId: string | null): MdComment[] {
+export function selectAgentAsks(
+  comments: MdComment[],
+  activeSessionId: string | null,
+): MdComment[] {
   if (!activeSessionId) return [];
   return comments.filter(
     (c) =>

@@ -232,9 +232,7 @@ test.describe('Table of Contents', () => {
     // doesn't override the clicked heading after the animation finishes
     await page.waitForTimeout(800);
     await expect(tocHeading(page, 'Conclusion')).toHaveClass(/bg-primary-bg/);
-    await expect(tocHeading(page, 'Project Specification')).not.toHaveClass(
-      /bg-primary-bg/,
-    );
+    await expect(tocHeading(page, 'Project Specification')).not.toHaveClass(/bg-primary-bg/);
   });
 
   test('clicking a heading updates the active heading from a previous one', async ({ page }) => {
@@ -280,9 +278,7 @@ test.describe('Table of Contents', () => {
     await page.waitForTimeout(200);
 
     // The first heading should now be active (spy is tracking scroll position again)
-    await expect(tocHeading(page, 'Project Specification')).toHaveClass(
-      /bg-primary-bg/,
-    );
+    await expect(tocHeading(page, 'Project Specification')).toHaveClass(/bg-primary-bg/);
     await expect(tocHeading(page, 'Conclusion')).not.toHaveClass(/bg-primary-bg/);
   });
 

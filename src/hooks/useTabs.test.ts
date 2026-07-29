@@ -153,7 +153,13 @@ describe('applyLoadedTabState — extended', () => {
     const path = '/tmp/file.md';
     const prevData = new Map([[path, makeTab(path)]]);
     const result = applyLoadedTabState(
-      prevData, [path], path, path, path, '# Content\n', new Date(),
+      prevData,
+      [path],
+      path,
+      path,
+      path,
+      '# Content\n',
+      new Date(),
     );
 
     expect(result.tabOrder).toEqual([path]);
@@ -177,7 +183,13 @@ describe('applyLoadedTabState — extended', () => {
     ]);
 
     const result = applyLoadedTabState(
-      prevData, [a, link, c], link, link, real, '# Real\n', new Date(),
+      prevData,
+      [a, link, c],
+      link,
+      link,
+      real,
+      '# Real\n',
+      new Date(),
     );
 
     // 'real' should replace 'link' in position index 1
@@ -197,7 +209,13 @@ describe('applyLoadedTabState — extended', () => {
     ]);
 
     const result = applyLoadedTabState(
-      prevData, [active, link], active, link, real, '# Content\n', new Date(),
+      prevData,
+      [active, link],
+      active,
+      link,
+      real,
+      '# Content\n',
+      new Date(),
     );
 
     // activeFilePath should remain 'active', not switch to 'real'
@@ -215,7 +233,13 @@ describe('applyLoadedTabState — extended', () => {
     ]);
 
     const result = applyLoadedTabState(
-      prevData, [link, other], link, link, real, '# Content\n', new Date(),
+      prevData,
+      [link, other],
+      link,
+      link,
+      real,
+      '# Content\n',
+      new Date(),
     );
 
     expect(result.activeFilePath).toBe(real);
@@ -225,9 +249,7 @@ describe('applyLoadedTabState — extended', () => {
     const path = '/tmp/file.md';
     const savedAt = new Date('2026-01-15T12:00:00.000Z');
     const prevData = new Map([[path, makeTab(path)]]);
-    const result = applyLoadedTabState(
-      prevData, [path], path, path, path, '# Content\n', savedAt,
-    );
+    const result = applyLoadedTabState(prevData, [path], path, path, path, '# Content\n', savedAt);
 
     expect(result.tabData.get(path)?.lastSaved).toEqual(savedAt);
   });
@@ -242,12 +264,8 @@ describe('TabState dirty flag', () => {
 
   it('is preserved through applyLoadedTabState', () => {
     const path = '/tmp/test.md';
-    const prevData = new Map([
-      [path, makeTab(path, { dirty: true })],
-    ]);
-    const result = applyLoadedTabState(
-      prevData, [path], path, path, path, '# content', new Date(),
-    );
+    const prevData = new Map([[path, makeTab(path, { dirty: true })]]);
+    const result = applyLoadedTabState(prevData, [path], path, path, path, '# content', new Date());
     // applyLoadedTabState creates a new TabState without dirty, so it should be undefined
     expect(result.tabData.get(path)?.dirty).toBeUndefined();
   });
@@ -290,9 +308,9 @@ describe('TabState errorKind', () => {
 
 describe('isAccessDeniedError', () => {
   it('returns true for an Error whose message starts with "Access denied"', () => {
-    expect(
-      isAccessDeniedError(new Error('Access denied: path outside allowed directories')),
-    ).toBe(true);
+    expect(isAccessDeniedError(new Error('Access denied: path outside allowed directories'))).toBe(
+      true,
+    );
   });
 
   it('returns false for an Error with an unrelated message', () => {

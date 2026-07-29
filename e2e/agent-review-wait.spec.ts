@@ -30,11 +30,20 @@ async function abortAllSessions(
 test.describe('Agent review mdr_wait flow', () => {
   let fixtureDir = '';
 
-  test.beforeAll(() => { mkdirSync(TEMP_FIXTURE_DIR, { recursive: true }); });
-  test.afterAll(() => { rmSync(TEMP_FIXTURE_DIR, { recursive: true, force: true }); });
-  test.beforeEach(async ({ request, baseURL }) => { await abortAllSessions(baseURL!, request); });
+  test.beforeAll(() => {
+    mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
+  });
+  test.afterAll(() => {
+    rmSync(TEMP_FIXTURE_DIR, { recursive: true, force: true });
+  });
+  test.beforeEach(async ({ request, baseURL }) => {
+    await abortAllSessions(baseURL!, request);
+  });
   test.afterEach(async () => {
-    if (fixtureDir) { rmSync(fixtureDir, { recursive: true, force: true }); fixtureDir = ''; }
+    if (fixtureDir) {
+      rmSync(fixtureDir, { recursive: true, force: true });
+      fixtureDir = '';
+    }
   });
 
   test('agent posts comments → calls /agent-wait → user clicks Done → /agent-wait returns done', async ({
@@ -61,7 +70,9 @@ test.describe('Agent review mdr_wait flow', () => {
     // 3. Post a comment (fire-and-forget — no expectsReply)
     const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
       data: {
-        comments: [{ filePath: file, anchor: 'timeout is 30 seconds', text: 'Should this be configurable?' }],
+        comments: [
+          { filePath: file, anchor: 'timeout is 30 seconds', text: 'Should this be configurable?' },
+        ],
       },
     });
     expect(post.status()).toBe(201);
@@ -71,11 +82,15 @@ test.describe('Agent review mdr_wait flow', () => {
     expect((postBody as { askId?: string }).askId).toBeUndefined();
 
     // 4. Start /agent-wait long-poll
-    const waitPromise = request.get(`${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=30`);
+    const waitPromise = request.get(
+      `${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=30`,
+    );
 
     // 5. Banner shows "End review" button (no pending ask)
     const banner = page.getByTestId('review-banner');
-    await expect(banner.getByRole('button', { name: /end review/i })).toBeVisible({ timeout: 10_000 });
+    await expect(banner.getByRole('button', { name: /end review/i })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // 6. Click Done
     await banner.getByRole('button', { name: /end review/i }).click();
@@ -107,7 +122,9 @@ test.describe('Agent review mdr_wait flow', () => {
     expect(doneRes.status()).toBe(200);
 
     // Then /agent-wait — should return immediately
-    const waitRes = await request.get(`${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=5`);
+    const waitRes = await request.get(
+      `${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=5`,
+    );
     expect(waitRes.status()).toBe(200);
     const body = (await waitRes.json()) as { status: string };
     expect(body.status).toBe('done');
@@ -127,7 +144,9 @@ test.describe('Agent review mdr_wait flow', () => {
     const { sessionId } = (await create.json()) as { sessionId: string };
 
     // Short 1s timeout — should return pending
-    const waitRes = await request.get(`${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=1`);
+    const waitRes = await request.get(
+      `${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=1`,
+    );
     expect(waitRes.status()).toBe(200);
     const body = (await waitRes.json()) as { status: string };
     expect(body.status).toBe('pending');

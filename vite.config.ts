@@ -22,13 +22,15 @@ export function mdrIdentityPlugin(): Plugin {
   return {
     name: 'mdr-identity',
     configureServer(server: ViteDevServer) {
-      server.middlewares.use((req: { url?: string }, res: { end: (body: string) => void }, next: () => void) => {
-        if (req.url === '/__mdr__') {
-          res.end('mdr');
-          return;
-        }
-        next();
-      });
+      server.middlewares.use(
+        (req: { url?: string }, res: { end: (body: string) => void }, next: () => void) => {
+          if (req.url === '/__mdr__') {
+            res.end('mdr');
+            return;
+          }
+          next();
+        },
+      );
     },
   };
 }
@@ -42,13 +44,7 @@ export default defineConfig({
     // .claude/worktrees/ for the ones Claude Code creates. Without the second,
     // a worktree left behind by another session adds ~70 failing "test files"
     // to every local run. demo/ contains a Playwright spec too.
-    exclude: [
-      'e2e/**',
-      'demo/**',
-      'node_modules/**',
-      '.worktrees/**',
-      '.claude/**',
-    ],
+    exclude: ['e2e/**', 'demo/**', 'node_modules/**', '.worktrees/**', '.claude/**'],
   },
   server: {
     // Bind IPv4 loopback explicitly so the CLI's 127.0.0.1 probe of

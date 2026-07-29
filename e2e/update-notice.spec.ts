@@ -68,9 +68,9 @@ test.describe('Update notice', () => {
     // The route stays active across reload; only the persisted dismissal
     // keeps the notice hidden.
     await page.reload();
-    await expect(
-      page.getByRole('heading', { name: 'Test Document' }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.locator('[data-update-notice]')).toHaveCount(0);
   });
 });

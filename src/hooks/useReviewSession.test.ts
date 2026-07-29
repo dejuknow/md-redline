@@ -68,7 +68,14 @@ describe('useReviewSession', () => {
           ok: true,
           json: async () => ({
             sessions: [
-              { id: 'rev_1', filePaths: ['/tmp/a.md'], enableResolve: false, status: 'open', sentCommentIds: [], waitingForAgent: false },
+              {
+                id: 'rev_1',
+                filePaths: ['/tmp/a.md'],
+                enableResolve: false,
+                status: 'open',
+                sentCommentIds: [],
+                waitingForAgent: false,
+              },
             ],
           }),
         } as Response;
@@ -85,8 +92,8 @@ describe('useReviewSession', () => {
       await Promise.resolve();
     });
 
-    const heartbeatCallsAfterMount = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    const heartbeatCallsAfterMount = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
     ).length;
     expect(heartbeatCallsAfterMount).toBeGreaterThanOrEqual(1);
 
@@ -96,14 +103,14 @@ describe('useReviewSession', () => {
       await Promise.resolve();
     });
 
-    const heartbeatCallsAfterInterval = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    const heartbeatCallsAfterInterval = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
     ).length;
     expect(heartbeatCallsAfterInterval).toBeGreaterThan(heartbeatCallsAfterMount);
 
     // Every heartbeat call must send the content-type header.
-    const heartbeatCalls = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    const heartbeatCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
     );
     for (const [, init] of heartbeatCalls) {
       expect(init).toMatchObject({
@@ -125,7 +132,14 @@ describe('useReviewSession', () => {
           ok: true,
           json: async () => ({
             sessions: [
-              { id: 'rev_1', filePaths: ['/tmp/a.md'], enableResolve: false, status: 'open', sentCommentIds: [], waitingForAgent: false },
+              {
+                id: 'rev_1',
+                filePaths: ['/tmp/a.md'],
+                enableResolve: false,
+                status: 'open',
+                sentCommentIds: [],
+                waitingForAgent: false,
+              },
             ],
           }),
         } as Response;
@@ -140,8 +154,8 @@ describe('useReviewSession', () => {
       await Promise.resolve();
     });
 
-    const heartbeatsAfterMount = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    const heartbeatsAfterMount = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
     ).length;
 
     // Simulate bfcache restore. Real PageTransitionEvent isn't available in
@@ -154,8 +168,8 @@ describe('useReviewSession', () => {
       await Promise.resolve();
     });
 
-    const heartbeatsAfterPageShow = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    const heartbeatsAfterPageShow = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
     ).length;
     expect(heartbeatsAfterPageShow).toBeGreaterThan(heartbeatsAfterMount);
 
@@ -170,8 +184,8 @@ describe('useReviewSession', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const heartbeatsAfterNonBfcacheShow = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
+    const heartbeatsAfterNonBfcacheShow = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/rev_1/heartbeat'),
     ).length;
     expect(heartbeatsAfterNonBfcacheShow).toBe(before);
   });
@@ -333,13 +347,9 @@ describe('useReviewSession', () => {
     it('prefers agent-origin over user-origin when both match', () => {
       const userSession = mkSession({ id: 'rev_user', origin: 'user' });
       const agentSession = mkSession({ id: 'rev_agent', origin: 'agent' });
-      expect(
-        findActiveSessionForFile([userSession, agentSession], '/tmp/a.md'),
-      ).toBe(agentSession);
+      expect(findActiveSessionForFile([userSession, agentSession], '/tmp/a.md')).toBe(agentSession);
       // Order doesn't matter.
-      expect(
-        findActiveSessionForFile([agentSession, userSession], '/tmp/a.md'),
-      ).toBe(agentSession);
+      expect(findActiveSessionForFile([agentSession, userSession], '/tmp/a.md')).toBe(agentSession);
     });
 
     it('within same origin, prefers the most recently created session', () => {
@@ -378,7 +388,14 @@ describe('useReviewSession', () => {
             ok: true,
             json: async () => ({
               sessions: [
-                { id: 'rev_1', filePaths: ['/tmp/a.md'], enableResolve: false, status: 'open', sentCommentIds: [], waitingForAgent: false },
+                {
+                  id: 'rev_1',
+                  filePaths: ['/tmp/a.md'],
+                  enableResolve: false,
+                  status: 'open',
+                  sentCommentIds: [],
+                  waitingForAgent: false,
+                },
               ],
             }),
           } as Response;
@@ -409,8 +426,8 @@ describe('useReviewSession', () => {
 
     // The hook should have called the list endpoint at least twice: the
     // initial poll, then the refresh triggered by the 404 heartbeat.
-    const listCalls = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url === '/api/review-sessions',
+    const listCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url === '/api/review-sessions',
     );
     expect(listCalls.length).toBeGreaterThanOrEqual(2);
 

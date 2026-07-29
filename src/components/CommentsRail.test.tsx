@@ -29,9 +29,7 @@ const comments: MdComment[] = [
     text: 'Orphaned comment',
     author: 'Dennis',
     timestamp: new Date().toISOString(),
-    replies: [
-      { id: 'r1', text: 'A reply', author: 'Dennis', timestamp: new Date().toISOString() },
-    ],
+    replies: [{ id: 'r1', text: 'A reply', author: 'Dennis', timestamp: new Date().toISOString() }],
   },
 ];
 
@@ -226,7 +224,6 @@ describe('RailDensityControl', () => {
 });
 
 describe('CommentsRail', () => {
-
   describe('Anchored density', () => {
     it('renders a positioned card per anchoredComments entry', async () => {
       renderRail();

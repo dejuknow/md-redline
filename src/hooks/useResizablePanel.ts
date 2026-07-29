@@ -88,8 +88,7 @@ export function useResizablePanel() {
 
       // Right-edge panels (sidebar, mermaidPanel) grow when dragged leftward;
       // left-edge panels (explorer) grow when dragged rightward.
-      const delta =
-        panel === 'explorer' ? e.clientX - startX.current : startX.current - e.clientX;
+      const delta = panel === 'explorer' ? e.clientX - startX.current : startX.current - e.clientX;
 
       const newWidth = clamp(startWidth.current + delta, MIN_WIDTHS[panel], MAX_WIDTHS[panel]);
 

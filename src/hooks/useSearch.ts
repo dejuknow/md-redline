@@ -15,9 +15,7 @@ export function useSearch(onClose: () => void) {
   }, []);
 
   const handleSearchNext = useCallback(() => {
-    setActiveSearchIndex((prev) =>
-      prev < searchMatchCountRef.current - 1 ? prev + 1 : 0,
-    );
+    setActiveSearchIndex((prev) => (prev < searchMatchCountRef.current - 1 ? prev + 1 : 0));
   }, []);
 
   const handleSearchPrev = useCallback(() => {

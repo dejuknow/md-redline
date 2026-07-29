@@ -18,7 +18,15 @@
 // ============================================================================
 
 import { test, expect, type Page } from '@playwright/test';
-import { copyFileSync, unlinkSync, existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs';
+import {
+  copyFileSync,
+  unlinkSync,
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  readFileSync,
+} from 'fs';
 import { writeFile as writeFileAsync } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -371,12 +379,12 @@ async function setupDemoPage(page: Page) {
       const chrome = document.createElement('div');
       chrome.id = 'demo-chrome';
       chrome.innerHTML =
-        '<div class="dots">'
-        + '<span class="close"></span>'
-        + '<span class="minimize"></span>'
-        + '<span class="maximize"></span>'
-        + '</div>'
-        + '<span class="title">md-redline</span>';
+        '<div class="dots">' +
+        '<span class="close"></span>' +
+        '<span class="minimize"></span>' +
+        '<span class="maximize"></span>' +
+        '</div>' +
+        '<span class="title">md-redline</span>';
       document.body.appendChild(chrome);
 
       // Fake cursor — attached to <html>, NOT <body>. If it's under <body>
@@ -384,9 +392,10 @@ async function setupDemoPage(page: Page) {
       // click location while we're zoomed in.
       const cursor = document.createElement('div');
       cursor.id = 'demo-cursor';
-      cursor.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
-        + '<path d="M5 3l14 8.5-6.5 1.5-3.5 6z" fill="white" stroke="black" stroke-width="1.2" stroke-linejoin="round"/>'
-        + '</svg>';
+      cursor.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
+        '<path d="M5 3l14 8.5-6.5 1.5-3.5 6z" fill="white" stroke="black" stroke-width="1.2" stroke-linejoin="round"/>' +
+        '</svg>';
       document.documentElement.appendChild(cursor);
 
       // The cursor SVG is offset by translate(-3px,-2px) with the arrow tip
@@ -412,14 +421,18 @@ async function setupDemoPage(page: Page) {
       // Appended to <html>, NOT body, so the ripple shares a coordinate
       // system with the (also-on-html) cursor. Body is scaled during zoom,
       // so a ripple inside body would drift away from the cursor tip.
-      document.addEventListener('mousedown', (e) => {
-        const ripple = document.createElement('div');
-        ripple.className = 'demo-ripple';
-        ripple.style.left = (e.clientX + TIP_OFFSET_X) + 'px';
-        ripple.style.top  = (e.clientY + TIP_OFFSET_Y) + 'px';
-        document.documentElement.appendChild(ripple);
-        setTimeout(() => ripple.remove(), 900);
-      }, true);
+      document.addEventListener(
+        'mousedown',
+        (e) => {
+          const ripple = document.createElement('div');
+          ripple.className = 'demo-ripple';
+          ripple.style.left = e.clientX + TIP_OFFSET_X + 'px';
+          ripple.style.top = e.clientY + TIP_OFFSET_Y + 'px';
+          document.documentElement.appendChild(ripple);
+          setTimeout(() => ripple.remove(), 900);
+        },
+        true,
+      );
     });
   });
 }
@@ -549,7 +562,9 @@ async function addCommentAnimated(page: Page, anchorText: string, commentText: s
   // be mid-reflow for a frame or two, which produces bounds that don't
   // match the final on-screen position. Waiting past two paint cycles is
   // enough for layout to converge.
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+  );
   await page.waitForTimeout(80);
 
   const bounds = await getTextBounds(page, anchorText);
@@ -657,7 +672,6 @@ async function addCommentAnimated(page: Page, anchorText: string, commentText: s
 // ---------------------------------------------------------------------------
 
 test.describe.serial('Demo recording', () => {
-
   test.beforeAll(() => {
     copyFileSync(FIXTURE_BEFORE, DEMO_FILE);
     copyFileSync(FIXTURE_PRD, REVIEW_DEMO_FILE);
@@ -681,7 +695,7 @@ test.describe.serial('Demo recording', () => {
       data: { filePaths: [DEMO_FILE], enableResolve: true },
     });
     expect(res.status()).toBe(201);
-    const { sessionId } = await res.json() as { sessionId: string };
+    const { sessionId } = (await res.json()) as { sessionId: string };
 
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
     await expect(page.locator('.prose')).toBeVisible({ timeout: 10_000 });
@@ -715,7 +729,12 @@ test.describe.serial('Demo recording', () => {
     const sendBtn = banner.getByRole('button', { name: 'Send 2 & finish' });
     const sendBox = await sendBtn.boundingBox();
     if (sendBox) {
-      await slowMove(page, sendBox.x + sendBox.width / 2, sendBox.y + sendBox.height / 2, T.CURSOR_TO_SEND);
+      await slowMove(
+        page,
+        sendBox.x + sendBox.width / 2,
+        sendBox.y + sendBox.height / 2,
+        T.CURSOR_TO_SEND,
+      );
       await page.waitForTimeout(T.PRE_SEND_CLICK);
     }
     await sendBtn.click();
@@ -731,18 +750,24 @@ test.describe.serial('Demo recording', () => {
     // =====================================================================
 
     const content = readFileSync(DEMO_FILE, 'utf-8');
-    await page.evaluate((args) => {
-      const snapshots = { [args.path]: args.content };
-      localStorage.setItem('md-redline-snapshots', JSON.stringify(snapshots));
-    }, { path: DEMO_FILE, content });
+    await page.evaluate(
+      (args) => {
+        const snapshots = { [args.path]: args.content };
+        localStorage.setItem('md-redline-snapshots', JSON.stringify(snapshots));
+      },
+      { path: DEMO_FILE, content },
+    );
 
-    let modified = content
-      .replace(/- (<!-- @comment\{[^>]*"anchor":"Minimum 8 characters"[^>]*\} -->)Minimum 8 characters/,
-        (_, marker) => {
-          const updated = marker
-            .replace(/\} -->$/, ',"replies":[{"id":"r1","text":"Done. Updated to 12 characters.","author":"Agent","timestamp":"2026-03-26T12:01:00.000Z"}],"resolved":true,"status":"resolved"} -->');
-          return `- ${updated}Minimum 12 characters`;
-        });
+    let modified = content.replace(
+      /- (<!-- @comment\{[^>]*"anchor":"Minimum 8 characters"[^>]*\} -->)Minimum 8 characters/,
+      (_, marker) => {
+        const updated = marker.replace(
+          /\} -->$/,
+          ',"replies":[{"id":"r1","text":"Done. Updated to 12 characters.","author":"Agent","timestamp":"2026-03-26T12:01:00.000Z"}],"resolved":true,"status":"resolved"} -->',
+        );
+        return `- ${updated}Minimum 12 characters`;
+      },
+    );
 
     modified = modified.replace(
       /(<!-- @comment\{[^>]*"anchor":"valid 1 hour"[^>]*)\} -->/,
@@ -778,7 +803,12 @@ test.describe.serial('Demo recording', () => {
 
     const diffBox = await viewDiffBtn.boundingBox();
     if (diffBox) {
-      await slowMove(page, diffBox.x + diffBox.width / 2, diffBox.y + diffBox.height / 2, T.CURSOR_TO_VIEWDIFF);
+      await slowMove(
+        page,
+        diffBox.x + diffBox.width / 2,
+        diffBox.y + diffBox.height / 2,
+        T.CURSOR_TO_VIEWDIFF,
+      );
       await page.waitForTimeout(100);
     }
     await viewDiffBtn.click();
@@ -792,7 +822,12 @@ test.describe.serial('Demo recording', () => {
     if (await nextDiffBtn.isVisible().catch(() => false)) {
       const nextBox = await nextDiffBtn.boundingBox();
       if (nextBox) {
-        await slowMove(page, nextBox.x + nextBox.width / 2, nextBox.y + nextBox.height / 2, T.CURSOR_TO_NEXT);
+        await slowMove(
+          page,
+          nextBox.x + nextBox.width / 2,
+          nextBox.y + nextBox.height / 2,
+          T.CURSOR_TO_NEXT,
+        );
         await page.waitForTimeout(100);
       }
       await nextDiffBtn.click();
@@ -807,7 +842,12 @@ test.describe.serial('Demo recording', () => {
     if (await hideDiffBtn.isVisible().catch(() => false)) {
       const hideBox = await hideDiffBtn.boundingBox();
       if (hideBox) {
-        await slowMove(page, hideBox.x + hideBox.width / 2, hideBox.y + hideBox.height / 2, T.CURSOR_TO_HIDEDIFF);
+        await slowMove(
+          page,
+          hideBox.x + hideBox.width / 2,
+          hideBox.y + hideBox.height / 2,
+          T.CURSOR_TO_HIDEDIFF,
+        );
         await page.waitForTimeout(100);
       }
       await hideDiffBtn.click();
@@ -844,7 +884,7 @@ test.describe.serial('Demo recording', () => {
       data: { filePaths: [REVIEW_DEMO_FILE], origin: 'agent' },
     });
     expect(res.status()).toBe(201);
-    const { sessionId } = await res.json() as { sessionId: string };
+    const { sessionId } = (await res.json()) as { sessionId: string };
 
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
     await expect(page.locator('.prose')).toBeVisible({ timeout: 10_000 });
@@ -856,9 +896,7 @@ test.describe.serial('Demo recording', () => {
     // (same guard the e2e specs use).
     await page.waitForTimeout(500);
 
-    const postComments = (
-      comments: Array<{ anchor: string; text: string }>,
-    ) =>
+    const postComments = (comments: Array<{ anchor: string; text: string }>) =>
       request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
         data: {
           mode: 'review',
@@ -969,7 +1007,12 @@ test.describe.serial('Demo recording', () => {
     const endBtn = banner.getByRole('button', { name: /end review/i });
     const endBox = await endBtn.boundingBox();
     if (endBox) {
-      await slowMove(page, endBox.x + endBox.width / 2, endBox.y + endBox.height / 2, T.CURSOR_TO_END);
+      await slowMove(
+        page,
+        endBox.x + endBox.width / 2,
+        endBox.y + endBox.height / 2,
+        T.CURSOR_TO_END,
+      );
       await page.waitForTimeout(T.PRE_SEND_CLICK);
     }
     await endBtn.click();

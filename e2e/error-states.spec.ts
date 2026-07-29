@@ -99,8 +99,7 @@ test.describe('Error states', () => {
     // second call (the retry triggered by retryAllAccessDenied) is mocked to
     // return success — simulating the state after the picker grants access.
     await page.route(
-      (url) =>
-        url.pathname === '/api/file' && url.searchParams.get('path') === testFile,
+      (url) => url.pathname === '/api/file' && url.searchParams.get('path') === testFile,
       async (route) => {
         fileFetchCount++;
         if (fileFetchCount === 1) {
@@ -143,9 +142,9 @@ test.describe('Error states', () => {
     await trustButton.click();
 
     // The mock response should be rendered as a heading.
-    await expect(
-      page.getByRole('heading', { name: 'Mocked Trust Retry Doc' }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Mocked Trust Retry Doc' })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // The error and trust button should be gone after the successful retry.
     await expect(trustButton).toBeHidden();

@@ -15,7 +15,11 @@ function normalizeStored(parsed: unknown): Map<string, DiffReference> {
   for (const [path, val] of Object.entries(parsed as Record<string, unknown>)) {
     if (typeof val === 'string') {
       map.set(path, { content: val, capturedAt: Date.now(), origin: 'handoff' });
-    } else if (val && typeof val === 'object' && typeof (val as { content?: unknown }).content === 'string') {
+    } else if (
+      val &&
+      typeof val === 'object' &&
+      typeof (val as { content?: unknown }).content === 'string'
+    ) {
       const v = val as { content: string; capturedAt?: unknown; origin?: unknown };
       map.set(path, {
         content: v.content,

@@ -4,14 +4,11 @@
  * dependency cycle.
  */
 
-
 export type RequestReviewInput =
   | { mode: 'new'; filePaths: string[]; enableResolve: boolean }
   | { mode: 'continue'; sessionId: string };
 
-export type ValidationResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: string };
+export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export interface CreateSessionResult {
   sessionId: string;
@@ -67,7 +64,11 @@ import type { AskNoReplyReason } from '../review-sessions';
 export type { AskNoReplyReason };
 
 export type AskWaitResult =
-  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
+  | {
+      status: 'reply';
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    }
   | { status: 'no_reply'; reason: AskNoReplyReason };
 
 export interface PostAgentCommentsResult {
@@ -98,7 +99,14 @@ export interface PostReviewArgs {
 
 export interface ReviewInput {
   filePaths: string[];
-  comments?: Array<{ filePath: string; anchor: string; text: string; author?: string; contextBefore?: string; contextAfter?: string }>;
+  comments?: Array<{
+    filePath: string;
+    anchor: string;
+    text: string;
+    author?: string;
+    contextBefore?: string;
+    contextAfter?: string;
+  }>;
   replies?: Array<{ filePath: string; commentId: string; text: string; author?: string }>;
   enableResolve?: boolean;
 }
@@ -116,7 +124,10 @@ export type WaitForReviewResult =
    * or the agent invoked /finish from the legacy user-batch flow. The agent
    * should treat this as "no engagement" rather than "user finished".
    */
-  | { status: 'aborted'; reason: 'user_cancelled' | 'browser_disconnected' | 'agent_silent' | 'finished' };
+  | {
+      status: 'aborted';
+      reason: 'user_cancelled' | 'browser_disconnected' | 'agent_silent' | 'finished';
+    };
 
 export interface PostReviewResult {
   askId?: string;

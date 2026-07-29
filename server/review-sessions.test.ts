@@ -32,7 +32,12 @@ describe('ReviewSessionStore', () => {
     const a = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
     const b = store.createSession({ filePaths: ['/tmp/b.md'], enableResolve: false });
 
-    expect(store.listOpenSessions().map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
+    expect(
+      store
+        .listOpenSessions()
+        .map((s) => s.id)
+        .sort(),
+    ).toEqual([a.id, b.id].sort());
   });
 
   it('sendBatch resolves the waiter with batch status and keeps the session open', async () => {
@@ -74,7 +79,9 @@ describe('ReviewSessionStore', () => {
     store.beginWaitPark(session.id);
     const waiter2 = store.waitForSession(session.id);
     let resolved = false;
-    void waiter2.then(() => { resolved = true; });
+    void waiter2.then(() => {
+      resolved = true;
+    });
 
     // Flush microtasks — waiter2 should NOT have resolved yet
     await Promise.resolve();
@@ -329,9 +336,13 @@ describe('ReviewSessionStore', () => {
     it('addAsk rejects a second ask while another is pending for the same session', () => {
       const store = new ReviewSessionStore();
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
-      store.addAsk(session.id, [{ commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' }]);
+      store.addAsk(session.id, [
+        { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+      ]);
       expect(() =>
-        store.addAsk(session.id, [{ commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' }]),
+        store.addAsk(session.id, [
+          { commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' },
+        ]),
       ).toThrow(/previous mdr_ask is still pending/);
     });
 
@@ -340,7 +351,9 @@ describe('ReviewSessionStore', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       store.finish(session.id);
       expect(() =>
-        store.addAsk(session.id, [{ commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' }]),
+        store.addAsk(session.id, [
+          { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+        ]),
       ).toThrow(/session not found or already finished/);
     });
 
@@ -424,7 +437,9 @@ describe('ReviewSessionStore', () => {
       ]);
 
       // Force a stale heartbeat so the sweep aborts the session.
-      const internal = (store as unknown as { sessions: Map<string, { lastHeartbeatAt: Date }> }).sessions.get(session.id)!;
+      const internal = (
+        store as unknown as { sessions: Map<string, { lastHeartbeatAt: Date }> }
+      ).sessions.get(session.id)!;
       internal.lastHeartbeatAt = new Date(Date.now() - 31 * 60_000);
       (store as unknown as { sweepStale: () => void }).sweepStale();
 
@@ -677,13 +692,19 @@ describe('ReviewSessionStore', () => {
 
   describe('findOpenSession', () => {
     it('returns an open session with matching file paths', () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md', '/tmp/b.md'],
+        enableResolve: false,
+      });
       const found = store.findOpenSession(['/tmp/a.md', '/tmp/b.md'], 'user');
       expect(found?.id).toBe(session.id);
     });
 
     it('matches regardless of file path order', () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md', '/tmp/b.md'], enableResolve: false });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md', '/tmp/b.md'],
+        enableResolve: false,
+      });
       const found = store.findOpenSession(['/tmp/b.md', '/tmp/a.md'], 'user');
       expect(found?.id).toBe(session.id);
     });
@@ -830,10 +851,16 @@ describe('ReviewSessionStore', () => {
 
   describe('setSessionDone / waitForSessionDone', () => {
     it('waitForSessionDone resolves when setSessionDone is called', async () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
       const waiter = store.waitForSessionDone(session.id);
       let resolved = false;
-      void waiter.then(() => { resolved = true; });
+      void waiter.then(() => {
+        resolved = true;
+      });
 
       await Promise.resolve();
       expect(resolved).toBe(false);
@@ -844,19 +871,29 @@ describe('ReviewSessionStore', () => {
     });
 
     it('waitForSessionDone returns immediately when already done', async () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
       store.setSessionDone(session.id);
 
       const waiter = store.waitForSessionDone(session.id);
       let resolved = false;
-      void waiter.then(() => { resolved = true; });
+      void waiter.then(() => {
+        resolved = true;
+      });
 
       await Promise.resolve();
       expect(resolved).toBe(true);
     });
 
     it('setSessionDone is idempotent', () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
       expect(() => {
         store.setSessionDone(session.id);
         store.setSessionDone(session.id);
@@ -864,7 +901,11 @@ describe('ReviewSessionStore', () => {
     });
 
     it('setSessionDone rejects user-origin sessions', () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'user' });
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'user',
+      });
       expect(() => store.setSessionDone(session.id)).toThrow(/only valid for agent-origin/);
     });
 
@@ -872,8 +913,12 @@ describe('ReviewSessionStore', () => {
       expect(() => store.waitForSessionDone('rev_nonexistent')).toThrow('Session not found');
     });
 
-    it('wasSessionDone is true after setSessionDone, even after the session is gc\'d', () => {
-      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false, origin: 'agent' });
+    it("wasSessionDone is true after setSessionDone, even after the session is gc'd", () => {
+      const session = store.createSession({
+        filePaths: ['/tmp/a.md'],
+        enableResolve: false,
+        origin: 'agent',
+      });
       store.setSessionDone(session.id);
       expect(store.wasSessionDone(session.id)).toBe(true);
       // Simulate the terminal-retention sweep removing the session from the live Map.

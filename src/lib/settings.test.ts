@@ -123,7 +123,10 @@ describe('parseSettings superseded default template set', () => {
     { label: 'Too vague', text: 'This is too vague. Be more specific.' },
     { label: 'Fix formatting', text: 'Fix the formatting in this section.' },
     { label: 'Factually wrong', text: 'This is factually incorrect. Please verify and correct.' },
-    { label: 'Out of scope', text: 'This is out of scope. Remove it or move it to a separate doc.' },
+    {
+      label: 'Out of scope',
+      text: 'This is out of scope. Remove it or move it to a separate doc.',
+    },
   ];
 
   it('replaces an untouched old default set with the current defaults', () => {

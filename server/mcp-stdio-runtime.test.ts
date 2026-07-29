@@ -296,7 +296,9 @@ describe('handleRequestReviewToolCall', () => {
     const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
       createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
-      waitForSession: vi.fn().mockResolvedValue({ status: 'aborted', reason: 'browser_disconnected' }),
+      waitForSession: vi
+        .fn()
+        .mockResolvedValue({ status: 'aborted', reason: 'browser_disconnected' }),
       abortSession: vi.fn(),
     });
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
@@ -326,7 +328,9 @@ describe('handleRequestReviewToolCall', () => {
 
   it('throws on grantAccess failure with the underlying error message', async () => {
     const client = makeReviewClient({
-      grantAccess: vi.fn().mockRejectedValue(new Error('Cannot grant access outside allowed directories')),
+      grantAccess: vi
+        .fn()
+        .mockRejectedValue(new Error('Cannot grant access outside allowed directories')),
     });
     const openInBrowser = vi.fn();
 
@@ -381,7 +385,9 @@ describe('handleRequestReviewToolCall', () => {
   it('skips openInBrowser when createSession returns created: false (dedup)', async () => {
     const client = makeReviewClient({
       grantAccess: vi.fn().mockResolvedValue(undefined),
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
+      createSession: vi
+        .fn()
+        .mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
       waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'X' }),
       abortSession: vi.fn(),
     });
@@ -621,10 +627,7 @@ describe('handleWaitToolCall', () => {
       waitForReview: vi.fn().mockResolvedValue({ status: 'done' }),
     });
     const sendProgress = vi.fn();
-    await handleWaitToolCall(
-      { sessionId: 'rev_1' },
-      { client, sendProgress, signal: undefined },
-    );
+    await handleWaitToolCall({ sessionId: 'rev_1' }, { client, sendProgress, signal: undefined });
     expect(sendProgress).toHaveBeenCalledWith(expect.stringContaining('rev_1'));
   });
 
@@ -649,12 +652,16 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
   function makeReviewClient(overrides: Partial<MdrClient> = {}): MdrClient {
     return {
       grantAccess: vi.fn(),
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
+      createSession: vi
+        .fn()
+        .mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
       waitForSession: vi.fn(),
       abortSession: vi.fn(),
       postAgentComments: vi.fn(),
       waitForAsk: vi.fn(),
-      postReview: vi.fn().mockResolvedValue({ commentsWritten: 2, repliesWritten: 0, commentIds: ['c1', 'c2'] }),
+      postReview: vi
+        .fn()
+        .mockResolvedValue({ commentsWritten: 2, repliesWritten: 0, commentIds: ['c1', 'c2'] }),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
       ...overrides,
@@ -666,11 +673,13 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
     const result = await handleReviewToolCall(
       {
         filePaths: ['/abs/a.md'],
-        comments: [
-          { filePath: '/abs/a.md', anchor: 'foo', text: 'bar', author: 'Claude' },
-        ],
+        comments: [{ filePath: '/abs/a.md', anchor: 'foo', text: 'bar', author: 'Claude' }],
       },
-      { client, openInBrowser: vi.fn().mockResolvedValue(undefined), baseUrl: 'http://localhost:5188' },
+      {
+        client,
+        openInBrowser: vi.fn().mockResolvedValue(undefined),
+        baseUrl: 'http://localhost:5188',
+      },
     );
     expect(result.content[0].text).toContain('2 comment');
     expect(result.content[0].text).toContain('rev_1');
@@ -683,10 +692,15 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
   it('opens browser on first call, skips on dedupe', async () => {
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
     const client = makeReviewClient({
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
+      createSession: vi
+        .fn()
+        .mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: false }),
     });
     await handleReviewToolCall(
-      { filePaths: ['/abs/a.md'], comments: [{ filePath: '/abs/a.md', anchor: 'x', text: 'y', author: 'Claude' }] },
+      {
+        filePaths: ['/abs/a.md'],
+        comments: [{ filePath: '/abs/a.md', anchor: 'x', text: 'y', author: 'Claude' }],
+      },
       { client, openInBrowser, baseUrl: 'http://localhost:5188' },
     );
     expect(openInBrowser).not.toHaveBeenCalled();
@@ -695,7 +709,9 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
   it('opens the browser AT MOST ONCE per URL even if created=true is returned repeatedly', async () => {
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
     const client = makeReviewClient({
-      createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
+      createSession: vi
+        .fn()
+        .mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1', created: true }),
     });
     const input = {
       filePaths: ['/abs/a.md'],
@@ -710,9 +726,14 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
 
 describe('createMdrClient HTTP methods', () => {
   it('postReview sends comments + replies (fire-and-forget, no expectsReply)', async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ commentIds: ['cmt_1'], commentsWritten: 1, repliesWritten: 0 }), { status: 201 }),
-    );
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ commentIds: ['cmt_1'], commentsWritten: 1, repliesWritten: 0 }),
+          { status: 201 },
+        ),
+      );
     global.fetch = fetchSpy as never;
 
     const client = createMdrClient('http://localhost:3000');

@@ -11,7 +11,9 @@ function svg(content: string): Buffer<ArrayBuffer> {
 
 describe('injectSvgDimensions', () => {
   it('injects width and height when only viewBox is set', () => {
-    const input = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 116"><rect/></svg>');
+    const input = svg(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 116"><rect/></svg>',
+    );
     const result = asString(injectSvgDimensions(input));
     expect(result).toContain('width="100"');
     expect(result).toContain('height="116"');
@@ -134,9 +136,7 @@ describe('injectSvgDimensions', () => {
   });
 
   it('only modifies the first svg tag if there are nested svgs', () => {
-    const input = svg(
-      '<svg viewBox="0 0 100 100"><svg viewBox="0 0 50 50"></svg></svg>',
-    );
+    const input = svg('<svg viewBox="0 0 100 100"><svg viewBox="0 0 50 50"></svg></svg>');
     const result = asString(injectSvgDimensions(input));
     // Outer svg gets injected dimensions (100, 100), inner is left alone
     expect(result).toMatch(/<svg width="100" height="100" viewBox="0 0 100 100"/);

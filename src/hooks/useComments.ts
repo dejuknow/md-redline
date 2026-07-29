@@ -114,51 +114,63 @@ export function useComments(params: UseCommentsParams) {
   // Agent-initiated comments (mdr_ask questions) are excluded — they're tracked
   // and surfaced separately via the "Awaiting your reply" section, and they
   // must NOT be sent back to the agent as part of a user batch.
-  const { commentCounts, resolvedCommentCounts, commentIdsByFile, agentCommentCounts } = useMemo(() => {
-    const counts = new Map<string, number>();
-    const resolvedCounts = new Map<string, number>();
-    const idsByFile = new Map<string, string[]>();
-    const agentCounts = new Map<string, number>();
-    for (const tab of tabs) {
-      if (tab.filePath === activeFilePath) {
-        const userComments = comments.filter((c) => !c.agentInitiated);
-        const count = enableResolve
-          ? userComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-          : userComments.length;
-        counts.set(tab.filePath, count);
-        idsByFile.set(tab.filePath, userComments.map((c) => c.id));
-        if (enableResolve) {
-          resolvedCounts.set(
-            tab.filePath,
-            userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
-          );
-        }
-        const agentComments = comments.filter((c) => c.agentInitiated);
-        agentCounts.set(tab.filePath, agentComments.length);
-      } else {
-        try {
-          const { comments: tabComments } = parseComments(tab.rawMarkdown);
-          const userTabComments = tabComments.filter((c) => !c.agentInitiated);
+  const { commentCounts, resolvedCommentCounts, commentIdsByFile, agentCommentCounts } =
+    useMemo(() => {
+      const counts = new Map<string, number>();
+      const resolvedCounts = new Map<string, number>();
+      const idsByFile = new Map<string, string[]>();
+      const agentCounts = new Map<string, number>();
+      for (const tab of tabs) {
+        if (tab.filePath === activeFilePath) {
+          const userComments = comments.filter((c) => !c.agentInitiated);
           const count = enableResolve
-            ? userTabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-            : userTabComments.length;
+            ? userComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+            : userComments.length;
           counts.set(tab.filePath, count);
-          idsByFile.set(tab.filePath, userTabComments.map((c) => c.id));
+          idsByFile.set(
+            tab.filePath,
+            userComments.map((c) => c.id),
+          );
           if (enableResolve) {
             resolvedCounts.set(
               tab.filePath,
-              userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+              userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
             );
           }
-          const agentTabComments = tabComments.filter((c) => c.agentInitiated);
-          agentCounts.set(tab.filePath, agentTabComments.length);
-        } catch {
-          counts.set(tab.filePath, 0);
+          const agentComments = comments.filter((c) => c.agentInitiated);
+          agentCounts.set(tab.filePath, agentComments.length);
+        } else {
+          try {
+            const { comments: tabComments } = parseComments(tab.rawMarkdown);
+            const userTabComments = tabComments.filter((c) => !c.agentInitiated);
+            const count = enableResolve
+              ? userTabComments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+              : userTabComments.length;
+            counts.set(tab.filePath, count);
+            idsByFile.set(
+              tab.filePath,
+              userTabComments.map((c) => c.id),
+            );
+            if (enableResolve) {
+              resolvedCounts.set(
+                tab.filePath,
+                userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+              );
+            }
+            const agentTabComments = tabComments.filter((c) => c.agentInitiated);
+            agentCounts.set(tab.filePath, agentTabComments.length);
+          } catch {
+            counts.set(tab.filePath, 0);
+          }
         }
       }
-    }
-    return { commentCounts: counts, resolvedCommentCounts: resolvedCounts, commentIdsByFile: idsByFile, agentCommentCounts: agentCounts };
-  }, [tabs, activeFilePath, comments, enableResolve]);
+      return {
+        commentCounts: counts,
+        resolvedCommentCounts: resolvedCounts,
+        commentIdsByFile: idsByFile,
+        agentCommentCounts: agentCounts,
+      };
+    }, [tabs, activeFilePath, comments, enableResolve]);
 
   const commentCount = enableResolve
     ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
@@ -331,12 +343,7 @@ export function useComments(params: UseCommentsParams) {
 
   const handleReanchorToSelection = useCallback(
     (commentId: string, newAnchor: string, hintOffset?: number) => {
-      const next = moveComment(
-        rawMarkdownRef.current ?? '',
-        commentId,
-        newAnchor,
-        hintOffset,
-      );
+      const next = moveComment(rawMarkdownRef.current ?? '', commentId, newAnchor, hintOffset);
       updateAndSave(next);
     },
     [updateAndSave, rawMarkdownRef],

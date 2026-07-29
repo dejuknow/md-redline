@@ -20,9 +20,7 @@ const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
  * @returns {{ok: boolean, reason: 'green'|'no-runs'|'pending'|'failed', message: string, names?: string[], count?: number}}
  */
 export function evaluateCiRuns(checkRuns, { requiredApp = 'github-actions' } = {}) {
-  const runs = (checkRuns ?? []).filter(
-    (r) => !requiredApp || r?.app?.slug === requiredApp,
-  );
+  const runs = (checkRuns ?? []).filter((r) => !requiredApp || r?.app?.slug === requiredApp);
 
   if (runs.length === 0) {
     return {

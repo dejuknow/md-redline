@@ -234,11 +234,9 @@ test.describe('Copy button', () => {
     await expect(copyBtn).toHaveAttribute('title', 'Copied!');
 
     // Feedback should disappear after ~2 seconds
-    await expect(copyBtn).toHaveAttribute(
-      'title',
-      'Copy document (comment markers stripped)',
-      { timeout: 5000 },
-    );
+    await expect(copyBtn).toHaveAttribute('title', 'Copy document (comment markers stripped)', {
+      timeout: 5000,
+    });
   });
 });
 

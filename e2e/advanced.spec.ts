@@ -395,8 +395,7 @@ test.describe('Session persistence', () => {
     await page.locator('.prose').waitFor({ timeout: 10_000 });
 
     // Rail should still be hidden after reload (toggle not active)
-    cls =
-      (await page.locator('button[title*="Toggle comments rail"]').getAttribute('class')) ?? '';
+    cls = (await page.locator('button[title*="Toggle comments rail"]').getAttribute('class')) ?? '';
     expect(cls).not.toContain('bg-primary-bg');
     await expect(page.locator('[data-comments-rail]')).not.toBeVisible();
   });
@@ -477,18 +476,15 @@ test.describe('Session persistence', () => {
       f(),
     );
     await page.goto('/');
-    await page.evaluate(
-      ([fixture1, fixture2, overflow1]) => {
-        localStorage.setItem(
-          'md-redline-session',
-          JSON.stringify({
-            openTabs: [fixture1, fixture2, overflow1],
-            activeFilePath: overflow1,
-          }),
-        );
-      },
-      savedOrder,
-    );
+    await page.evaluate(([fixture1, fixture2, overflow1]) => {
+      localStorage.setItem(
+        'md-redline-session',
+        JSON.stringify({
+          openTabs: [fixture1, fixture2, overflow1],
+          activeFilePath: overflow1,
+        }),
+      );
+    }, savedOrder);
 
     // Reopen the MIDDLE saved tab via URL, as the desktop shell's first
     // navigation does. It must activate in place, not jump to the end.

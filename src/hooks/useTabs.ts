@@ -482,13 +482,10 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
   const errorKind = activeTab?.errorKind ?? null;
   const filePath = activeTab?.filePath ?? '';
 
-  const isTabDirty = useCallback(
-    (path: string): boolean => {
-      const key = findTabKey(tabDataRef.current, path) ?? path;
-      return tabDataRef.current.get(key)?.dirty === true;
-    },
-    [],
-  );
+  const isTabDirty = useCallback((path: string): boolean => {
+    const key = findTabKey(tabDataRef.current, path) ?? path;
+    return tabDataRef.current.get(key)?.dirty === true;
+  }, []);
 
   const setRawMarkdown = useCallback(
     (content: string) => {
@@ -628,13 +625,7 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
         }
       }
     }
-  }, [
-    applyLoadedResponse,
-    finishLoadRequest,
-    isCurrentLoadRequest,
-    startLoadRequest,
-    updateTab,
-  ]);
+  }, [applyLoadedResponse, finishLoadRequest, isCurrentLoadRequest, startLoadRequest, updateTab]);
 
   return {
     tabs,

@@ -96,7 +96,9 @@ describe('validateAskInput', () => {
   it('accepts optional author / contextBefore / contextAfter', () => {
     const res = validateAskInput({
       sessionId: 'rev_x',
-      questions: [{ ...validQuestion, author: 'Claude', contextBefore: 'before', contextAfter: 'after' }],
+      questions: [
+        { ...validQuestion, author: 'Claude', contextBefore: 'before', contextAfter: 'after' },
+      ],
     });
     expect(res.ok).toBe(true);
   });
@@ -124,13 +126,19 @@ describe('validateAskInput', () => {
   });
 
   it('rejects question with non-string filePath', () => {
-    const res = validateAskInput({ sessionId: 'rev_x', questions: [{ ...validQuestion, filePath: 42 }] });
+    const res = validateAskInput({
+      sessionId: 'rev_x',
+      questions: [{ ...validQuestion, filePath: 42 }],
+    });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/filePath/);
   });
 
   it('rejects question with empty anchor', () => {
-    const res = validateAskInput({ sessionId: 'rev_x', questions: [{ ...validQuestion, anchor: '' }] });
+    const res = validateAskInput({
+      sessionId: 'rev_x',
+      questions: [{ ...validQuestion, anchor: '' }],
+    });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/anchor/);
   });

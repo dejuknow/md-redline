@@ -184,9 +184,7 @@ function main() {
   try {
     content = readFileSync(file, 'utf-8');
   } catch (err) {
-    console.error(
-      `Could not read ${file}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    console.error(`Could not read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -201,13 +199,11 @@ function main() {
   console.log(`Simulating agent on ${file}`);
   console.log(`  ${open.length} open comment${open.length === 1 ? '' : 's'}`);
   console.log(
-    `  actions: ${[
-      opts.edit && 'edit',
-      opts.reply && 'reply',
-      opts.resolve && 'resolve',
-    ]
-      .filter(Boolean)
-      .join(', ') || '(none)'}`,
+    `  actions: ${
+      [opts.edit && 'edit', opts.reply && 'reply', opts.resolve && 'resolve']
+        .filter(Boolean)
+        .join(', ') || '(none)'
+    }`,
   );
 
   let nextContent = content;

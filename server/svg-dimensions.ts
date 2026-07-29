@@ -64,8 +64,7 @@ export function injectSvgDimensions(content: Buffer<ArrayBuffer>): Buffer<ArrayB
   // characters `<svg` of the matched tag. Using tagMatch.index avoids a
   // second regex scan that could match a different `<svg` substring.
   const insertAt = tagMatch.index! + 4; // length of "<svg"
-  const injected =
-    text.slice(0, insertAt) + ` width="${w}" height="${h}"` + text.slice(insertAt);
+  const injected = text.slice(0, insertAt) + ` width="${w}" height="${h}"` + text.slice(insertAt);
 
   return Buffer.from(injected, 'utf-8');
 }

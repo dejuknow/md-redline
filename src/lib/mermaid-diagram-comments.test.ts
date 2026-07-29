@@ -60,10 +60,7 @@ describe('commentsForDiagram', () => {
     // anchor text happens to match a node label downstream.
     const diagram = `flowchart TD\n  A[Login] --> B[Dashboard]`;
     const md =
-      'Welcome to the Login page. <!-- @comment{...} -->\n' +
-      '```mermaid\n' +
-      diagram +
-      '\n```\n';
+      'Welcome to the Login page. <!-- @comment{...} -->\n' + '```mermaid\n' + diagram + '\n```\n';
     const proseMarker = md.indexOf('<!-- @comment');
     const c: MdComment = { ...makeComment('prose', 'Login'), cleanOffset: proseMarker };
     expect(commentsForDiagram(diagram, [c], md).map((c) => c.id)).toEqual([]);
@@ -108,10 +105,7 @@ describe('commentsForDiagram', () => {
 
   it('attributes comments inside the source block to that diagram', () => {
     const diagram = `flowchart TD\n  A[API Gateway]`;
-    const md =
-      'prose\n```mermaid\n' +
-      diagram +
-      '\n<!-- @comment{...} -->\n```\nafter\n';
+    const md = 'prose\n```mermaid\n' + diagram + '\n<!-- @comment{...} -->\n```\nafter\n';
     const markerOffset = md.indexOf('<!-- @comment');
     const c: MdComment = { ...makeComment('inside', 'API Gateway'), cleanOffset: markerOffset };
     expect(commentsForDiagram(diagram, [c], md).map((c) => c.id)).toEqual(['inside']);

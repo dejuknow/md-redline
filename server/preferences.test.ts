@@ -132,10 +132,7 @@ describe('writePreferences', () => {
       trustedRoots: ['/Users/test/vault-a', '/Users/test/vault-b'],
     });
     const result = await readPreferences(testDir);
-    expect(result.trustedRoots).toEqual([
-      '/Users/test/vault-a',
-      '/Users/test/vault-b',
-    ]);
+    expect(result.trustedRoots).toEqual(['/Users/test/vault-a', '/Users/test/vault-b']);
   });
 });
 
@@ -247,9 +244,7 @@ describe('corrupted prefs quarantine', () => {
 
     const entries = await readdir(testDir);
     expect(
-      entries.some(
-        (e) => e.startsWith('.md-redline.json.corrupt-') && !e.endsWith('.tmp'),
-      ),
+      entries.some((e) => e.startsWith('.md-redline.json.corrupt-') && !e.endsWith('.tmp')),
     ).toBe(true);
 
     const fresh = await readPreferences(testDir);
@@ -278,12 +273,10 @@ describe('cross-process file lock', () => {
     await writeFile(lockPath, 'fake-pid');
 
     let completed = false;
-    const writePromise = writePreferences(testDir, { author: 'Locked' }).then(
-      (result) => {
-        completed = true;
-        return result;
-      },
-    );
+    const writePromise = writePreferences(testDir, { author: 'Locked' }).then((result) => {
+      completed = true;
+      return result;
+    });
 
     // Give the writer a chance to attempt the lock and back off.
     await new Promise((res) => setTimeout(res, 100));

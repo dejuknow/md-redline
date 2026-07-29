@@ -143,7 +143,8 @@ export function CommentListSurface({
     const status = getEffectiveStatus(c);
     const hiddenByFilter =
       resolveEnabled &&
-      ((filter === 'open' && status !== 'open') || (filter === 'resolved' && status !== 'resolved'));
+      ((filter === 'open' && status !== 'open') ||
+        (filter === 'resolved' && status !== 'resolved'));
     const q = search.toLowerCase();
     const hiddenBySearch =
       search !== '' &&
@@ -229,12 +230,8 @@ export function CommentListSurface({
   const activeCommentsAll = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
     : filtered;
-  const orphanActiveComments = activeCommentsAll.filter((c) =>
-    missingAnchors.has(c.id),
-  );
-  const activeComments = activeCommentsAll.filter(
-    (c) => !missingAnchors.has(c.id),
-  );
+  const orphanActiveComments = activeCommentsAll.filter((c) => missingAnchors.has(c.id));
+  const activeComments = activeCommentsAll.filter((c) => !missingAnchors.has(c.id));
   const resolvedComments = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved')
     : [];
@@ -396,9 +393,7 @@ export function CommentListSurface({
             onRequestReplyCompose={openReplyCompose}
             onRequestReplyEdit={openReplyEdit}
             onCloseEditor={closeEditor}
-            onContextMenu={
-              onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
-            }
+            onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
           />
         ))}
 
@@ -441,9 +436,7 @@ export function CommentListSurface({
             onRequestReplyCompose={openReplyCompose}
             onRequestReplyEdit={openReplyEdit}
             onCloseEditor={closeEditor}
-            onContextMenu={
-              onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined
-            }
+            onContextMenu={onCtxMenu ? (id, x, y) => onCtxMenu({ commentId: id, x, y }) : undefined}
           />
         ))}
 

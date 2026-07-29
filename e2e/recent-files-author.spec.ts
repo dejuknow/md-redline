@@ -184,7 +184,9 @@ test.describe('Author management', () => {
     // Reload and verify — wait for the settings button (toolbar) to be ready,
     // not .prose, because the file may not reopen automatically after reload.
     await page.reload();
-    await expect(page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`)).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`)).toBeVisible({
+      timeout: 10_000,
+    });
 
     await page.locator(`button[title="Settings (${MOD_LABEL}+,)"]`).click();
     await expect(authorInput(page)).toHaveValue('PersistentUser');

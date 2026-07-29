@@ -113,9 +113,7 @@ test.describe('Margin notes', () => {
     await card.locator('textarea').fill('Reply from the margin');
     await page.keyboard.press(withMod('Enter'));
 
-    await expect
-      .poll(() => readFileSync(fixturePath, 'utf-8'))
-      .toContain('Reply from the margin');
+    await expect.poll(() => readFileSync(fixturePath, 'utf-8')).toContain('Reply from the margin');
   });
 
   test('the Reply action works on an inactive compact card', async ({ page }) => {

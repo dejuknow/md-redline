@@ -319,7 +319,10 @@ export async function handleAskToolCall(
     void ctx.client.releaseAsk(input.sessionId, askId).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
       if (!msg.includes('HTTP 404')) {
-        console.warn(`[mcp] releaseAsk on early-cancel failed for ${input.sessionId}/${askId}:`, err);
+        console.warn(
+          `[mcp] releaseAsk on early-cancel failed for ${input.sessionId}/${askId}:`,
+          err,
+        );
       }
     });
     return {
@@ -384,9 +387,8 @@ export async function handleAskToolCall(
   if (askResult.status === 'reply') {
     const replyCount = askResult.replies.length;
     const totalCount = askResult.totalQuestions;
-    const countPhrase = replyCount === totalCount
-      ? `all ${replyCount}`
-      : `${replyCount} of ${totalCount}`;
+    const countPhrase =
+      replyCount === totalCount ? `all ${replyCount}` : `${replyCount} of ${totalCount}`;
     return {
       content: [
         {
@@ -413,12 +415,27 @@ export async function handleAskToolCall(
   const READ_FILE_HINT =
     'Re-read the file(s) to pick up any inline replies or edits the user made, then continue with your plan.';
   const reasonDetails: Record<string, { text: string; hintReadFile: boolean }> = {
-    released: { text: 'your tool call was cancelled before the user could reply', hintReadFile: true },
-    tab_closed: { text: 'the mdr browser tab was closed before the user replied', hintReadFile: true },
-    cancelled: { text: 'the user cancelled the review session before replying', hintReadFile: true },
-    done_without_reply: { text: 'the user finished the review without replying to your questions', hintReadFile: true },
+    released: {
+      text: 'your tool call was cancelled before the user could reply',
+      hintReadFile: true,
+    },
+    tab_closed: {
+      text: 'the mdr browser tab was closed before the user replied',
+      hintReadFile: true,
+    },
+    cancelled: {
+      text: 'the user cancelled the review session before replying',
+      hintReadFile: true,
+    },
+    done_without_reply: {
+      text: 'the user finished the review without replying to your questions',
+      hintReadFile: true,
+    },
     timeout: { text: 'the review session timed out before the user replied', hintReadFile: true },
-    agent_silent: { text: 'the session was closed because no comments were posted in time', hintReadFile: false },
+    agent_silent: {
+      text: 'the session was closed because no comments were posted in time',
+      hintReadFile: false,
+    },
   };
   const detail = reasonDetails[askResult.reason] ?? { text: askResult.reason, hintReadFile: true };
   const tail = detail.hintReadFile
@@ -543,7 +560,10 @@ export async function handleWaitToolCall(
   if (result.status === 'aborted') {
     return {
       content: [
-        { type: 'text', text: WAIT_ABORTED_TEXT[result.reason] ?? `Review session ended (${result.reason}).` },
+        {
+          type: 'text',
+          text: WAIT_ABORTED_TEXT[result.reason] ?? `Review session ended (${result.reason}).`,
+        },
       ],
     };
   }
@@ -615,8 +635,10 @@ export async function handleReviewToolCall(
   } catch (err) {
     const e = err as Error & { failedComments?: number[]; failedReplies?: number[] };
     const detailParts: string[] = [];
-    if (e.failedComments?.length) detailParts.push(`failedComments: ${JSON.stringify(e.failedComments)}`);
-    if (e.failedReplies?.length) detailParts.push(`failedReplies: ${JSON.stringify(e.failedReplies)}`);
+    if (e.failedComments?.length)
+      detailParts.push(`failedComments: ${JSON.stringify(e.failedComments)}`);
+    if (e.failedReplies?.length)
+      detailParts.push(`failedReplies: ${JSON.stringify(e.failedReplies)}`);
     const detail = detailParts.length > 0 ? ` ${detailParts.join('; ')}` : '';
     return {
       isError: true,

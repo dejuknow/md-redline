@@ -63,10 +63,7 @@ export function ReviewBanner({
 
   const buildPromptForSession = useCallback(
     (s: ReviewSession, ids?: string[]): string => {
-      const totalComments = s.filePaths.reduce(
-        (sum, p) => sum + (commentCounts.get(p) ?? 0),
-        0,
-      );
+      const totalComments = s.filePaths.reduce((sum, p) => sum + (commentCounts.get(p) ?? 0), 0);
       if (totalComments === 0 && (!ids || ids.length === 0)) {
         const list = s.filePaths.map((p) => `\`${p}\``).join(', ');
         return `I reviewed the following files and had no changes. Please proceed: ${list}.`;
@@ -121,15 +118,28 @@ export function ReviewBanner({
         onHandoffSuccess(s);
         onBatchSent?.(unsentIds);
         if (data.queued) {
-          showToast?.(`Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`, 'success');
+          showToast?.(
+            `Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`,
+            'success',
+          );
         } else {
-          showToast?.(`Sent ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'} to agent`, 'success');
+          showToast?.(
+            `Sent ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'} to agent`,
+            'success',
+          );
         }
       } finally {
         setBusyId(null);
       }
     },
-    [buildPromptForSession, commentIdsByFile, commentCounts, onHandoffSuccess, onBatchSent, showToast],
+    [
+      buildPromptForSession,
+      commentIdsByFile,
+      commentCounts,
+      onHandoffSuccess,
+      onBatchSent,
+      showToast,
+    ],
   );
 
   const handleSendAndFinish = useCallback(
@@ -278,9 +288,7 @@ export function ReviewBanner({
               {s.filePaths.map((p, i) => (
                 <span key={p}>
                   {i > 0 && ', '}
-                  <code className="rounded bg-current/10 px-1">
-                    {getPathBasename(p)}
-                  </code>
+                  <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
                 </span>
               ))}
               .
@@ -454,7 +462,9 @@ function AgentSessionRow({
         {awaitingReply ? (
           <strong>{agentName} is waiting on your reply.</strong>
         ) : (
-          <strong>{agentName} is reviewing {fileList}.</strong>
+          <strong>
+            {agentName} is reviewing {fileList}.
+          </strong>
         )}
         {awaitingReply ? (
           <PendingAskChip

@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  buildKillCommand,
-  checkServer,
-  gracefulShutdown,
-  killPort,
-} from './server-control.js';
+import { buildKillCommand, checkServer, gracefulShutdown, killPort } from './server-control.js';
 
 describe('buildKillCommand', () => {
   it('scopes lsof to loopback LISTEN sockets on macOS/Linux', () => {
@@ -70,10 +65,7 @@ describe('killPort', () => {
       .map((c) => String(c[0]))
       .filter((c) => c.startsWith('taskkill'));
     expect(taskkillCalls).toEqual(
-      expect.arrayContaining([
-        'taskkill /PID 4242 /F',
-        'taskkill /PID 4243 /F',
-      ]),
+      expect.arrayContaining(['taskkill /PID 4242 /F', 'taskkill /PID 4243 /F']),
     );
     // Deduped — only two unique PIDs despite three lines.
     expect(taskkillCalls).toHaveLength(2);

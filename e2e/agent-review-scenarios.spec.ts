@@ -90,20 +90,17 @@ test.describe('Agent review scenarios', () => {
     const { sessionId } = (await create.json()) as { sessionId: string };
 
     // 2. POST a comment whose anchor contains literal markdown markup.
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            {
-              filePath: file,
-              anchor: '**Metric**: 30% increase',
-              text: 'Is 30% realistic given current baselines?',
-            },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          {
+            filePath: file,
+            anchor: '**Metric**: 30% increase',
+            text: 'Is 30% realistic given current baselines?',
+          },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
 
     // 3. Navigate and wait for the sidebar to render.
@@ -157,25 +154,22 @@ test.describe('Agent review scenarios', () => {
     await page.waitForTimeout(500);
 
     // 3. POST two fire-and-forget agent comments.
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            {
-              filePath: file,
-              anchor: 'timeout is 30',
-              text: 'Should this be configurable?',
-            },
-            {
-              filePath: file,
-              anchor: 'retry count is 3',
-              text: 'Is 3 the right default?',
-            },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          {
+            filePath: file,
+            anchor: 'timeout is 30',
+            text: 'Should this be configurable?',
+          },
+          {
+            filePath: file,
+            anchor: 'retry count is 3',
+            text: 'Is 3 the right default?',
+          },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
 
     // 4. Wait for sidebar to populate. Banner stays up (unified active-review banner)
@@ -220,25 +214,22 @@ test.describe('Agent review scenarios', () => {
     const { sessionId } = (await create.json()) as { sessionId: string };
 
     // 2. POST two fire-and-forget comments.
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            {
-              filePath: file,
-              anchor: 'cache TTL is 60',
-              text: 'Is 60s the right default?',
-            },
-            {
-              filePath: file,
-              anchor: 'flush interval is 5',
-              text: 'Consider making this configurable.',
-            },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          {
+            filePath: file,
+            anchor: 'cache TTL is 60',
+            text: 'Is 60s the right default?',
+          },
+          {
+            filePath: file,
+            anchor: 'flush interval is 5',
+            text: 'Consider making this configurable.',
+          },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
 
     // 3. Navigate and wait for comments to render.
@@ -349,17 +340,14 @@ test.describe('Agent review scenarios', () => {
     });
 
     // 2. POST fire-and-forget comments.
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            { filePath: file, anchor: 'Hello world', text: 'Nice greeting.' },
-            { filePath: file, anchor: 'This is a doc', text: 'Add a summary.' },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          { filePath: file, anchor: 'Hello world', text: 'Nice greeting.' },
+          { filePath: file, anchor: 'This is a doc', text: 'Add a summary.' },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
 
     // 3. Navigate to the session and let it fully settle.
@@ -418,16 +406,13 @@ test.describe('Agent review scenarios', () => {
     const { sessionId } = (await create.json()) as { sessionId: string };
 
     // 2. POST comments to session A — this bumps lastHeartbeatAt internally.
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            { filePath: file, anchor: 'batch size is 100', text: 'Should this scale dynamically?' },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          { filePath: file, anchor: 'batch size is 100', text: 'Should this scale dynamically?' },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
 
     // 3. Immediately make another agent-origin POST for the same files.
@@ -468,25 +453,22 @@ test.describe('Agent review scenarios', () => {
     const { sessionId } = (await create.json()) as { sessionId: string };
 
     // 2. POST two comments with markdown-formatted anchors.
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            {
-              filePath: file,
-              anchor: '**Bold word**',
-              text: 'Consider rephrasing',
-            },
-            {
-              filePath: file,
-              anchor: '_Italic_',
-              text: 'Why italics here?',
-            },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          {
+            filePath: file,
+            anchor: '**Bold word**',
+            text: 'Consider rephrasing',
+          },
+          {
+            filePath: file,
+            anchor: '_Italic_',
+            text: 'Why italics here?',
+          },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
 
     // 3. Navigate to the session and wait for the sidebar.

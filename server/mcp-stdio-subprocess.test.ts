@@ -53,7 +53,9 @@ function bundleIsRunnable(): boolean {
 // The bin needs dist/server.js too: its production-mode probe stats that file
 // before it will run `mcp` at all.
 const HAS_DIST =
-  existsSync(DIST_MCP) && existsSync(join(__dirname, '..', 'dist', 'server.js')) && bundleIsRunnable();
+  existsSync(DIST_MCP) &&
+  existsSync(join(__dirname, '..', 'dist', 'server.js')) &&
+  bundleIsRunnable();
 
 interface JsonRpcResponse {
   jsonrpc: '2.0';
@@ -123,25 +125,23 @@ async function waitFor(
         }),
       );
 
-      const afterInit = await waitFor(
-        stdoutRef,
-        (parsed) => parsed.some((r) => r.id === 1),
-        5_000,
-      );
+      const afterInit = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 1), 5_000);
       const initResp = afterInit.find((r) => r.id === 1);
-      expect(initResp, `initialize response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
+      expect(
+        initResp,
+        `initialize response missing; raw stdout:\n${stdoutRef.current}`,
+      ).toBeDefined();
       expect(initResp?.result).toBeDefined();
 
       // Send tools/list and wait for its response.
       child.stdin.write(rpcRequest(2, 'tools/list'));
 
-      const afterList = await waitFor(
-        stdoutRef,
-        (parsed) => parsed.some((r) => r.id === 2),
-        5_000,
-      );
+      const afterList = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 2), 5_000);
       const toolsResp = afterList.find((r) => r.id === 2);
-      expect(toolsResp, `tools/list response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
+      expect(
+        toolsResp,
+        `tools/list response missing; raw stdout:\n${stdoutRef.current}`,
+      ).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       const names = tools.map((t) => t.name).sort();
       expect(names).toEqual(['mdr_ask', 'mdr_request_review', 'mdr_review', 'mdr_wait']);
@@ -176,7 +176,10 @@ async function waitFor(
 
       const afterList = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 2), 5_000);
       const toolsResp = afterList.find((r) => r.id === 2);
-      expect(toolsResp, `tools/list response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
+      expect(
+        toolsResp,
+        `tools/list response missing; raw stdout:\n${stdoutRef.current}`,
+      ).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       expect(tools.find((t) => t.name === 'mdr_review')).toBeDefined();
     } finally {
@@ -217,9 +220,16 @@ async function waitFor(
         }),
       );
 
-      const afterCall = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 2), 10_000);
+      const afterCall = await waitFor(
+        stdoutRef,
+        (parsed) => parsed.some((r) => r.id === 2),
+        10_000,
+      );
       const callResp = afterCall.find((r) => r.id === 2);
-      expect(callResp, `tools/call response missing; raw stdout:\n${stdoutRef.current}`).toBeDefined();
+      expect(
+        callResp,
+        `tools/call response missing; raw stdout:\n${stdoutRef.current}`,
+      ).toBeDefined();
       // Either a result or an error is acceptable — the key thing is the tool was dispatched
       // (not "Unknown tool: mdr_review"). If there's an error, it should not be about unknown tool.
       if (callResp?.error) {

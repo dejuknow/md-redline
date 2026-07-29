@@ -70,7 +70,7 @@ async function ink(page: Page, selector: string): Promise<Ink> {
 async function themeTone(page: Page, custom: string): Promise<string> {
   const hex = await page.evaluate(
     (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim(),
-    custom
+    custom,
   );
   return hexToRgb(hex);
 }
@@ -206,10 +206,10 @@ test.describe('Prose emphasis contract', () => {
       // cell or a header takes the same weight body bold gets.
       const bodyStrong = await ink(page, '.prose p strong');
       expect((await ink(page, '.prose td strong')).weight, `${name} td strong`).toBe(
-        bodyStrong.weight
+        bodyStrong.weight,
       );
       expect((await ink(page, '.prose th strong')).weight, `${name} th strong`).toBe(
-        bodyStrong.weight
+        bodyStrong.weight,
       );
     }
   });
@@ -268,14 +268,12 @@ test.describe('Prose emphasis contract', () => {
     expect((await ink(page, '.raw-table')).color).toBe(lightLine.color);
     // Quoted source lines are document text, so they clear the muted tone.
     expect((await ink(page, '.raw-blockquote')).color).toBe(
-      await themeTone(page, '--theme-text-secondary')
+      await themeTone(page, '--theme-text-secondary'),
     );
     // Fenced source blocks take --theme-code-text, which falls back to body ink
     // rather than the secondary. No theme overrides it today, so this asserts
     // the fallback arm the docs describe.
-    expect((await ink(page, '.raw-code-block')).color).toBe(
-      await themeTone(page, '--theme-text')
-    );
+    expect((await ink(page, '.raw-code-block')).color).toBe(await themeTone(page, '--theme-text'));
     // Heading markup lifts with bold, sharing --theme-raw-bold-weight.
     expect((await ink(page, '.raw-heading')).weight).toBe(lightBold.weight);
 

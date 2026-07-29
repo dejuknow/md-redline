@@ -69,12 +69,7 @@ describe('useDiffLines', () => {
     // Clean lines: ['# Heading', '', 'Body line one.', 'Body line two.', '']
     expect(map.length).toBeGreaterThan(0);
     // Find the clean index of "Body line one." and verify it points past the marker.
-    const cleanLines = MARKER_SNAPSHOT
-      .replace(
-        /<!-- @comment\{[^}]*\} -->\n?/,
-        '',
-      )
-      .split('\n');
+    const cleanLines = MARKER_SNAPSHOT.replace(/<!-- @comment\{[^}]*\} -->\n?/, '').split('\n');
     const cleanIdx = cleanLines.indexOf('Body line one.');
     expect(cleanIdx).toBeGreaterThanOrEqual(0);
     const rawIdx = map[cleanIdx];

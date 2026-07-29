@@ -81,10 +81,7 @@ function renderCard(
     onRequestReplyEdit: vi.fn(),
     onCloseEditor: vi.fn(),
   };
-  return render(
-    createElement(CommentCard, { ...defaults, ...props }),
-    { wrapper: AllProviders },
-  );
+  return render(createElement(CommentCard, { ...defaults, ...props }), { wrapper: AllProviders });
 }
 
 describe('CommentCard — agent-initiated comment', () => {

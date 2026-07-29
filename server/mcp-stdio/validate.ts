@@ -1,4 +1,10 @@
-import type { AskInput, RequestReviewInput, ReviewInput, ValidationResult, WaitInput } from './types';
+import type {
+  AskInput,
+  RequestReviewInput,
+  ReviewInput,
+  ValidationResult,
+  WaitInput,
+} from './types';
 
 // Hard caps on agent-controlled string fields. Anchors, text bodies, and
 // context fields end up persisted into the user's markdown file and parsed
@@ -53,7 +59,10 @@ export function validateRequestReviewInput(raw: unknown): ValidationResult<Reque
 
   // New session mode: filePaths is required
   if (!Array.isArray(obj.filePaths)) {
-    return { ok: false, error: 'filePaths must be an array (or provide sessionId to continue a session)' };
+    return {
+      ok: false,
+      error: 'filePaths must be an array (or provide sessionId to continue a session)',
+    };
   }
   if (obj.filePaths.length === 0) {
     return { ok: false, error: 'filePaths must be non-empty' };
@@ -100,7 +109,11 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
   if (hasComments) {
     for (let i = 0; i < (obj.comments as unknown[]).length; i++) {
       const c = (obj.comments as Array<Record<string, unknown>>)[i];
-      if (typeof c.filePath !== 'string' || typeof c.anchor !== 'string' || typeof c.text !== 'string') {
+      if (
+        typeof c.filePath !== 'string' ||
+        typeof c.anchor !== 'string' ||
+        typeof c.text !== 'string'
+      ) {
         return { ok: false, error: `comments[${i}]: filePath, anchor, text required as strings` };
       }
       if (!c.anchor || !c.text || !c.filePath) {
@@ -132,7 +145,11 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
   if (hasReplies) {
     for (let i = 0; i < (obj.replies as unknown[]).length; i++) {
       const r = (obj.replies as Array<Record<string, unknown>>)[i];
-      if (typeof r.filePath !== 'string' || typeof r.commentId !== 'string' || typeof r.text !== 'string') {
+      if (
+        typeof r.filePath !== 'string' ||
+        typeof r.commentId !== 'string' ||
+        typeof r.text !== 'string'
+      ) {
         return { ok: false, error: `replies[${i}]: filePath, commentId, text required as strings` };
       }
       if (!r.commentId || !r.text || !r.filePath) {

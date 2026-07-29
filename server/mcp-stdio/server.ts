@@ -7,9 +7,19 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { createMdrClient } from './client';
-import { handleAskToolCall, handleRequestReviewToolCall, handleReviewToolCall, handleWaitToolCall } from './handler';
+import {
+  handleAskToolCall,
+  handleRequestReviewToolCall,
+  handleReviewToolCall,
+  handleWaitToolCall,
+} from './handler';
 import type { RunMcpServerOptions } from './types';
-import { validateAskInput, validateRequestReviewInput, validateReviewInput, validateWaitInput } from './validate';
+import {
+  validateAskInput,
+  validateRequestReviewInput,
+  validateReviewInput,
+  validateWaitInput,
+} from './validate';
 
 /**
  * Wire the MCP SDK Server with stdio transport and register the
@@ -100,8 +110,14 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
                 type: 'object',
                 required: ['filePath', 'anchor', 'text'],
                 properties: {
-                  filePath: { type: 'string', description: 'Absolute path to a file in the session.' },
-                  anchor: { type: 'string', description: 'Exact text in the file the question refers to.' },
+                  filePath: {
+                    type: 'string',
+                    description: 'Absolute path to a file in the session.',
+                  },
+                  anchor: {
+                    type: 'string',
+                    description: 'Exact text in the file the question refers to.',
+                  },
                   text: { type: 'string', description: 'Your question.' },
                   author: {
                     type: 'string',
@@ -123,7 +139,7 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'Returns IMMEDIATELY after posting (never blocks). The returned `sessionId` ' +
           'MUST be passed to mdr_wait afterward to block until the user clicks Done — ' +
           'this is a two-tool flow: mdr_review (post) → mdr_wait (block). Skipping ' +
-          'mdr_wait leaves a banner on the user\'s screen until they click Done; you ' +
+          "mdr_wait leaves a banner on the user's screen until they click Done; you " +
           'will not see their replies or edits before continuing, and any user feedback ' +
           'will be invisible to you for this turn.\n\n' +
           'Use this when the user asks you to review a doc and drop comments. ' +
@@ -152,9 +168,15 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
                 required: ['filePath', 'anchor', 'text'],
                 properties: {
                   filePath: { type: 'string' },
-                  anchor: { type: 'string', description: 'Exact text in the file the comment refers to.' },
+                  anchor: {
+                    type: 'string',
+                    description: 'Exact text in the file the comment refers to.',
+                  },
                   text: { type: 'string', description: 'The feedback.' },
-                  author: { type: 'string', description: 'Your agent name (e.g. "Claude"). Shown in the mdr UI.' },
+                  author: {
+                    type: 'string',
+                    description: 'Your agent name (e.g. "Claude"). Shown in the mdr UI.',
+                  },
                   contextBefore: { type: 'string' },
                   contextAfter: { type: 'string' },
                 },
@@ -167,9 +189,15 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
                 required: ['filePath', 'commentId', 'text'],
                 properties: {
                   filePath: { type: 'string' },
-                  commentId: { type: 'string', description: 'ID of an existing top-level comment.' },
+                  commentId: {
+                    type: 'string',
+                    description: 'ID of an existing top-level comment.',
+                  },
                   text: { type: 'string' },
-                  author: { type: 'string', description: 'Your agent name (e.g. "Claude"). Shown in the mdr UI.' },
+                  author: {
+                    type: 'string',
+                    description: 'Your agent name (e.g. "Claude"). Shown in the mdr UI.',
+                  },
                 },
               },
             },
@@ -185,7 +213,7 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'Returns when the user clicks Done in the mdr UI. ' +
           'If the wait times out (90s), returns {status:"pending"} — call mdr_wait again ' +
           'with the same sessionId to keep waiting. ' +
-          "After this returns {status:\"done\"}, read the file(s) to see the user's " +
+          'After this returns {status:"done"}, read the file(s) to see the user\'s ' +
           'replies, deletions, and resolutions.',
         inputSchema: {
           type: 'object',

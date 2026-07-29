@@ -611,10 +611,9 @@ describe('useComments', () => {
       // Start: anchor present (no orphans).
       const rawOk = `Hello ${makeComment({ id: 'c1', anchor: 'Hello' })}world`;
       const params = defaultParams({ rawMarkdown: rawOk });
-      const { result, rerender } = renderHook(
-        (p: UseCommentsParams) => useComments(p),
-        { initialProps: params },
-      );
+      const { result, rerender } = renderHook((p: UseCommentsParams) => useComments(p), {
+        initialProps: params,
+      });
       expect(Array.from(result.current.newOrphanIds)).toEqual([]);
       const initialRef = result.current.newOrphanIds;
 
@@ -844,8 +843,7 @@ describe('useComments', () => {
     it('calls moveComment and writes the updated raw markdown', () => {
       const setRawMarkdown = vi.fn();
       const saveFile = vi.fn();
-      const raw =
-        `Hello ${makeComment({ id: 'c1', anchor: 'missing text', status: 'open' })}new anchor here`;
+      const raw = `Hello ${makeComment({ id: 'c1', anchor: 'missing text', status: 'open' })}new anchor here`;
       const rawMarkdownRef = { current: raw };
       const params = defaultParams({
         rawMarkdown: raw,
@@ -855,9 +853,7 @@ describe('useComments', () => {
       });
       const { result } = renderHook(() => useComments(params));
 
-      act(() =>
-        result.current.handleReanchorToSelection('c1', 'new anchor', undefined),
-      );
+      act(() => result.current.handleReanchorToSelection('c1', 'new anchor', undefined));
 
       expect(setRawMarkdown).toHaveBeenCalledTimes(1);
       const saved = setRawMarkdown.mock.calls[0][0] as string;
@@ -877,9 +873,7 @@ describe('useComments', () => {
       });
       const { result } = renderHook(() => useComments(params));
 
-      act(() =>
-        result.current.handleReanchorToSelection('c1', 'not in doc', undefined),
-      );
+      act(() => result.current.handleReanchorToSelection('c1', 'not in doc', undefined));
 
       const saved = setRawMarkdown.mock.calls[0][0] as string;
       expect(saved).toContain('"anchor":"missing"');

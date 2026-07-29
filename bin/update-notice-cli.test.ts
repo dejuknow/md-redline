@@ -68,7 +68,10 @@ function startStub(
         return;
       }
 
-      if (req.method === 'POST' && (url.pathname === '/api/shutdown' || url.pathname === '/api/grant-access')) {
+      if (
+        req.method === 'POST' &&
+        (url.pathname === '/api/shutdown' || url.pathname === '/api/grant-access')
+      ) {
         req.resume();
         req.on('end', () => jsonBody(res, 200, { ok: true }));
         return;
@@ -177,7 +180,9 @@ describe('mdr update notice (subprocess)', () => {
     expect(
       result.stdout,
       `expected update notice; stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-    ).toContain(`Update available: ${CLI_VERSION} -> 99.0.0. Run: npm install -g md-redline@latest`);
+    ).toContain(
+      `Update available: ${CLI_VERSION} -> 99.0.0. Run: npm install -g md-redline@latest`,
+    );
     expect(result.code).toBe(0);
   }, 15_000);
 

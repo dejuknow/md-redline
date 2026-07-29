@@ -238,8 +238,8 @@ describe('scorer', () => {
       const expected = makeExpected({
         contentShouldChange: true,
         contentAssertions: [
-          { type: 'contains', value: 'brave' },       // pass
-          { type: 'not_contains', value: 'old' },      // fail — "old" is present
+          { type: 'contains', value: 'brave' }, // pass
+          { type: 'not_contains', value: 'old' }, // fail — "old" is present
         ],
       });
 
@@ -295,15 +295,15 @@ describe('scorer', () => {
       const expected = makeExpected({
         contentShouldChange: true,
         contentAssertions: [
-          { type: 'contains', value: 'improved' },  // pass
+          { type: 'contains', value: 'improved' }, // pass
         ],
         comments: [
           {
             id: 'c1',
             expectedAction: 'address',
             contentHints: {
-              shouldContain: ['improved'],            // pass
-              shouldNotContain: ['broken'],           // pass
+              shouldContain: ['improved'], // pass
+              shouldNotContain: ['broken'], // pass
             },
           },
         ],
@@ -483,9 +483,7 @@ describe('scorer', () => {
       const output = 'Hello world';
       const expected = makeExpected({
         contentShouldChange: true,
-        contentAssertions: [
-          { type: 'contains', value: longValue },
-        ],
+        contentAssertions: [{ type: 'contains', value: longValue }],
       });
 
       const result = score('long-assertion', input, output, expected);

@@ -8,9 +8,7 @@ const formats: Record<string, FormatAdapter> = {
 export function getFormat(name: string): FormatAdapter {
   const format = formats[name];
   if (!format) {
-    throw new Error(
-      `Unknown format: ${name}. Available: ${Object.keys(formats).join(', ')}`,
-    );
+    throw new Error(`Unknown format: ${name}. Available: ${Object.keys(formats).join(', ')}`);
   }
   return format;
 }

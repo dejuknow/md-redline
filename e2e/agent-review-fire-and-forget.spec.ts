@@ -66,11 +66,7 @@ test.describe('Agent review fire-and-forget', () => {
   }) => {
     fixtureDir = makeFixtureDir('happy');
     const file = resolve(fixtureDir, 'spec.md');
-    writeFileSync(
-      file,
-      '# Spec\n\nHello world.\n\nThis is a doc.\n',
-      'utf8',
-    );
+    writeFileSync(file, '# Spec\n\nHello world.\n\nThis is a doc.\n', 'utf8');
 
     // 1. Create an agent-origin session.
     const create = await request.post(`${baseURL}/api/review-sessions`, {
@@ -89,25 +85,22 @@ test.describe('Agent review fire-and-forget', () => {
     await page.waitForTimeout(500);
 
     // 3. Post two fire-and-forget comments (expectsReply: false).
-    const post = await request.post(
-      `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-      {
-        data: {
-          comments: [
-            {
-              filePath: file,
-              anchor: 'Hello world',
-              text: 'Consider a more specific greeting.',
-            },
-            {
-              filePath: file,
-              anchor: 'This is a doc',
-              text: 'Add a summary sentence here.',
-            },
-          ],
-        },
+    const post = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+      data: {
+        comments: [
+          {
+            filePath: file,
+            anchor: 'Hello world',
+            text: 'Consider a more specific greeting.',
+          },
+          {
+            filePath: file,
+            anchor: 'This is a doc',
+            text: 'Add a summary sentence here.',
+          },
+        ],
       },
-    );
+    });
     expect(post.status()).toBe(201);
     const { commentIds } = (await post.json()) as { commentIds: string[] };
     expect(commentIds).toHaveLength(2);
@@ -121,6 +114,8 @@ test.describe('Agent review fire-and-forget', () => {
 
     // 6. Banner shows "End review" button (fire-and-forget mode).
     const banner = page.getByTestId('review-banner');
-    await expect(banner.getByRole('button', { name: /end review/i })).toBeVisible({ timeout: 5_000 });
+    await expect(banner.getByRole('button', { name: /end review/i })).toBeVisible({
+      timeout: 5_000,
+    });
   });
 });

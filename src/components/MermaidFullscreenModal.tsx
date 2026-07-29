@@ -35,8 +35,7 @@ function pickByContext(
   textNodes: SVGTextElement[],
   comment: MdComment,
 ): SVGTextElement | null {
-  const contextTail =
-    comment.contextBefore?.trim().split(/\s+/).slice(-3).join(' ').trim() ?? '';
+  const contextTail = comment.contextBefore?.trim().split(/\s+/).slice(-3).join(' ').trim() ?? '';
   if (!contextTail) return null;
   for (const cand of candidates) {
     const idx = textNodes.indexOf(cand);
@@ -51,24 +50,15 @@ function pickByContext(
   }
   return null;
 }
-import {
-  MermaidPanZoomCanvas,
-  type MermaidPanZoomCanvasHandle,
-} from './MermaidPanZoomCanvas';
+import { MermaidPanZoomCanvas, type MermaidPanZoomCanvasHandle } from './MermaidPanZoomCanvas';
 import { MermaidThreadPanel } from './MermaidThreadPanel';
 import { CommentForm } from './CommentForm';
 import { IconButton } from './IconButton';
 import { useSelection } from '../hooks/useSelection';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPrimaryModifierLabel } from '../lib/platform';
-import {
-  commentsForDiagram,
-  orderThreadsBySvgPosition,
-} from '../lib/mermaid-diagram-comments';
-import {
-  applyMermaidSvgTextHighlight,
-  getMermaidHighlightTheme,
-} from '../lib/mermaid-highlights';
+import { commentsForDiagram, orderThreadsBySvgPosition } from '../lib/mermaid-diagram-comments';
+import { applyMermaidSvgTextHighlight, getMermaidHighlightTheme } from '../lib/mermaid-highlights';
 import './MermaidFullscreenModal.css';
 
 export interface MermaidFullscreenModalProps {
@@ -329,7 +319,6 @@ export function MermaidFullscreenModal({
     panToCommentAnchor(commentId);
   };
 
-
   // Order threads by their position in the SVG. The DOM read has to happen
   // after `MermaidPanZoomCanvas` inserts the SVG in its effect, which runs
   // *after* this component's useLayoutEffect. We retry on each frame until
@@ -346,16 +335,14 @@ export function MermaidFullscreenModal({
     let rafId = 0;
     const tryOrder = () => {
       if (cancelled) return;
-      const svg = rootRef.current?.querySelector<SVGSVGElement>(
-        '.mermaid-fullscreen-canvas-inner svg',
-      ) ?? null;
+      const svg =
+        rootRef.current?.querySelector<SVGSVGElement>('.mermaid-fullscreen-canvas-inner svg') ??
+        null;
       if (!svg) {
         rafId = window.requestAnimationFrame(tryOrder);
         return;
       }
-      setOrderedComments(
-        orderThreadsBySvgPosition(threadsForDiagram, svg).map((t) => t.comment),
-      );
+      setOrderedComments(orderThreadsBySvgPosition(threadsForDiagram, svg).map((t) => t.comment));
     };
     rafId = window.requestAnimationFrame(tryOrder);
     return () => {
@@ -493,11 +480,7 @@ export function MermaidFullscreenModal({
         </div>
 
         <div className="mermaid-fullscreen-body">
-          <MermaidPanZoomCanvas
-            ref={canvasRef}
-            svgHtml={svgHtml}
-            contentKey={source ?? ''}
-          />
+          <MermaidPanZoomCanvas ref={canvasRef} svgHtml={svgHtml} contentKey={source ?? ''} />
           {/* Resize handle, mirrors `<App>`'s sidebar divider — same hover
               feedback, same drag affordance, only renders while the panel
               is visible so it can't be clicked when the panel is hidden. */}

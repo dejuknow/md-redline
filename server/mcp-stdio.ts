@@ -5,9 +5,17 @@
  * dist bundle) keep their imports stable.
  */
 
-export { validateRequestReviewInput, validateContinueReviewInput, validateAskInput } from './mcp-stdio/validate';
+export {
+  validateRequestReviewInput,
+  validateContinueReviewInput,
+  validateAskInput,
+} from './mcp-stdio/validate';
 export { createMdrClient } from './mcp-stdio/client';
-export { handleRequestReviewToolCall, handleContinueReviewToolCall, handleReviewToolCall } from './mcp-stdio/handler';
+export {
+  handleRequestReviewToolCall,
+  handleContinueReviewToolCall,
+  handleReviewToolCall,
+} from './mcp-stdio/handler';
 export type { ContinueReviewInput } from './mcp-stdio/validate';
 export { runMcpServer } from './mcp-stdio/server';
 export { readPreferences } from './preferences';

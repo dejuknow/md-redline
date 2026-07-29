@@ -15,10 +15,10 @@ export function buildKillCommand(port, platform = process.platform) {
   return `lsof -iTCP@127.0.0.1:${port} -sTCP:LISTEN -t | xargs kill 2>/dev/null`;
 }
 
-export function killPort(port, {
-  platform = process.platform,
-  exec = (cmd, opts) => execSync(cmd, opts),
-} = {}) {
+export function killPort(
+  port,
+  { platform = process.platform, exec = (cmd, opts) => execSync(cmd, opts) } = {},
+) {
   const command = buildKillCommand(port, platform);
   if (!command) return false;
   try {
@@ -33,7 +33,11 @@ export function killPort(port, {
       );
       for (const pid of pids) {
         if (pid && pid !== '0') {
-          try { exec(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }); } catch { /* already exited */ }
+          try {
+            exec(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+          } catch {
+            /* already exited */
+          }
         }
       }
     } else {
@@ -45,10 +49,7 @@ export function killPort(port, {
   }
 }
 
-export async function checkServer(port, {
-  fetchFn = fetch,
-  timeoutMs = 1_000,
-} = {}) {
+export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000 } = {}) {
   try {
     // 127.0.0.1, never `localhost`: the server binds IPv4 loopback only,
     // while `localhost` resolves to ::1 first. If another app holds the
@@ -68,15 +69,18 @@ export async function checkServer(port, {
   }
 }
 
-export async function gracefulShutdown(port, {
-  fetchFn = fetch,
-  checkServerFn = (p) => checkServer(p, { fetchFn }),
-  requestTimeoutMs = 2_000,
-  deadlineMs = 3_000,
-  pollMs = 250,
-  now = () => Date.now(),
-  delay = (ms) => new Promise((r) => setTimeout(r, ms)),
-} = {}) {
+export async function gracefulShutdown(
+  port,
+  {
+    fetchFn = fetch,
+    checkServerFn = (p) => checkServer(p, { fetchFn }),
+    requestTimeoutMs = 2_000,
+    deadlineMs = 3_000,
+    pollMs = 250,
+    now = () => Date.now(),
+    delay = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {},
+) {
   // The server handler returns JSON then calls `setImmediate(process.exit)`,
   // so the response socket can be torn down before fetch fully resolves on
   // some runtimes. Treat a dropped connection the same as a 2xx reply and

@@ -211,7 +211,11 @@ describe('MarkdownViewer comment highlights — frontmatter fields', () => {
     // highlight has to land on the rendered field rather than nowhere.
     const source =
       '---\nname: mcp2cli\ndescription: Use when a server should be driven from the shell\n---\n\n# Overview\n\nBody text.\n';
-    const raw = insertComment(source, 'Use when a server should be driven from the shell', 'too vague?');
+    const raw = insertComment(
+      source,
+      'Use when a server should be driven from the shell',
+      'too vague?',
+    );
     const { comments, cleanMarkdown } = parseComments(raw);
     expect(comments).toHaveLength(1);
     expect(cleanMarkdown).toBe(source);
@@ -308,8 +312,7 @@ describe('MarkdownViewer comment highlights — numbered heading anchors', () =>
     // Block tags butt against each other, as they do once the viewer has
     // re-rendered: the concatenated text nodes carry no separator, so the
     // anchor's newlines cannot match literally and the tiered search runs.
-    const html =
-      '<h2>1. Current Strategy</h2><h3>1.1 The thesis</h3><p>Own the lead journey.</p>';
+    const html = '<h2>1. Current Strategy</h2><h3>1.1 The thesis</h3><p>Own the lead journey.</p>';
 
     const comment = {
       id: 'cmt_numbered',

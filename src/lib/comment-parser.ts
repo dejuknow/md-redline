@@ -47,7 +47,11 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
   const frontmatter = getFrontmatterRange(rawMarkdown);
 
   while ((fenceMatch = fenceRegex.exec(rawMarkdown)) !== null) {
-    if (frontmatter && fenceMatch.index >= frontmatter.start && fenceMatch.index < frontmatter.end) {
+    if (
+      frontmatter &&
+      fenceMatch.index >= frontmatter.start &&
+      fenceMatch.index < frontmatter.end
+    ) {
       continue;
     }
     const marker = fenceMatch[1];
@@ -1733,8 +1737,7 @@ export function orderCommentsByAnchor(cleanMarkdown: string, comments: MdComment
     return direct === -1 ? (comment.cleanOffset ?? 0) : direct;
   };
   return [...comments].sort(
-    (a, b) =>
-      (a.cleanOffset ?? 0) - (b.cleanOffset ?? 0) || anchorPosition(a) - anchorPosition(b),
+    (a, b) => (a.cleanOffset ?? 0) - (b.cleanOffset ?? 0) || anchorPosition(a) - anchorPosition(b),
   );
 }
 

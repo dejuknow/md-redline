@@ -112,7 +112,9 @@ test('hover-button opens the fullscreen modal', async ({ page }) => {
   // The shell with the canvas and panel should be present
   await expect(page.locator('.mermaid-fullscreen-shell')).toBeVisible();
   // The SVG is rendered inside the canvas
-  await expect(page.locator('.mermaid-fullscreen-canvas-inner svg')).toBeVisible({ timeout: 8_000 });
+  await expect(page.locator('.mermaid-fullscreen-canvas-inner svg')).toBeVisible({
+    timeout: 8_000,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -123,7 +125,9 @@ test('Esc closes the fullscreen modal', async ({ page }) => {
   await openFullscreenModal(page);
 
   // Ensure the canvas SVG is present before pressing Escape
-  await expect(page.locator('.mermaid-fullscreen-canvas-inner svg')).toBeVisible({ timeout: 8_000 });
+  await expect(page.locator('.mermaid-fullscreen-canvas-inner svg')).toBeVisible({
+    timeout: 8_000,
+  });
 
   await page.keyboard.press('Escape');
 
@@ -170,9 +174,7 @@ test('clicking the backdrop closes the fullscreen modal', async ({ page }) => {
     }
     // Fallback: dispatch directly on the modal element (React's onClick checks
     // e.target === e.currentTarget)
-    modal.dispatchEvent(
-      new MouseEvent('click', { bubbles: false, cancelable: true }),
-    );
+    modal.dispatchEvent(new MouseEvent('click', { bubbles: false, cancelable: true }));
     return true;
   });
 
@@ -253,7 +255,9 @@ test('selecting SVG text in fullscreen opens the floating comment form', async (
   await openFullscreenModal(page);
 
   // Wait for canvas SVG to render
-  await expect(page.locator('.mermaid-fullscreen-canvas-inner svg')).toBeVisible({ timeout: 8_000 });
+  await expect(page.locator('.mermaid-fullscreen-canvas-inner svg')).toBeVisible({
+    timeout: 8_000,
+  });
   await page
     .locator('.mermaid-fullscreen-canvas-inner svg text', { hasText: 'Dashboard' })
     .first()
@@ -293,7 +297,10 @@ test('clicking a highlighted SVG label activates the comment in the panel', asyn
   await openMermaidFixture(page);
 
   // Add a comment on "Login" via inline view first (mirrors test 4 setup)
-  await page.locator('.mermaid-block svg text', { hasText: 'Login' }).first().waitFor({ timeout: 10_000 });
+  await page
+    .locator('.mermaid-block svg text', { hasText: 'Login' })
+    .first()
+    .waitFor({ timeout: 10_000 });
   await page.evaluate(() => {
     const textEl = [...document.querySelectorAll('.mermaid-block svg text')].find(
       (t) => (t.textContent || '').trim() === 'Login',
@@ -323,7 +330,9 @@ test('clicking a highlighted SVG label activates the comment in the panel', asyn
   await openFullscreenModal(page);
 
   // Click the highlighted Login label inside the canvas SVG
-  const labeled = page.locator('.mermaid-fullscreen-canvas-inner svg text.mermaid-comment-highlight').first();
+  const labeled = page
+    .locator('.mermaid-fullscreen-canvas-inner svg text.mermaid-comment-highlight')
+    .first();
   await expect(labeled).toBeVisible({ timeout: 5_000 });
   await labeled.click({ force: true });
 

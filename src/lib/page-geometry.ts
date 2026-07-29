@@ -44,9 +44,7 @@ export function pageGeometry(
   const railFits = railCol >= COL_MIN;
   if (railAllowed && railFits) {
     const colWidth = Math.min(railCol, colMax);
-    const pageWidth = reserveRail
-      ? PAD_L + colWidth + RAIL_FOOTPRINT
-      : PAD_L + colWidth + PAD_L;
+    const pageWidth = reserveRail ? PAD_L + colWidth + RAIL_FOOTPRINT : PAD_L + colWidth + PAD_L;
     return { railFits, railShown: true, colWidth, pageWidth };
   }
   const colWidth = Math.max(Math.min(contentWidth - 2 * PAD_L, colMax), 320);

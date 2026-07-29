@@ -150,20 +150,17 @@ test.describe('Stranded focus requests route to the drawer', () => {
       // ask (same guard as agent-asks.spec.ts).
       await page.waitForTimeout(500);
 
-      const ask = await request.post(
-        `${baseURL}/api/review-sessions/${sessionId}/agent-comments`,
-        {
-          data: {
-            questions: [
-              {
-                filePath: askFile,
-                anchor: 'rate limit is 100 req/min',
-                text: 'per-user or per-tenant?',
-              },
-            ],
-          },
+      const ask = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+        data: {
+          questions: [
+            {
+              filePath: askFile,
+              anchor: 'rate limit is 100 req/min',
+              text: 'per-user or per-tenant?',
+            },
+          ],
         },
-      );
+      });
       expect(ask.status()).toBe(201);
 
       // No comment surface is visible at this width, so the painted highlight

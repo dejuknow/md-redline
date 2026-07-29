@@ -179,7 +179,9 @@ test.describe('Tab switching content integrity', () => {
     await openSecondFile(page);
 
     // Tab 2 is active – verify doc 2 content is shown and doc 1 is not
-    await expect(page.getByRole('heading', { name: 'Second Test Document', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Second Test Document', exact: true }),
+    ).toBeVisible();
     // "Section One" is unique to doc 1 and should not be visible
     await expect(page.getByRole('heading', { name: 'Section One' })).not.toBeVisible();
 

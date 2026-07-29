@@ -36,10 +36,7 @@ function renderPanel(props: Partial<Parameters<typeof SettingsPanel>[0]> = {}) {
     author: '',
     onAuthorChange: vi.fn(),
   };
-  return render(
-    createElement(SettingsPanel, { ...defaults, ...props }),
-    { wrapper: AllProviders },
-  );
+  return render(createElement(SettingsPanel, { ...defaults, ...props }), { wrapper: AllProviders });
 }
 
 beforeEach(() => {

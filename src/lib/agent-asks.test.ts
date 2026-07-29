@@ -15,7 +15,13 @@ describe('selectAgentAsks', () => {
   it('returns only mdr_ask comments (expectsReply=true) for the active session', () => {
     const comments = [
       mk({ id: 'c1' }),
-      mk({ id: 'c2', agentInitiated: true, expectsReply: true, sessionId: 'rev_a', author: 'Claude' }),
+      mk({
+        id: 'c2',
+        agentInitiated: true,
+        expectsReply: true,
+        sessionId: 'rev_a',
+        author: 'Claude',
+      }),
       mk({ id: 'c3', agentInitiated: true, expectsReply: true, sessionId: 'rev_b' }),
       mk({ id: 'c4', agentInitiated: true, expectsReply: true }), // no sessionId — orphaned, excluded
     ];
@@ -55,7 +61,9 @@ describe('selectAgentAsks', () => {
         agentInitiated: true,
         expectsReply: true,
         sessionId: 'rev_a',
-        replies: [{ id: 'r1', text: 'my answer', author: 'User', timestamp: '2026-01-01T00:00:00.000Z' }],
+        replies: [
+          { id: 'r1', text: 'my answer', author: 'User', timestamp: '2026-01-01T00:00:00.000Z' },
+        ],
       }),
     ];
     const result = selectAgentAsks(comments, 'rev_a');
@@ -68,7 +76,13 @@ describe('selectAgentAsks', () => {
     // both fired the "agent has a question" toast. Only mdr_ask should now.
     const comments = [
       mk({ id: 'review_1', agentInitiated: true, sessionId: 'rev_a', author: 'Claude' }),
-      mk({ id: 'ask_1', agentInitiated: true, expectsReply: true, sessionId: 'rev_a', author: 'Claude' }),
+      mk({
+        id: 'ask_1',
+        agentInitiated: true,
+        expectsReply: true,
+        sessionId: 'rev_a',
+        author: 'Claude',
+      }),
       mk({ id: 'review_2', agentInitiated: true, expectsReply: false, sessionId: 'rev_a' }),
     ];
     const result = selectAgentAsks(comments, 'rev_a');
@@ -76,7 +90,9 @@ describe('selectAgentAsks', () => {
   });
 
   it('returns empty when sessionId is null', () => {
-    const comments = [mk({ id: 'c2', agentInitiated: true, expectsReply: true, sessionId: 'rev_a' })];
+    const comments = [
+      mk({ id: 'c2', agentInitiated: true, expectsReply: true, sessionId: 'rev_a' }),
+    ];
     expect(selectAgentAsks(comments, null)).toEqual([]);
   });
 

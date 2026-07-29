@@ -92,7 +92,10 @@ describe('applySimulation', () => {
   });
 
   it('skips already-resolved comments', () => {
-    const resolved = SAMPLE.replace('"anchor":"Plain body."', '"anchor":"Plain body.","resolved":true');
+    const resolved = SAMPLE.replace(
+      '"anchor":"Plain body."',
+      '"anchor":"Plain body.","resolved":true',
+    );
     const out = applySimulation(resolved, opts);
     // Body should not have been edited because no open comments remained.
     expect(out).not.toContain('[Updated by Agent]');

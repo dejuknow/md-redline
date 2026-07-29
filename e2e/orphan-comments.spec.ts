@@ -19,10 +19,7 @@ let fixturePath = '';
 
 test.beforeEach(async ({ page }, testInfo) => {
   mkdirSync(TEMP_FIXTURE_DIR, { recursive: true });
-  fixtureDir = resolve(
-    TEMP_FIXTURE_DIR,
-    `orphan-${process.pid}-${testInfo.retry}-${Date.now()}`,
-  );
+  fixtureDir = resolve(TEMP_FIXTURE_DIR, `orphan-${process.pid}-${testInfo.retry}-${Date.now()}`);
   mkdirSync(fixtureDir, { recursive: true });
   fixturePath = resolve(fixtureDir, 'orphan.md');
   writeFileSync(fixturePath, FIXTURE);
@@ -173,7 +170,9 @@ test('Re-anchor to selection binds the orphan comment to new text', async ({ pag
     .toContain('"anchor":"fresh landing spot"');
 });
 
-test('Re-anchor to selection picks the selected occurrence when anchor text is duplicated', async ({ page }) => {
+test('Re-anchor to selection picks the selected occurrence when anchor text is duplicated', async ({
+  page,
+}) => {
   // Use a fixture where "landing spot" appears twice so we can test that
   // hintOffset routes re-anchoring to the actually-selected occurrence.
   const DUP_FIXTURE = `# Orphan Test
