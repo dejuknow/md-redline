@@ -812,14 +812,20 @@ body {
   padding: 0.6em 0.85em;
   border-radius: 6px;
   background-color: var(--theme-bg-secondary);
-  color: var(--theme-text-muted);
+  /* Values sit at body-copy ink, not muted. Muted on --theme-bg-secondary
+     measures 2.18:1 on Solarized, 2.57 on Catppuccin and 2.82 on Nord, so six
+     of the eight themes failed AA and three sat under the 3:1 floor. This is
+     the same trap the prose counters and bullets above already fell into and
+     were moved off; the block reads as quiet through its size and its tint,
+     which do not cost anyone legibility. */
+  color: var(--theme-text-secondary);
   font-size: 0.75em;
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
 .doc-frontmatter__key {
-  color: var(--theme-text-secondary);
+  color: var(--theme-text);
   font-weight: 500;
 }
 

@@ -39,7 +39,12 @@ const VIEWER_CHROME_SELECTOR = '[data-drag-handle], [data-comment-form], .mermai
  * app-specific containers into a rich editor is exactly what CONTENT_WRAPPERS
  * exists to prevent.
  */
-const LAYOUT_WRAPPER_SELECTOR = '.table-scroll, .table-scroll__viewport';
+// .doc-frontmatter is a presentation box around document text, exactly like
+// the table scroll wrappers: a selection running from a frontmatter field into
+// the prose below reconstructs it via cloneContents and would otherwise paste
+// an app class into someone else's document.
+const LAYOUT_WRAPPER_SELECTOR =
+  '.table-scroll, .table-scroll__viewport, .doc-frontmatter';
 
 /** Drop UI the viewer overlays on the prose so it never lands on the clipboard. */
 function stripViewerChrome(root: DocumentFragment | HTMLElement): void {
