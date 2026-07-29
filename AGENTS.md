@@ -695,17 +695,25 @@ reason.
 Commenting on a field works through the normal selection flow. The marker
 lands after the closing fence (see Protected containers under Comment format).
 
-Known gap, pre-existing and not specific to frontmatter: relocation makes
-`cleanOffset` non-unique, since every marker pushed out of the same container
-lands on the same offset. `MarkdownViewer` groups highlights by
-`` `${cleanOffset}:${anchor}` ``, so two comments on different fields that share
-a value (`false` in two booleans) collide into one group and paint a single
-highlight on the first occurrence, with the second comment's id riding along on
-the same `<mark>`. The `contextBefore` that would separate them is stored but
-never consulted, because grouping happens before matching. The same collapse
-reproduces with two comments on repeated text inside one code fence, so it
-predates frontmatter rendering. The plain-text offset drift is a red herring
-here: it measures 4 characters and the creation path resolves correctly.
+Relocation makes `cleanOffset` non-unique: every marker pushed out of the same
+container lands on the same offset, so two comments on fields that share a
+value (`false` in two booleans) can't be told apart by position. Two things
+keep them separate, and both matter:
+
+- `insertComment` backfills `contextBefore` / `contextAfter` from the position
+  the anchor actually resolved to whenever it relocates a marker and the caller
+  supplied none. Agents writing over MCP never supply them, so without this the
+  highest-volume writer produces indistinguishable markers.
+- `MarkdownViewer` includes those contexts in its highlight grouping key,
+  joined on an explicit `\u0000` escape. Grouping runs before matching, so a
+  key that omits context collapses the two comments into one group and paints a
+  single `<mark>` on the first occurrence.
+
+Neither is frontmatter-specific: the same collapse reproduces with two comments
+on repeated text inside one code fence.
+
+The plain-text offset drift is a red herring here: it measures 4 characters and
+the creation path resolves correctly.
 
 ### Mermaid fullscreen view
 Click the expand button (top-right of any Mermaid diagram on hover) to open the

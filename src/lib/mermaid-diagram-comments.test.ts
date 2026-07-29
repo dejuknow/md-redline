@@ -80,6 +80,16 @@ describe('commentsForDiagram', () => {
     expect(commentsForDiagram(diagram, [c], md).map((c) => c.id)).toEqual([]);
   });
 
+  it('keeps a diagram comment whose label also appears in the frontmatter', () => {
+    // A frontmatter field echoing a node label is ordinary ("title: Login
+    // flow" over a diagram containing A[Login]). Asking the frontmatter first
+    // would drop this comment entirely.
+    const diagram = 'graph TD\n    A[Login] --> B';
+    const md = '---\ntitle: Login flow\n---\n```mermaid\n' + diagram + '\n```\n';
+    const c: MdComment = { ...makeComment('node', 'Login'), cleanOffset: md.indexOf('```mermaid') };
+    expect(commentsForDiagram(diagram, [c], md, 0).map((c) => c.id)).toEqual(['node']);
+  });
+
   it('still attributes a diagram comment sitting on the fence below frontmatter', () => {
     // Same geometry, but the anchor is a node label rather than a field value,
     // so the tie-break must keep it.

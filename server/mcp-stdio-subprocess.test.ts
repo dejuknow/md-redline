@@ -37,14 +37,23 @@ function bundleIsRunnable(): boolean {
     }
     if (entry.isDirectory()) {
       for (const child of readdirSync(path)) stack.push(join(path, child));
-    } else if (entry.mtimeMs > bundleMtime) {
-      return false;
+    } else if (path.endsWith('.ts')) {
+      // Same two filters the bin applies. Test files don't reach the bundle,
+      // so editing one must not report staleness — without this, touching any
+      // of the ~30 *.test.ts files under these roots silently disables this
+      // suite while `mdr mcp` itself would start perfectly well. This file
+      // qualifies, which made the check disable itself on its own edit.
+      if (path.endsWith('.test.ts') || path.endsWith('.spec.ts')) continue;
+      if (entry.mtimeMs > bundleMtime) return false;
     }
   }
   return true;
 }
 
-const HAS_DIST = existsSync(DIST_MCP) && bundleIsRunnable();
+// The bin needs dist/server.js too: its production-mode probe stats that file
+// before it will run `mcp` at all.
+const HAS_DIST =
+  existsSync(DIST_MCP) && existsSync(join(__dirname, '..', 'dist', 'server.js')) && bundleIsRunnable();
 
 interface JsonRpcResponse {
   jsonrpc: '2.0';

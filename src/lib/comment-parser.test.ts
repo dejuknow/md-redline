@@ -2091,6 +2091,37 @@ describe('insertComment inside fenced code blocks', () => {
     });
   });
 
+  describe('two no-context comments on the same anchor', () => {
+    it('resolve to the same occurrence, so sharing one highlight is correct', () => {
+      // Agents over MCP pass no hint offset, so insertComment takes the first
+      // match. Two such comments therefore refer to the SAME `false`, not to
+      // one field each, and downstream merging them onto a single highlight is
+      // right. Recorded because it looks like the offset-collapse bug and
+      // isn't: the cure would be for the agent to pass context, which the MCP
+      // route already forwards.
+      const doc = '# Config\n\n```yaml\ndraft: false\narchived: false\n```\n';
+      let raw = insertComment(doc, 'false', 'first', 'Agent');
+      raw = insertComment(raw, 'false', 'second', 'Agent');
+      const { comments, cleanMarkdown } = parseComments(raw);
+      expect(comments).toHaveLength(2);
+      const firstFalse = cleanMarkdown.indexOf('false');
+      for (const c of comments) {
+        expect(cleanMarkdown.startsWith('false', firstFalse)).toBe(true);
+        expect(c.contextBefore).toBeUndefined();
+      }
+    });
+
+    it('stay distinct when the agent does supply context', () => {
+      const doc = '# Config\n\n```yaml\ndraft: false\narchived: false\n```\n';
+      let raw = insertComment(doc, 'false', 'first', 'Agent', 'draft: ', '\narchived');
+      raw = insertComment(raw, 'false', 'second', 'Agent', 'archived: ', '\n```');
+      const { comments } = parseComments(raw);
+      const keyOf = (c: (typeof comments)[number]) =>
+        [c.cleanOffset, c.anchor, c.contextBefore ?? '', c.contextAfter ?? ''].join('|');
+      expect(keyOf(comments[0])).not.toBe(keyOf(comments[1]));
+    });
+  });
+
   describe('inside HTML comments', () => {
     it('places the marker before a block-level comment, not nested inside it', () => {
       const raw = '# Notes\n\n<!-- TODO: decide on the retry loop -->\n\nBody.\n';

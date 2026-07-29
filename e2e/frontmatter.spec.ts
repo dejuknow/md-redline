@@ -8,9 +8,14 @@ import { resetTestAppState } from './helpers/test-state';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
 
+// Deliberately contains the characters the HTML serializer has to escape
+// (<, >, &, both quote flavours). The innerText comparison below then proves
+// they survive the round trip and decode back to the source exactly, which is
+// what comment anchoring depends on.
 const SKILL_DOC = `---
 name: mcp2cli
 description: Use when an MCP server should be driven from the shell
+pattern: <server> & "tool" or 'alias'
 tools:
   - Read
   - Write
