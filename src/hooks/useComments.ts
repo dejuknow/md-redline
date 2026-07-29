@@ -25,6 +25,7 @@ import {
   detectMissingAnchors,
   orderCommentsByAnchor,
 } from '../lib/comment-parser';
+import { randomId } from '../lib/random-id';
 import { getEffectiveStatus } from '../types';
 import { renderMarkdown } from '../markdown/pipeline';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
@@ -195,7 +196,7 @@ export function useComments(params: UseCommentsParams) {
       contextAfter?: string,
       hintOffset?: number,
     ) => {
-      const newCommentId = crypto.randomUUID();
+      const newCommentId = randomId();
       const newRaw = insertComment(
         rawMarkdownRef.current ?? '',
         anchor,
