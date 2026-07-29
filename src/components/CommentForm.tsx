@@ -6,6 +6,12 @@ import { getPrimaryModifierLabel } from '../lib/platform';
 
 interface Props {
   selection: SelectionInfo;
+  /** True while this is an uncommitted touch/pen selection the user may still
+   * be adjusting with the native handles. Such a selection must never start
+   * expanded: quick comment skips the pill for mouse, where the selection is
+   * already final on mouseup, but on touch that would swallow the adjustment
+   * step the pending flow exists for. */
+  isPending?: boolean;
   autoExpand?: boolean;
   onSubmit: (
     anchor: string,
@@ -18,12 +24,19 @@ interface Props {
   onLock: () => void;
 }
 
-export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock }: Props) {
+export function CommentForm({
+  selection,
+  isPending,
+  autoExpand,
+  onSubmit,
+  onCancel,
+  onLock,
+}: Props) {
   const { settings } = useSettings();
   const TEMPLATES = settings.templates;
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
   const modLabel = getPrimaryModifierLabel();
-  const [isExpanded, setIsExpanded] = useState(!!settings.quickComment);
+  const [isExpanded, setIsExpanded] = useState(!!settings.quickComment && !isPending);
   const [text, setText] = useState('');
   // True while a template prefill sits untouched; Escape then clears the
   // prefill instead of closing the form.
@@ -57,17 +70,23 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
     }
   }, [isExpanded]);
 
-  // Auto-expand when triggered by keyboard shortcut
+  // Auto-expand when triggered by keyboard shortcut. Guarded on isPending for
+  // the same reason as the quick-comment effect below: onLock commits, and a
+  // pending selection must stay collapsed and adjustable until the user says
+  // otherwise.
   useEffect(() => {
-    if (autoExpand && !isExpanded) {
+    if (autoExpand && !isExpanded && !isPending) {
       onLock();
       setIsExpanded(true);
     }
-  }, [autoExpand, isExpanded, onLock]);
+  }, [autoExpand, isExpanded, isPending, onLock]);
 
-  // Quick comment: lock selection on mount when starting expanded
+  // Quick comment: lock selection on mount when starting expanded. Skipped
+  // while pending, both because there is nothing to lock yet and because
+  // onLock commits the pending selection, which would auto-open the form on
+  // touch.
   useEffect(() => {
-    if (settings.quickComment) {
+    if (settings.quickComment && !isPending) {
       onLock();
     }
     // Only run on mount — quickComment won't change mid-lifecycle of this instance
@@ -114,7 +133,13 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   // to it.
   useEffect(() => {
     if (isExpanded) return;
-    const remeasure = () => {
+    // Coalesce into one measurement per frame. Touch scrolling fires scroll
+    // events faster than the compositor paints, and measuring on every one of
+    // them lands the repositioned pill a frame out of step with the text it is
+    // tracking, which reads as jitter on a tablet.
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
         const r = sel.getRangeAt(0).getBoundingClientRect();
@@ -139,9 +164,15 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           : next,
       );
     };
+    const remeasure = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(measure);
+    };
     document.addEventListener('scroll', remeasure, { capture: true, passive: true });
-    return () =>
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
       document.removeEventListener('scroll', remeasure, { capture: true } as EventListenerOptions);
+    };
   }, [isExpanded, selection.rect]);
 
   useLayoutEffect(() => {
@@ -246,7 +277,10 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
   };
 
   const handlePillOverflow = () => {
-    onLock();
+    // Deliberately does NOT lock. onLock commits a pending touch selection, so
+    // peeking at the overflow menu used to freeze handle adjustment for good.
+    // The selection is safe without it: mouseup inside [data-comment-form]
+    // already bails, and the pill carries that attribute.
     setShowPillMenu((prev) => !prev);
   };
 
@@ -279,12 +313,25 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
         )}
         <div className="selection-pill-enter flex items-center gap-0.5 px-1.5 py-1 max-w-[calc(100vw-24px)] overflow-hidden bg-surface-raised border border-border rounded-full shadow-lg">
           <button
+            // Named for the touch flow: this is the button that promotes a
+            // pending touch/pen selection. A mouse selection is already
+            // committed by the time the pill renders, so the same button just
+            // expands. One control, one name, both modalities.
+            data-testid="pending-selection-commit"
             onMouseDown={(e) => e.preventDefault()} // Prevent stealing focus/clearing selection
+            onTouchEnd={(e) => {
+              // The tap that expands would otherwise collapse the native
+              // selection first. Commit reads a stored snapshot so it survives
+              // either way, but this keeps the highlight up while it opens.
+              e.preventDefault();
+              handleExpand();
+            }}
             onClick={handleExpand}
             className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full text-sm font-medium text-primary-text hover:bg-tint-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
           >
             <svg
               className="w-3.5 h-3.5"
+              aria-hidden="true"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -303,6 +350,13 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
             <button
               key={t.label}
               onMouseDown={(e) => e.preventDefault()}
+              // Same reason as the Comment button: on touch, mousedown is
+              // synthesised after the selection has already collapsed, so
+              // preventing it there is too late to keep the pending selection.
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                handlePillTemplate(t.text);
+              }}
               onClick={() => handlePillTemplate(t.text)}
               className="px-2.5 py-1 rounded-full text-xs text-content-secondary hover:bg-tint transition-colors max-w-36 truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
             >
@@ -312,6 +366,10 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
           {TEMPLATES.length > 2 && (
             <button
               onMouseDown={(e) => e.preventDefault()}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                handlePillOverflow();
+              }}
               onClick={handlePillOverflow}
               aria-label="More templates"
               aria-expanded={showPillMenu}
@@ -400,6 +458,7 @@ export function CommentForm({ selection, autoExpand, onSubmit, onCancel, onLock 
             >
               <svg
                 className="w-3.5 h-3.5"
+                aria-hidden="true"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"

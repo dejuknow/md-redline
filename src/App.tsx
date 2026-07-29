@@ -24,6 +24,7 @@ import {
   stripInlineFormatting,
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
+import type { SelectionInfo } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentPopover } from './components/CommentPopover';
@@ -570,8 +571,9 @@ export default function App() {
     );
   }, []);
 
-  const { selection, pendingSelection, clearSelection, lockSelection, commitPendingSelection } =
-    useSelection(containerRef as RefObject<HTMLElement | null>);
+  const { selection, commentSelection, isPending, clearSelection, lockSelection } = useSelection(
+    containerRef as RefObject<HTMLElement | null>,
+  );
   const requestCommentFocus = useCallback(
     (commentId: string, origin: 'creation' | 'jump' = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -1593,9 +1595,20 @@ export default function App() {
     onAnchorChange: handleAnchorChange,
   });
 
-  // Stable ref for selection to use in keyboard handler without re-creating it
+  // Stable ref for selection to use in keyboard handler without re-creating it.
+  // Committed selections ONLY. The copy handler depends on that: it overrides
+  // the native copy because the viewer paints its own highlight and clears the
+  // browser's range, which happens on commit. While a selection is merely
+  // pending the native range is still live, so copy must stay native.
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+
+  // For entry points that START commenting, a pending touch selection counts.
+  // Gating those on selectionRef made Cmd+Enter, Cmd+Shift+M and the context
+  // menu silently do nothing after a touch or pen selection, which is the
+  // normal case on an iPad with a keyboard attached.
+  const commentableSelectionRef = useRef<SelectionInfo | null>(commentSelection);
+  commentableSelectionRef.current = commentSelection;
 
   // Context menu handlers
   const {
@@ -1617,7 +1630,7 @@ export default function App() {
     handleAddComment,
     setActiveCommentId,
     ensureCommentSurface,
-    selectionRef,
+    selectionRef: commentableSelectionRef,
     lockSelection,
     setAutoExpandForm,
     triggerEdit,
@@ -1719,7 +1732,13 @@ export default function App() {
       }
 
       // Cmd+Enter : Expand comment form when text is selected (Feature 3)
-      if (mod && e.key === 'Enter' && !isInput && selectionRef.current && viewMode === 'rendered') {
+      if (
+        mod &&
+        e.key === 'Enter' &&
+        !isInput &&
+        commentableSelectionRef.current &&
+        viewMode === 'rendered'
+      ) {
         e.preventDefault();
         lockSelection();
         setAutoExpandForm(true);
@@ -1729,7 +1748,7 @@ export default function App() {
       // Cmd+Shift+M : Start commenting on selection
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        if (selectionRef.current) {
+        if (commentableSelectionRef.current) {
           lockSelection();
         }
         return;
@@ -2826,30 +2845,20 @@ export default function App() {
             </div>
           </div>
 
-          {/* Touch/pen: the selection is held as pending while the native
-            handles are adjusted; this button is the explicit "done selecting"
-            signal. touchend commits from the stored SelectionInfo snapshot,
-            so it works even if the tap collapses the native selection. */}
-          {pendingSelection && !selection && viewMode === 'rendered' && (
-            <button
-              type="button"
-              data-preserve-selection
-              data-testid="pending-selection-commit"
-              onTouchEnd={(e) => {
-                e.preventDefault();
-                commitPendingSelection();
-              }}
-              onClick={commitPendingSelection}
-              className="fixed bottom-6 right-6 z-50 rounded-full bg-primary px-5 py-3 text-sm font-medium text-on-primary shadow-lg"
-            >
-              Comment
-            </button>
-          )}
-
-          {/* Floating comment form (disabled in raw/diff view) */}
-          {selection && viewMode === 'rendered' && (
+          {/* Floating comment form (disabled in raw/diff view).
+            One form serves both states. A mouse selection arrives already
+            committed; a touch or pen selection arrives as `pendingSelection`,
+            because touch fires no mouseup and the native handles emit nothing
+            the page can see. Rendering the same pill for both is what keeps
+            the two modalities identical: the collapsed pill and its quick
+            templates are the affordance in either case.
+            Both handleExpand and handlePillTemplate call onLock first, so
+            committing there means any engagement with the pill promotes the
+            pending selection, whichever button the user reaches for. */}
+          {commentSelection && viewMode === 'rendered' && (
             <CommentForm
-              selection={selection}
+              selection={commentSelection}
+              isPending={isPending}
               autoExpand={autoExpandForm}
               onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
                 handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);

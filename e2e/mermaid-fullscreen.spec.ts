@@ -361,3 +361,44 @@ test('toolbar comment-panel button toggles the side panel', async ({ page }) => 
     .click();
   await expect(page.locator('[aria-label="Diagram comments"]')).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// Touch/pen commenting inside the modal
+//
+// useSelection routes every touch and pen gesture into `pendingSelection`, so a
+// consumer reading only `selection` loses touch commenting silently and
+// entirely. This modal is the second consumer of that hook and was missed when
+// the pending flow landed, which contradicted the parity AGENTS.md claims for
+// this surface. Regression guard.
+// ---------------------------------------------------------------------------
+test('touch selection inside the fullscreen modal shows the comment pill', async ({ page }) => {
+  await openMermaidFixture(page);
+  await openFullscreenModal(page);
+
+  await page.evaluate(() => {
+    const inner = document.querySelector('.mermaid-fullscreen-canvas-inner')!;
+    inner.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true }));
+    const textEl = [...document.querySelectorAll('.mermaid-fullscreen-canvas-inner svg text')].find(
+      (t) => (t.textContent || '').trim().length > 3,
+    );
+    if (!textEl) throw new Error('no SVG text in the fullscreen canvas');
+    const walker = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT);
+    const tn = walker.nextNode() as Text | null;
+    if (!tn) throw new Error('no text node');
+    const range = document.createRange();
+    range.setStart(tn, 0);
+    range.setEnd(tn, Math.min(3, (tn.textContent || '').length));
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    // No mouseup: a touch gesture never fires one.
+  });
+
+  const pill = page.getByTestId('pending-selection-commit');
+  await expect(pill).toBeVisible({ timeout: 5_000 });
+  // Collapsed, not auto-expanded, so the native handles stay adjustable.
+  await expect(page.locator('[data-comment-form] textarea')).toHaveCount(0);
+
+  await pill.click();
+  await expect(page.locator('[data-comment-form] textarea')).toBeVisible({ timeout: 5_000 });
+});

@@ -106,14 +106,36 @@ describe('useSelection modality routing', () => {
     expect(hook().selection).toBeNull();
   });
 
-  it('stops capturing pending while a selection is committed', () => {
+  // Originally asserted on commitPendingSelection alone. The app only reaches
+  // that through lockSelection, which also locks, and an unlocked committed
+  // selection deliberately no longer blocks capture (see the supersede test
+  // below), so this now drives the path the app actually takes.
+  it('stops capturing pending while a selection is locked', () => {
     pointerDown('touch');
     selectionChange();
-    act(() => hook().commitPendingSelection());
+    act(() => hook().lockSelection());
     mockResolve.mockReturnValue({ ...INFO, text: 'other' });
     selectionChange();
     expect(hook().pendingSelection).toBeNull();
     expect(hook().selection).toEqual(INFO);
+  });
+
+  // A pill showing for an unlocked mouse selection must not swallow a touch
+  // selection made elsewhere. Gating capture on "anything committed" dropped
+  // those silently and left the stale pill over the old text, while the mouse
+  // path always overrode, so the two modalities disagreed.
+  it('a touch selection supersedes an unlocked mouse selection', () => {
+    mockResolve.mockReturnValue({ ...INFO, text: 'MOUSE-A' });
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection?.text).toBe('MOUSE-A');
+
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-B' });
+    pointerDown('touch');
+    selectionChange();
+
+    expect(hook().pendingSelection?.text).toBe('TOUCH-B');
+    expect(hook().selection).toBeNull();
   });
 
   it('re-arms the pending flow after clearSelection', () => {
@@ -142,6 +164,169 @@ describe('useSelection modality routing', () => {
     });
     expect(hook().pendingSelection).toBeNull();
     expect(hook().selection).toBeNull();
+  });
+
+  // A mouse gesture supersedes any pending touch selection. Without that,
+  // onLock (which fires on every pill interaction) would resurrect the stale
+  // touch selection and anchor the comment to the wrong text.
+  it('a mouse selection clears a pending touch selection', () => {
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-A' });
+    pointerDown('touch');
+    selectionChange();
+    expect(hook().pendingSelection?.text).toBe('TOUCH-A');
+
+    mockResolve.mockReturnValue({ ...INFO, text: 'MOUSE-B' });
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection?.text).toBe('MOUSE-B');
+    expect(hook().pendingSelection).toBeNull();
+  });
+
+  it('committing after a mouse selection does not resurrect the touch one', () => {
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-A' });
+    pointerDown('touch');
+    selectionChange();
+
+    mockResolve.mockReturnValue({ ...INFO, text: 'MOUSE-B' });
+    pointerDown('mouse');
+    mouseUp();
+
+    act(() => hook().commitPendingSelection());
+    expect(hook().selection?.text).toBe('MOUSE-B');
+  });
+
+  it('a mouse selection that collapses also drops the pending pill', () => {
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-A' });
+    pointerDown('touch');
+    selectionChange();
+    expect(hook().pendingSelection?.text).toBe('TOUCH-A');
+
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toBeNull();
+    expect(hook().pendingSelection).toBeNull();
+  });
+
+  // Tapping the pill collapses the native selection. If the debounce then
+  // resolves null it drops the pending selection and the commit that follows
+  // finds nothing, so the tap silently does nothing. Guarded on where the
+  // gesture started rather than on winning a race against the timer.
+  it('a gesture starting inside the pill does not clear the pending selection', () => {
+    mockResolve.mockReturnValue(INFO);
+    pointerDown('touch');
+    selectionChange();
+    expect(hook().pendingSelection).toEqual(INFO);
+
+    // The pill carries data-preserve-selection.
+    const pillEl = document.createElement('div');
+    pillEl.setAttribute('data-preserve-selection', '');
+    document.body.appendChild(pillEl);
+    const e = new Event('pointerdown', { bubbles: true });
+    Object.defineProperty(e, 'pointerType', { value: 'touch' });
+    Object.defineProperty(e, 'target', { value: pillEl });
+    act(() => {
+      document.dispatchEvent(e);
+    });
+
+    // The tap collapsed the selection.
+    mockResolve.mockReturnValue(null);
+    selectionChange();
+
+    expect(hook().pendingSelection).toEqual(INFO);
+    act(() => hook().commitPendingSelection());
+    expect(hook().selection).toEqual(INFO);
+    pillEl.remove();
+  });
+
+  it('a commit landing inside the debounce window does not resurrect pending', () => {
+    mockResolve.mockReturnValue(INFO);
+    pointerDown('touch');
+    selectionChange();
+    expect(hook().pendingSelection).toEqual(INFO);
+
+    // The tap collapses the selection, which schedules a second timer while
+    // nothing is committed yet, so the pre-check does not bail.
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    // Then the click lands and commits.
+    act(() => {
+      hook().commitPendingSelection();
+    });
+    expect(hook().selection).toEqual(INFO);
+
+    // That in-flight timer must not write pendingSelection back.
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(hook().pendingSelection).toBeNull();
+    expect(hook().selection).toEqual(INFO);
+  });
+
+  // A debounce timer must only ever apply to the gesture that armed it. Without
+  // that, a touch selectionchange could arm a timer, a mouse drag could commit
+  // inside the 150ms window, and the stale timer would then destroy the fresh
+  // mouse selection.
+  it('a stale timer cannot destroy a selection committed after it was armed', () => {
+    mockResolve.mockReturnValue({ ...INFO, text: 'MOUSE-A' });
+    pointerDown('mouse');
+    mouseUp();
+
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-B' });
+    pointerDown('touch');
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+
+    mockResolve.mockReturnValue({ ...INFO, text: 'MOUSE-C' });
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection?.text).toBe('MOUSE-C');
+
+    mockResolve.mockReturnValue(null);
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(hook().selection?.text).toBe('MOUSE-C');
+    expect(hook().pendingSelection).toBeNull();
+  });
+
+  // The preserved-target guard exists to stop the tap that engages the pill from
+  // erasing pending when it collapses the selection. It must not veto a real
+  // adjustment: native handle drags emit no pointerdown, so the flag survives
+  // that tap indefinitely.
+  it('handle adjustments still land after a tap on a preserved element', () => {
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-A' });
+    pointerDown('touch');
+    selectionChange();
+    expect(hook().pendingSelection?.text).toBe('TOUCH-A');
+
+    const el = document.createElement('span');
+    el.setAttribute('data-preserve-selection', '');
+    document.body.appendChild(el);
+    const e = new Event('pointerdown', { bubbles: true });
+    Object.defineProperty(e, 'pointerType', { value: 'touch' });
+    Object.defineProperty(e, 'target', { value: el });
+    act(() => {
+      document.dispatchEvent(e);
+    });
+
+    mockResolve.mockReturnValue({ ...INFO, text: 'TOUCH-A-WIDER' });
+    selectionChange();
+    expect(hook().pendingSelection?.text).toBe('TOUCH-A-WIDER');
+
+    // But a collapse right after that tap still leaves pending intact.
+    mockResolve.mockReturnValue(null);
+    const e2 = new Event('pointerdown', { bubbles: true });
+    Object.defineProperty(e2, 'pointerType', { value: 'touch' });
+    Object.defineProperty(e2, 'target', { value: el });
+    act(() => {
+      document.dispatchEvent(e2);
+    });
+    selectionChange();
+    expect(hook().pendingSelection?.text).toBe('TOUCH-A-WIDER');
+    el.remove();
   });
 
   it('does not capture pending while locked', () => {

@@ -141,7 +141,8 @@ export function MermaidFullscreenModal({
       (root?.querySelector('.mermaid-fullscreen-canvas-inner') as HTMLElement | null) ?? null;
   }, [open, svgHtml]);
 
-  const { selection, clearSelection, lockSelection } = useSelection(canvasInnerRef);
+  const { commentSelection, isPending, clearSelection, lockSelection } =
+    useSelection(canvasInnerRef);
 
   // Modal stays mounted (returns null) when closed, which means useSelection
   // state survives across opens. Without this, closing while a CommentForm is
@@ -175,7 +176,7 @@ export function MermaidFullscreenModal({
         // composer/useSelection's own Esc handling (which clears the
         // selection / cancels the form). Closing the whole modal here would
         // drop the in-progress draft.
-        if (inEditable || selection) return;
+        if (inEditable || commentSelection) return;
         e.stopPropagation();
         onClose();
         return;
@@ -213,7 +214,7 @@ export function MermaidFullscreenModal({
   }, [
     open,
     onClose,
-    selection,
+    commentSelection,
     settings.mermaidFullscreenPanelCollapsed,
     updateMermaidFullscreenPanelCollapsed,
   ]);
@@ -514,9 +515,10 @@ export function MermaidFullscreenModal({
         </div>
       </div>
 
-      {selection && (
+      {commentSelection && (
         <CommentForm
-          selection={selection}
+          selection={commentSelection}
+          isPending={isPending}
           onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
             onAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
             clearSelection();

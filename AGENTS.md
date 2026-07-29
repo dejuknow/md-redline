@@ -432,16 +432,31 @@ headings, bold, links, tables, and list structure.
 Selections made by touch or pen route through a pending flow instead of the
 mouseup path (`useSelection.ts`): touch selection never fires `mouseup`, and
 native selection-handle drags emit no pointer events the page can see, so
-nothing auto-opens — a timer cannot distinguish "paused to think" from "done
-adjusting". While a touch/pen selection exists, a fixed **Comment** button
-(`data-testid="pending-selection-commit"`, bottom-right) is the explicit
-commit signal; tapping it promotes the pending `SelectionInfo` snapshot to the
-active selection, which opens the pill/form as usual. The modality is decided
-per gesture via the last `pointerdown`'s `pointerType` (not per device), so
-hybrid devices get mouse-immediate and touch-deferred behavior side by side.
-The commit works from the stored snapshot, so it survives the tap collapsing
-the native selection. `selectionchange` is debounced 150ms purely to coalesce
-handle-drag event streams; it gates nothing user-visible.
+nothing auto-opens; a timer cannot distinguish "paused to think" from "done
+adjusting". The modality is decided per gesture via the last `pointerdown`'s
+`pointerType` (not per device), so hybrid devices get mouse-immediate and
+touch-deferred behavior side by side.
+
+There is one comment surface for both modalities. `App.tsx` renders a single
+`CommentForm` for `selection ?? pendingSelection`, so a touch selection shows
+the same collapsed pill (Comment plus the quick templates) that a mouse
+selection does. `CommentForm`'s `handleExpand` and `handlePillTemplate` both
+call `onLock` first, and `onLock` commits the pending selection, so engaging
+with the pill by any route promotes it. That is what keeps the two modalities
+identical by construction rather than by two components kept in sync: an
+earlier revision had a separate touch-only button, which drifted into a
+different affordance (no templates) and cost touch users an extra tap.
+
+The commit reads the stored `SelectionInfo` snapshot, so it survives the tap
+collapsing the native selection. `selectionchange` is debounced 150ms purely to
+coalesce handle-drag event streams; it gates nothing user-visible. The pill's
+scroll-follow coalesces into one measurement per animation frame, because touch
+scrolling outpaces the compositor and measuring per event reads as jitter.
+
+Known gap (#35): the anchor drag handles (`DragHandles.tsx`,
+`useDragHandles.ts`) are still mouse-only. They react to a tap because iOS
+synthesises a `mousedown`, but a touch drag emits no `mousemove`, so they cannot
+be moved on a tablet.
 
 ### Comments rail
 The single comment surface for the rendered view: a fixed-width column at the
