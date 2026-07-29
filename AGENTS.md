@@ -187,6 +187,32 @@ file(s)" result instead of an error.
 
 Security defaults in `server/index.ts`: path validation against allowed roots, localhost-only CORS, 10 MB body limit.
 
+**Host allowlist and reverse-proxy fronting** — a Host-header check closes DNS
+rebinding by rejecting any hostname that is not loopback. `CreateAppOptions.allowedHosts`,
+defaulting from the comma-separated `MD_REDLINE_ALLOWED_HOSTS`, adds extra names
+so the loopback-bound server can sit behind a trusted proxy (`tailscale serve`,
+nginx, Caddy). Both the header and the allowlist entries are normalized through
+the exported `normalizeHostname`, so the two sides cannot drift apart. It strips
+a scheme, a protocol-relative `//`, any path, query or fragment, userinfo, a
+port, IPv6 brackets and trailing dots, then lowercases. That list is deliberately
+generous: an operator pastes whatever `tailscale serve status` or the address bar
+gave them, and every form that silently fails to match is a support ticket whose
+symptom (all proxied requests 400) points nowhere near the typo. Entries that
+normalize to nothing are dropped with a warning. Non-ASCII hostnames must be
+written in punycode, since that is what a browser puts in the Host header. A Host
+header that is present but empty is checked and fails closed. The bind address is
+never affected.
+
+There is no authentication anywhere in the server, so setting `allowedHosts`
+moves the trust boundary from this machine to whatever can reach the proxy.
+Two consequences worth keeping in mind when adding routes: `trustedRoots` is
+stripped from `PUT /api/preferences` because persisted roots hydrate into
+`allowedRoots` on the next launch (accepting it let a client grant itself a
+directory and read it back after a restart), and every route that lets a caller
+direct a change must use POST or PUT, the two verbs the `application/json` guard
+checks. See the README section "Reaching md-redline from another device" for the
+operator-facing version.
+
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
 (`127.0.0.1`), default port 6373 ("MDR" on a phone keypad; overridable via
 `MD_REDLINE_PORT`), scanning up to 10 ports from there if taken. The Vite dev

@@ -6,6 +6,7 @@ import {
   createApp,
   createAppFull,
   isPathInsideRoot,
+  normalizeHostname,
   removePortFileIfOwned,
   type CreateAppOptions,
 } from './index';
@@ -1199,6 +1200,42 @@ describe('/api/pick-folder', () => {
   });
 });
 
+describe('normalizeHostname', () => {
+  // Both the Host header and the allowlist entries go through this, so the
+  // table is the contract for what an operator is allowed to paste.
+  it.each([
+    ['mac.tail1234.ts.net', 'mac.tail1234.ts.net'],
+    ['MAC.Tail1234.TS.NET', 'mac.tail1234.ts.net'],
+    ['mac.tail1234.ts.net:8443', 'mac.tail1234.ts.net'],
+    ['https://mac.tail1234.ts.net', 'mac.tail1234.ts.net'],
+    ['https://mac.tail1234.ts.net/', 'mac.tail1234.ts.net'],
+    ['https://mac.tail1234.ts.net/review?x=1#f', 'mac.tail1234.ts.net'],
+    ['//mac.tail1234.ts.net/', 'mac.tail1234.ts.net'],
+    ['https://user:pw@mac.tail1234.ts.net/', 'mac.tail1234.ts.net'],
+    ['user@mac.tail1234.ts.net', 'mac.tail1234.ts.net'],
+    ['mac.tail1234.ts.net.', 'mac.tail1234.ts.net'],
+    ['mac.tail1234.ts.net..', 'mac.tail1234.ts.net'],
+    ['  mac.tail1234.ts.net  ', 'mac.tail1234.ts.net'],
+    ['[fd7a:115c:a1e0::1]', 'fd7a:115c:a1e0::1'],
+    ['[fd7a:115c:a1e0::1]:6373', 'fd7a:115c:a1e0::1'],
+    ['localhost', 'localhost'],
+    ['127.0.0.1:3001', '127.0.0.1'],
+    ['', ''],
+    ['https://', ''],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(normalizeHostname(input)).toBe(expected);
+  });
+
+  // A path segment must never be able to carry a different name into the
+  // comparison, in either direction.
+  it('does not let a path or userinfo smuggle in another hostname', () => {
+    expect(normalizeHostname('https://evil.example/mac.tail1234.ts.net')).toBe('evil.example');
+    expect(normalizeHostname('https://evil.example@mac.tail1234.ts.net')).toBe(
+      'mac.tail1234.ts.net',
+    );
+  });
+});
+
 describe('Host header allowlist (DNS rebinding defense)', () => {
   it('rejects requests with a non-loopback Host header', async () => {
     const response = await app.request(`http://localhost/api/config`, {
@@ -1270,8 +1307,8 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
     expect(await r.json()).toEqual({ error: 'Invalid Host header' });
   });
 
-  it('reads allowedHosts from MDR_ALLOWED_HOSTS when the option is absent', async () => {
-    vi.stubEnv('MDR_ALLOWED_HOSTS', 'proxy.example.internal, other.host ');
+  it('reads allowedHosts from MD_REDLINE_ALLOWED_HOSTS when the option is absent', async () => {
+    vi.stubEnv('MD_REDLINE_ALLOWED_HOSTS', 'proxy.example.internal, other.host ');
     try {
       const envApp = createApp({ cwd: cwdRoot, homeDir: fakeHome });
       const r1 = await envApp.request(`http://localhost/api/config`, {
@@ -1292,7 +1329,7 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
   });
 
   it('an explicit allowedHosts option overrides the env var', async () => {
-    vi.stubEnv('MDR_ALLOWED_HOSTS', 'env.example.internal');
+    vi.stubEnv('MD_REDLINE_ALLOWED_HOSTS', 'env.example.internal');
     try {
       const optionApp = createApp({
         cwd: cwdRoot,
@@ -1307,6 +1344,96 @@ describe('Host header allowlist (DNS rebinding defense)', () => {
         headers: { Host: 'env.example.internal' },
       });
       expect(r2.status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('matches an allowlist entry that carries a port, as copied from a proxy config', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['mac.tail1234.ts.net:8443'],
+    });
+    const r = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'mac.tail1234.ts.net' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('treats a trailing-dot FQDN as the same name on both sides', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['mac.tail1234.ts.net.'],
+    });
+    const r1 = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'mac.tail1234.ts.net.' },
+    });
+    expect(r1.status).toBe(200);
+    const r2 = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'mac.tail1234.ts.net' },
+    });
+    expect(r2.status).toBe(200);
+  });
+
+  it('accepts a bracketed IPv6 allowlist entry', async () => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: ['[fd7a:115c:a1e0::1]'],
+    });
+    const r = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: '[fd7a:115c:a1e0::1]:6373' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('matches the loopback names case-insensitively', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { Host: 'LOCALHOST:6373' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  // `tailscale serve status` and the browser address bar both hand you a URL
+  // with a trailing slash, so that is the form an operator actually pastes.
+  it.each([
+    'https://mac.tail1234.ts.net',
+    'https://mac.tail1234.ts.net/',
+    'https://mac.tail1234.ts.net/review',
+    'https://mac.tail1234.ts.net:8443/',
+    'mac.tail1234.ts.net/',
+    'mac.tail1234.ts.net?x=1',
+    'mac.tail1234.ts.net#frag',
+  ])('accepts an allowlist entry written as %s', async (entry) => {
+    const proxiedApp = createApp({
+      cwd: cwdRoot,
+      homeDir: fakeHome,
+      allowedHosts: [entry],
+    });
+    const r = await proxiedApp.request(`http://localhost/api/config`, {
+      headers: { Host: 'mac.tail1234.ts.net' },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('rejects a Host header that is present but empty, rather than skipping the check', async () => {
+    const r = await app.request(`http://localhost/api/config`, {
+      headers: { Host: '' },
+    });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: 'Invalid Host header' });
+  });
+
+  it('an empty MD_REDLINE_ALLOWED_HOSTS still rejects every non-loopback host', async () => {
+    vi.stubEnv('MD_REDLINE_ALLOWED_HOSTS', '');
+    try {
+      const envApp = createApp({ cwd: cwdRoot, homeDir: fakeHome });
+      const r = await envApp.request(`http://localhost/api/config`, {
+        headers: { Host: 'attacker.example.com' },
+      });
+      expect(r.status).toBe(400);
     } finally {
       vi.unstubAllEnvs();
     }
