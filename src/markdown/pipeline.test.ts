@@ -60,12 +60,55 @@ describe('renderMarkdown', () => {
     expect(html).toContain('class="custom"');
   });
 
-  it('handles YAML frontmatter (should not appear in output)', () => {
+  it('renders YAML frontmatter as document content', () => {
     const md = '---\ntitle: Test\nauthor: Someone\n---\n\n# Content';
     const html = renderMarkdown(md);
-    expect(html).not.toContain('title: Test');
-    expect(html).not.toContain('author: Someone');
+    expect(html).toContain('class="doc-frontmatter"');
+    expect(html).toContain('title');
+    expect(html).toContain('Someone');
     expect(html).toContain('<h1>Content</h1>');
+  });
+
+  it('renders TOML frontmatter too', () => {
+    const html = renderMarkdown('+++\ntitle = "Post"\n+++\n\n# Content');
+    expect(html).toContain('class="doc-frontmatter"');
+    expect(html).toContain('"Post"');
+  });
+
+  it('emits frontmatter text byte-identically, fences excluded', () => {
+    // Comment anchoring searches the raw markdown for text the DOM handed it,
+    // so any transformation here silently breaks comment creation. Compare the
+    // element's text content against the source block verbatim.
+    const body = 'name: mcp2cli\ndescription: Use when a server should be driven\n  from the shell.\ntools:\n  - Read';
+    const html = renderMarkdown(`---\n${body}\n---\n\n# Overview`);
+    const inner = html.slice(
+      html.indexOf('<div class="doc-frontmatter">') + '<div class="doc-frontmatter">'.length,
+      html.indexOf('</div>'),
+    );
+    const text = inner.replace(/<[^>]+>/g, '');
+    expect(text).toBe(body);
+  });
+
+  it('does not treat a mid-document --- as frontmatter', () => {
+    const html = renderMarkdown('# Title\n\ntext\n\n---\n\nmore');
+    expect(html).not.toContain('doc-frontmatter');
+    expect(html).toContain('<hr>');
+  });
+
+  it('escapes HTML inside frontmatter values', () => {
+    const html = renderMarkdown('---\nx: <script>alert(1)</script>\n---\n\n# H');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('doc-frontmatter');
+  });
+
+  it('leaves a document without frontmatter unchanged', () => {
+    const html = renderMarkdown('# Title\n\nBody.');
+    expect(html).not.toContain('doc-frontmatter');
+  });
+
+  it('drops an empty frontmatter block instead of rendering an empty box', () => {
+    expect(renderMarkdown('---\n---\n\n# H')).not.toContain('doc-frontmatter');
+    expect(renderMarkdown('---\n\n---\n\n# H')).not.toContain('doc-frontmatter');
   });
 
   it('handles empty input', () => {
