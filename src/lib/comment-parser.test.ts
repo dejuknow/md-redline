@@ -348,7 +348,12 @@ describe('addReply', () => {
 describe('appendReply', () => {
   it('appends a reply to an existing comment with no existing replies', () => {
     const raw = `${marker({ id: 'c1', anchor: 'hello', text: 'top comment' })}hello world`;
-    const reply = { id: 'r1', text: 'a reply', author: 'Agent', timestamp: '2026-01-01T00:00:00.000Z' };
+    const reply = {
+      id: 'r1',
+      text: 'a reply',
+      author: 'Agent',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
     const result = appendReply(raw, 'c1', reply);
     const parsed = parseComments(result);
     expect(parsed.comments[0].replies).toHaveLength(1);
@@ -362,7 +367,12 @@ describe('appendReply', () => {
 
   it('appends to an existing reply array', () => {
     const raw = `${marker({ id: 'c1', replies: [{ id: 'r0', text: 'first', author: 'User', timestamp: '2026-01-01T00:00:00.000Z' }] })}hello`;
-    const reply = { id: 'r1', text: 'second', author: 'Agent', timestamp: '2026-01-02T00:00:00.000Z' };
+    const reply = {
+      id: 'r1',
+      text: 'second',
+      author: 'Agent',
+      timestamp: '2026-01-02T00:00:00.000Z',
+    };
     const result = appendReply(raw, 'c1', reply);
     const parsed = parseComments(result);
     expect(parsed.comments[0].replies).toHaveLength(2);
@@ -372,14 +382,24 @@ describe('appendReply', () => {
 
   it('returns unchanged content when commentId is not found', () => {
     const raw = `${marker({ id: 'c1' })}hello`;
-    const reply = { id: 'r1', text: 'orphan', author: 'Agent', timestamp: '2026-01-01T00:00:00.000Z' };
+    const reply = {
+      id: 'r1',
+      text: 'orphan',
+      author: 'Agent',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
     const result = appendReply(raw, 'c_does_not_exist', reply);
     expect(result).toBe(raw);
   });
 
   it('preserves contextBefore, contextAfter, and other fields', () => {
     const raw = `${marker({ id: 'c1', anchor: 'foo', contextBefore: 'pre', contextAfter: 'post' })}foo`;
-    const reply = { id: 'r1', text: 'reply', author: 'Agent', timestamp: '2026-01-01T00:00:00.000Z' };
+    const reply = {
+      id: 'r1',
+      text: 'reply',
+      author: 'Agent',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
     const result = appendReply(raw, 'c1', reply);
     const parsed = parseComments(result);
     expect(parsed.comments[0].contextBefore).toBe('pre');
@@ -400,7 +420,12 @@ describe('appendReply', () => {
       expectsReply: true,
       sessionId: 'rev_xyz',
     })}foo`;
-    const reply = { id: 'r1', text: 'my answer', author: 'User', timestamp: '2026-01-01T00:00:00.000Z' };
+    const reply = {
+      id: 'r1',
+      text: 'my answer',
+      author: 'User',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
     const result = appendReply(raw, 'c1', reply);
     const parsed = parseComments(result);
     expect(parsed.comments[0].agentInitiated).toBe(true);
@@ -466,10 +491,7 @@ describe('removeReply', () => {
 });
 
 describe('findNewReplyIds', () => {
-  function makeComment(
-    id: string,
-    replies: { id: string; text: string }[] = [],
-  ): MdComment {
+  function makeComment(id: string, replies: { id: string; text: string }[] = []): MdComment {
     return {
       id,
       anchor: 'a',
@@ -579,9 +601,7 @@ describe('backfillReplyTimestamps', () => {
   it('returns the original string when forceIds is empty', () => {
     const raw = `${marker({
       id: 'c1',
-      replies: [
-        { id: 'r1', text: 'reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
-      ],
+      replies: [{ id: 'r1', text: 'reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' }],
     })}hello`;
     const result = backfillReplyTimestamps(raw, new Set(), FALLBACK);
     expect(result).toBe(raw);
@@ -590,9 +610,7 @@ describe('backfillReplyTimestamps', () => {
   it('returns the original string when no matching reply is found', () => {
     const raw = `${marker({
       id: 'c1',
-      replies: [
-        { id: 'r1', text: 'reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' },
-      ],
+      replies: [{ id: 'r1', text: 'reply', author: 'A', timestamp: '2024-01-01T00:00:00.000Z' }],
     })}hello`;
     const result = backfillReplyTimestamps(raw, new Set(['nonexistent']), FALLBACK);
     expect(result).toBe(raw);
@@ -778,6 +796,91 @@ describe('detectMissingAnchors', () => {
     expect(missing.has('a')).toBe(false);
   });
 
+  it('does not flag an anchor that crosses table cells', () => {
+    // The anchor comes from rendered text, where the cell pipes are invisible.
+    const clean = [
+      '| | Single-point tool | Full lead journey |',
+      '|---|---|---|',
+      '| **Autonomous** | Chatbase (chat) | **EasyMate (target)** |',
+    ].join('\n');
+    const comments = [
+      { id: 'a', anchor: 'Single-point tool\nFull lead journey\nAutonomous\nChatbase (chat)' },
+    ] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+  });
+
+  it('does not flag an anchor that runs from a heading into a table', () => {
+    const clean = [
+      '### 1.1 The thesis',
+      '',
+      'Own the **complete lead journey** for SMBs.',
+      '',
+      '| | Single-point tool |',
+      '|---|---|',
+      '| **Autonomous** | Chatbase (chat) |',
+    ].join('\n');
+    const comments = [
+      {
+        id: 'a',
+        anchor:
+          '1.1 The thesis\nOwn the complete lead journey for SMBs.\nSingle-point tool\nAutonomous\nChatbase (chat)',
+      },
+    ] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+  });
+
+  it('still flags an anchor whose words were changed inside a table', () => {
+    const clean = '| **Autonomous** | Chatbase (chat) |';
+    const comments = [{ id: 'a', anchor: 'Autonomous Smith.ai (voice)' }] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(true);
+  });
+
+  it('does not flag an anchor whose word opens with a dash inside a blockquote', () => {
+    // The scaffolding skip must not swallow the "-" that starts the next word.
+    const clean = '> revenue\n> -20% YoY';
+    const comments = [{ id: 'a', anchor: 'revenue -20% YoY' }] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+  });
+
+  it('does not flag an anchor whose word opens with a dash inside a list', () => {
+    const clean = '- revenue\n- -20% drop';
+    const comments = [{ id: 'a', anchor: 'revenue -20% drop' }] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+  });
+
+  it('does not flag an anchor whose table cell opens with a dash', () => {
+    const clean = '| Cost | -20% |';
+    const comments = [{ id: 'a', anchor: 'Cost -20%' }] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+  });
+
+  it('flags an anchor whose words were separated by new punctuation', () => {
+    // ": " between the words is visible content, not markdown scaffolding. The
+    // viewer's matcher would not follow it either, so the comment must be
+    // reported for re-anchoring rather than silently losing its highlight.
+    expect(
+      detectMissingAnchors('alpha: beta', [{ id: 'a', anchor: 'alpha beta' }] as MdComment[]).has(
+        'a',
+      ),
+    ).toBe(true);
+    expect(
+      detectMissingAnchors('alpha -> beta', [{ id: 'a', anchor: 'alpha beta' }] as MdComment[]).has(
+        'a',
+      ),
+    ).toBe(true);
+    expect(
+      detectMissingAnchors('alpha = beta', [{ id: 'a', anchor: 'alpha beta' }] as MdComment[]).has(
+        'a',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not flag an anchor containing a literal dash between words', () => {
+    const clean = 'Trade-offs: speed - cost - quality';
+    const comments = [{ id: 'a', anchor: 'speed - cost - quality' }] as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+  });
+
   it('detects partially modified anchor', () => {
     const clean = 'Hello universe';
     const comments = [{ id: 'a', anchor: 'Hello world' }] as MdComment[];
@@ -860,36 +963,28 @@ describe('detectMissingAnchors', () => {
 
   it('does not flag anchor spanning a task list', () => {
     const clean = '- [ ] First task\n- [x] Done task';
-    const comments = [
-      { id: 'a', anchor: 'First task\nDone task' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'First task\nDone task' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag anchor spanning a nested (indented) list', () => {
     const clean = '- Outer item\n  - Inner item\n  - Another inner';
-    const comments = [
-      { id: 'a', anchor: 'Outer item\nInner item\nAnother inner' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Outer item\nInner item\nAnother inner' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag anchor spanning inline HTML tags', () => {
     const clean = 'Footnote<sup>1</sup> here.\nLine one<br>Line two.';
-    const comments = [
-      { id: 'a', anchor: 'Footnote1 here.\nLine oneLine two.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Footnote1 here.\nLine oneLine two.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag anchor spanning an autolink', () => {
     const clean = 'Visit <https://example.com> today.';
-    const comments = [
-      { id: 'a', anchor: 'Visit https://example.com today.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Visit https://example.com today.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -897,9 +992,7 @@ describe('detectMissingAnchors', () => {
   it('does not flag anchor spanning reference-style links and ref definitions', () => {
     const clean =
       'See [the docs][docs-ref] and [an example][ex] for info.\n\n[docs-ref]: https://example.com/docs\n[ex]: https://example.com/ex';
-    const comments = [
-      { id: 'a', anchor: 'See the docs and an example for info.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'See the docs and an example for info.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -915,18 +1008,14 @@ describe('detectMissingAnchors', () => {
 
   it('does not flag anchor spanning footnote refs and definitions', () => {
     const clean = 'See the docs[^1] for more details.\n\n[^1]: footnote text here.';
-    const comments = [
-      { id: 'a', anchor: 'See the docs for more details.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'See the docs for more details.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag anchor spanning a backslash hard break', () => {
     const clean = 'Line one\\\nLine two';
-    const comments = [
-      { id: 'a', anchor: 'Line one\nLine two' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Line one\nLine two' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -936,9 +1025,7 @@ describe('detectMissingAnchors', () => {
     // non-empty. The handler must leave it in place so a comment whose
     // anchor includes the literal text still matches.
     const clean = 'Aside [^] continues here.';
-    const comments = [
-      { id: 'a', anchor: 'Aside [^] continues here.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Aside [^] continues here.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -955,9 +1042,7 @@ describe('detectMissingAnchors', () => {
       '    - npm test\n' +
       '\n' +
       'Then continue.';
-    const comments = [
-      { id: 'a', anchor: '- npm install\n- npm test' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: '- npm install\n- npm test' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -967,11 +1052,8 @@ describe('detectMissingAnchors', () => {
     // `[the docs]: url` definition elsewhere, is a shortcut reference link.
     // remark-gfm renders just `the docs` (no brackets) — the parser must
     // drop the brackets to match.
-    const clean =
-      'See [the docs] for full details.\n\n[the docs]: https://example.com';
-    const comments = [
-      { id: 'a', anchor: 'See the docs for full details.' },
-    ] as MdComment[];
+    const clean = 'See [the docs] for full details.\n\n[the docs]: https://example.com';
+    const comments = [{ id: 'a', anchor: 'See the docs for full details.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -981,9 +1063,7 @@ describe('detectMissingAnchors', () => {
     // verbatim — the parser must NOT drop the brackets, otherwise an anchor
     // that includes them would fail to match.
     const clean = 'See [Note] for the warning. No reference defined.';
-    const comments = [
-      { id: 'a', anchor: 'See [Note] for the warning.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'See [Note] for the warning.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -994,9 +1074,7 @@ describe('detectMissingAnchors', () => {
     // handling. DOM textContent omits both layers of `> ` plus the bullet
     // marker, so the anchor only has the inner prose.
     const clean = '> > - Inner bullet one\n> > - Inner bullet two';
-    const comments = [
-      { id: 'a', anchor: 'Inner bullet one\nInner bullet two' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Inner bullet one\nInner bullet two' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -1015,9 +1093,7 @@ describe('detectMissingAnchors', () => {
 
   it('strips reference definitions with quoted titles', () => {
     const clean = 'See [docs][r] today.\n\n[r]: https://example.com "title text"';
-    const comments = [
-      { id: 'a', anchor: 'See docs today.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'See docs today.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -1036,18 +1112,14 @@ describe('detectMissingAnchors', () => {
     // bracket handler bails out and the text is preserved verbatim so users
     // can comment on it.
     const clean = 'Math: <3 km away';
-    const comments = [
-      { id: 'a', anchor: 'Math: <3 km away' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Math: <3 km away' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('strips collapsed reference links [text][]', () => {
     const clean = 'See [the docs][] for info.\n\n[the docs]: https://example.com';
-    const comments = [
-      { id: 'a', anchor: 'See the docs for info.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'See the docs for info.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -1056,36 +1128,28 @@ describe('detectMissingAnchors', () => {
     // CommonMark only escapes ASCII punctuation; `\f`, `\foo`, etc. should
     // keep both the backslash and the following char.
     const clean = 'Path: C:\\foo and \\bar end';
-    const comments = [
-      { id: 'a', anchor: 'Path: C:\\foo and \\bar end' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Path: C:\\foo and \\bar end' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag a blockquoted task list', () => {
     const clean = '> - [ ] Task in quote\n> - [x] Done in quote';
-    const comments = [
-      { id: 'a', anchor: 'Task in quote\nDone in quote' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'Task in quote\nDone in quote' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag a deeply nested list (4-space indent)', () => {
     const clean = '- A\n    - B\n        - C';
-    const comments = [
-      { id: 'a', anchor: 'A\nB\nC' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'A\nB\nC' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
 
   it('does not flag inline HTML with attributes', () => {
     const clean = 'See <a href="https://x.com" target="_blank">click here</a> please.';
-    const comments = [
-      { id: 'a', anchor: 'See click here please.' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: 'See click here please.' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -1290,9 +1354,7 @@ Final checklist is complete.
   it('does not flag agent anchor with mixed formatting markers', () => {
     // `**Still selected + content changed**` → plain `Still selected + content changed`
     const clean = 'State: **Still selected + content changed** triggers a diff.';
-    const comments = [
-      { id: 'a', anchor: '**Still selected + content changed**' },
-    ] as MdComment[];
+    const comments = [{ id: 'a', anchor: '**Still selected + content changed**' }] as MdComment[];
     const missing = detectMissingAnchors(clean, comments);
     expect(missing.has('a')).toBe(false);
   });
@@ -2761,11 +2823,7 @@ describe('moveComment', () => {
   });
 
   it('uses hintOffset to disambiguate duplicate anchor occurrences', () => {
-    const raw = insertComment(
-      'first foo then second foo in doc',
-      'first foo',
-      'note',
-    );
+    const raw = insertComment('first foo then second foo in doc', 'first foo', 'note');
     const { comments } = parseComments(raw);
     const commentId = comments[0].id;
 

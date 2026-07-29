@@ -869,10 +869,7 @@ export function removeReply(rawMarkdown: string, commentId: string, replyId: str
  * an external editor (typically an LLM agent) just added so we can override
  * them.
  */
-export function findNewReplyIds(
-  oldComments: MdComment[],
-  newComments: MdComment[],
-): Set<string> {
+export function findNewReplyIds(oldComments: MdComment[], newComments: MdComment[]): Set<string> {
   const newReplyIds = new Set<string>();
   const oldById = new Map(oldComments.map((c) => [c.id, c]));
   for (const newC of newComments) {
@@ -1066,8 +1063,7 @@ export function stripInlineFormatting(md: string): {
   // brackets, but a literal `[Note]` with no definition stays bracketed,
   // so we only strip when we know there's a real label.
   const refLabels = new Set<string>();
-  const normalizeRefLabel = (label: string) =>
-    label.replace(/\s+/g, ' ').trim().toLowerCase();
+  const normalizeRefLabel = (label: string) => label.replace(/\s+/g, ' ').trim().toLowerCase();
   const REF_DEF_RE =
     /(?:^|\n)\[([^\n\]]+)\]:[ \t]+(?:<[^<>\n]*>|\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*(?=\n|$)/g;
   for (let m: RegExpExecArray | null; (m = REF_DEF_RE.exec(md)) !== null; ) {
@@ -1474,8 +1470,60 @@ export function stripInlineFormatting(md: string): {
 }
 
 /**
- * Check if ordered parts appear contiguously in text, with only whitespace between them.
- * Used for flexible anchor detection when exact string match fails.
+ * Structural markdown that can sit between two words of an anchor without the
+ * anchored text having changed: list bullets, blockquote arrows, heading
+ * hashes, and a table's delimiter row. Anchors are captured from rendered
+ * text, where none of this is visible, so a selection crossing table cells or
+ * block boundaries has to be recognized in the source too.
+ *
+ * These characters are only structural at a line start, so they are skipped
+ * only once the gap between two parts has crossed a newline. Skipping them
+ * mid-line would read visible punctuation as invisible markup and report
+ * "alpha beta" as still present in "alpha: beta", which is a genuine edit the
+ * viewer's own matcher would not follow — the comment would lose its highlight
+ * without ever being flagged for re-anchoring.
+ */
+const LINE_START_SCAFFOLDING = /[>#+*:=-]/;
+
+/**
+ * The one piece of structure that is legitimately mid-line: a table's cell
+ * separator. Rendered text shows cells side by side with no pipe.
+ */
+const CELL_SEPARATOR = '|';
+
+function skipWhitespace(text: string, from: number): number {
+  let pos = from;
+  while (pos < text.length && /\s/.test(text[pos])) pos++;
+  return pos;
+}
+
+/**
+ * Position just past `part` when it can be reached from `from` across nothing
+ * but whitespace and structural markdown, or null when it cannot. Each
+ * character is consumed one at a time and the part is retried at every
+ * resulting position, so a part that itself opens with one of those characters
+ * ("-20%") still matches.
+ */
+function advancePastPart(text: string, from: number, part: string): number | null {
+  let pos = skipWhitespace(text, from);
+  let crossedNewline = text.slice(from, pos).includes('\n');
+  for (;;) {
+    if (text.startsWith(part, pos)) return pos + part.length;
+    if (pos >= text.length) return null;
+    const char = text[pos];
+    const structural =
+      char === CELL_SEPARATOR || (crossedNewline && LINE_START_SCAFFOLDING.test(char));
+    if (!structural) return null;
+    const next = skipWhitespace(text, pos + 1);
+    if (text.slice(pos + 1, next).includes('\n')) crossedNewline = true;
+    pos = next;
+  }
+}
+
+/**
+ * Check if ordered parts appear contiguously in text, separated only by
+ * whitespace and structural markdown. Used for flexible anchor detection when
+ * exact string match fails.
  */
 function partsAppearContiguously(text: string, parts: string[]): boolean {
   let searchFrom = 0;
@@ -1485,19 +1533,12 @@ function partsAppearContiguously(text: string, parts: string[]): boolean {
     let pos = firstIdx + parts[0].length;
     let matched = true;
     for (let i = 1; i < parts.length; i++) {
-      // Skip whitespace so cross-line selections still match
-      while (pos < text.length && /\s/.test(text[pos])) pos++;
-      // After whitespace, skip optional block-level markers at line start (list bullets, blockquote)
-      if (pos < text.length && /[-*+>]/.test(text[pos]) && (pos === 0 || text[pos - 1] === '\n')) {
-        pos++;
-        while (pos < text.length && text[pos] === ' ') pos++;
-      }
-      if (text.startsWith(parts[i], pos)) {
-        pos += parts[i].length;
-      } else {
+      const next = advancePastPart(text, pos, parts[i]);
+      if (next === null) {
         matched = false;
         break;
       }
+      pos = next;
     }
     if (matched) return true;
     searchFrom = firstIdx + 1;
