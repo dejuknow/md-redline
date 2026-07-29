@@ -6,7 +6,7 @@ import type { TabContextMenuInfo } from '../components/TabBar';
 import type { SidebarContextMenuInfo } from '../components/CommentListSurface';
 import type { MdComment, SelectionInfo } from '../types';
 import { getEffectiveStatus } from '../types';
-import { getPathBasename } from '../lib/path-utils';
+import { getParentDir, getPathBasename } from '../lib/path-utils';
 
 type ContextMenuInstance = {
   open: (x: number, y: number) => void;
@@ -53,8 +53,8 @@ export interface UseContextMenuItemsParams {
   addRecentFile: (path: string) => void;
   revealInFinder: (path: string) => void;
   revealLabel: string;
-  setExplorerDir: Dispatch<SetStateAction<string | undefined>>;
-  setExplorerVisible: (v: boolean | ((prev: boolean) => boolean)) => void;
+  /** Open the explorer panel on a directory (re-browses even if unchanged). */
+  revealDirInExplorer: (dir: string, filePath?: string) => void;
   tabs: Array<{ filePath: string }>;
   closeTab: (path: string) => void;
   closeOtherTabs: (path: string) => void;
@@ -64,6 +64,29 @@ export interface UseContextMenuItemsParams {
   explorerCtxMenu: ContextMenuInstance;
   tabCtxMenu: ContextMenuInstance;
   sidebarCtxMenu: ContextMenuInstance;
+}
+
+/**
+ * Put a viewer selection on the clipboard with the same two flavors the
+ * Cmd/Ctrl+C path writes, so right-click Copy does not silently flatten a
+ * table or a nested list that the keyboard copy would have preserved.
+ * Falls back to plain text when the richer API is unavailable or rejects.
+ */
+function copySelectionToClipboard(sel: SelectionInfo): void {
+  const writePlain = () => void navigator.clipboard.writeText(sel.text).catch(() => {});
+  if (!sel.html || typeof ClipboardItem === 'undefined' || !navigator.clipboard.write) {
+    writePlain();
+    return;
+  }
+  try {
+    const item = new ClipboardItem({
+      'text/plain': new Blob([sel.text], { type: 'text/plain' }),
+      'text/html': new Blob([sel.html], { type: 'text/html' }),
+    });
+    navigator.clipboard.write([item]).catch(writePlain);
+  } catch {
+    writePlain();
+  }
 }
 
 export function useContextMenuItems(params: UseContextMenuItemsParams) {
@@ -88,8 +111,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     addRecentFile,
     revealInFinder,
     revealLabel,
-    setExplorerDir,
-    setExplorerVisible,
+    revealDirInExplorer,
     tabs,
     closeTab,
     closeOtherTabs,
@@ -197,7 +219,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           {
             label: 'Copy',
             onClick: () => {
-              navigator.clipboard.writeText(sel.text);
+              copySelectionToClipboard(sel);
             },
           },
         ];
@@ -255,10 +277,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         const items: ContextMenuEntry[] = [
           {
             label: 'Open in Explorer',
-            onClick: () => {
-              setExplorerDir(info.path);
-              setExplorerVisible(true);
-            },
+            onClick: () => revealDirInExplorer(info.path),
           },
           { type: 'divider' as const },
           { label: revealLabel, onClick: () => revealInFinder(info.path) },
@@ -281,8 +300,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       addRecentFile,
       revealInFinder,
       revealLabel,
-      setExplorerVisible,
-      setExplorerDir,
+      revealDirInExplorer,
       viewerCtxMenu,
       explorerCtxMenu,
       tabCtxMenu,
@@ -300,8 +318,9 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       const hasTabsToRight = tabIndex >= 0 && tabIndex < tabs.length - 1;
       const hasOtherTabs = tabs.length > 1;
       const fileName = getPathBasename(info.filePath) || info.filePath;
-      const lastSlash = info.filePath.lastIndexOf('/');
-      const parentDir = lastSlash > 0 ? info.filePath.slice(0, lastSlash) : null;
+      // Separator-agnostic: a Windows path has no forward slashes, and a file
+      // at the POSIX root still has a parent to reveal.
+      const parentDir = getParentDir(info.filePath) || null;
 
       const items: ContextMenuEntry[] = [
         { label: 'Close', onClick: () => closeTab(info.filePath) },
@@ -322,8 +341,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           disabled: parentDir === null,
           onClick: () => {
             if (parentDir === null) return;
-            setExplorerDir(parentDir);
-            setExplorerVisible(true);
+            revealDirInExplorer(parentDir, info.filePath);
           },
         },
         { label: revealLabel, onClick: () => revealInFinder(info.filePath) },
@@ -341,8 +359,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       closeTabsToRight,
       revealInFinder,
       revealLabel,
-      setExplorerDir,
-      setExplorerVisible,
+      revealDirInExplorer,
       viewerCtxMenu,
       explorerCtxMenu,
       tabCtxMenu,

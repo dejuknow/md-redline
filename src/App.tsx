@@ -77,6 +77,7 @@ import { useComments } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
+import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
@@ -224,8 +225,7 @@ export default function App() {
         if (overrideDir) {
           hint = overrideDir;
         } else if (activeFilePath) {
-          const lastSlash = activeFilePath.lastIndexOf('/');
-          hint = lastSlash > 0 ? activeFilePath.slice(0, lastSlash) : null;
+          hint = getParentDir(activeFilePath) || null;
         }
         const url = hint
           ? `/api/pick-folder?defaultPath=${encodeURIComponent(hint)}`
@@ -248,6 +248,16 @@ export default function App() {
   );
 
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
+  // Bumped on every explicit reveal so the explorer re-browses even when the
+  // requested directory equals the last one we asked for (the user may have
+  // navigated elsewhere inside the panel since).
+  const [explorerRevealNonce, setExplorerRevealNonce] = useState(0);
+  const [explorerRevealPath, setExplorerRevealPath] = useState<string | undefined>(undefined);
+  // Which reveal the explorer has already applied. A ref rather than state: the
+  // panel unmounts on every sidebar toggle, Outline switch and focus-mode
+  // entry, so this has to outlive it, and recording a consumption must not
+  // re-render (that would scroll the panel a second time).
+  const explorerRevealConsumedRef = useRef<number | null>(null);
   const [homeDir, setHomeDir] = useState<string>('');
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
@@ -300,6 +310,22 @@ export default function App() {
       setExplorerVisible(visible);
     },
     [focusMode, exitFocusMode, setExplorerVisible],
+  );
+
+  const handleExplorerRevealConsumed = useCallback((nonce: number) => {
+    explorerRevealConsumedRef.current = nonce;
+  }, []);
+
+  /** Show a directory in the explorer panel, opening and switching to it. */
+  const revealDirInExplorer = useCallback(
+    (dir: string, filePath?: string) => {
+      setExplorerDir(dir);
+      setExplorerRevealPath(filePath);
+      setExplorerRevealNonce((n) => n + 1);
+      setLeftPanelView('explorer');
+      setExplorerVisibleGuarded(true);
+    },
+    [setLeftPanelView, setExplorerVisibleGuarded],
   );
 
   const setSidebarVisibleGuarded = useCallback(
@@ -1447,10 +1473,8 @@ export default function App() {
         }
         const firstFile = session.filePaths[0];
         if (firstFile) {
-          const lastSlash = firstFile.lastIndexOf('/');
-          if (lastSlash > 0) {
-            setExplorerDir(firstFile.slice(0, lastSlash));
-          }
+          const parent = getParentDir(firstFile);
+          if (parent) setExplorerDir(parent);
         }
       } catch {
         /* ignore */
@@ -1475,10 +1499,8 @@ export default function App() {
       addRecentFile(urlFile);
       // Also point the explorer at the file's parent dir so the user can
       // browse siblings, rather than falling back to the server's cwd.
-      const lastSlash = urlFile.lastIndexOf('/');
-      if (lastSlash > 0) {
-        setExplorerDir(urlFile.slice(0, lastSlash));
-      }
+      const parent = getParentDir(urlFile);
+      if (parent) setExplorerDir(parent);
       window.history.replaceState({}, '', window.location.pathname);
       return;
     }
@@ -1500,10 +1522,8 @@ export default function App() {
           openTab(data.initialFile);
           // Same as the urlFile path: point the explorer at the file's
           // parent dir so siblings are browsable.
-          const lastSlash = data.initialFile.lastIndexOf('/');
-          if (lastSlash > 0) {
-            setExplorerDir(data.initialFile.slice(0, lastSlash));
-          }
+          const parent = getParentDir(data.initialFile);
+          if (parent) setExplorerDir(parent);
         }
         if (data.initialDir) {
           setExplorerDir(data.initialDir);
@@ -1592,8 +1612,7 @@ export default function App() {
     addRecentFile,
     revealInFinder,
     revealLabel,
-    setExplorerDir,
-    setExplorerVisible: setExplorerVisibleGuarded,
+    revealDirInExplorer,
     tabs,
     closeTab,
     closeOtherTabs,
@@ -1821,18 +1840,30 @@ export default function App() {
 
   useEffect(() => {
     const handleCopy = (e: ClipboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      const composer =
+        active instanceof HTMLTextAreaElement && active.closest('[data-comment-form]') !== null
+          ? active
+          : null;
       const fallbackText = getCopySelectionFallbackText({
         nativeSelectionText: window.getSelection()?.toString() ?? '',
         viewerSelectionText: selectionRef.current?.text ?? null,
-        activeElement: document.activeElement as HTMLElement | null,
+        activeElement: active,
         viewMode,
+        inCommentComposer: composer !== null,
+        composerCaretCollapsed:
+          composer !== null && composer.selectionStart === composer.selectionEnd,
       });
       if (!fallbackText || !e.clipboardData) return;
 
       // The viewer paints its own selection highlight, which clears the native
-      // browser selection range. Restore expected copy behavior from app state.
+      // browser selection range. Restore expected copy behavior from app state,
+      // including the rich-text flavor snapshotted at selection time so
+      // formatting survives a paste into a rich-text editor.
       e.preventDefault();
       e.clipboardData.setData('text/plain', fallbackText);
+      const html = selectionRef.current?.html;
+      if (html) e.clipboardData.setData('text/html', html);
     };
 
     document.addEventListener('copy', handleCopy);
@@ -2223,10 +2254,7 @@ export default function App() {
   // file. Computed here so the Toolbar can render the path in its prompt.
   const accessDeniedDir =
     errorKind === 'access-denied' && activeFilePath
-      ? (() => {
-          const lastSlash = activeFilePath.lastIndexOf('/');
-          return lastSlash > 0 ? activeFilePath.slice(0, lastSlash) : null;
-        })()
+      ? getParentDir(activeFilePath) || null
       : null;
 
   // Optimistic sent IDs: updated immediately when a batch is sent, before
@@ -2370,6 +2398,10 @@ export default function App() {
               {leftPanelView === 'explorer' ? (
                 <FileExplorer
                   initialDir={explorerDir}
+                  revealNonce={explorerRevealNonce}
+                  revealPath={explorerRevealPath}
+                  revealConsumedNonce={explorerRevealConsumedRef.current}
+                  onRevealConsumed={handleExplorerRevealConsumed}
                   activeFilePath={activeFilePath}
                   homeDir={homeDir}
                   onOpenFile={handleExplorerOpenFile}

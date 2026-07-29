@@ -1,4 +1,5 @@
 import type { SelectionInfo } from '../types';
+import { buildRangeHtml } from './copy-selection-html';
 import { getVisibleTextContent, getVisibleTextOffset } from './visible-text';
 
 export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null {
@@ -29,6 +30,7 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
 
   return {
     text,
+    html: buildRangeHtml(range, containerEl) ?? undefined,
     rect,
     contextBefore,
     contextAfter,

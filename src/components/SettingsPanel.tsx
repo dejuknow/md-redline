@@ -334,7 +334,8 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                   </button>
                 </div>
                 <p className="text-xs text-content-muted mb-3">
-                  Drag to reorder. The order here matches the template picker.
+                  Drag to reorder. The order here matches the template picker, and the first two
+                  become the one-tap buttons on the selection pill.
                 </p>
 
                 {/* Template list */}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getPathBasename, tildeShortenPath } from './path-utils';
+import { getParentDir, getPathBasename, tildeShortenPath } from './path-utils';
 
 describe('getPathBasename', () => {
   it('returns the basename for POSIX paths', () => {
@@ -53,5 +53,32 @@ describe('tildeShortenPath', () => {
 
   it('replaces a leading Windows-style home dir prefix with ~', () => {
     expect(tildeShortenPath('C:\\Users\\dennisju\\dev', 'C:\\Users\\dennisju')).toBe('~\\dev');
+  });
+});
+
+describe('getParentDir', () => {
+  it('returns the directory for a POSIX path', () => {
+    expect(getParentDir('/Users/dennis/docs/spec.md')).toBe('/Users/dennis/docs');
+  });
+
+  it('returns the root for a file directly under it', () => {
+    expect(getParentDir('/spec.md')).toBe('/');
+  });
+
+  it('handles Windows separators', () => {
+    expect(getParentDir('C:\\docs\\spec.md')).toBe('C:\\docs');
+  });
+
+  it('keeps the separator on a drive root', () => {
+    expect(getParentDir('C:\\spec.md')).toBe('C:\\');
+  });
+
+  it('returns an empty string when there is no directory part', () => {
+    expect(getParentDir('spec.md')).toBe('');
+    expect(getParentDir('')).toBe('');
+  });
+
+  it('ignores a trailing separator', () => {
+    expect(getParentDir('/Users/dennis/docs/')).toBe('/Users/dennis');
   });
 });

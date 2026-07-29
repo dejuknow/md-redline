@@ -63,6 +63,11 @@ export interface ParseResult {
 
 export interface SelectionInfo {
   text: string;
+  /**
+   * The selection serialized as HTML, snapshotted before the viewer's highlight
+   * repaint destroys the range. Feeds the clipboard's rich-text flavor.
+   */
+  html?: string;
   rect: DOMRect;
   contextBefore: string;
   contextAfter: string;

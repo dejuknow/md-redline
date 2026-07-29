@@ -363,6 +363,60 @@ While a template prefill sits untouched in the full comment form, Escape
 clears the prefill and keeps the form open; a second Escape (or an Escape
 after typing) closes the form as usual.
 
+### Copying a document selection
+The rendered view paints the pending selection as `mark.selection-highlight`
+(`MarkdownViewer.tsx`), which replaces the selected text nodes and collapses the
+browser's own range, so a plain Cmd/Ctrl+C would copy nothing. The document-level
+`copy` handler in `App.tsx` restores it:
+
+- `getCopySelectionFallbackText` (`src/lib/copy-selection.ts`) decides whether to
+  override. It stands down outside the rendered view, when a real native selection
+  still exists, and inside editable elements. The one exception is the comment
+  composer: with quick comment on, the textarea takes focus the instant a selection
+  is made, so a collapsed caret there still copies the document selection. Text
+  selected inside the composer keeps the native copy.
+- `buildRangeHtml` (`src/lib/copy-selection-html.ts`) supplies the `text/html`
+  flavor. `resolveSelection` calls it at selection time and stores the result on
+  `SelectionInfo.html`, before the repaint destroys the range, so the rich flavor
+  does not depend on the highlight painting (or painting correctly). It clones the
+  range after widening each boundary through ancestors the selection sits flush
+  against, so a tight `<a>` or heading wrapper is not flattened; the walk only
+  climbs content elements (`CONTENT_WRAPPERS`), never layout wrappers like the doc
+  sheet, whose classes have no business on the clipboard. It then unwraps the app's
+  own highlight marks, strips viewer chrome, and re-wraps the leading run of loose
+  `<li>`s in their list (only the leading run, so a selection that runs out of a
+  list keeps the blocks after it).
+
+  Numbering is per level, not per list-pair. `collectListLevels` walks every
+  list the range's start sits inside, outermost first, pairing each with the
+  item at that list's own level, and each level gets its own `start` via
+  `restoreOrderedStart` (whose offset comes structurally from that item, not
+  from matching item text). Modelling this as a fixed outer/inner pair looks
+  sufficient and is not: nesting is arbitrarily deep, and any list between the
+  two ends up silently renumbered from 1. Separately, `owningList` picks the
+  list whose items are the fragment's *top-level* nodes, which is the one
+  `wrapLooseListItems` may have to rebuild because the list element itself was
+  never inside the range.
+
+  Tables get the mirror-image treatment: `rebuildTableWrapper` restores the
+  `<table>` around rows or cells left at the fragment's top level by a partial
+  selection, since the HTML fragment parser drops stray `<tr>`/`<td>` and
+  foster-parents their text. `unwrapSingleCell` then undoes it for a selection
+  that lives inside one cell, which is a text selection rather than a table
+  one: copying a value out of a config table should paste the value, not a 1x1
+  table.
+
+  Locating a source list's counterpart inside the clone is not derivable by
+  search (nesting, partial ancestors and dropped leading siblings all move it),
+  so `buildRangeHtml` tags the source elements with `CLONE_MARK` for the
+  duration of `cloneContents` and strips the attribute from both the live
+  document (in a `finally`) and the clone before serializing. This is the one
+  place the helper touches the live DOM; it is synchronous, and a test asserts
+  the source document is byte-identical afterwards.
+
+Both flavors go on the clipboard, so pasting into a rich-text editor keeps
+headings, bold, links, tables, and list structure.
+
 ### Comments rail
 The single comment surface for the rendered view: a fixed-width column at the
 right edge of the document page, inside the same width-managed page unit as
@@ -482,6 +536,38 @@ button. To re-anchor: select replacement text in the viewer, then click the
 button. This calls `moveComment` under the hood and restores the comment at the
 new position. When comments first become orphaned, a debounced toast fires after
 500 ms: `"N comment(s) lost their anchor. See "Needs re-anchoring" in Comments."`
+
+Orphan detection is a separate matcher from the viewer's: `detectMissingAnchors`
+(`comment-parser.ts`) searches the markdown **source**, where an anchor captured
+from rendered text meets syntax the reader never sees. `partsAppearContiguously`
+therefore allows structural markdown between anchor words (cell pipes and the
+`|:---|` delimiter row, list bullets, blockquote arrows, heading hashes). It
+tries a whitespace-only gap first, so an anchor whose own words are punctuation
+(a literal `-` between words) is not swallowed by the scaffolding skip. A
+selection crossing a table would otherwise be flagged as an orphan the instant
+it was saved, even though the viewer highlighted it correctly.
+
+#### Anchor matching tiers
+`findMatchRange` (`MarkdownViewer.tsx`) locates an anchor in the concatenated
+visible text nodes, in order:
+
+1. Literal match (hint and context aware).
+2. Flexible-whitespace match on the original text, hint aware via
+   `findFlexibleMatch`. A cross-block anchor carries newlines that the
+   concatenated text nodes do not, so this is tier 1 with the whitespace
+   loosened. The walk stops at the first match past the offset hint (matches
+   come out left to right, so nothing later can be closer) and is capped at
+   `MAX_FLEXIBLE_PROBES`, since this tier now runs for every anchor that misses
+   a literal match rather than once as a last resort.
+3. Stripped-formatting match (`**bold**` → `bold`), literal then flexible.
+4. Mermaid node syntax (`E[label]` → `label`), with its own inner fallbacks.
+
+The whole-text tiers must stay ahead of the stripped one. `stripInlineFormatting`
+reads markdown source syntax, and an anchor captured from rendered text can carry
+something that only looks like syntax: `1. ` opening a heading such as
+`## 1. Current Strategy` parses as an ordered-list marker. Matching the stripped
+variant first either anchors to "Current Strategy" and silently drops the number
+from the highlight, or fails outright and reports the anchor as lost.
 
 #### Agent questions
 When the agent calls `mdr_ask`, the questions render as standard comment cards
@@ -635,7 +721,37 @@ There is no explorer toggle in the toolbar anymore; `Cmd+B` still toggles
 The app logo and the settings gear live only in the sidebar.
 
 ### File explorer
-Sidebar view (`Cmd+B`) for browsing and opening markdown files.
+Sidebar view (`Cmd+B`) for browsing and opening markdown files. The panel sizes
+itself `flex-1 min-h-0` so a long listing scrolls inside the panel instead of
+pushing the settings button out of the sidebar's bottom corner.
+
+**Reveal in explorer.** `revealDirInExplorer(dir, filePath?)` in `App.tsx` backs
+both the tab context menu's "Reveal in Explorer Sidebar" and the explorer's
+"Open in Explorer" on a directory. It sets the directory, switches the left
+panel to Explorer, opens it, and bumps `explorerRevealNonce`. The nonce is what
+makes a reveal work when the explorer is already pointed at that directory:
+`FileExplorer` re-browses on nonce change, since the panel tracks its own
+navigation and the stored directory alone would not have changed.
+
+A reveal applies exactly once. The consumed nonce is recorded the moment the
+reveal lands, because `revealPath` stays set afterwards and would otherwise keep
+winning every later scroll-into-view and re-flashing its row whenever the active
+file changed. Consumption is owned by `App` (`explorerRevealConsumedRef`, seeded
+into the panel as `revealConsumedNonce` and reported back via
+`onRevealConsumed`) rather than by the panel: `FileExplorer` unmounts on every
+sidebar toggle, Outline switch and focus-mode entry, so panel-local state would
+resurrect a spent reveal on the next remount. It is a ref, not state, because
+recording a consumption must not re-render — that would scroll the panel a
+second time, away from the row just revealed. A reveal whose target never appears is retired
+when the listing for that file's own directory arrives without it, scoped that
+way so a still-in-flight browse of some other directory cannot retire it early.
+
+The revealed row scrolls into view and, when it is not the active file, flashes
+briefly. The flash timer lives in its own effect keyed on `flashPath` rather
+than in the reveal effect, so an interruption (opening another file mid-flash)
+re-arms the timer instead of tearing it down and leaving the row highlighted for
+good. A row that is both the reveal target and the active file claims both refs,
+so the active-file scroll keeps working after the reveal is spent.
 
 ### Document outline
 Sidebar view (`Cmd+Shift+O`) showing heading structure for quick navigation.
@@ -704,7 +820,13 @@ The Prose typeface, Document width, and Prose size controls are each an accessib
 segmented control (`role="group"` with a label) whose segments show a crimson
 focus-visible ring on keyboard focus.
 
-Note on templates: the default template texts contain no em-dashes; `parseSettings` upgrades persisted copies of the pre-2026-07-10 default texts in place (exact-match only, customized templates untouched).
+Note on templates: the shipped set is `DEFAULT_TEMPLATES` in `src/lib/settings.ts`, ordered so the
+two most-used verdicts (`Agreed`, `Rewrite this`) land in the selection pill's one-tap slots.
+`parseSettings` runs two migrations, both exact-match only so customized templates are never
+touched: pre-2026-07-10 default texts are rewritten in place to drop em-dashes, and a stored list
+that still matches the pre-2026-07-28 default set in full is replaced with the current defaults
+(that revision added `Agreed` and `Why this?`, dropped `Fix formatting`, and folded `Too vague`
+into `Rewrite this`).
 
 ### Themes
 

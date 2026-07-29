@@ -940,14 +940,28 @@ const MERMAID_NODE_MAX_LEN = 1024;
 /**
  * Find a matching range for `text` in `fullText`. Tiers:
  *   1. Literal exact match (hint/context aware).
- *   2. Stripped-formatting fallback (e.g. **bold** → bold).
- *   3. Mermaid node syntax fallback (e.g. "E[label]" → "label"), with its
+ *   2. Flexible whitespace match on the original text (hint aware). A
+ *      cross-block anchor carries newlines the concatenated text nodes do not,
+ *      so this is really tier 1 with the whitespace loosened.
+ *   3. Stripped-formatting fallback (e.g. **bold** → bold).
+ *   4. Mermaid node syntax fallback (e.g. "E[label]" → "label"), with its
  *      own stripped-formatting and flexible-search inner fallbacks.
- *   4. Flexible whitespace search on the original text.
  *
- * Returns null when no tier finds a match. Tier 2 (stripped) shortcircuits
- * to flexibleSearch on the stripped text — it does NOT fall through to the
- * Mermaid path, preserving the original wrapText behavior.
+ * Returns null when no tier finds a match.
+ *
+ * The whole-text tiers run before the stripped one because the stripper reads
+ * markdown source syntax, and an anchor captured from rendered text can carry
+ * something that only looks like syntax: `1. ` opening a heading such as
+ * "## 1. Current Strategy" parses as an ordered-list marker. Matching the
+ * stripped variant first would quietly anchor to "Current Strategy" and drop
+ * the number from the highlight, or fail outright and report a lost anchor.
+ *
+ * Tier 3 also falls through to tier 4 on failure, where it used to stop. An
+ * anchor can be both markdown-formatted and Mermaid node syntax
+ * ("E[**bold** label]"), and stopping at tier 3 meant such an anchor never
+ * reached the label extraction that was written for it. Falling through only
+ * ever adds candidates, and each later tier is itself anchored to the same
+ * text, so it cannot turn a correct match into a wrong one.
  */
 function findMatchRange(
   fullText: string,
@@ -970,7 +984,11 @@ function findMatchRange(
     return { start, end: start + text.length };
   }
 
-  // Tier 2: stripped formatting
+  // Tier 2: flexible whitespace on the original text
+  const flexible = findFlexibleMatch(fullText, text, hintOffset);
+  if (flexible) return flexible;
+
+  // Tier 3: stripped formatting
   const strippedText = stripInlineFormatting(text).plain;
   if (strippedText !== text && strippedText.length > 0) {
     const occs = findAllOccurrences(fullText, strippedText);
@@ -978,10 +996,11 @@ function findMatchRange(
       const start = pickClosestOccurrence(occs, hintOffset);
       return { start, end: start + strippedText.length };
     }
-    return flexibleSearch(fullText, strippedText) ?? null;
+    const flexible = flexibleSearch(fullText, strippedText);
+    if (flexible) return flexible;
   }
 
-  // Tier 3: Mermaid node syntax
+  // Tier 4: Mermaid node syntax
   const mermaidMatch =
     text.length <= MERMAID_NODE_MAX_LEN ? text.match(MERMAID_NODE_PATTERN) : null;
   if (mermaidMatch) {
@@ -1002,8 +1021,42 @@ function findMatchRange(
     }
   }
 
-  // Tier 4: flexible whitespace on the original
-  return flexibleSearch(fullText, text) ?? null;
+  return null;
+}
+
+/**
+ * Backstop on the flexible-match walk below. A pathological anchor whose first
+ * word is very common would otherwise rescan the document once per occurrence,
+ * for every comment, on every repaint.
+ */
+const MAX_FLEXIBLE_PROBES = 64;
+
+/**
+ * The flexible-whitespace match of `needle` closest to `hintOffset`.
+ *
+ * Without a hint this is the first match and costs a single scan. With one,
+ * the walk stops as soon as a match starts at or past the hint, since matches
+ * are enumerated left to right and everything after that point is farther
+ * away than the candidate already in hand.
+ */
+function findFlexibleMatch(
+  haystack: string,
+  needle: string,
+  hintOffset?: number,
+): { start: number; end: number } | null {
+  let best: { start: number; end: number } | null = null;
+  let from = 0;
+  for (let probe = 0; probe < MAX_FLEXIBLE_PROBES; probe++) {
+    const match = flexibleSearch(haystack, needle, from);
+    if (!match) break;
+    if (hintOffset === undefined) return match;
+    if (best === null || Math.abs(match.start - hintOffset) < Math.abs(best.start - hintOffset)) {
+      best = match;
+    }
+    if (match.start >= hintOffset) break;
+    from = match.start + 1;
+  }
+  return best;
 }
 
 /**
