@@ -89,6 +89,18 @@ describe('renderMarkdown', () => {
     expect(text).toBe(body);
   });
 
+  it('does not style continuation lines as keys', () => {
+    // A folded value's continuation lines routinely contain a colon (a URL, a
+    // ratio, a time). Matching key shape alone painted `http` and `3` as keys,
+    // while a genuinely nested key under a valueless parent must still style.
+    const md =
+      '---\ndescription: See docs at\n  http://example.com:8080/path\nnote: Ratio is\n  3:4 approx\ntools:\n  - Read\nnested:\n  key: value\n---\n\n# H';
+    const keys = [...renderMarkdown(md).matchAll(/doc-frontmatter__key">([^<]*)</g)].map(
+      (m) => m[1],
+    );
+    expect(keys).toEqual(['description', 'note', 'tools', 'nested', 'key']);
+  });
+
   it('does not treat a mid-document --- as frontmatter', () => {
     const html = renderMarkdown('# Title\n\ntext\n\n---\n\nmore');
     expect(html).not.toContain('doc-frontmatter');
