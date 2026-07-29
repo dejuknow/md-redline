@@ -23,6 +23,7 @@ import {
   resolveAllComments,
   removeResolvedComments,
   detectMissingAnchors,
+  orderCommentsByAnchor,
 } from '../lib/comment-parser';
 import { getEffectiveStatus } from '../types';
 import { renderMarkdown } from '../markdown/pipeline';
@@ -341,10 +342,18 @@ export function useComments(params: UseCommentsParams) {
     [updateAndSave, rawMarkdownRef],
   );
 
+  // Document order, not array order: markers relocated out of frontmatter or a
+  // code fence share one offset, so the raw array visits them in the order they
+  // were written rather than the order they appear.
+  const orderedComments = useMemo(
+    () => orderCommentsByAnchor(cleanMarkdown, comments),
+    [cleanMarkdown, comments],
+  );
+
   const handleJumpToNext = useCallback(() => {
     const navigable = enableResolve
-      ? comments.filter((c) => getEffectiveStatus(c) === 'open')
-      : comments;
+      ? orderedComments.filter((c) => getEffectiveStatus(c) === 'open')
+      : orderedComments;
     if (navigable.length === 0) return;
 
     const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
@@ -353,12 +362,12 @@ export function useComments(params: UseCommentsParams) {
     setActiveCommentId(next.id);
     viewerRef.current?.scrollToComment(next.id);
     rawViewRef.current?.scrollToComment(next.id);
-  }, [comments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
+  }, [orderedComments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
 
   const handleJumpToPrev = useCallback(() => {
     const navigable = enableResolve
-      ? comments.filter((c) => getEffectiveStatus(c) === 'open')
-      : comments;
+      ? orderedComments.filter((c) => getEffectiveStatus(c) === 'open')
+      : orderedComments;
     if (navigable.length === 0) return;
 
     const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
@@ -367,7 +376,7 @@ export function useComments(params: UseCommentsParams) {
     setActiveCommentId(prev.id);
     viewerRef.current?.scrollToComment(prev.id);
     rawViewRef.current?.scrollToComment(prev.id);
-  }, [comments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
+  }, [orderedComments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
 
   return {
     activeCommentId,

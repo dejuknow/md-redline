@@ -1709,6 +1709,35 @@ export function extractMermaidText(cleanMarkdown: string): string {
  * Returns a set of comment IDs with missing anchors.
  * Parts must appear contiguously (with only whitespace between them) to count as found.
  */
+/**
+ * Comments in the order a reader meets them in the document.
+ *
+ * `cleanOffset` is the MARKER's position, which for an ordinary comment is
+ * also its anchor's. Relocated markers break that: every marker pushed out of
+ * one container parks on the same offset, so ordering by it alone falls back
+ * to insertion order and two comments on two frontmatter fields are visited
+ * bottom-up if they were written bottom-up. The rail stacks its cards by
+ * measured DOM position and gets this right, so navigation that disagrees
+ * contradicts the cards sitting in front of the user.
+ *
+ * Offsets decide as before; the anchor's own position only breaks ties, so
+ * nothing changes for comments that were never relocated.
+ */
+export function orderCommentsByAnchor(cleanMarkdown: string, comments: MdComment[]): MdComment[] {
+  const anchorPosition = (comment: MdComment): number => {
+    if (comment.contextBefore) {
+      const withContext = cleanMarkdown.indexOf(comment.contextBefore + comment.anchor);
+      if (withContext !== -1) return withContext + comment.contextBefore.length;
+    }
+    const direct = cleanMarkdown.indexOf(comment.anchor);
+    return direct === -1 ? (comment.cleanOffset ?? 0) : direct;
+  };
+  return [...comments].sort(
+    (a, b) =>
+      (a.cleanOffset ?? 0) - (b.cleanOffset ?? 0) || anchorPosition(a) - anchorPosition(b),
+  );
+}
+
 export function detectMissingAnchors(cleanMarkdown: string, comments: MdComment[]): Set<string> {
   const missing = new Set<string>();
   if (!cleanMarkdown) return missing;

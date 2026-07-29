@@ -21,6 +21,7 @@ import {
   backfillReplyTimestamps,
   findNewReplyIds,
   moveComment,
+  orderCommentsByAnchor,
   transformCommentMarkers,
   extractMermaidText,
 } from './comment-parser';
@@ -769,6 +770,35 @@ describe('edge cases', () => {
     const reparsed = parseComments(rebuilt);
     expect(reparsed.comments).toHaveLength(2);
     expect(reparsed.cleanMarkdown).toBe(cleanMarkdown);
+  });
+});
+
+describe('orderCommentsByAnchor', () => {
+  it('visits two frontmatter comments top-down even when written bottom-up', () => {
+    const doc = '---\ntitle: Login flow\ndescription: A spec\n---\n\n# Body\n\nText.\n';
+    let raw = insertComment(doc, 'A spec', 'lower field', 'User', 'description: ', '\n---');
+    raw = insertComment(raw, 'Login flow', 'upper field', 'User', 'title: ', '\ndescription');
+    const { comments, cleanMarkdown } = parseComments(raw);
+    // Both markers park on the same offset, so array order is insertion order.
+    expect(comments[0].cleanOffset).toBe(comments[1].cleanOffset);
+    expect(comments.map((c) => c.text)).toEqual(['lower field', 'upper field']);
+    expect(orderCommentsByAnchor(cleanMarkdown, comments).map((c) => c.text)).toEqual([
+      'upper field',
+      'lower field',
+    ]);
+  });
+
+  it('leaves ordinary comments in document order untouched', () => {
+    const doc = '# T\n\nAlpha here.\n\nBeta there.\n\nGamma too.\n';
+    let raw = insertComment(doc, 'Gamma', 'third', 'User');
+    raw = insertComment(raw, 'Alpha', 'first', 'User');
+    raw = insertComment(raw, 'Beta', 'second', 'User');
+    const { comments, cleanMarkdown } = parseComments(raw);
+    expect(orderCommentsByAnchor(cleanMarkdown, comments).map((c) => c.text)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
   });
 });
 
