@@ -13,7 +13,7 @@ import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { FORMATTED_DOC_BASELINE } from './helpers/fixture-baselines';
-import { resetTestAppState } from './helpers/test-state';
+import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
 import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +27,10 @@ test.beforeEach(async ({ page }) => {
 
 test.afterAll(() => {
   writeFileSync(FIXTURE, FIXTURE_ORIGINAL);
+  // The theme and typeface tests below persist their settings server-side, and
+  // the prefs file is shared across specs. Later specs that do not reset in
+  // beforeEach would otherwise boot into Dark and Sans.
+  clearPersistedPreferences();
 });
 
 async function openFixture(page: Page) {
@@ -257,5 +261,90 @@ test.describe('Drag handles reposition on container resize', () => {
     // edge (both offset by a couple px for the handle's own width/inset).
     expect(Math.abs(startBox!.x - markBox!.x)).toBeLessThanOrEqual(8);
     expect(Math.abs(endBox!.x - (markBox!.x + markBox!.width))).toBeLessThanOrEqual(8);
+  });
+
+  /**
+   * Each handle sits at a fixed inset from its end of the mark, so the
+   * invariant across a reflow is that the gap is preserved. Asserting absolute
+   * proximity instead needs a tolerance wider than the drift being guarded
+   * against, and passes with the handles frozen.
+   *
+   * Measured against the mark's first and last client rects, which is what
+   * computePositions itself uses. The union bounding box would agree only while
+   * the anchor stays on one line: if it ever wraps, x and width change meaning
+   * and both gaps jump by tens of px on correct code. rectCount is returned so
+   * a wrap shows up in the failure message instead of looking like drift.
+   */
+  async function handleGaps(page: Page) {
+    return page.evaluate(() => {
+      const mark = document.querySelector('mark.comment-highlight-active');
+      const handles = document.querySelectorAll('[data-drag-handle]');
+      if (!mark || handles.length < 2) throw new Error('mark or handles missing');
+      const rects = mark.getClientRects();
+      const first = rects[0];
+      const last = rects[rects.length - 1];
+      const start = handles[0].getBoundingClientRect();
+      const end = handles[handles.length - 1].getBoundingClientRect();
+      return {
+        start: start.left - first.left,
+        end: end.left - last.right,
+        rectCount: rects.length,
+      };
+    });
+  }
+
+  async function commentAndActivate(page: Page, label: string) {
+    await openFixture(page);
+    await addComment(page, 'followed by regular text', label);
+    await getCard(page, label).click();
+    await expect(page.locator('[data-drag-handle]')).toHaveCount(2);
+    await stableHandlePositions(page);
+  }
+
+  // Presentation attributes reflow the text under the marks without resizing
+  // any observed box, so neither the scroll listener nor the ResizeObserver
+  // fires. Both cases below leave the handles parked at their old x without the
+  // presentation observer in useDragHandles.
+  test('handles stay aligned with the mark after switching to a dark theme', async ({ page }) => {
+    await commentAndActivate(page, 'Theme reposition test');
+    const before = await handleGaps(page);
+
+    // Dark themes set their own body and bold font-weights.
+    await page.keyboard.press(withMod('k'));
+    await page.getByPlaceholder('Type a command...').fill('Theme: Dark');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-theme="dark"]')).toBeVisible();
+    await stableHandlePositions(page);
+
+    const after = await handleGaps(page);
+    // Repositioning derives both handles from the same rects the assertion
+    // reads, so the correct-path delta is 0. The tolerance only absorbs
+    // subpixel rounding; the drift it guards against is 1-9px.
+    expect(after.rectCount).toBe(before.rectCount);
+    expect(Math.abs(after.start - before.start)).toBeLessThanOrEqual(0.25);
+    expect(Math.abs(after.end - before.end)).toBeLessThanOrEqual(0.25);
+  });
+
+  test('handles stay aligned with the mark after switching the prose typeface', async ({
+    page,
+  }) => {
+    await commentAndActivate(page, 'Typeface reposition test');
+    const before = await handleGaps(page);
+
+    // Serif to sans is a bigger metric change than any weight swap, and it
+    // lands on a different element and attribute than the theme does.
+    await page.locator('button[title*="Settings"]').click();
+    await page.getByRole('button', { name: 'Sans', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-prose-font="sans"]')).toBeVisible();
+    await stableHandlePositions(page);
+
+    const after = await handleGaps(page);
+    // Repositioning derives both handles from the same rects the assertion
+    // reads, so the correct-path delta is 0. The tolerance only absorbs
+    // subpixel rounding; the drift it guards against is 1-9px.
+    expect(after.rectCount).toBe(before.rectCount);
+    expect(Math.abs(after.start - before.start)).toBeLessThanOrEqual(0.25);
+    expect(Math.abs(after.end - before.end)).toBeLessThanOrEqual(0.25);
   });
 });

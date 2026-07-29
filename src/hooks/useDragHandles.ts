@@ -183,10 +183,32 @@ export function useDragHandles({
     ro.observe(scrollContainer);
     const page = pageRef.current;
     if (page) ro.observe(page);
+    // Presentation attributes reflow the text under the marks. Theme is not
+    // purely chromatic (the dark ones set their own body and bold font-weights)
+    // and the typeface toggle swaps serif for sans, so either one re-measures
+    // every glyph and slides the marks horizontally. Line count usually holds,
+    // so no observed box resizes and none of the listeners above fire, leaving
+    // the handles parked at their old x until the next scroll. Size is included
+    // for completeness: it currently changes height too, so the ResizeObserver
+    // already catches it, but that is incidental rather than guaranteed.
+    //
+    // Observed with subtree, because these live on different elements: theme on
+    // the document element, the prose pair on the viewer wrapper. The filter
+    // keeps the callback off every other attribute mutation, and the rAF lets
+    // the reflow land before measuring.
+    const presentationObserver = new MutationObserver(() => {
+      requestAnimationFrame(handler);
+    });
+    presentationObserver.observe(document.documentElement, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['data-theme', 'data-prose-font', 'data-prose-size'],
+    });
     return () => {
       scrollContainer.removeEventListener('scroll', handler);
       window.removeEventListener('resize', handler);
       ro.disconnect();
+      presentationObserver.disconnect();
     };
   }, [activeCommentId, scrollContainerRef, pageRef, updatePositions]);
 
