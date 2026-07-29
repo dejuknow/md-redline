@@ -89,6 +89,13 @@ highlighting, orphan detection, and agent handoff are unaffected.
 | YAML/TOML frontmatter (offset 0 only) | After the closing fence, own line | It can't go before, and a comment body containing `: ` breaks the YAML parse |
 | HTML comment | Before the block; own line only when the comment owns its line | Nested comments don't exist: the first `-->` closes the outer one and the rest becomes visible text |
 
+The ranges are computed with regexes, and each container's scan excludes the
+others (a fence line inside frontmatter is YAML, a `<!--` inside a fence is
+sample text). Do not add a fifth exclusion: four rounds of that have already
+happened and the fourth cost a silently lost comment. #30 replaces the
+computation with ranges derived from the parse, and the next container bug to
+land here is the trigger to do it.
+
 ## API endpoints
 
 **Files**
