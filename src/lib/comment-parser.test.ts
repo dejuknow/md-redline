@@ -2149,6 +2149,28 @@ describe('insertComment inside fenced code blocks', () => {
       expect(parseComments(result).cleanMarkdown).toBe(raw);
     });
 
+    it('does not nest inside an UNCLOSED html comment', () => {
+      // Every HTML parser reads an unclosed comment as running to EOF. A
+      // marker placed inside would close it early with its own `-->` and spill
+      // the remainder as visible text.
+      const raw = '# T\n\n<!-- TODO: decide the retry loop\n\nBody.\n';
+      const result = insertComment(raw, 'decide the retry loop', 'why?');
+      expect(result).not.toMatch(/<!-- TODO: <!--/);
+      expect(parseComments(result).comments).toHaveLength(1);
+    });
+
+    it('treats a <!-- inside a code fence as sample text, not a comment', () => {
+      // Otherwise an unclosed `<!--` in a code sample would mark the entire
+      // rest of the document as protected.
+      const raw = '# T\n\n```html\n<!-- sample\n```\n\nReal body text here.\n';
+      const result = insertComment(raw, 'Real body text', 'note');
+      const parsed = parseComments(result);
+      expect(parsed.comments).toHaveLength(1);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      // The marker belongs next to its anchor, not hoisted to the stray `<!--`.
+      expect(result).toMatch(/@comment.*-->Real body text/);
+    });
+
     it('does not nest inside a malformed @comment marker left in the document', () => {
       const raw = '# H\n\n<!-- @comment{"id":"x","text":"unclosed -->\n\nbody\n';
       const result = insertComment(raw, 'unclosed', 'broken marker');

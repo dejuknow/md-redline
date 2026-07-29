@@ -79,12 +79,30 @@ export function getFrontmatterRange(markdown: string): CodeBlockRange | null {
  * here as an ordinary comment, which is what we want: nothing should be
  * inserted inside it either.
  */
-function getHtmlCommentRanges(markdown: string): CodeBlockRange[] {
+function getHtmlCommentRanges(
+  markdown: string,
+  fencedRanges: CodeBlockRange[] = [],
+): CodeBlockRange[] {
   const ranges: CodeBlockRange[] = [];
-  const regex = /<!--[\s\S]*?-->/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(markdown)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+  let from = 0;
+  while (from < markdown.length) {
+    const start = markdown.indexOf('<!--', from);
+    if (start === -1) break;
+    // A `<!--` inside a fenced block is sample text, not a comment. It also
+    // can't need protecting: the fence pass has already moved the marker out.
+    if (isInsideCodeBlock(start, fencedRanges)) {
+      from = start + 4;
+      continue;
+    }
+    const closer = markdown.indexOf('-->', start + 4);
+    // An unclosed comment runs to the end of the document, because that is how
+    // every HTML parser reads it. Treating it as unprotected would let a
+    // marker land inside, and the marker's own `-->` would then close the
+    // outer comment early and expose the remainder as visible text: exactly
+    // the corruption the closed-comment case exists to prevent.
+    const end = closer === -1 ? markdown.length : closer + 3;
+    ranges.push({ start, end });
+    from = end;
   }
   return ranges;
 }
@@ -596,8 +614,9 @@ export function insertComment(
   let ownLine = false;
   let leadingNewline = false;
   {
+    const fencedRanges = getCodeBlockRanges(cleanMarkdown);
     // Fenced blocks: before the opening fence.
-    for (const range of getCodeBlockRanges(cleanMarkdown)) {
+    for (const range of fencedRanges) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset <= range.end) {
         insertionCleanOffset = range.start;
         ownLine = true;
@@ -620,7 +639,7 @@ export function insertComment(
     }
     // HTML comments: before the block. Only claim a whole line when the
     // comment owns one; an inline note keeps its paragraph intact.
-    for (const range of getHtmlCommentRanges(cleanMarkdown)) {
+    for (const range of getHtmlCommentRanges(cleanMarkdown, fencedRanges)) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset < range.end) {
         insertionCleanOffset = range.start;
         ownLine = range.start === 0 || cleanMarkdown[range.start - 1] === '\n';
