@@ -833,10 +833,69 @@ into `Rewrite this`).
 Light: light, sepia, solarized, github. Dark: dark, nord, rose-pine, catppuccin. System follows OS.
 The default light and dark themes use a red-pen palette (warm neutrals, crimson accent).
 The document viewer renders on a raised sheet via the `.doc-sheet` class, with the shadow
-value supplied per-theme through `--theme-sheet-shadow`. Rendered code blocks (`pre`) use
-`--theme-code-text`, falling back to `--theme-text-secondary` when a theme doesn't set it;
-the dark theme sets it to `#cdc6b9`, a step brighter than its secondary text color, so code
-stays readable against `--theme-bg-inset`. Other themes are unaffected.
+value supplied per-theme through `--theme-sheet-shadow`. Rendered code blocks (`pre`) and
+raw-view fenced code use `--theme-code-text`, falling back to `--theme-text` so that a theme
+setting no value renders code at the same strength as the prose around it. No theme
+currently overrides it.
+
+Document body copy runs at full ink in every theme and both views: `--tw-prose-body` is
+`--theme-text` (not `--theme-text-secondary`), and `.raw-line-content` / `.raw-table` match.
+Emphasis is carried by weight, not color: `--tw-prose-bold` falls back to `--theme-text`, so
+bold and body are the same color unless a theme opts out. Light themes take that default
+unchanged, at the typography plugin's stock 400/600.
+
+The four dark themes opt out, because light-on-dark text blooms: strokes optically thicken,
+which compresses the 400/600 gap until bold stops reading as bold. The effect is worse here
+than in the sans-set readers that ship weight-only emphasis, since a serif at 600 thickens
+its stems but leaves hairlines thin. Dark themes therefore split the difference across both
+channels rather than pushing either hard, via four tokens set in each theme's own block:
+
+| Token | Default when unset | Dark themes |
+| --- | --- | --- |
+| `--theme-prose-bold` | `--theme-text` | one step brighter than `--theme-text` |
+| `--theme-prose-body-weight` | 400 | 350 |
+| `--theme-prose-bold-weight` | 600 | 780 |
+| `--theme-raw-bold-weight` | 600 | 700 |
+
+Measured ink coverage is 1.68x body against 1.19x for stock. Source Serif 4 is a variable
+face, so the off-scale weights cost no extra file. Adding a theme therefore needs no changes
+outside its own token block: the rules that consume these are unconditional, with the stock
+pair as the `var()` fallback, so a theme that sets none of them gets plugin defaults.
+
+`--theme-raw-bold-weight` is separate because the source view is 13px mono, where the
+rendered view's 780 is too heavy and its 350 body goes spindly; raw line content stays at
+400 in every theme. Counters, bullets, captions, and `.raw-blockquote` track
+`--theme-text-secondary` rather than `--theme-text-muted`: muted falls under 3.5:1 on the
+Nord, Rosé Pine, and Catppuccin backgrounds, which was tolerable when body was dimmed too
+and is not now.
+
+Both weight rules are scoped, and the scoping is load-bearing rather than cosmetic.
+Blockquote paragraphs keep the plugin's 500 body weight: that block is italic as a whole,
+and italics carry less ink than roman at the same weight, so the plugin pays the difference
+back in weight. Inline `em` is deliberately not exempt, since lifting it alone would make
+italic phrases heavier than the roman text around them.
+
+Headings are the only block with a `strong` ladder of its own in the plugin (h1 900 down
+through h4 700), so `strong` inside `h1`–`h4` is excluded from the body bold weight and
+keeps that ladder; applied flat, the rule drags `# Title **bold**` down to 600 inside a 700
+heading and renders emphasis *lighter* than the text around it. Blockquotes and `thead th`
+are deliberately **not** excluded even though the plugin has `strong` rules for them: those
+rules set `color: inherit` only, with no weight, so there is no ladder to defer to and
+excluding them leaves bold in a quote or a table header identical to its surroundings.
+
+Comment and selection highlights pin their text to `--theme-text` so it stays legible on the
+amber fill. Because bold now sits a step *above* full ink on the dark themes, that pin is
+scoped back off `strong`: an anchor covering exactly a bold run nests the `mark` inside the
+`<strong>` where the pin would win, while an anchor spilling past it nests the other way, so
+without the exception the same phrase renders two different colors depending on how far the
+selection ran.
+
+`e2e/prose-emphasis.spec.ts` asserts the dark-theme values by direction (body thinner than
+stock, bold heavier and tonally above body) rather than by number, so retuning 350/780/700
+does not require editing tests. The plugin's own stock values are asserted literally, since
+changing those means the plugin changed under us and the test should say so.
+`e2e/drag-regression.spec.ts` covers the reflow side: switching theme or typeface must not
+strand the drag handles away from their mark.
 
 Document links in rendered prose are ink-colored with a quiet accent-colored underline
 (`--theme-accent` at 45% via `color-mix`), switching to crimson only on hover; raw-view

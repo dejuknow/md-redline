@@ -13,3 +13,13 @@ export async function resetTestAppState(page: Page) {
   rmSync(prefsFile, { force: true });
   await page.goto('/');
 }
+
+/**
+ * Drop persisted preferences without needing a page. Specs that change a
+ * persisted setting (theme, prose font) should call this in `afterAll`: the
+ * prefs file is shared and workers is 1, so whatever they leave behind is what
+ * later specs boot into, and not every spec resets in `beforeEach`.
+ */
+export function clearPersistedPreferences() {
+  rmSync(prefsFile, { force: true });
+}

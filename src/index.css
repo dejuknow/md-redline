@@ -177,7 +177,12 @@ body {
   --theme-text-secondary: #b3ac9f;
   --theme-text-muted: #8d877b;
   --theme-text-faint: #57524a;
-  --theme-code-text: #cdc6b9;
+  /* Bold ink sits a step above --theme-text so body can hold full strength.
+     The weights compensate for halation; see the prose section for the reasoning. */
+  --theme-prose-bold: #f7f4ee;
+  --theme-prose-body-weight: 350;
+  --theme-prose-bold-weight: 780;
+  --theme-raw-bold-weight: 700;
   --theme-accent: #e0584f;
   --theme-accent-hover: #e97a72;
   --theme-accent-bg: rgba(224, 88, 79, 0.12);
@@ -310,6 +315,11 @@ body {
   --theme-text-secondary: #d8dee9;
   --theme-text-muted: #7b88a1;
   --theme-text-faint: #4c566a;
+  /* Bold ink sits a step above --theme-text; body holds full strength. */
+  --theme-prose-bold: #f7f9fc;
+  --theme-prose-body-weight: 350;
+  --theme-prose-bold-weight: 780;
+  --theme-raw-bold-weight: 700;
   --theme-accent: #88c0d0;
   --theme-accent-hover: #8fbcbb;
   --theme-accent-bg: rgba(136, 192, 208, 0.15);
@@ -376,6 +386,10 @@ body {
   --theme-text-secondary: #908caa;
   --theme-text-muted: #6e6a86;
   --theme-text-faint: #524f67;
+  --theme-prose-bold: #efedff;
+  --theme-prose-body-weight: 350;
+  --theme-prose-bold-weight: 780;
+  --theme-raw-bold-weight: 700;
   --theme-accent: #c4a7e7;
   --theme-accent-hover: #d4bdf7;
   --theme-accent-bg: rgba(196, 167, 231, 0.15);
@@ -574,6 +588,11 @@ body {
   --theme-text-secondary: #bac2de;
   --theme-text-muted: #6c7086;
   --theme-text-faint: #45475a;
+  /* Bold ink sits a step above --theme-text; body holds full strength. */
+  --theme-prose-bold: #dfe6ff;
+  --theme-prose-body-weight: 350;
+  --theme-prose-bold-weight: 780;
+  --theme-raw-bold-weight: 700;
   --theme-accent: #cba6f7;
   --theme-accent-hover: #d8bcf9;
   --theme-accent-bg: rgba(203, 166, 247, 0.15);
@@ -663,21 +682,73 @@ body {
 
 /* ========== Prose Theme Overrides ========== */
 .prose {
-  --tw-prose-body: var(--theme-text-secondary);
+  --tw-prose-body: var(--theme-text);
   --tw-prose-headings: var(--theme-text);
   --tw-prose-links: var(--theme-text);
-  --tw-prose-bold: var(--theme-text);
+  --tw-prose-bold: var(--theme-prose-bold, var(--theme-text));
   --tw-prose-code: var(--theme-text);
   --tw-prose-quotes: var(--theme-text-secondary);
   --tw-prose-quote-borders: var(--theme-border);
-  --tw-prose-counters: var(--theme-text-muted);
-  --tw-prose-bullets: var(--theme-text-muted);
+  /* Counters, bullets, and captions are quiet, but they are still document
+     content, so they sit one step under body rather than at --theme-text-muted.
+     Muted drops under 3.5:1 on the Nord, Rosé Pine, and Catppuccin backgrounds,
+     which was tolerable when body was also dimmed and is not now. */
+  --tw-prose-counters: var(--theme-text-secondary);
+  --tw-prose-bullets: var(--theme-text-secondary);
   --tw-prose-hr: var(--theme-border);
   --tw-prose-th-borders: var(--theme-border);
   --tw-prose-td-borders: var(--theme-border);
-  --tw-prose-captions: var(--theme-text-muted);
+  --tw-prose-captions: var(--theme-text-secondary);
   --tw-prose-pre-bg: var(--theme-bg-inset);
-  --tw-prose-pre-code: var(--theme-code-text, var(--theme-text-secondary));
+  /* Code falls back to body ink, not to the secondary: a theme that sets no
+     --theme-code-text should render code at the same strength as the prose
+     around it. */
+  --tw-prose-pre-code: var(--theme-code-text, var(--theme-text));
+}
+
+/* Body copy runs at full ink in every theme (see --tw-prose-body above), and
+   emphasis is weight, not color: --tw-prose-bold falls back to --theme-text, so
+   bold and body match unless a theme opts out. That is what light themes do, and
+   what GitHub and Obsidian both ship.
+
+   Dark themes need help the light ones don't. Light text on near-black blooms:
+   strokes optically thicken, which eats the 400-to-600 gap until bold stops
+   reading as bold. The serif makes it worse than it is for those two apps, since
+   both set their prose in a sans, where 600 thickens uniformly instead of leaving
+   hairlines thin. So dark themes split the difference across both channels rather
+   than pushing either one hard: body drops to 350, bold rises to 780, and
+   --theme-prose-bold lifts bold a step above --theme-text. Measured ink coverage
+   is 1.68x body, against 1.19x for the stock 400/600. Source Serif 4 is variable,
+   so the off-scale weights cost no extra file.
+
+   Both weights are per-theme tokens rather than theme-keyed selectors, so a new
+   theme opts in from its own block alongside its colors, and a theme that sets
+   neither gets the plugin's stock pair.
+
+   Blockquote paragraphs keep the plugin's 500. That block is italic as a whole,
+   and italics carry less ink than roman at the same weight, so the plugin pays
+   the difference back in weight; thinning it further would undo that. Inline
+   `em` is deliberately NOT exempt: it sits inside a line already set at the
+   body weight, and lifting it alone would make italic phrases heavier than the
+   roman text around them. */
+.prose :is(p, li, td):not(blockquote *) {
+  font-weight: var(--theme-prose-body-weight, 400);
+}
+
+/* Headings are the one block with its own strong ladder in the plugin: 900 for
+   h1 down through 700 for h4, each pitched above the heading it sits in. This
+   rule is about body copy and has to stay out of them, because applied flat it
+   drags `# Title **bold**` to 600 inside a 700 heading, rendering emphasis
+   lighter than the text around it.
+
+   Blockquotes and table headers are NOT excluded, despite also having plugin
+   `strong` rules: those rules set `color: inherit` only, with no weight, so
+   there is no ladder to defer to. Excluding them just left bold in a quote or a
+   table header identical to its surroundings, which is the exact defect this
+   branch exists to fix. They take the body weight and keep the inherited
+   color. */
+.prose strong:not(:where(h1, h2, h3, h4) *) {
+  font-weight: var(--theme-prose-bold-weight, 600);
 }
 
 /* Inline code stays neutral: the crimson accent is budgeted for review
@@ -718,7 +789,7 @@ body {
 
 .prose :where(pre):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   background-color: var(--theme-bg-inset);
-  color: var(--theme-code-text, var(--theme-text-secondary));
+  color: var(--theme-code-text, var(--theme-text));
 }
 
 .prose :where(pre code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
@@ -806,6 +877,24 @@ mark.comment-highlight {
     text-decoration-color 0.15s ease,
     outline-color 0.15s ease;
   line-height: inherit;
+}
+
+/* Highlights pin their text to full ink so it stays legible on the amber fill.
+   That was written when body copy was dimmer than --theme-text and is a no-op
+   for body text now, but bold sits a step above full ink on the dark themes, so
+   for bold the pin is a downgrade.
+
+   It only bites in one of the two shapes the viewer produces: wrapping an
+   anchor that covers exactly a bold run nests the mark inside the <strong>
+   (surroundContents), where the mark's own color wins, while an anchor that
+   spills past the bold nests the <strong> inside the mark, where it doesn't. So
+   without this the same phrase renders two different colors depending on how
+   far the selection ran, and the pending-selection preview flickers between
+   them mid-drag. Light themes leave --theme-prose-bold unset and are unchanged. */
+.prose
+  strong
+  :is(mark.comment-highlight, mark.comment-highlight-sent, mark.selection-highlight) {
+  color: var(--theme-prose-bold, var(--theme-text));
 }
 
 /* Mermaid highlights use inline styles — Chrome ignores class-based
@@ -1125,7 +1214,7 @@ body {
   padding-left: 1rem;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--theme-text-secondary);
+  color: var(--theme-text);
 }
 
 /* Ensure empty lines still have height */
@@ -1207,14 +1296,18 @@ body {
 }
 
 /* --- Syntax highlighting --- */
+/* Same emphasis contract as the rendered view, driven by the same tokens: a
+   theme that sets neither gets ink-colored markup at 600. The weight is its own
+   token because this view is 13px mono, where the rendered view's 780 is too
+   heavy and its 350 body goes spindly. */
 .raw-heading {
-  color: var(--theme-text);
-  font-weight: 600;
+  color: var(--theme-prose-bold, var(--theme-text));
+  font-weight: var(--theme-raw-bold-weight, 600);
 }
 
 .raw-bold {
-  color: var(--theme-text);
-  font-weight: 600;
+  color: var(--theme-prose-bold, var(--theme-text));
+  font-weight: var(--theme-raw-bold-weight, 600);
 }
 
 .raw-italic {
@@ -1232,7 +1325,7 @@ body {
 }
 
 .raw-code-block {
-  color: var(--theme-code-text, var(--theme-text-secondary));
+  color: var(--theme-code-text, var(--theme-text));
   background-color: var(--theme-bg-inset);
   border-radius: 4px;
   display: inline;
@@ -1245,8 +1338,11 @@ body {
   text-underline-offset: 2px;
 }
 
+/* Quoted lines are document text, not syntax chrome, so they track the
+   secondary rather than the muted tone, which falls under 3.5:1 on the cooler
+   dark palettes. */
 .raw-blockquote {
-  color: var(--theme-text-muted);
+  color: var(--theme-text-secondary);
   border-left: 2px solid var(--theme-border);
   padding-left: 0.5em;
 }
@@ -1260,7 +1356,7 @@ body {
 }
 
 .raw-table {
-  color: var(--theme-text-secondary);
+  color: var(--theme-text);
 }
 
 .raw-frontmatter {
