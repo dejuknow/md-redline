@@ -65,5 +65,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The MCP stdio subprocess tests spawn `bin/md-redline mcp`, which needs
+      # dist/server.js (its production-mode probe) and dist/mcp-stdio.js (the
+      # bundle it runs). Without them the whole suite skips itself, so the
+      # spawn path shipped untested for as long as this job has been green.
+      # build:server is esbuild only, no tsc or vite, and takes well under a
+      # second, so this buys real coverage on all three platforms for
+      # essentially no runtime. Spawning is exactly what this matrix is for.
+      - name: Build server bundles
+        run: npm run build:server
+
       - name: Unit and CLI tests
         run: npm run test:unit
