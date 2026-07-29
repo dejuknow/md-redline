@@ -1,11 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 const BIN = join(__dirname, '..', 'bin', 'md-redline');
 const DIST_MCP = join(__dirname, '..', 'dist', 'mcp-stdio.js');
-const HAS_DIST = existsSync(DIST_MCP);
+
+/**
+ * Whether the built MCP bundle is current enough to spawn.
+ *
+ * `mdr mcp` refuses to start on a stale bundle, since it would otherwise run
+ * pre-edit code. Existence alone is therefore not enough to decide these tests
+ * can run: editing any bundled source without rebuilding leaves a bundle that
+ * exists but is rejected, and every test here then burns its 15s ceiling
+ * waiting for a subprocess that already exited. Mirror the bin's own rule
+ * (bin/md-redline, `mdr mcp bundle is stale`) over the same three roots so the
+ * suite skips for the same reason the binary refuses.
+ */
+function bundleIsRunnable(): boolean {
+  let bundleMtime: number;
+  try {
+    bundleMtime = statSync(DIST_MCP).mtimeMs;
+  } catch {
+    return false;
+  }
+  const root = join(__dirname, '..');
+  const stack = [join(root, 'server'), join(root, 'src', 'lib'), join(root, 'src', 'types.ts')];
+  while (stack.length) {
+    const path = stack.pop();
+    if (!path) continue;
+    let entry;
+    try {
+      entry = statSync(path);
+    } catch {
+      continue; // vanished between readdir and stat
+    }
+    if (entry.isDirectory()) {
+      for (const child of readdirSync(path)) stack.push(join(path, child));
+    } else if (entry.mtimeMs > bundleMtime) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const HAS_DIST = existsSync(DIST_MCP) && bundleIsRunnable();
 
 interface JsonRpcResponse {
   jsonrpc: '2.0';
