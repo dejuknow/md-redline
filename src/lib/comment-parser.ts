@@ -74,8 +74,15 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
  * thematic break and a `+++` is ordinary text, so this deliberately anchors
  * to the start of the string.
  */
+export function createFrontmatterRegex(flags = ''): RegExp {
+  // One definition, because two consumers drifting is how the raw view ended
+  // up recognising only `---` while the renderer had learned `+++`. No `m`
+  // flag ever: `^` must anchor to the start of the document.
+  return new RegExp(String.raw`^(---|\+\+\+)[ \t]*\r?\n[\s\S]*?\r?\n\1[ \t]*(?:\r?\n|$)`, flags);
+}
+
 export function getFrontmatterRange(markdown: string): CodeBlockRange | null {
-  const match = /^(---|\+\+\+)[ \t]*\r?\n[\s\S]*?\r?\n\1[ \t]*(?:\r?\n|$)/.exec(markdown);
+  const match = createFrontmatterRegex().exec(markdown);
   if (!match) return null;
   return { start: 0, end: match[0].length };
 }
