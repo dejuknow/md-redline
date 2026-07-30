@@ -7,7 +7,7 @@ import { promises as fsPromises } from 'fs';
 import { randomBytes } from 'crypto';
 import { watch, statSync, realpathSync, readFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
-import { homedir, platform, tmpdir } from 'os';
+import { platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
@@ -21,6 +21,7 @@ import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
+import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
 import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
 
 const require = createRequire(import.meta.url);
@@ -186,7 +187,7 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 export function createAppFull(options: CreateAppOptions = {}) {
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
-  const homeDir = options.homeDir ?? process.env.MD_REDLINE_HOME ?? homedir();
+  const homeDir = options.homeDir ?? resolveHomeDir();
   const initialArgRaw = options.initialArg ?? process.argv[2] ?? '';
   const initialArg = initialArgRaw ? resolve(cwd, initialArgRaw) : '';
   const platformName = options.platformName ?? platform();
@@ -207,7 +208,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
 
   const app = new Hono();
   // Allow CORS only from Vite dev server ports (default 5188-5197, or custom via env)
-  const viteBasePort = Number.parseInt(process.env.MD_REDLINE_VITE_PORT ?? '5188', 10);
+  const viteBasePort = resolveVitePort();
   const allowedPorts = new Set<number>();
   for (let p = viteBasePort; p < viteBasePort + 10; p++) allowedPorts.add(p);
   // Also allow the default range if a custom port is configured
@@ -1533,10 +1534,7 @@ export const app = createApp({
   isUpdateCheckPending: updatesEnabled ? updateChecker.isPending : undefined,
 });
 
-// 6373 ("MDR" on a phone keypad) stays clear of the 3000-3010 range that
-// Next.js/Nest/CRA stacks contend for. Must match DEFAULT_SERVER_PORT in
-// bin/md-redline, which scans this range to find us.
-const DEFAULT_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '6373', 10);
+const DEFAULT_PORT = resolveApiPort();
 const MAX_PORT_ATTEMPTS = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 

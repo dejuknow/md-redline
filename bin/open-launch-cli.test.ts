@@ -178,3 +178,42 @@ describe('mdr browser launcher (subprocess)', () => {
     15_000,
   );
 });
+
+// The CLI is the third reader of the API port, and the one no unit test can reach:
+// the value seeds the fallback scan inside findServerPort, so it is invisible from
+// outside unless the CLI is asked. Without this, re-inlining an expression here
+// leaves the whole suite green while a documented `PORT=7100` sends the CLI
+// scanning from 6373 and the server binds 7100. The expected values come from
+// server/env.test.ts's table, which is the same function.
+describe('mdr resolves the API port the same way the server does', () => {
+  function runCliCapturingStdout(args: string[], env: NodeJS.ProcessEnv): Promise<string> {
+    return new Promise((resolvePromise, reject) => {
+      const child = spawn(process.execPath, [BIN, ...args], {
+        env,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      let out = '';
+      child.stdout.on('data', (chunk) => {
+        out += String(chunk);
+      });
+      child.once('error', reject);
+      child.once('exit', () => resolvePromise(out.trim()));
+    });
+  }
+
+  it.each([
+    ['the prefixed name', { MD_REDLINE_PORT: '7100' }, '7100'],
+    ['the documented bare alias', { PORT: '7100' }, '7100'],
+    ['the prefixed name winning over the alias', { MD_REDLINE_PORT: '7100', PORT: '7200' }, '7100'],
+    ['a blank prefixed name deferring to the alias', { MD_REDLINE_PORT: '', PORT: '7100' }, '7100'],
+    ['a malformed value, not truncated to 7100', { MD_REDLINE_PORT: '7100nonsense' }, '6373'],
+    ['neither set', {}, '6373'],
+  ])(
+    'honours %s',
+    async (_label, overrides, expected) => {
+      const env = cleanEnv({ MD_REDLINE_PORT: '', PORT: '', ...overrides });
+      expect(await runCliCapturingStdout(['__port'], env)).toBe(expected);
+    },
+    15_000,
+  );
+});

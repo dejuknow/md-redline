@@ -9,6 +9,7 @@ import process from 'process';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
+import { resolveApiPort } from './ports.js';
 
 import { checkServer, gracefulShutdown, killPort } from './server-control.js';
 import { buildWindowsCommand } from './spawn-command.js';
@@ -21,14 +22,13 @@ const APP_DIR = resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
 const { version: CLI_VERSION } = require(join(APP_DIR, 'package.json'));
 const DIST_SERVER = join(APP_DIR, 'dist', 'server.js');
-// 6373 ("MDR" on a phone keypad) keeps mdr out of the 3000-3010 range that
-// Next.js/Nest/CRA stacks contend for. The server reads the same env var,
-// so an override stays consistent across CLI and server.
-const DEFAULT_SERVER_PORT = Number.parseInt(process.env.MD_REDLINE_PORT ?? '', 10) || 6373;
-// Pre-0.7 servers bound 3001+. Scanning the old range lets this CLI find a
-// still-running old server, so the version-upgrade path can stop it and
-// `mdr --stop` keeps working across the port migration. Safe to drop once
-// no pre-6373 servers can plausibly be running.
+const DEFAULT_SERVER_PORT = resolveApiPort();
+// Pre-0.7 servers bound 3001+. 0.7.0 (2026-07-18) moved the default to 6373, and
+// 0.6.0 shipped four days before it, so a machine that has not rebooted since can
+// still have one running. Scanning the old range lets the stale-server upgrade path
+// find that server and stop it, and keeps `mdr --stop` working across the
+// migration. Drop this at 0.8.0 or after 2026-11-01, whichever is later: these are
+// local servers, so one reboot cycle clears every one of them.
 const LEGACY_SERVER_PORT = 3001;
 const DEFAULT_CLIENT_PORT = 5188;
 const MAX_PORT_SCAN = 10;
@@ -722,6 +722,17 @@ async function main() {
     // detached-teardown race — and honors MD_REDLINE_BROWSER like every other path.
     const target = process.argv[3];
     if (target) await openInBrowser(target);
+    return;
+  }
+
+  if (process.argv[2] === '__port') {
+    // Internal, undocumented seam, same idea as __open above: print the API port
+    // this CLI resolved and exit, without booting or contacting anything. The port
+    // is otherwise unobservable from outside, because it only seeds the fallback
+    // scan inside findServerPort, and the one command that would reveal it
+    // (--stop) kills whatever it finds. Lets a test prove the CLI, the server and
+    // vite.config all answer with the same port for the same environment.
+    console.log(DEFAULT_SERVER_PORT);
     return;
   }
 
