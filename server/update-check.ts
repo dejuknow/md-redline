@@ -1,4 +1,4 @@
-import { homedir } from 'os';
+import { resolveHomeDir } from './env';
 import { isNewerVersion } from '../bin/version-compare.js';
 import { readPreferences, writePreferences } from './preferences';
 
@@ -33,7 +33,7 @@ export function isUpdateCheckDisabled(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 export function createUpdateChecker(options: UpdateCheckerOptions): UpdateChecker {
-  const homeDir = options.homeDir ?? process.env.MD_REDLINE_HOME ?? homedir();
+  const homeDir = options.homeDir ?? resolveHomeDir();
   const registryUrl = (
     options.registryUrl ??
     process.env.MD_REDLINE_REGISTRY_URL ??

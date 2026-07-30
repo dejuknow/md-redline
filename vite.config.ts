@@ -3,8 +3,14 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import type { HmrContext, Plugin, ViteDevServer } from 'vite';
 
-const serverPort = Number.parseInt(process.env.MD_REDLINE_VITE_PORT ?? '5188', 10);
-const apiPort = Number.parseInt(process.env.MD_REDLINE_PORT ?? process.env.PORT ?? '6373', 10);
+import { resolveApiPort, resolveVitePort } from './server/env';
+
+// Shared with the server and the CLI on purpose. While each side computed the port
+// from its own inline copy, a documented `PORT=7100` bound the server and aimed
+// this proxy at 7100 while the CLI scanned from 6373. server/env.test.ts asserts
+// this proxy target against the port the server resolves.
+const serverPort = resolveVitePort();
+const apiPort = resolveApiPort();
 
 export function ignoreMarkdownHotUpdatePlugin(): Plugin {
   return {
