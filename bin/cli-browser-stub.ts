@@ -3,7 +3,7 @@ import { join } from 'path';
 
 /**
  * Writes a platform-appropriate executable stub that stands in for a real
- * browser when the CLI is driven under test via the MDR_BROWSER override. The
+ * browser when the CLI is driven under test via the MD_REDLINE_BROWSER override. The
  * CLI spawns it with the URL as its sole argument.
  *
  * With `markerPath`, the stub writes its URL argument there as its first action,

@@ -171,12 +171,23 @@ function spawnDetached(command, args, options = {}) {
   });
 }
 
+// Named once each, then referenced through these constants everywhere below.
+// Each name appears in two unrelated syntaxes: an env key Node sets, and a %VAR%
+// placeholder inside a string cmd.exe expands. A rename that updates one syntax
+// but not the other spawns `start "" ""`, which silently opens Explorer instead
+// of the browser. Sourcing both spellings from one identifier makes that
+// mismatch unreachable, which matters because no test can catch it: a faithful
+// ComSpec stub is impossible (Node refuses to spawn .cmd/.bat without a shell,
+// and only real cmd.exe expands %VAR%), so the only check is a human on Windows.
+const BROWSER_COMMAND_VAR = 'MD_REDLINE_INTERNAL_BROWSER_COMMAND';
+const BROWSER_URL_VAR = 'MD_REDLINE_INTERNAL_BROWSER_URL';
+
 function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
   return new Promise((resolveSpawn, rejectSpawn) => {
     const env = {
       ...process.env,
-      MDR_INTERNAL_BROWSER_COMMAND: command,
-      MDR_INTERNAL_BROWSER_URL: url,
+      [BROWSER_COMMAND_VAR]: command,
+      [BROWSER_URL_VAR]: url,
     };
     const child = shellCommand
       ? spawn(process.env.ComSpec ?? 'cmd.exe', [
@@ -188,7 +199,7 @@ function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
           // with windowsVerbatimArguments so Node does not backslash-escape the
           // inner quotes (\") — cmd reads those literally and the command name
           // becomes unrecognized.
-          '""%MDR_INTERNAL_BROWSER_COMMAND%" "%MDR_INTERNAL_BROWSER_URL%""',
+          `""%${BROWSER_COMMAND_VAR}%" "%${BROWSER_URL_VAR}%""`,
         ], {
           cwd: APP_DIR,
           detached: true,
@@ -224,12 +235,12 @@ function openWithWindowsShell(url) {
       '/d',
       '/s',
       '/c',
-      '"start "" "%MDR_INTERNAL_BROWSER_URL%""',
+      `"start "" "%${BROWSER_URL_VAR}%""`,
     ], {
       cwd: APP_DIR,
       detached: true,
       stdio: 'ignore',
-      env: { ...process.env, MDR_INTERNAL_BROWSER_URL: url },
+      env: { ...process.env, [BROWSER_URL_VAR]: url },
       windowsHide: true,
       windowsVerbatimArguments: true,
     });
@@ -412,10 +423,21 @@ async function buildUrl(file, dir) {
 }
 
 async function openInBrowser(url) {
-  // MDR_BROWSER overrides the launcher with an explicit command that receives
-  // the URL as its argument (e.g. a specific browser binary). Spawned detached
-  // so it survives this process exiting, same as the platform defaults below.
-  const override = process.env.MDR_BROWSER?.trim();
+  // MD_REDLINE_BROWSER overrides the launcher with an explicit command that
+  // receives the URL as its argument (e.g. a specific browser binary). Spawned
+  // detached so it survives this process exiting, same as the platform defaults
+  // below.
+  //
+  // MDR_BROWSER is the original name, kept as a fallback because it shipped and
+  // is documented. Every other variable uses the MD_REDLINE_ prefix, so the new
+  // name is the one to reach for; this one can go at a major.
+  // First non-EMPTY wins, not first non-undefined: `??` alone would let
+  // MD_REDLINE_BROWSER="" discard a working MDR_BROWSER and fall through to the OS
+  // default. ports.js documents why blank has to count as unset everywhere.
+  const override =
+    [process.env.MD_REDLINE_BROWSER, process.env.MDR_BROWSER]
+      .map((v) => v?.trim())
+      .find((v) => v) ?? '';
   if (override) {
     if (process.platform === 'win32') {
       const needsShell = /\.(?:cmd|bat)$/i.test(override);
@@ -697,7 +719,7 @@ async function main() {
     // Internal, undocumented seam: launch the browser for a URL and exit
     // immediately, without booting a server. Lets the browser-open regression
     // test drive openInBrowser() in isolation — the worst case for the Windows
-    // detached-teardown race — and honors MDR_BROWSER like every other path.
+    // detached-teardown race — and honors MD_REDLINE_BROWSER like every other path.
     const target = process.argv[3];
     if (target) await openInBrowser(target);
     return;

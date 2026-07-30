@@ -105,6 +105,10 @@ function closeStub(server: Server): Promise<void> {
 function buildEnv(stubPort: number, isolatedTmp: string, browserStub: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    // Blank the legacy browser name: the launcher takes the first non-empty of
+    // MD_REDLINE_BROWSER then MDR_BROWSER, so an ambient MDR_BROWSER on a
+    // contributor's machine would otherwise be reachable from these tests.
+    MDR_BROWSER: '',
     // Isolates the port file the CLI reads/writes under tmpdir() so this run
     // never sees (or clobbers) a real md-redline.port from the dev box. TMPDIR
     // covers macOS/Linux; TEMP/TMP cover Windows, whose os.tmpdir() ignores it.
@@ -116,7 +120,7 @@ function buildEnv(stubPort: number, isolatedTmp: string, browserStub: string): N
     // No-op the browser launcher so the run never opens a real browser. Works
     // on every OS, unlike shadowing `open` on PATH (Windows launches via
     // `cmd /c start`, which PATH cannot intercept).
-    MDR_BROWSER: browserStub,
+    MD_REDLINE_BROWSER: browserStub,
   };
 }
 
