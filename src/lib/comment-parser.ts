@@ -638,6 +638,12 @@ export function insertComment(
   // relocate it to the nearest legal position outside the container. The
   // anchor is unaffected: it stays the real text, so highlighting, orphan
   // detection, and agent handoff all keep working.
+  //
+  // Before adding a fifth exclusion or special case here: don't. Four rounds
+  // have now taught one of these regexes about a case another already knew,
+  // and the fourth cost a silently lost comment. #30 replaces this whole
+  // computation with ranges derived from the parse, where the two consumers
+  // cannot disagree. The next container bug that lands here is the trigger.
   let ownLine = false;
   let leadingNewline = false;
   {
