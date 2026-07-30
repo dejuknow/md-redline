@@ -239,8 +239,8 @@ All of these environment variables are optional.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MDR_BROWSER` | OS default browser | Command used to open the review URL. Set it to a specific browser binary (for example `MDR_BROWSER=firefox`); it is spawned with the URL as its argument. |
-| `MD_REDLINE_PORT` (or `PORT`) | `6373` | Port for the API server. It scans up to 10 ports upward from here if that one is taken. |
+| `MD_REDLINE_BROWSER` | OS default browser | Command used to open the review URL. Set it to a specific browser binary (for example `MD_REDLINE_BROWSER=firefox`); it is spawned with the URL as its argument. The older `MDR_BROWSER` still works: it is used whenever this one is unset or blank. |
+| `MD_REDLINE_PORT` (or `PORT`) | `6373` | Port for the API server. It scans up to 10 ports upward from here if that one is taken. `MD_REDLINE_PORT` wins when both are set; a blank one defers to `PORT`. |
 | `MD_REDLINE_VITE_PORT` | `5188` | Port for the Vite dev client (development only). |
 | `MD_REDLINE_HOME` | your OS home directory | Base directory for md-redline's preferences file (`.md-redline.json`, which stores trusted roots and the update-check cache). |
 | `MD_REDLINE_REGISTRY_URL` | public npm registry | Registry base URL used for the background update check. |
@@ -252,66 +252,65 @@ All of these environment variables are optional.
 md-redline binds to `127.0.0.1` and has **no authentication of any kind**. That is
 safe today because only your own machine can reach it.
 
-`MD_REDLINE_ALLOWED_HOSTS` exists so you can put a reverse proxy in front of it
-(`tailscale serve`, nginx, Caddy) and review from a tablet. Setting it does not
-change the bind address, so the proxy still has to run on the same machine. What
-it does change is the security boundary: it moves from "my machine" to "anything
-that can reach the proxy".
+`MD_REDLINE_ALLOWED_HOSTS` lets you put a reverse proxy in front of it
+(`tailscale serve`, nginx, Caddy) and review from a tablet. It does not change the
+bind address, so the proxy still runs on the same machine. It does change the
+security boundary, from "my machine" to "anything that can reach the proxy".
 
-Whatever can reach the proxy gets unauthenticated access to:
+Whatever reaches the proxy can read and write every markdown file under your
+trusted roots, browse those directories, see their absolute paths and your recent
+files, open native file pickers and reveal files in Finder **on your machine**,
+answer agent review sessions, and shut the server down. There is no login.
 
-- Reading and writing any markdown file under your trusted roots (`GET` and `PUT /api/file`)
-- Listing and browsing directories under those roots (`GET /api/browse`, `GET /api/files`)
-- Reading any image under those roots (`GET /api/asset`)
-- Learning where those roots are, plus every file you recently opened, as absolute
-  paths (`GET /api/preferences`)
-- Changing your stored author name, theme, recent files and settings (`PUT /api/preferences`)
-- Opening native file and folder pickers **on your machine** (`POST /api/pick-file`, `POST /api/pick-folder`)
-- Revealing files in Finder or Explorer **on your machine** (`POST /api/reveal`)
-- Reading and answering agent review sessions (`/api/review-sessions/*`), watching
-  files for changes (`GET /api/watch`), and shutting the server down (`POST /api/shutdown`)
+So if you set it:
 
-So if you set this:
-
-- Prefer `tailscale serve`, which is reachable only from devices on your own
-  tailnet. Do **not** use `tailscale funnel`, which publishes to the open internet.
+- Prefer `tailscale serve`, reachable only from your own tailnet. Do **not** use
+  `tailscale funnel`, which publishes to the open internet.
 - With nginx or Caddy, terminate TLS and put authentication in front of md-redline
   yourself. It will not do it for you.
 - Only list hostnames you actually control. The DNS-rebinding defense still holds
   for everything else, because an attacker's rebinding domain never matches a
   hostname you listed explicitly.
+- Serve it over HTTPS if you can. The clipboard API the hand-off prompt copy needs
+  only works in a secure context, so over plain HTTP that button fails on the very
+  tablet you set this up for.
 
-Two practical notes on the proxy itself:
+A reachable client **cannot** widen its own filesystem access: trusted roots grow
+only when you pick a file or folder in the native dialog, so the readable set
+stays whatever you approved locally.
 
-- **Whether you need this variable at all depends on your proxy.** `tailscale serve`
-  and Caddy preserve the original `Host`, so you must list the public hostname.
-  nginx's default `proxy_set_header Host $proxy_host` rewrites it to `127.0.0.1:6373`,
-  which already passes, so you only need the variable if you forward the original
-  host (`proxy_set_header Host $host`).
-- **Turn off response buffering for `/api/watch`.** Live file updates arrive over
-  Server-Sent Events. md-redline sends `X-Accel-Buffering: no`, which nginx honours;
-  if your proxy ignores it, disable buffering for that path or edits will not appear
-  until a buffer fills.
+<details>
+<summary>Proxy configuration details and how the request checks work</summary>
 
-Serve it over HTTPS if you can. The clipboard API that the hand-off prompt copy
-relies on only works in a secure context, so over plain HTTP that button fails on
-the tablet you set this up for.
+**Whether you need the variable at all depends on your proxy.** `tailscale serve`
+and Caddy preserve the original `Host`, so you must list the public hostname.
+nginx's default `proxy_set_header Host $proxy_host` rewrites it to
+`127.0.0.1:6373`, which already passes, so you only need the variable if you
+forward the original host (`proxy_set_header Host $host`).
 
-Every endpoint that changes something is a `POST` or a `PUT` requiring a JSON
-content type, which a web page cannot send to another origin without the browser
-asking this server for permission first. That is what stops a page you visit, or
-a link in a chat message, or an image embedded in a markdown file you are
-reviewing, from quietly triggering an endpoint here. md-redline additionally
-rejects requests a browser labels cross-site, but only as a second layer: clients
-that send no such metadata, like the CLI and the MCP server, are deliberately
-unaffected by it.
+**Turn off response buffering for `/api/watch`.** Live file updates arrive over
+Server-Sent Events. md-redline sends `X-Accel-Buffering: no`, which nginx honours;
+if your proxy ignores it, disable buffering for that path or edits will not appear
+until a buffer fills.
 
-What a reachable client **cannot** do is widen its own filesystem access. Trusted
-roots grow only when you pick a file or folder in the native dialog
-(`/api/pick-file`, `/api/pick-folder`). A bulk `PUT /api/preferences` cannot write
-`trustedRoots`, and `/api/grant-access` only re-checks a path against the roots
-you already approved rather than adding new ones. So the set of readable
-directories is whatever you approved locally and nothing more.
+**Why a hostile page cannot drive these endpoints.** Every endpoint that changes
+something is a `POST` or a `PUT` requiring a JSON content type, which a web page
+cannot send to another origin without the browser asking this server for
+permission first. That is what stops a page you visit, a link in a chat message,
+or an image embedded in a markdown file you are reviewing from quietly triggering
+an endpoint here. md-redline additionally rejects requests a browser labels
+cross-site, but only as a second layer: clients that send no such metadata, like
+the CLI and the MCP server, are deliberately unaffected.
+
+**The full surface**, if you want to audit it: `GET`/`PUT /api/file`,
+`GET /api/browse`, `GET /api/files`, `GET /api/asset`, `GET`/`PUT /api/preferences`,
+`GET /api/config`, `GET /api/version`, `GET /api/platform`,
+`POST /api/pick-file`, `POST /api/pick-folder`, `POST /api/reveal`,
+`GET /api/watch`, `POST /api/shutdown`, and `/api/review-sessions/*`.
+`POST /api/grant-access` only re-checks a path against roots you already approved
+rather than adding new ones.
+
+</details>
 
 ## Troubleshooting
 

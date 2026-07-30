@@ -213,6 +213,62 @@ direct a change must use POST or PUT, the two verbs the `application/json` guard
 checks. See the README section "Reaching md-redline from another device" for the
 operator-facing version.
 
+**Environment variables** that a user sets use the `MD_REDLINE_` prefix. New
+user-facing variables take the prefix.
+
+Two aliases predate the convention and still work, because both shipped and are
+documented in the README's config table: `MDR_BROWSER` for `MD_REDLINE_BROWSER`,
+and a bare `PORT` for `MD_REDLINE_PORT`. Do not remove either without a major. In
+both pairs the prefixed name wins, but only if it is non-EMPTY. Blank counts as
+unset everywhere, because a plain `??` keeps an empty string and an empty string
+is rarely harmless: `MD_REDLINE_PORT=""` used to beat a working `PORT` and reach
+`Number.parseInt('')`, and the resulting NaN aborted startup with "No available
+port found (tried NaN-NaN)"; an empty `MD_REDLINE_HOME` resolved
+`.md-redline.json` against the current working directory, so trusted roots were
+written wherever the user launched from and never persisted.
+
+One resolver per variable, imported by every reader: **more than one place reads
+the same variable, and the readers have to agree.** `vite.config.ts` resolves the
+API port to aim its dev proxy, `server/index.ts` resolves it to decide what to
+bind, `bin/md-redline` resolves it to seed the fallback scan that finds a running
+server, and `server/update-check.ts` resolves the home directory independently of
+`server/index.ts` (the update checker is constructed with no `homeDir` option, so
+that read is live in production).
+
+Three inline copies is what that replaced, and they did disagree. `PORT=7100`, the
+alias the README documents, bound the server and aimed the proxy at 7100 while the
+CLI scanned from 6373, because the CLI's copy read only the prefixed name; the CLI
+could then find the server through the port file or not at all. A blank
+`MD_REDLINE_PORT` aborted the server with "No available port found (tried
+NaN-NaN)" and killed `npm run dev` with `ERR_SOCKET_BAD_PORT`, while the CLI
+quietly fell back to 6373. Only a malformed value like `7100nonsense` was
+consistent, and only because all three truncated it the same way; all three now
+reject it. Add a resolver and import it; never inline a second copy.
+
+The port resolvers live in `bin/ports.js`, not in `server/env.ts`, and that
+location is deliberate. `bin/md-redline` reads the API port too, to seed the
+fallback scan that locates a running server when the port file is missing or
+stale, and it is a dependency-free CLI with no build step, so it can only import
+plain JavaScript. `bin/` is also what package.json ships next to `dist/`, so the
+module is present in an npm install. `server/env.ts` re-exports it, esbuild inlines
+it into `dist/server.js`, and `vite.config.ts` reaches it through `server/env.ts`.
+Three readers, one function. Types come from the hand-written `bin/ports.d.ts`,
+not from a compiler flag: `bin/version-compare.js` has been shared between the CLI
+and `server/update-check.ts` the same way since before this module existed, and
+`allowJs` would have typed every future `bin/` import as unchecked `any`.
+
+`MD_REDLINE_REGISTRY_URL` and `MD_REDLINE_BASE_URL` keep a plain `??` by choice:
+both are development or background-only, and a blank value fails visibly at the
+first fetch rather than quietly doing the wrong thing. `NO_UPDATE_NOTIFIER` and
+`CI` are presence-checked on purpose, per ecosystem convention, where an empty
+value counts as set.
+
+Two further sets are deliberately outside the rule. `MD_REDLINE_INTERNAL_BROWSER_*` are
+set by `bin/md-redline` and expanded by the Windows `cmd` it spawns, never read
+through `process.env`, so a `process.env` grep will not find them: they are an
+argument-passing mechanism rather than configuration. `RELEASE_SKIP_CI_CHECK` and
+`RELEASE_SKIP_CLAUDE` are local to `scripts/release.mjs`.
+
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
 (`127.0.0.1`), default port 6373 ("MDR" on a phone keypad; overridable via
 `MD_REDLINE_PORT`), scanning up to 10 ports from there if taken. The Vite dev
@@ -228,7 +284,7 @@ fast-path lookup and removes it on exit only if it still owns the recorded port
 
 **Browser launcher** — the CLI opens the resolved URL in the OS default
 browser: `open` (macOS), `xdg-open` (Linux), `cmd /c start` (Windows). Set
-`MDR_BROWSER` to override with an explicit command that is spawned with the URL
+`MD_REDLINE_BROWSER` to override with an explicit command that is spawned with the URL
 as its argument. Every launch goes through `spawnDetached`, which on Windows
 must pass `detached: true` (opt-in per call) so the child outlives the CLI's
 near-immediate exit; without it the launcher is torn down before it runs. The
@@ -236,7 +292,11 @@ long-lived server deliberately stays non-detached, since a detached child gets
 its own console window on Windows that `windowsHide` cannot suppress under
 `shell: true`. The undocumented `mdr __open <url>` subcommand runs only the
 launcher and exits; the browser-open regression test
-(`bin/open-launch-cli.test.ts`) drives it with `MDR_BROWSER` pointed at a stub.
+(`bin/open-launch-cli.test.ts`) drives it with `MD_REDLINE_BROWSER` pointed at a stub.
+The undocumented `mdr __port` prints the API port the CLI resolved and exits, which
+is the only way to observe it: that value only seeds the fallback scan inside
+`findServerPort`, and `--stop` would kill whatever it found. The same test file uses
+it to prove the CLI agrees with the server and `vite.config.ts`.
 
 **CLI stale-server upgrade**: on every plain `mdr` invocation,
 `ensureServerRunning()` in `bin/md-redline` asks the running server for
