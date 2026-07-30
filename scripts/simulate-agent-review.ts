@@ -48,7 +48,7 @@ function parseArgs(argv: string[]): Options {
     files: [],
     mode: 'fire-and-forget',
     count: 3,
-    server: process.env.MDR_BASE_URL ?? 'http://localhost:5188',
+    server: process.env.MD_REDLINE_BASE_URL ?? 'http://localhost:5188',
     open: false,
   };
 
@@ -115,7 +115,7 @@ Options:
   --mode <mode>          fire-and-forget | wait | release  (default: fire-and-forget)
   --count <n>            Number of synthetic comments to generate (default: 3).
   --server <url>         mdr server base URL (default: http://localhost:5188).
-                         Also reads MDR_BASE_URL env var.
+                         Also reads MD_REDLINE_BASE_URL env var.
   --open                 Open the session URL in the system browser.
   --help, -h             Show this message.
 

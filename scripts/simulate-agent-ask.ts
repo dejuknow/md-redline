@@ -14,7 +14,7 @@
  */
 import { execSync } from 'child_process';
 
-const baseUrl = process.env.MDR_BASE_URL ?? 'http://localhost:5188';
+const baseUrl = process.env.MD_REDLINE_BASE_URL ?? 'http://localhost:5188';
 
 async function main() {
   const [filePath, anchor, text] = process.argv.slice(2);
