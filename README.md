@@ -1,5 +1,7 @@
 # <img src="public/favicon.svg" width="30" align="center" /> md-redline
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fdejuknow%2Fmd-redline.svg)](https://mcptoplist.com/server/glama%2Fdejuknow%2Fmd-redline)
+
 [![npm version](https://img.shields.io/npm/v/md-redline)](https://www.npmjs.com/package/md-redline)
 
 Inline review comments for markdown specs, prompts, and design docs.
