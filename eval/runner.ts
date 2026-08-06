@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { score } from './scorer.js';
 import { getFormat } from './formats/index.js';
 import { claudeCli } from './agents/claude-cli.js';
+import { claudeCliResolve } from './agents/claude-cli-resolve.js';
 import type { AgentAdapter, EvalCase, ExpectedCriteria, ScoringResult } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,6 +14,7 @@ const RESULTS_DIR = join(__dirname, 'results');
 
 const agents: Record<string, AgentAdapter> = {
   'claude-cli': claudeCli,
+  'claude-cli-resolve': claudeCliResolve,
 };
 
 async function discoverCases(filter?: string): Promise<EvalCase[]> {
@@ -71,7 +73,7 @@ async function runCase(
 }
 
 function printTable(results: ScoringResult[]) {
-  const header = ['Case'.padEnd(28), 'Parse', ' Exec', 'Integ', 'Overall'].join(' | ');
+  const header = ['Case'.padEnd(28), 'Parse', ' Exec', 'Integ', 'Anchor', 'Overall'].join(' | ');
 
   const divider = '-'.repeat(header.length);
 
@@ -85,6 +87,7 @@ function printTable(results: ScoringResult[]) {
       fmtPct(r.scores.parsing),
       fmtPct(r.scores.execution),
       fmtPct(r.scores.integrity),
+      fmtPct(r.scores.anchorIntegrity),
       fmtPct(r.overall),
     ].join(' | ');
     console.log(row);
@@ -94,14 +97,20 @@ function printTable(results: ScoringResult[]) {
 
   // Averages
   if (results.length > 1) {
-    const avg = (key: keyof ScoringResult['scores']) =>
-      results.reduce((s, r) => s + r.scores[key], 0) / results.length;
+    // Averaged over the cases where the dimension applies. Counting an
+    // inapplicable dimension as 0 would punish cases that have no such
+    // surface; counting it as 1 would flatter them.
+    const avg = (key: keyof ScoringResult['scores']) => {
+      const vals = results.map((r) => r.scores[key]).filter((v): v is number => v !== null);
+      return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    };
     const avgOverall = results.reduce((s, r) => s + r.overall, 0) / results.length;
     const row = [
       'AVERAGE'.padEnd(28),
       fmtPct(avg('parsing')),
       fmtPct(avg('execution')),
       fmtPct(avg('integrity')),
+      fmtPct(avg('anchorIntegrity')),
       fmtPct(avgOverall),
     ].join(' | ');
     console.log(row);
@@ -109,8 +118,8 @@ function printTable(results: ScoringResult[]) {
   }
 }
 
-function fmtPct(n: number): string {
-  return (n * 100).toFixed(0).padStart(5) + '%';
+function fmtPct(n: number | null): string {
+  return n === null ? '  n/a' : (n * 100).toFixed(0).padStart(5) + '%';
 }
 
 async function validateFixtures(cases: EvalCase[]) {
@@ -193,7 +202,29 @@ async function main() {
 
   const results: ScoringResult[] = [];
 
+  const skipped: string[] = [];
+
   for (const evalCase of cases) {
+    // A case that declares an agent requirement is scored only under that
+    // agent. Scoring it anyway would report a confident number for a run that
+    // could not have produced the behavior the case exists to measure.
+    const required: string | undefined = JSON.parse(
+      await readFile(evalCase.expectedPath, 'utf-8'),
+    ).requiresAgent;
+    // A typo here would otherwise skip the case under every agent forever,
+    // leaving only a log line behind — the quietest way to lose a fixture.
+    if (required && !agents[required]) {
+      console.error(
+        `\n${evalCase.name}: requiresAgent "${required}" is not a known agent. Available: ${Object.keys(agents).join(', ')}`,
+      );
+      process.exit(1);
+    }
+    if (required && required !== agentName) {
+      skipped.push(`${evalCase.name} (needs agent "${required}")`);
+      console.log(`Skipping: ${evalCase.name} — needs agent "${required}", running "${agentName}"`);
+      continue;
+    }
+
     process.stdout.write(`Running: ${evalCase.name}...`);
     try {
       const result = await runCase(evalCase, agent, formatName);
@@ -218,6 +249,7 @@ async function main() {
           parsing: 0,
           execution: 0,
           integrity: 0,
+          anchorIntegrity: 0,
         },
         overall: 0,
         details: [`error: ${err instanceof Error ? err.message : String(err)}`],
@@ -233,13 +265,23 @@ async function main() {
   // Print summary table
   printTable(results);
 
+  // Say what was not measured. A skipped case reported only as a smaller case
+  // count reads as full coverage to anyone scanning the average.
+  if (skipped.length > 0) {
+    console.log(`\nSkipped ${skipped.length} case(s), not counted in the average:`);
+    for (const s of skipped) console.log(`  - ${s}`);
+  }
+
   // Save summary
   const summary = {
     timestamp,
     agent: agentName,
     format: formatName,
     cases: results.length,
-    averageOverall: results.reduce((s, r) => s + r.overall, 0) / results.length,
+    skipped,
+    averageOverall: results.length
+      ? results.reduce((s, r) => s + r.overall, 0) / results.length
+      : null,
     results,
   };
   await writeFile(join(runDir, 'summary.json'), JSON.stringify(summary, null, 2));

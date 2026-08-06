@@ -1,0 +1,31 @@
+{
+  "markerMode": "resolve",
+  "requiresAgent": "claude-cli-resolve",
+  "totalComments": 3,
+  "actionableComments": 3,
+  "comments": [
+    {
+      "id": "eval-16-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldNotContain": ["Is it already live?"]
+      }
+    },
+    {
+      "id": "eval-16-c2",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldNotContain": ["Draft another one does nothing"]
+      }
+    },
+    {
+      "id": "eval-16-c3",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldNotContain": ["Tone slider, 1 to 5"]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": []
+}
