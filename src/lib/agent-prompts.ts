@@ -40,9 +40,20 @@ export function buildAddressCommentsPrompt({
 Comments are embedded as HTML comment markers: \`<!-- @comment{JSON} -->\`
 Each marker is placed immediately before the text it refers to (the "anchor").
 The JSON contains these fields:
-- \`anchor\`: the exact text the comment refers to
+- \`anchor\`: the exact text the comment refers to, and the key md-redline uses to find it (see "Keeping anchors valid" below)
 - \`text\`: my feedback - this is what I need you to address
 - \`replies\`: threaded discussion - read for additional context
+- \`contextBefore\` / \`contextAfter\`: optional snippets of the text surrounding the anchor when I wrote the comment, used to disambiguate repeated text
+
+## Keeping anchors valid
+
+The \`anchor\` field is how md-redline locates a comment in the document. It is not a description, it is a lookup key: if the exact text stops existing, the comment detaches from the document and I lose the thread of what it was about.
+
+So whenever an edit rewrites, restructures, or moves the text a marker points at, update that marker's \`anchor\` in the same edit so it quotes the new text that replaced it. This applies to comments you resolve as well as ones you leave open. Never leave an \`anchor\` pointing at text that is no longer in the file.
+
+When you change an \`anchor\`, **delete** that marker's \`contextBefore\` and \`contextAfter\` rather than trying to rewrite them. Both fields are optional. They describe where the OLD anchor sat, so leaving them is actively wrong: md-redline weighs a context match above the marker's own position, and stale context will pull the highlight onto the wrong copy of repeated text. Removing them lets it fall back to the marker position, which is correct by construction.
+
+If the anchored text is deleted outright with nothing replacing it, say so in your reply rather than re-pointing the anchor at unrelated text.
 
 ## Identifying yourself
 
