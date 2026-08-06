@@ -27,8 +27,11 @@ interface Props {
 const tabControlButtonClass =
   'flex h-full w-8 items-center justify-center shrink-0 border-l border-border text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
 
+// w-9 (36px) is load-bearing: it has to stay in step with the scrollport's
+// scroll-pr-10 below, which is what keeps a tab from scrolling under this
+// button.
 const tabActionButtonClass =
-  'sticky right-0 z-10 flex h-full items-center justify-center bg-surface-secondary px-2.5 shrink-0 rounded-t-md text-content-muted transition-colors hover:bg-tint hover:text-content';
+  'sticky right-0 z-10 flex h-full w-9 items-center justify-center bg-surface-secondary shrink-0 rounded-t-md text-content-muted transition-colors hover:bg-tint hover:text-content';
 
 export function TabBar({
   tabs,
@@ -45,6 +48,11 @@ export function TabBar({
   const tabsContentRef = useRef<HTMLDivElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
   const tabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const viewportWidthRef = useRef(-1);
+  // Read inside scrollActiveTabIntoView so that callback keeps a stable
+  // identity and the resize observer below survives tab switches.
+  const activeFilePathRef = useRef(activeFilePath);
+  activeFilePathRef.current = activeFilePath;
   const [tabListOpen, setTabListOpen] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -58,6 +66,20 @@ export function TabBar({
     setIsOverflowing(maxScrollLeft > 1);
     setCanScrollLeft(viewport.scrollLeft > 1);
     setCanScrollRight(viewport.scrollLeft < maxScrollLeft - 1);
+  }, []);
+
+  // Bring the active tab into view. The scrollport's scroll-padding is what
+  // holds it clear of the sticky open-file button pinned to the right edge;
+  // without that padding the browser parks the tab's tail underneath it.
+  // Reports whether there was a tab to align, so a caller that tracks state
+  // across calls can tell an alignment from a no-op.
+  const scrollActiveTabIntoView = useCallback(() => {
+    const activePath = activeFilePathRef.current;
+    const tabButton = activePath ? tabButtonRefs.current.get(activePath) : null;
+    if (!tabButton) return false;
+
+    tabButton.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    return true;
   }, []);
 
   const scrollTabsBy = useCallback((direction: 'left' | 'right') => {
@@ -81,7 +103,26 @@ export function TabBar({
     viewport.addEventListener('scroll', handleScroll, { passive: true });
 
     const resizeObserver =
-      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => updateTabOverflow()) : null;
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            // The scrollport keeps narrowing after the active tab was scrolled
+            // into view (the overflow arrows mount, the explorer opens, the
+            // window resizes), and a scroll position computed against the old
+            // width leaves the active tab clipped. Re-align on width changes
+            // only, so content growth such as a new comment badge doesn't yank
+            // the strip back while the user is looking at another tab.
+            // Fractional width, not clientWidth: a sub-pixel settle at the end
+            // of the explorer's open animation rounds to the same integer and
+            // would skip the last re-align. Record the width only once an
+            // alignment actually ran, so a resize that lands before the active
+            // tab has mounted gets another chance.
+            const width = viewport.getBoundingClientRect().width;
+            if (width !== viewportWidthRef.current && scrollActiveTabIntoView()) {
+              viewportWidthRef.current = width;
+            }
+            updateTabOverflow();
+          })
+        : null;
 
     resizeObserver?.observe(viewport);
     if (tabsContentRef.current) resizeObserver?.observe(tabsContentRef.current);
@@ -90,20 +131,25 @@ export function TabBar({
       viewport.removeEventListener('scroll', handleScroll);
       resizeObserver?.disconnect();
     };
-  }, [tabs.length, updateTabOverflow]);
+    // tabs.length is not a stale-closure leftover: rebuilding the observer
+    // re-delivers an observation once the tabs arrive, which is the other half
+    // of the retry above. The obvious simplification is to move that retry to
+    // the alignment effect below, whose stated job it already is. Don't: that
+    // effect aligns unconditionally, so every background tab open would pull
+    // the strip off whatever the user is reading. Both halves are pinned by
+    // TabBar.test.tsx.
+  }, [tabs.length, scrollActiveTabIntoView, updateTabOverflow]);
 
   useEffect(() => {
     if (!activeFilePath) return;
 
     const frame = window.requestAnimationFrame(() => {
-      tabButtonRefs.current
-        .get(activeFilePath)
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      scrollActiveTabIntoView();
       updateTabOverflow();
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [activeFilePath, updateTabOverflow]);
+  }, [activeFilePath, scrollActiveTabIntoView, updateTabOverflow]);
 
   useEffect(() => {
     if (!tabListOpen) return;
@@ -162,7 +208,13 @@ export function TabBar({
           </button>
         )}
 
-        <div ref={tabsViewportRef} className="min-w-0 flex-1 h-full overflow-x-auto no-scrollbar">
+        {/* scroll-pr-10 is what keeps scrollIntoView from tucking a tab under
+            the sticky open-file button, so it has to stay >= that button's
+            w-9. The extra 4px is breathing room, not a second constraint. */}
+        <div
+          ref={tabsViewportRef}
+          className="min-w-0 flex-1 h-full overflow-x-auto no-scrollbar scroll-pr-10"
+        >
           <div ref={tabsContentRef} className="flex h-full items-stretch min-w-max gap-1">
             {tabs.map((tab) => {
               const isActive = tab.filePath === activeFilePath;
