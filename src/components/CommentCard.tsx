@@ -223,6 +223,45 @@ export const CommentCard = memo(function CommentCard({
     onCloseEditor();
   };
 
+  // Three states, and they are not interchangeable. A recovered anchor still
+  // points somewhere, so it reads quietly and only invites a check. A stale
+  // anchor with no recovery on an open comment is the loud case: the reviewer
+  // has to re-anchor it by hand. The same on a resolved comment is history
+  // that came loose, worth showing but not worth alarming over.
+  //
+  // Which of the last two applies is read off the comment's own status, never
+  // off `anchorMissing` being absent. Surfaces differ in whether they wire
+  // that prop at all — MermaidThreadPanel does not — so treating "no
+  // anchorMissing" as "resolved" tells an open, actionable orphan that it was
+  // resolved, and only on the surfaces that forgot to pass the prop.
+  const QUIET_BADGE = 'bg-surface-secondary text-content-muted border border-border-subtle';
+  const anchorDetached = anchorMissing || comment.anchorStale;
+  const anchorBadge = showAnchorContext
+    ? null
+    : comment.recoveredAnchor
+      ? {
+          label: 'Re-anchored',
+          className: QUIET_BADGE,
+          title: `Anchor text was rewritten. Following the marker to the text that replaced it.\n\nOriginally anchored to: "${comment.anchor}"`,
+        }
+      : anchorDetached
+        ? // `status`, not `isResolved`: the latter also requires the resolve
+          // setting to be on, while detectMissingAnchors — whose behavior this
+          // badge exists to explain — keys off effective status alone. Gating
+          // on the setting makes the badge disagree with the rail.
+          status === 'resolved'
+          ? {
+              label: 'Changed',
+              className: QUIET_BADGE,
+              title: 'Anchor text was modified or removed after this comment was resolved',
+            }
+          : {
+              label: 'Changed',
+              className: 'bg-danger-bg text-danger-text',
+              title: 'Anchor text was modified or removed',
+            }
+        : null;
+
   return (
     <div
       className={`group rounded-lg border transition-all duration-200 cursor-pointer ${
@@ -244,10 +283,14 @@ export const CommentCard = memo(function CommentCard({
       <div className="px-3 pt-3 pb-1 flex items-start gap-2">
         <div
           data-anchor-quote
-          title={comment.anchor}
+          title={
+            comment.recoveredAnchor
+              ? `${comment.recoveredAnchor}\n\nOriginally anchored to: "${comment.anchor}"`
+              : comment.anchor
+          }
           className={`comment-quote flex-1 min-w-0 line-clamp-2 ${isResolved ? 'comment-quote-resolved' : ''}`}
         >
-          &ldquo;{comment.anchor}&rdquo;
+          &ldquo;{comment.recoveredAnchor ?? comment.anchor}&rdquo;
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {sent && (
@@ -258,12 +301,12 @@ export const CommentCard = memo(function CommentCard({
               Sent
             </span>
           )}
-          {anchorMissing && !showAnchorContext && (
+          {anchorBadge && (
             <span
-              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-danger-bg text-danger-text"
-              title="Anchor text was modified or removed"
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${anchorBadge.className}`}
+              title={anchorBadge.title}
             >
-              Changed
+              {anchorBadge.label}
             </span>
           )}
           {resolveEnabled && (
@@ -421,6 +464,28 @@ export const CommentCard = memo(function CommentCard({
                     Resolve
                   </ActionButton>
                 )}
+            {/* A recovered comment is attached but pointing somewhere it was
+                never written against, and the marker on disk still holds the
+                stale anchor. Without this it is the one detached state with no
+                way out: excluded from "Needs re-anchoring", so no re-anchor
+                button, no orphan toast, and nothing the reviewer can act on.
+                One click writes the recovery into the file and ends it. */}
+            {comment.recoveredAnchor && onReanchorToSelection && (
+              <ActionButton
+                intent="primary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReanchorToSelection(
+                    comment.id,
+                    comment.recoveredAnchor!,
+                    comment.cleanOffset ?? undefined,
+                  );
+                }}
+                title={`Write this anchor into the file, replacing "${comment.anchor}"`}
+              >
+                Keep this anchor
+              </ActionButton>
+            )}
             {showAnchorContext &&
               selectionText &&
               selectionText.trim().length > 0 &&

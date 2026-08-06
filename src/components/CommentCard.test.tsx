@@ -219,3 +219,79 @@ describe('clamp re-check', () => {
     expect(resizeObserverObserved).toContain(textEl);
   });
 });
+
+describe('CommentCard — anchor badges', () => {
+  it('shows no anchor badge when the anchor is intact', () => {
+    renderCard();
+    expect(screen.queryByText('Changed')).toBeNull();
+    expect(screen.queryByText('Re-anchored')).toBeNull();
+  });
+
+  it('shows "Re-anchored" and quotes where the comment now points', () => {
+    renderCard({
+      comment: {
+        ...baseComment,
+        anchorStale: true,
+        recoveredAnchor: 'A1. The section that replaced it',
+      },
+    });
+    expect(screen.queryByText('Re-anchored')).not.toBeNull();
+    expect(screen.queryByText('Changed')).toBeNull();
+    // The quote follows the recovery, so the card describes the document as it
+    // is now rather than as it was when the comment was written.
+    expect(screen.getByText(/A1\. The section that replaced it/)).toBeTruthy();
+  });
+
+  it('keeps the original anchor reachable in the title when re-anchored', () => {
+    const { container } = renderCard({
+      comment: { ...baseComment, anchorStale: true, recoveredAnchor: 'the replacement' },
+    });
+    const quote = container.querySelector('[data-anchor-quote]');
+    expect(quote?.getAttribute('title')).toContain('Hello world');
+  });
+
+  it('shows "Changed" for an open comment whose anchor could not be recovered', () => {
+    renderCard({ comment: { ...baseComment, anchorStale: true }, anchorMissing: true });
+    const badge = screen.queryByText('Changed');
+    expect(badge).not.toBeNull();
+    expect(badge?.className).toContain('bg-danger-bg');
+  });
+
+  it('shows a quiet "Changed" for a resolved comment detached by a later rewrite', () => {
+    // Resolved comments are excluded from the rail's orphan set (the reviewer
+    // cannot act on them), so anchorMissing is false while anchorStale is true.
+    // The badge still has to appear, or the resolved thread silently stops
+    // pointing anywhere.
+    renderCard({
+      comment: { ...baseComment, status: 'resolved', resolved: true, anchorStale: true },
+      anchorMissing: false,
+    });
+    const badge = screen.queryByText('Changed');
+    expect(badge).not.toBeNull();
+    expect(badge?.className).not.toContain('bg-danger-bg');
+  });
+
+  it('reads the quiet variant off the comment’s status, not off a missing prop', () => {
+    // MermaidThreadPanel renders cards without wiring anchorMissing at all, so
+    // "no anchorMissing" cannot be taken to mean "resolved". An OPEN detached
+    // comment there must still read as loud and actionable, and must never be
+    // told it was resolved.
+    renderCard({
+      comment: { ...baseComment, anchorStale: true },
+      anchorMissing: undefined,
+    });
+    const badge = screen.queryByText('Changed');
+    expect(badge).not.toBeNull();
+    expect(badge?.className).toContain('bg-danger-bg');
+    expect(badge?.getAttribute('title')).not.toContain('resolved');
+  });
+
+  it('suppresses the badge when the full anchor context is already shown', () => {
+    renderCard({
+      comment: { ...baseComment, anchorStale: true },
+      anchorMissing: true,
+      showAnchorContext: true,
+    });
+    expect(screen.queryByText('Changed')).toBeNull();
+  });
+});

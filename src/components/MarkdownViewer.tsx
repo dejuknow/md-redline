@@ -290,18 +290,31 @@ export const MarkdownViewer = memo(
         // tooling) and never a space, since a space separator lets
         // ["a b", "c"] and ["a", "b c"] produce the same key: the very
         // collision class this key exists to prevent.
+        // A rewritten anchor highlights against its recovered text, so the
+        // comment keeps a home in the document instead of dropping its mark.
+        //
+        // Its stored context is dropped along with the old anchor. Those
+        // strings describe the neighborhood of text that no longer exists, and
+        // pickLiteralOccurrence scores context overlap ABOVE proximity to the
+        // hint offset — so a stale contextBefore that happens to match another
+        // occurrence of the recovered text wins outright and paints the mark in
+        // the wrong place. With no context it falls back to the marker
+        // position, which is exactly where recovery took the text from.
+        const anchorText = comment.recoveredAnchor ?? comment.anchor;
+        const contextBefore = comment.recoveredAnchor ? undefined : comment.contextBefore;
+        const contextAfter = comment.recoveredAnchor ? undefined : comment.contextAfter;
         const key = [
           comment.cleanOffset ?? '',
-          comment.anchor,
-          comment.contextBefore ?? '',
-          comment.contextAfter ?? '',
+          anchorText,
+          contextBefore ?? '',
+          contextAfter ?? '',
         ].join('\u0000');
         const group = highlightGroups.get(key) || {
           ids: [],
-          anchor: comment.anchor,
+          anchor: anchorText,
           plainOffset,
-          contextBefore: comment.contextBefore,
-          contextAfter: comment.contextAfter,
+          contextBefore,
+          contextAfter,
         };
         group.ids.push(comment.id);
         highlightGroups.set(key, group);

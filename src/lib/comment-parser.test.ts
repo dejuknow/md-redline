@@ -802,7 +802,296 @@ describe('orderCommentsByAnchor', () => {
   });
 });
 
+describe('anchor recovery after a rewrite', () => {
+  // An agent that restructures a document while addressing comments leaves the
+  // markers in place and rewrites the text around them. The marker's position
+  // still points at whatever replaced the anchored text, which is the signal
+  // recovery runs on.
+  const rewritten = [
+    '# Notes',
+    '',
+    '<!-- @comment{"id":"c1","anchor":"Is it already live?","text":"Turn this into a decision","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->',
+    '### A1. One terminal screen at the end of setup',
+    '',
+    'It does not claim to be live.',
+  ].join('\n');
+
+  it('recovers a rewritten anchor from the text following the marker', () => {
+    const { comments } = parseComments(rewritten);
+    expect(comments[0].anchorStale).toBe(true);
+    expect(comments[0].recoveredAnchor).toBe('A1. One terminal screen at the end of setup');
+  });
+
+  it('does not report a recovered comment as orphaned', () => {
+    const { comments, cleanMarkdown } = parseComments(rewritten);
+    expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(false);
+  });
+
+  it('leaves intact anchors untouched', () => {
+    const intact = [
+      '<!-- @comment{"id":"c1","anchor":"still here","text":"x","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->still here',
+    ].join('\n');
+    const { comments } = parseComments(intact);
+    expect(comments[0].anchorStale).toBeUndefined();
+    expect(comments[0].recoveredAnchor).toBeUndefined();
+  });
+
+  it('does not treat a formatting-only difference as a stale anchor', () => {
+    // The anchor came from rendered text, so it carries no ** markers.
+    const formatted =
+      '<!-- @comment{"id":"c1","anchor":"the bold claim","text":"x","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->**the bold claim** follows';
+    const { comments } = parseComments(formatted);
+    expect(comments[0].anchorStale).toBeUndefined();
+    expect(comments[0].recoveredAnchor).toBeUndefined();
+  });
+
+  it('reports a genuine orphan when nothing follows the marker', () => {
+    const stranded =
+      '# Notes\n\nSome kept text.\n\n<!-- @comment{"id":"c1","anchor":"deleted paragraph","text":"x","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->';
+    const { comments, cleanMarkdown } = parseComments(stranded);
+    expect(comments[0].anchorStale).toBe(true);
+    expect(comments[0].recoveredAnchor).toBeUndefined();
+    expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+  });
+
+  it('rejects replacement text too short to identify anything', () => {
+    const tiny =
+      '<!-- @comment{"id":"c1","anchor":"a long deleted sentence","text":"x","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->\n## Hi\n';
+    const { comments } = parseComments(tiny);
+    expect(comments[0].anchorStale).toBe(true);
+    expect(comments[0].recoveredAnchor).toBeUndefined();
+  });
+
+  it('strips list scaffolding from the recovered anchor', () => {
+    const list =
+      '<!-- @comment{"id":"c1","anchor":"Ways to auto move a deal","text":"x","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->\n- **A quick way to move a lead to another stage**, likely in a kanban view\n';
+    const { comments } = parseComments(list);
+    expect(comments[0].recoveredAnchor).toBe(
+      'A quick way to move a lead to another stage, likely in a kanban view',
+    );
+  });
+
+  // Each of these produced a wrong anchor before its guard existed. The shape
+  // they share: recovery attached the comment to text that was not its own,
+  // and the recoveredAnchor then suppressed the orphan badge that would have
+  // told the reviewer to look.
+  describe('guards against attaching to the wrong text', () => {
+    const stale = (anchor: string, extra = '') =>
+      `<!-- @comment{"id":"c1","anchor":${JSON.stringify(anchor)},"text":"x","author":"PM","timestamp":"2026-08-06T10:00:00Z"${extra}} -->`;
+
+    it('recovers from the marker position, not the fuzzy-relocated offset', () => {
+      // The contextAfter-only fallback rewinds cleanOffset by the OLD anchor's
+      // length, which a rewrite is exactly what invalidates. Following it
+      // landed mid-word in the PRECEDING paragraph.
+      const raw = `# Doc\n\nSome earlier paragraph with words words words words here.\n\n${stale(
+        'the original anchor sentence that was deleted',
+        ',"contextAfter":" and then the trailing context follows."',
+      )} and then the trailing context follows.\n`;
+      const { comments } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBe('and then the trailing context follows.');
+    });
+
+    it('does not cross a blank line onto an unrelated later section', () => {
+      const raw = `# Doc\n\nKept paragraph.\n\n${stale('a paragraph that was deleted entirely')}\n\n## Unrelated Later Section\n\nBody.\n`;
+      const { comments, cleanMarkdown } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBeUndefined();
+      expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+    });
+
+    it('refuses a table row, whose cells run together in the DOM', () => {
+      // An earlier pass collapsed the cell pipes to spaces and produced
+      // "Metric Target Owner name here". Rendering the same document shows the
+      // DOM concatenates adjacent cells with NO separator
+      // ("MetricTargetOwnername here"), and flexibleIndexOf requires at least
+      // one whitespace character between parts — so the spaced candidate could
+      // never be located, while still suppressing the orphan badge. There is
+      // no readable extraction that matches, so recovery declines the row.
+      const raw = `# Doc\n\n${stale('the deleted sentence')}| Metric | Target | Owner name here |\n|---|---|---|\n| Revenue | 100 | Dana |\n`;
+      const { comments, cleanMarkdown } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBeUndefined();
+      expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+    });
+
+    it('still recovers a line whose only pipe is inside inline code', () => {
+      // A union type or CLI flag in backticks is text the reader sees, so the
+      // cell-separator check must not treat it as a table row.
+      const raw = `# Doc\n\n${stale('the deleted sentence')}The mode field takes \`'ask' | 'review'\` and nothing else.\n`;
+      const { comments } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBe(
+        "The mode field takes 'ask' | 'review' and nothing else.",
+      );
+    });
+
+    it('refuses a footnote definition, whose body renders elsewhere', () => {
+      // rehype moves footnote bodies into a separate Footnotes section and
+      // drops the `[^1]: ` marker, so the marker's position says nothing about
+      // where the text lands and the extracted ": body" prefix matches nothing.
+      const raw = `# Doc\n\nBody with a ref[^1].\n\n${stale('the deleted note')}[^1]: The footnote body text goes here.\n`;
+      const { comments, cleanMarkdown } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBeUndefined();
+      expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+    });
+
+    it('refuses to recover onto a table delimiter row', () => {
+      // A `|---|` row is the shape that needs this guard specifically: it
+      // survives the length floor, so without STRUCTURE_ONLY_LINE it would be
+      // accepted as an anchor. A ```ts fence would be refused here too, but is
+      // also caught by the floor, so it cannot tell the two apart.
+      const raw = `# Doc\n\n${stale('the deleted caption')}\n|--------|--------|--------|\n| A | B | C |\n`;
+      const { comments } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBeUndefined();
+    });
+
+    // insertComment moves a marker out of any container that cannot hold one,
+    // which breaks the "immediately before its anchor" contract recovery runs
+    // on. These build the marker with insertComment rather than by hand, so
+    // the relocation actually happens rather than being assumed.
+    describe('markers relocated out of protected containers', () => {
+      it('does not recover a frontmatter comment onto the document title', () => {
+        // Frontmatter is the container the marker TRAILS, so the text ahead of
+        // it is the body, not the field the comment is about.
+        const doc =
+          '---\nstatus: draft\nowner: dana\n---\n# A Fully Written Out Document Title Right Here\n\nBody text here.\n';
+        const withComment = insertComment(
+          doc,
+          'status: draft',
+          'is this still draft?',
+          'PM',
+          undefined,
+          undefined,
+          undefined,
+          'c1',
+        );
+        const rewritten = withComment.replace(/^status: draft$/m, 'status: shipped');
+        const { comments, cleanMarkdown } = parseComments(rewritten);
+        expect(comments[0].recoveredAnchor).toBeUndefined();
+        expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+      });
+
+      it('does not recover an HTML-comment anchor into raw comment syntax', () => {
+        // rehype drops HTML comments, so `<!-- ... -->` as an anchor could
+        // never be located in the rendered document: the badge would say
+        // re-anchored while no highlight existed anywhere.
+        const doc = '# Doc\n\n<!-- TODO: secret note here -->\n\nVisible body paragraph.\n';
+        const withComment = insertComment(
+          doc,
+          'TODO: secret note here',
+          'still needed?',
+          'PM',
+          undefined,
+          undefined,
+          undefined,
+          'c1',
+        );
+        const rewritten = withComment.replace(
+          '<!-- TODO: secret note here -->',
+          '<!-- TODO: totally different content now -->',
+        );
+        const { comments, cleanMarkdown } = parseComments(rewritten);
+        expect(comments[0].recoveredAnchor).toBeUndefined();
+        expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+      });
+
+      it('does not recover a fenced-code comment onto the fence line', () => {
+        // Refused by NON_PROSE_LINE rather than by accident.
+        const doc = '# Doc\n\n```ts\nconst answer = 42;\n```\n\nAfter.\n';
+        const withComment = insertComment(
+          doc,
+          'const answer = 42;',
+          'magic number',
+          'PM',
+          undefined,
+          undefined,
+          undefined,
+          'c1',
+        );
+        const rewritten = withComment.replace('const answer = 42;', 'const answer = compute();');
+        const { comments, cleanMarkdown } = parseComments(rewritten);
+        expect(comments[0].recoveredAnchor).toBeUndefined();
+        expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+      });
+    });
+
+    it('refuses a candidate carrying an HTML entity, which the DOM never shows', () => {
+      // Recovery is the only producer of anchors read out of SOURCE text, so
+      // it is the only place `&amp;` can reach an anchor while the rendered
+      // document holds `&`. anchorResolves compares against the source and
+      // cannot see the divergence, so storing it would suppress the orphan
+      // badge while the viewer matched nothing.
+      const raw = `# Doc\n\n${stale('the old paragraph')}Tom &amp; Jerry are the canonical duo here\n`;
+      const { comments, cleanMarkdown } = parseComments(raw);
+      expect(comments[0].recoveredAnchor).toBeUndefined();
+      expect(detectMissingAnchors(cleanMarkdown, comments).has('c1')).toBe(true);
+    });
+
+    it('points cleanOffset back at the marker once recovery succeeds', () => {
+      // cleanOffset is the disambiguating hint for both the viewer's
+      // occurrence picker and moveComment behind "Keep this anchor". The fuzzy
+      // re-match aimed it at where it guessed the OLD anchor went, and that
+      // anchor is gone by definition here.
+      const raw = `# Doc\n\nEarlier paragraph with plenty of words in it here.\n\n${stale(
+        'the deleted anchor sentence',
+        ',"contextAfter":" and the trailing context follows on."',
+      )} and the trailing context follows on.\n`;
+      const { comments, cleanMarkdown } = parseComments(raw);
+      const c = comments[0];
+      expect(c.recoveredAnchor).toBe('and the trailing context follows on.');
+      // The hint must land on the recovered text, not in the paragraph above it.
+      expect(cleanMarkdown.slice(c.cleanOffset!).trimStart()).toMatch(/^and the trailing context/);
+    });
+
+    it('truncates a long line back to a word boundary, keeping it locatable', () => {
+      const long =
+        'This replacement paragraph runs well past the hundred and twenty character ceiling that the recovered anchor is allowed to occupy before it gets cut.';
+      const raw = `# Doc\n\n${stale('the deleted sentence')}${long}\n`;
+      const { comments, cleanMarkdown } = parseComments(raw);
+      const recovered = comments[0].recoveredAnchor!;
+      expect(recovered.length).toBeLessThanOrEqual(120);
+      // Cut at a word boundary, not mid-word...
+      expect(long.startsWith(recovered)).toBe(true);
+      expect(long[recovered.length]).toBe(' ');
+      // ...and still a prefix that resolves, which is what makes it usable as
+      // an anchor at all.
+      expect(stripInlineFormatting(cleanMarkdown).plain.includes(recovered)).toBe(true);
+    });
+
+    it('does not recover onto another comment’s still-live anchor', () => {
+      const raw = `# Doc\n\n${stale('deleted one')}\n<!-- @comment{"id":"c2","anchor":"second anchor text","text":"y","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->second anchor text\n`;
+      const { comments } = parseComments(raw);
+      expect(comments.find((c) => c.id === 'c1')?.recoveredAnchor).toBeUndefined();
+    });
+
+    it('still recovers for comments clustered on one rewritten block', () => {
+      // Neither anchor resolves any more, so the live-anchor guard must not
+      // fire: both comments legitimately point at the text that replaced them.
+      const raw = `# Doc\n\n${stale('first dead quote')}<!-- @comment{"id":"c2","anchor":"second dead quote","text":"y","author":"PM","timestamp":"2026-08-06T10:00:00Z"} -->### A3. The decision that replaced both\n`;
+      const { comments } = parseComments(raw);
+      expect(comments.map((c) => c.recoveredAnchor)).toEqual([
+        'A3. The decision that replaced both',
+        'A3. The decision that replaced both',
+      ]);
+    });
+  });
+
+  it('never writes the recovered anchor back into the marker', () => {
+    const { comments } = parseComments(rewritten);
+    const serialized = serializeComment(comments[0]);
+    expect(serialized).not.toContain('recoveredAnchor');
+    expect(serialized).not.toContain('anchorStale');
+    expect(serialized).toContain('"anchor":"Is it already live?"');
+  });
+});
+
 describe('detectMissingAnchors', () => {
+  it('skips resolved comments by default but flags them on request', () => {
+    const clean = 'Only this text survives';
+    const comments = [
+      { id: 'a', anchor: 'deleted text', status: 'resolved' },
+    ] as unknown as MdComment[];
+    expect(detectMissingAnchors(clean, comments).has('a')).toBe(false);
+    expect(detectMissingAnchors(clean, comments, { includeResolved: true }).has('a')).toBe(true);
+  });
+
   it('returns empty set when all anchors are present', () => {
     const clean = 'Hello world, this is a test';
     const comments = [
@@ -1572,9 +1861,32 @@ describe('fuzzy re-matching', () => {
     expect(parsed.comments).toHaveLength(1);
     const clean = parsed.cleanMarkdown;
     expect(clean).toBe('prefix text changed text and the rest follows here.');
-    const afterIdx = clean.indexOf(' and the rest follows');
-    // cleanOffset is positioned anchor.length chars before contextAfter
-    // so the marker re-attaches to the right region
+    // The fallback positions cleanOffset anchor.length chars before
+    // contextAfter, which lands mid-word ("ged text") because it subtracts the
+    // length of an anchor that no longer exists. Recovery succeeds for this
+    // comment and supersedes that guess with the marker's own position, which
+    // is where the replacement text actually starts. Asserting the old
+    // mid-word offset would be pinning the artifact rather than the behavior.
+    expect(parsed.comments[0].cleanOffset).toBe('prefix text '.length);
+    expect(parsed.comments[0].recoveredAnchor).toBe('changed text and the rest follows here.');
+  });
+
+  it('keeps the contextAfter-only fallback offset when recovery cannot run', () => {
+    // Same fallback, but the marker is stranded at end of file so recovery
+    // returns null and does not override. This is what still exercises
+    // fuzzyReMatch's own result.
+    const comment: MdComment = {
+      id: 'after-only-2',
+      anchor: 'old text',
+      text: 'note',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      contextAfter: ' and the rest follows',
+    };
+    const raw = `prefix text and the rest follows here.\n\n${serializeComment(comment)}`;
+    const parsed = parseComments(raw);
+    const afterIdx = parsed.cleanMarkdown.indexOf(' and the rest follows');
+    expect(parsed.comments[0].recoveredAnchor).toBeUndefined();
     expect(parsed.comments[0].cleanOffset).toBe(Math.max(0, afterIdx - comment.anchor.length));
   });
 
