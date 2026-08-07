@@ -161,7 +161,7 @@ Current stills:
   Password Management so both comment cards show. Both carry an agent (Claude)
   reply; the focused card also has an open reply composer holding an unsent
   draft (so it shows the full comment, agent reply, and in-progress reply),
-  while the other card's reply stays collapsed as a "1 reply" count.
+  while the other card's reply stays collapsed as a "1 reply from Claude" summary line.
   Seeds a restored 3-tab session
   via `localStorage` from the committed `fixtures/hero/*.md` (authentication-spec
   carries the five comments); the frame is composited in-browser around the

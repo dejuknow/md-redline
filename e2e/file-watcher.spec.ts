@@ -258,6 +258,76 @@ test.describe('File watcher - external changes', () => {
     expect(skew).toBeLessThan(5 * 60_000);
   });
 
+  test('an agent reply arriving externally marks the anchored card as new until opened', async ({
+    page,
+  }) => {
+    // The whole point of the unread mark: an anchored card collapses a reply to
+    // a one-line summary, so without it the answer the reviewer handed off for
+    // looks identical to a thread they already read. Only the watcher can
+    // create this state, so it can't be covered below the App level.
+    await openFixture(page);
+    await page.waitForTimeout(1500);
+
+    // A second comment exists only so the first can be un-focused later: a card
+    // goes back to compact when some OTHER card becomes the active one.
+    const marker = (replies?: unknown[]) =>
+      `<!-- @comment${JSON.stringify({
+        id: 'unread-c1',
+        anchor: 'valid credentials',
+        text: 'Should we say "active credentials"?',
+        author: 'Dennis',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        ...(replies ? { replies } : {}),
+      })} -->valid credentials`;
+    const otherMarker = `<!-- @comment${JSON.stringify({
+      id: 'unread-c2',
+      anchor: 'Rate limiting',
+      text: 'Unrelated second comment.',
+      author: 'Dennis',
+      timestamp: '2025-01-01T00:00:00.000Z',
+    })} -->Rate limiting`;
+    const withBoth = (replies?: unknown[]) =>
+      FIXTURE_ORIGINAL.replace('valid credentials', marker(replies)).replace(
+        'Rate limiting',
+        otherMarker,
+      );
+
+    writeFileSync(FIXTURE, withBoth());
+    await expect(page.getByText('Should we say "active credentials"?')).toBeVisible({
+      timeout: 15_000,
+    });
+    // No replies yet, so no summary line at all.
+    await expect(page.getByTestId('reply-summary')).toHaveCount(0);
+
+    writeFileSync(
+      FIXTURE,
+      withBoth([
+        {
+          id: 'unread-r1',
+          text: 'Yes, "active" is more precise.',
+          author: 'Claude',
+          timestamp: '2025-01-01T00:00:00.000Z',
+        },
+      ]),
+    );
+
+    const summary = page.getByTestId('reply-summary');
+    await expect(summary).toHaveText('1 new reply from Claude', { timeout: 15_000 });
+    await expect(summary).toHaveAttribute('data-unread', 'true');
+
+    // Opening the card is what counts as reading it: the thread expands and the
+    // summary line goes away with it.
+    await summary.click();
+    await expect(page.getByText('Yes, "active" is more precise.')).toBeVisible();
+    await expect(page.getByTestId('reply-summary')).toHaveCount(0);
+
+    // Focusing the other card collapses this one again — the reply is now an
+    // ordinary summary, not a second round of "new".
+    await page.locator('[data-comment-card-id="unread-c2"]').click();
+    await expect(summary).toHaveText('1 reply from Claude');
+    await expect(summary).not.toHaveAttribute('data-unread', 'true');
+  });
+
   test('reply with missing timestamp does not render "Invalid Date" on first load', async ({
     page,
   }) => {

@@ -13,6 +13,7 @@ import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
+import { useUnreadReplies } from './hooks/useUnreadReplies';
 import { usePageVisible } from './hooks/usePageVisible';
 import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
@@ -1206,23 +1207,56 @@ export default function App() {
   // Override agent-supplied reply timestamps with the file's mtime. LLM agents
   // can't reliably know "now," so without this they hallucinate timestamps
   // that look like reasonable ISO-8601 strings but are hours stale. Returns
-  // the corrected content (or the original if no override was needed).
+  // the corrected content (or the original if no override was needed) plus the
+  // IDs of the replies that just arrived, which the caller also needs to mark
+  // them unread — computing them here saves the caller a second parse pass.
   const correctReplyTimestamps = useCallback(
-    (oldContent: string, newContent: string, mtime: number | undefined): string => {
+    (
+      oldContent: string,
+      newContent: string,
+      mtime: number | undefined,
+    ): { content: string; newReplyIds: ReadonlySet<string> } => {
       try {
         const { comments: oldComments } = parseComments(oldContent);
         const { comments: newComments } = parseComments(newContent);
         const newReplyIds = findNewReplyIds(oldComments, newComments);
-        if (newReplyIds.size === 0) return newContent;
+        if (newReplyIds.size === 0) return { content: newContent, newReplyIds };
         const fallbackIso =
           mtime != null ? new Date(mtime).toISOString() : new Date().toISOString();
-        return backfillReplyTimestamps(newContent, newReplyIds, fallbackIso);
+        return {
+          content: backfillReplyTimestamps(newContent, newReplyIds, fallbackIso),
+          newReplyIds,
+        };
       } catch {
-        return newContent;
+        return { content: newContent, newReplyIds: new Set<string>() };
       }
     },
     [],
   );
+
+  // Replies an agent added while the reader was elsewhere. Anchored cards
+  // collapse a reply to a one-line summary, so without this the thing the
+  // reader handed off for looks identical to a thread they already read.
+  const { unreadByPath, markRepliesUnread, markRepliesRead } = useUnreadReplies();
+
+  const unreadReplyIds = useMemo(
+    () => new Set(activeFilePath ? (unreadByPath[activeFilePath] ?? []) : []),
+    [unreadByPath, activeFilePath],
+  );
+
+  // Opening a comment is what counts as reading it: activating a card is
+  // exactly what drops it out of compact rendering and puts the reply text on
+  // screen, in both densities. markRepliesRead returns the previous state when
+  // nothing changes, so re-running this on every reparse is free.
+  useEffect(() => {
+    if (!activeFilePath || !activeCommentId) return;
+    const active = comments.find((c) => c.id === activeCommentId);
+    if (!active?.replies?.length) return;
+    markRepliesRead(
+      activeFilePath,
+      active.replies.map((reply) => reply.id),
+    );
+  }, [activeCommentId, activeFilePath, comments, markRepliesRead]);
 
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
   const onExternalChange = useCallback(
@@ -1286,7 +1320,14 @@ export default function App() {
         // Ignore parse errors — still update the content
       }
 
-      const nextContent = correctReplyTimestamps(rawMarkdownRef.current, content, mtime);
+      const { content: nextContent, newReplyIds } = correctReplyTimestamps(
+        rawMarkdownRef.current,
+        content,
+        mtime,
+      );
+      if (activeFilePath) {
+        markRepliesUnread(activeFilePath, newReplyIds);
+      }
 
       // Update content directly via updateTab (NOT setRawMarkdown which marks
       // dirty:true). External changes already match disk, so dirty must be false.
@@ -1355,6 +1396,7 @@ export default function App() {
     [
       activeFilePath,
       correctReplyTimestamps,
+      markRepliesUnread,
       setDiffEnabled,
       settings.enableResolve,
       showToast,
@@ -1401,7 +1443,15 @@ export default function App() {
         // handler does, so background files don't show stale times when the
         // user switches to them. No toast — background tabs aren't visible.
         const oldContent = snapshot?.rawMarkdown ?? '';
-        const nextContent = correctReplyTimestamps(oldContent, content, mtime);
+        const { content: nextContent, newReplyIds } = correctReplyTimestamps(
+          oldContent,
+          content,
+          mtime,
+        );
+        // The background case is the one that matters most: a handoff answered
+        // on a tab the reader isn't looking at. No toast fires here, so the
+        // unread mark is the only thing that survives until they switch to it.
+        markRepliesUnread(path, newReplyIds);
         updateTab(path, {
           rawMarkdown: nextContent,
           ...(mtime != null ? { mtime } : {}),
@@ -1419,6 +1469,7 @@ export default function App() {
     backgroundPathsKey,
     correctReplyTimestamps,
     getTabSnapshot,
+    markRepliesUnread,
     pageVisible,
     saveFileAt,
     updateTab,
@@ -2818,6 +2869,7 @@ export default function App() {
                             requestedEditor={requestedEditor}
                             requestedFocus={requestedCommentFocus}
                             onFocusHandled={() => setRequestedCommentFocus(null)}
+                            unreadReplyIds={unreadReplyIds}
                           />
                         )}
                         {popoverCommentId &&

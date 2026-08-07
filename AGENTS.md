@@ -608,9 +608,20 @@ the sendable-only map. Inline code in prose renders neutral (`--theme-text`
 on `--theme-bg-inset`), never the crimson accent:
 
 - **Anchored** (default): cards align to their document anchors. Cards are
-  compact by default (anchor text, comment preview, reply count); the active
+  compact by default (anchor text, comment preview, reply summary); the active
   card (selected by clicking its highlight or the card itself) expands to the
-  full thread view with all actions, including Reply. A connector line runs
+  full thread view with all actions, including Reply. A compact card's replies
+  collapse to a clickable disclosure line naming who replied ("2 replies from
+  Claude and Dennis", `data-testid="reply-summary"`); clicking it activates the
+  card, which is what expands the thread. Replies that arrived from outside the
+  app since the reader last opened that card are tracked per file path by
+  `useUnreadReplies` (session-only, never persisted) and fed in as
+  `unreadReplyIds`; when a card has any, the line counts and attributes only
+  those, reading "1 new reply from Claude" in the accent color with
+  `data-unread="true"`. Both watcher paths mark them (the active tab's
+  `onExternalChange` and the multiplexed background-tab SSE handler, which is
+  the case that matters most since no toast fires there). Activating a comment
+  marks its replies read in either density. A connector line runs
   from the anchor to the active (or hovered) card along the rail's left edge.
   Cards never overlap: they resolve top-down by anchor position, and the
   active card gets priority to sit at its anchor, compressing cards above it

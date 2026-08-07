@@ -41,6 +41,10 @@ interface CommentsRailProps {
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
+  /** Replies that arrived externally and have not been opened yet. Only the
+   * anchored density can show one without showing its text, so only its cards
+   * need it. */
+  unreadReplyIds?: ReadonlySet<string>;
 }
 
 /**
@@ -330,6 +334,7 @@ function AnchoredCards({
   onContextMenu,
   requestedEditor,
   onReanchorToSelection,
+  unreadReplyIds,
 }: CommentsRailProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -463,6 +468,7 @@ function AnchoredCards({
               thread={comment}
               active={active}
               compact={!active}
+              unreadReplyIds={unreadReplyIds}
               anchorMissing={
                 layout.orphanIds.includes(comment.id) || missingAnchors.has(comment.id)
               }

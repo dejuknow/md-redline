@@ -7,7 +7,7 @@ import {
   useCallback,
   type MouseEventHandler,
 } from 'react';
-import type { MdComment, CommentStatus } from '../types';
+import type { MdComment, CommentReply, CommentStatus } from '../types';
 import { getEffectiveStatus } from '../types';
 import { getAuthorColor } from '../hooks/useAuthor';
 import { useAutoResize } from '../hooks/useAutoResize';
@@ -39,10 +39,47 @@ interface Props {
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
-  /** Margin-notes compact rendering: the replies thread collapses to a count
+  /** Margin-notes compact rendering: the replies thread collapses to a summary
    * line. Editor surfaces (the edit textarea and reply composer) still render
    * when triggered, since the hover action bar is reachable on compact cards. */
   compact?: boolean;
+  /** Reply IDs that arrived from outside the app since the user last opened
+   * this card. Drives the "new" emphasis on the compact summary line, which is
+   * the only place a reply can be present but unread. */
+  unreadReplyIds?: ReadonlySet<string>;
+}
+
+const collapsedChevron = (
+  <svg
+    className="w-3 h-3 shrink-0"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    strokeWidth={2.5}
+    aria-hidden="true"
+  >
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+  </svg>
+);
+
+/**
+ * Distinct authors of a reply list, in first-appearance order. A margin card is
+ * narrow, so the summary line names at most two and counts the rest.
+ */
+function replyAuthors(replies: CommentReply[]): string[] {
+  return [...new Set(replies.map((reply) => reply.author))];
+}
+
+function summarizeReplies(replies: CommentReply[], isNew: boolean): string {
+  const authors = replyAuthors(replies);
+  const who =
+    authors.length === 1
+      ? authors[0]
+      : authors.length === 2
+        ? `${authors[0]} and ${authors[1]}`
+        : `${authors[0]} +${authors.length - 1}`;
+  const noun = replies.length === 1 ? 'reply' : 'replies';
+  return `${replies.length}${isNew ? ' new' : ''} ${noun} from ${who}`;
 }
 
 const STATUS_CONFIG: Record<CommentStatus, { label: string; className: string }> = {
@@ -74,6 +111,7 @@ export const CommentCard = memo(function CommentCard({
   selectionOffset,
   onReanchorToSelection,
   compact = false,
+  unreadReplyIds,
 }: Props) {
   const { settings } = useSettings();
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
@@ -188,6 +226,12 @@ export const CommentCard = memo(function CommentCard({
   };
 
   const replies = comment.replies || [];
+  // When some replies are unread, the summary line counts and attributes only
+  // those: an agent's answer that just landed is the thing worth returning to,
+  // and burying it in a total ("3 replies") is what made it easy to miss.
+  const unreadReplies = unreadReplyIds ? replies.filter((r) => unreadReplyIds.has(r.id)) : [];
+  const hasUnread = unreadReplies.length > 0;
+  const summaryReplies = hasUnread ? unreadReplies : replies;
   const isEditingReply = editingReplyId !== null;
   const editingReply = editingReplyId
     ? (replies.find((reply) => reply.id === editingReplyId) ?? null)
@@ -616,10 +660,44 @@ export const CommentCard = memo(function CommentCard({
         </div>
       )}
 
+      {/* Collapsed replies summary. Styled as a disclosure rather than a count
+          because clicking it is what expands the thread (activating the card
+          drops compact), and the old muted "1 reply" read as inert metadata
+          next to the very content the reader came back for. */}
       {compact && replies.length > 0 && (
-        <div className="px-3 pb-2 text-xs text-content-muted">
-          {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
-        </div>
+        <button
+          type="button"
+          data-testid="reply-summary"
+          data-unread={hasUnread ? 'true' : undefined}
+          title={
+            replies.length === 1
+              ? 'Open this comment to read the reply'
+              : `Open this comment to read all ${replies.length} replies`
+          }
+          onClick={(e) => {
+            e.stopPropagation();
+            onActivate(comment.id);
+          }}
+          className={`flex w-full items-center gap-1.5 px-3 pb-2 text-xs text-left rounded-b-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
+            hasUnread
+              ? 'font-medium text-primary-text'
+              : 'text-content-muted hover:text-content-secondary'
+          }`}
+        >
+          {collapsedChevron}
+          <span className="flex shrink-0 items-center -space-x-0.5">
+            {replyAuthors(summaryReplies)
+              .slice(0, 3)
+              .map((author) => (
+                <span
+                  key={author}
+                  className="inline-block w-2 h-2 rounded-full ring-1 ring-surface-raised"
+                  style={{ backgroundColor: getAuthorColor(author).text }}
+                />
+              ))}
+          </span>
+          <span className="truncate">{summarizeReplies(summaryReplies, hasUnread)}</span>
+        </button>
       )}
 
       {/* Reply input (shown when replying — trigger is in the action bar

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 
 // Mock preferences-client so SettingsContext doesn't hit the network
@@ -135,7 +135,7 @@ describe('anchor quote', () => {
 });
 
 describe('CommentCard: compact mode', () => {
-  it('compact hides the replies thread and shows a count line', async () => {
+  it('compact hides the replies thread and shows a summary line', async () => {
     const withReplies: MdComment = {
       ...baseComment,
       replies: [
@@ -144,7 +144,7 @@ describe('CommentCard: compact mode', () => {
       ],
     };
     renderCard({ comment: withReplies, compact: true });
-    expect(await screen.findByText('2 replies')).toBeTruthy();
+    expect(await screen.findByText('2 replies from Dennis')).toBeTruthy();
     expect(screen.queryByText('First reply')).toBeNull();
     expect(screen.queryByText('Second reply')).toBeNull();
   });
@@ -157,8 +157,90 @@ describe('CommentCard: compact mode', () => {
       ],
     };
     renderCard({ comment: oneReply, compact: true });
-    expect(await screen.findByText('1 reply')).toBeTruthy();
+    expect(await screen.findByText('1 reply from Dennis')).toBeTruthy();
     expect(screen.queryByText('Only reply')).toBeNull();
+  });
+
+  it('names both authors of a two-author thread, and counts the rest beyond that', async () => {
+    const stamp = new Date().toISOString();
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'a', author: 'Claude', timestamp: stamp },
+          { id: 'r2', text: 'b', author: 'Dennis', timestamp: stamp },
+        ],
+      },
+      compact: true,
+    });
+    expect(await screen.findByText('2 replies from Claude and Dennis')).toBeTruthy();
+
+    cleanup();
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'a', author: 'Claude', timestamp: stamp },
+          { id: 'r2', text: 'b', author: 'Dennis', timestamp: stamp },
+          { id: 'r3', text: 'c', author: 'Bianca', timestamp: stamp },
+        ],
+      },
+      compact: true,
+    });
+    expect(await screen.findByText('3 replies from Claude +2')).toBeTruthy();
+  });
+
+  it('the summary counts and attributes only the unread replies', async () => {
+    const stamp = new Date().toISOString();
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'old one', author: 'Dennis', timestamp: stamp },
+          { id: 'r2', text: 'just landed', author: 'Claude', timestamp: stamp },
+        ],
+      },
+      compact: true,
+      unreadReplyIds: new Set(['r2']),
+    });
+    // Not "2 replies": the agent's answer is what the reader came back for, and
+    // folding it into a total is what made it easy to miss.
+    const summary = await screen.findByTestId('reply-summary');
+    expect(summary.textContent).toContain('1 new reply from Claude');
+    expect(summary.getAttribute('data-unread')).toBe('true');
+  });
+
+  it('drops the new emphasis once every reply has been read', async () => {
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'read already', author: 'Claude', timestamp: new Date().toISOString() },
+        ],
+      },
+      compact: true,
+      unreadReplyIds: new Set(['r-from-another-comment']),
+    });
+    const summary = await screen.findByTestId('reply-summary');
+    expect(summary.textContent).toContain('1 reply from Claude');
+    expect(summary.textContent).not.toContain('new');
+    expect(summary.getAttribute('data-unread')).toBeNull();
+  });
+
+  it('the summary line activates the card, which is what expands the thread', async () => {
+    const onActivate = vi.fn();
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'Only reply', author: 'Dennis', timestamp: new Date().toISOString() },
+        ],
+      },
+      compact: true,
+      onActivate,
+    });
+    fireEvent.click(await screen.findByTestId('reply-summary'));
+    expect(onActivate).toHaveBeenCalledWith(baseComment.id);
   });
 
   it('non-compact renders replies as before', async () => {
@@ -170,7 +252,7 @@ describe('CommentCard: compact mode', () => {
     };
     renderCard({ comment: withReplies });
     expect(await screen.findByText('First reply')).toBeTruthy();
-    expect(screen.queryByText('1 reply')).toBeNull();
+    expect(screen.queryByTestId('reply-summary')).toBeNull();
   });
 
   it('compact still renders the reply composer when reply-compose is active', async () => {
