@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process';
 import { readFile, mkdtemp, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runClaude } from './run-claude.js';
 import type { AgentAdapter } from '../types.js';
-
-const TIMEOUT_MS = 180_000; // 3 minutes
 
 const SYSTEM_CONTEXT = `You are reviewing a markdown file that contains inline review comments.
 
@@ -51,20 +49,3 @@ Read the file, make the requested changes, and write the result back to the same
     }
   },
 };
-
-function runClaude(prompt: string, cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'claude',
-      ['-p', prompt, '--allowedTools', 'Read,Edit,Write'],
-      { cwd, timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`claude-cli failed: ${error.message}\nstderr: ${stderr}`));
-          return;
-        }
-        resolve(stdout);
-      },
-    );
-  });
-}

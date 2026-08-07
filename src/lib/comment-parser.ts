@@ -1,4 +1,10 @@
-import { getEffectiveStatus, type MdComment, type ParseResult, type CommentReply } from '../types';
+import {
+  displayAnchor,
+  getEffectiveStatus,
+  type MdComment,
+  type ParseResult,
+  type CommentReply,
+} from '../types';
 import { randomId } from './random-id';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
@@ -271,7 +277,16 @@ export function transformCommentMarkers(
 
 export function parseComments(rawMarkdown: string): ParseResult {
   const comments: MdComment[] = [];
-  const strippedRegions: { rawStart: number; rawEnd: number; parsed: boolean }[] = [];
+  const strippedRegions: {
+    rawStart: number;
+    rawEnd: number;
+    parsed: boolean;
+    /** A standalone marker takes its own trailing newline with it, so the
+     * anchor on the next line ends up flush against the marker's offset.
+     * Recovery needs to know, or it cannot tell that layout apart from an
+     * inline marker whose anchor really is one line down. */
+    consumedNewline: boolean;
+  }[] = [];
 
   for (const region of collectCommentRegions(rawMarkdown)) {
     if (region.parsedComment) {
@@ -281,6 +296,7 @@ export function parseComments(rawMarkdown: string): ParseResult {
       rawStart: region.rawStart,
       rawEnd: region.stripEnd,
       parsed: region.parsedComment !== null,
+      consumedNewline: region.stripEnd > region.markerEnd,
     });
   }
 
@@ -298,11 +314,19 @@ export function parseComments(rawMarkdown: string): ParseResult {
   // this is the start of the anchor text in the clean content.
   let cumShift = 0;
   let commentIdx = 0;
+  // The marker's own position, kept separately because the fuzzy re-match below
+  // moves cleanOffset to a GUESS at where the anchor region went. Recovery
+  // needs the position the marker actually occupies, which is exact.
+  const markerOffsets = new Map<string, { offset: number; newlineBudget: number }>();
   for (let i = 0; i < strippedRegions.length; i++) {
     const region = strippedRegions[i];
     const cleanPos = region.rawStart - cumShift;
     if (region.parsed && comments[commentIdx]) {
       comments[commentIdx].cleanOffset = cleanPos;
+      markerOffsets.set(comments[commentIdx].id, {
+        offset: cleanPos,
+        newlineBudget: region.consumedNewline ? 0 : 1,
+      });
       commentIdx++;
     }
     cumShift += region.rawEnd - region.rawStart;
@@ -325,6 +349,77 @@ export function parseComments(rawMarkdown: string): ParseResult {
     const newOffset = fuzzyReMatch(cleanMarkdown, comment);
     if (newOffset !== null) {
       comment.cleanOffset = newOffset;
+    }
+  }
+
+  // Anchor recovery. A marker is written immediately before the text it
+  // anchors to, so when an edit rewrites that text but leaves the marker in
+  // place, the marker's own position still points at whatever replaced it.
+  // Recovering from position keeps the comment attached through a rewrite
+  // that would otherwise detach it, and the card badges the recovery so the
+  // reviewer can confirm it rather than trusting it silently.
+  //
+  // Recovery reads markerOffsets, never the possibly-relocated cleanOffset.
+  // The fuzzy re-match above can rewind an offset by the OLD anchor's length
+  // (its contextAfter-only fallback), which a rewrite is exactly what
+  // invalidates — following it lands mid-word in the preceding paragraph.
+  //
+  // The stripped document is built lazily: documents with no stale anchors —
+  // the overwhelming majority — never pay for it.
+  // insertComment relocates a marker out of every container that cannot hold
+  // one, which breaks the "immediately before its anchor" contract recovery
+  // runs on. Frontmatter is the case position alone cannot detect: it is the
+  // one container the marker TRAILS (frontmatter is only recognized at offset
+  // 0, so there is nowhere above it to go), leaving the marker parked on the
+  // closing fence with its anchor behind it and the document's first heading
+  // ahead. Recovering there silently re-points a comment about a frontmatter
+  // field at the page title. The other two containers are refused by
+  // NON_PROSE_LINE, which the fence and HTML-comment layouts both trip.
+  const frontmatterEnd = getFrontmatterRange(cleanMarkdown)?.end;
+
+  let plainDoc: string | null = null;
+  let mermaidDoc: string | null = null;
+  let liveAnchors: Set<string> | null = null;
+  for (const comment of comments) {
+    const marker = markerOffsets.get(comment.id);
+    if (marker === undefined) continue;
+    if (cleanMarkdown.includes(comment.anchor)) continue;
+    if (plainDoc === null) {
+      plainDoc = stripInlineFormatting(cleanMarkdown).plain;
+      mermaidDoc = extractMermaidText(cleanMarkdown);
+      // Anchors that still resolve belong to the comments holding them. A
+      // stale marker sitting just before one of them must not recover onto it:
+      // that text has an owner. Comments clustered on the SAME rewritten block
+      // are unaffected, since none of their anchors resolves any more.
+      liveAnchors = new Set(
+        comments
+          .filter((c) => anchorResolves(c.anchor, plainDoc!, mermaidDoc ?? ''))
+          .map((c) => c.anchor),
+      );
+    }
+    if (anchorResolves(comment.anchor, plainDoc, mermaidDoc ?? '')) continue;
+    comment.anchorStale = true;
+    const recovered =
+      marker.offset === frontmatterEnd
+        ? null
+        : recoverAnchorAtOffset(cleanMarkdown, marker.offset, marker.newlineBudget);
+    // A candidate that cannot be located is worse than none: it would suppress
+    // the orphan badge (recoveredAnchor short-circuits detectMissingAnchors)
+    // while the viewer highlights nothing, leaving the comment both unmarked
+    // and unflagged. Validate through the same matcher every other anchor uses.
+    if (
+      recovered !== null &&
+      recovered !== comment.anchor &&
+      !liveAnchors?.has(recovered) &&
+      anchorResolves(recovered, plainDoc, mermaidDoc ?? '')
+    ) {
+      comment.recoveredAnchor = recovered;
+      // Point the offset back at the marker. The fuzzy re-match above aimed it
+      // at where it guessed the OLD anchor went, and that anchor is gone by
+      // definition here — leaving the guess in place feeds a stale hint to the
+      // viewer's occurrence picker and to moveComment when the reviewer clicks
+      // "Keep this anchor", which picks the wrong copy of repeated text.
+      comment.cleanOffset = marker.offset;
     }
   }
 
@@ -391,10 +486,102 @@ function fuzzyReMatch(cleanMarkdown: string, comment: MdComment): number | null 
   return null;
 }
 
+/** Longest recovered anchor to keep. Long enough to identify a heading or a
+ * sentence opener, short enough that the card quote stays readable. */
+const MAX_RECOVERED_ANCHOR = 120;
+/** Below this, the recovered text is too generic to be worth re-anchoring to. */
+const MIN_RECOVERED_ANCHOR = 8;
+/** List bullets, heading hashes, blockquote arrows, ordered-list numbering and
+ * leading table pipes: document scaffolding that is never part of an anchor. */
+const LEADING_SCAFFOLDING = /^(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+|\|\s*)+/;
+/**
+ * Lines recovery refuses, because nothing it could extract from them would be
+ * findable in the rendered document. Recovery is the ONLY producer of anchors
+ * read out of source text — every other anchor comes from DOM textContent —
+ * and `anchorResolves` also compares against source, so it structurally cannot
+ * catch a source-only string. Each entry here is a construct where source and
+ * rendered text diverge:
+ *
+ * - fence delimiters and `|---|` rows: not text at all
+ * - HTML comments: dropped by rehype
+ * - table rows: adjacent cells concatenate with NO separator in the DOM
+ *   (`MetricTargetOwner`), while any readable extraction would put something
+ *   between them; `flexibleIndexOf` requires at least one whitespace character
+ *   between parts, so a spaced candidate can never match
+ * - footnote definitions: rendered into a separate Footnotes section, so the
+ *   marker's position says nothing about where the text ends up
+ */
+const NON_PROSE_LINE =
+  /^(?:```|~~~|<!--|\[\^[^\]]*\]:|\|?\s*:?-{3,}:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$)/;
+/** Inline code spans, removed before looking for table cell separators: a pipe
+ * inside backticks is a union type or a CLI flag the reader really does see,
+ * not a cell boundary. */
+const INLINE_CODE_SPAN = /`[^`]*`/g;
+/**
+ * An HTML entity in the source. Recovery is the only producer of anchors read
+ * out of source text — every other anchor comes from DOM textContent — so it
+ * is the only place where `&amp;` can reach an anchor while the rendered
+ * document holds `&`. `anchorResolves` compares against the source too and
+ * cannot catch the divergence, so the candidate would be stored, suppress the
+ * orphan badge, and match nothing in the viewer. Fail closed instead: the
+ * comment orphans loudly, exactly as it did before recovery existed.
+ */
+const HTML_ENTITY = /&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/;
+
+/**
+ * Derive a replacement anchor from the text that now follows a marker.
+ *
+ * `newlineBudget` is how many newlines may separate the marker's offset from
+ * its anchor before the two count as different blocks: 0 for a standalone
+ * marker (whose own trailing newline was already stripped, leaving the next
+ * line flush against the offset) and 1 for an inline marker that ends its
+ * line. Crossing a blank line means the block the marker introduced is gone
+ * rather than rewritten, and skipping over it would silently re-point the
+ * comment at an unrelated later section while suppressing its orphan badge.
+ *
+ * Returns null when nothing usable follows — the marker sits at the end of
+ * the file, or a blank line separates it from the next content, or that
+ * content is pure structure — in which case the comment is genuinely orphaned
+ * and should be flagged as such.
+ */
+export function recoverAnchorAtOffset(
+  cleanMarkdown: string,
+  cleanOffset: number,
+  newlineBudget: number,
+): string | null {
+  let start = cleanOffset;
+  let newlines = 0;
+  while (start < cleanMarkdown.length && /\s/.test(cleanMarkdown[start])) {
+    if (cleanMarkdown[start] === '\n' && ++newlines > newlineBudget) return null;
+    start++;
+  }
+  if (start >= cleanMarkdown.length) return null;
+
+  const lineEnd = cleanMarkdown.indexOf('\n', start);
+  const line = cleanMarkdown.slice(start, lineEnd === -1 ? cleanMarkdown.length : lineEnd);
+  const trimmed = line.trim();
+  if (NON_PROSE_LINE.test(trimmed) || HTML_ENTITY.test(line)) return null;
+  if (trimmed.replace(INLINE_CODE_SPAN, '').includes('|')) return null;
+  const body = line.replace(LEADING_SCAFFOLDING, '').trim();
+  if (!body) return null;
+
+  let candidate = stripInlineFormatting(body).plain.trim();
+  if (candidate.length > MAX_RECOVERED_ANCHOR) {
+    candidate = candidate.slice(0, MAX_RECOVERED_ANCHOR);
+    // Back off to a word boundary so the quote does not end mid-word. The
+    // result stays a prefix of the real text, so it still matches the document.
+    const lastSpace = candidate.lastIndexOf(' ');
+    if (lastSpace >= MIN_RECOVERED_ANCHOR) candidate = candidate.slice(0, lastSpace);
+    candidate = candidate.trim();
+  }
+  return candidate.length >= MIN_RECOVERED_ANCHOR ? candidate : null;
+}
+
 export function serializeComment(comment: MdComment): string {
-  // Strip cleanOffset — it's computed at parse time, not persisted
+  // Strip the parse-time fields — they're derived from the current document
+  // state on every parse, never persisted into the marker
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { cleanOffset, ...data } = comment;
+  const { cleanOffset, recoveredAnchor, anchorStale, ...data } = comment;
   // Escape --> and --!> in the JSON to prevent them from closing the HTML
   // comment prematurely. The HTML spec treats both as comment-close sequences.
   // \u003e is the Unicode escape for >, which JSON.parse decodes back to >
@@ -1740,7 +1927,10 @@ export function orderCommentsByAnchor(cleanMarkdown: string, comments: MdComment
       const withContext = cleanMarkdown.indexOf(comment.contextBefore + comment.anchor);
       if (withContext !== -1) return withContext + comment.contextBefore.length;
     }
-    const direct = cleanMarkdown.indexOf(comment.anchor);
+    // A recovered comment's stored anchor is by definition absent, so searching
+    // for it can only fail and leave the tie-break inert. Its recovered text is
+    // the string that actually sits in the document.
+    const direct = cleanMarkdown.indexOf(displayAnchor(comment));
     return direct === -1 ? (comment.cleanOffset ?? 0) : direct;
   };
   return [...comments].sort(
@@ -1748,50 +1938,76 @@ export function orderCommentsByAnchor(cleanMarkdown: string, comments: MdComment
   );
 }
 
-export function detectMissingAnchors(cleanMarkdown: string, comments: MdComment[]): Set<string> {
-  const missing = new Set<string>();
-  if (!cleanMarkdown) return missing;
-  // Compare against plain text (formatting stripped) since anchors come from
-  // DOM textContent which doesn't include markdown formatting markers like
-  // **, _, `, ~~, etc. Without this, anchors spanning formatted text would
-  // always be flagged as "changed".
-  const { plain } = stripInlineFormatting(cleanMarkdown);
-  // Also extract rendered text from mermaid blocks — anchors from mermaid SVG
-  // won't match the raw source syntax, but will match the extracted labels.
-  const mermaidText = extractMermaidText(cleanMarkdown);
-  for (const c of comments) {
-    if (getEffectiveStatus(c) === 'resolved') continue;
-    // First try matching the raw anchor against the stripped file content
-    // (the existing behavior that works for user-authored DOM-derived anchors).
-    if (plain.includes(c.anchor)) continue;
-    const parts = c.anchor.split(/\s+/).filter(Boolean);
-    if (parts.length === 0) continue;
-    if (partsAppearContiguously(plain, parts)) continue;
-    // Mermaid fallback for raw anchor
+/**
+ * Whether an anchor string still resolves against the document.
+ *
+ * `plain` is the document with inline formatting stripped, because anchors
+ * come from DOM textContent and carry no markdown markup like **, _, `, ~~.
+ * `mermaidText` is the rendered label text of any mermaid blocks, because
+ * anchors taken from a mermaid SVG will not match the raw source syntax.
+ * Both are computed once by the caller and reused across comments.
+ */
+function anchorResolves(anchor: string, plain: string, mermaidText: string): boolean {
+  // First try matching the raw anchor against the stripped file content
+  // (the existing behavior that works for user-authored DOM-derived anchors).
+  if (plain.includes(anchor)) return true;
+  const parts = anchor.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return true;
+  if (partsAppearContiguously(plain, parts)) return true;
+  // Mermaid fallback for raw anchor
+  if (
+    mermaidText &&
+    (mermaidText.includes(anchor) || partsAppearContiguously(mermaidText, parts))
+  ) {
+    return true;
+  }
+
+  // Secondary pass: strip inline formatting from the anchor too and retry.
+  // Agent-authored anchors may contain markdown markup (e.g. `**Metric**: 30%`)
+  // because the agent reads raw file content. Stripping symmetrically lets
+  // these anchors match the plain-text file content.
+  const { plain: anchorPlain } = stripInlineFormatting(anchor);
+  if (anchorPlain !== anchor) {
+    if (plain.includes(anchorPlain)) return true;
+    const strippedParts = anchorPlain.split(/\s+/).filter(Boolean);
+    if (strippedParts.length > 0 && partsAppearContiguously(plain, strippedParts)) return true;
     if (
       mermaidText &&
-      (mermaidText.includes(c.anchor) || partsAppearContiguously(mermaidText, parts))
+      (mermaidText.includes(anchorPlain) || partsAppearContiguously(mermaidText, strippedParts))
     ) {
-      continue;
+      return true;
     }
+  }
 
-    // Secondary pass: strip inline formatting from the anchor too and retry.
-    // Agent-authored anchors may contain markdown markup (e.g. `**Metric**: 30%`)
-    // because the agent reads raw file content. Stripping symmetrically lets
-    // these anchors match the plain-text file content.
-    const { plain: anchorPlain } = stripInlineFormatting(c.anchor);
-    if (anchorPlain !== c.anchor) {
-      if (plain.includes(anchorPlain)) continue;
-      const strippedParts = anchorPlain.split(/\s+/).filter(Boolean);
-      if (strippedParts.length > 0 && partsAppearContiguously(plain, strippedParts)) continue;
-      if (
-        mermaidText &&
-        (mermaidText.includes(anchorPlain) || partsAppearContiguously(mermaidText, strippedParts))
-      ) {
-        continue;
-      }
-    }
+  return false;
+}
 
+export interface DetectMissingAnchorsOptions {
+  /**
+   * Also check resolved comments. Off by default so the rail keeps flagging
+   * only comments the reviewer can still act on, but the card badge turns it
+   * on: an agent that rewrites the document while resolving comments detaches
+   * resolved anchors just as thoroughly, and silently exempting them reports
+   * all-clear on a review whose history no longer points anywhere.
+   */
+  includeResolved?: boolean;
+}
+
+export function detectMissingAnchors(
+  cleanMarkdown: string,
+  comments: MdComment[],
+  options: DetectMissingAnchorsOptions = {},
+): Set<string> {
+  const missing = new Set<string>();
+  if (!cleanMarkdown) return missing;
+  const { plain } = stripInlineFormatting(cleanMarkdown);
+  const mermaidText = extractMermaidText(cleanMarkdown);
+  for (const c of comments) {
+    if (!options.includeResolved && getEffectiveStatus(c) === 'resolved') continue;
+    // Position recovery already found replacement text for this marker. The
+    // comment is re-anchored, not orphaned, and carries its own badge.
+    if (c.recoveredAnchor) continue;
+    if (anchorResolves(c.anchor, plain, mermaidText)) continue;
     missing.add(c.id);
   }
   return missing;

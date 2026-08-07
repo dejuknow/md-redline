@@ -381,28 +381,212 @@ describe('scorer', () => {
   // 5. Weighted overall score
   // -----------------------------------------------------------------------
   describe('overall score weighting', () => {
-    it('weights are parsing=0.25, execution=0.50, integrity=0.25', () => {
-      // All markers removed (parsing=1.0), content changed (execution=1.0), no markers left (integrity=1.0)
+    it('weights are parsing=0.20, execution=0.40, integrity=0.20, anchorIntegrity=0.20', () => {
+      // All markers removed (parsing=1.0), content changed (execution=1.0),
+      // no markers left (integrity=1.0, anchorIntegrity=1.0)
       const input = `Hello ${makeMarker()}world`;
       const output = 'Hello world — fixed';
       const expected = makeExpected();
 
       const result = score('perfect', input, output, expected);
-      expect(result.overall).toBeCloseTo(1.0 * 0.25 + 1.0 * 0.5 + 1.0 * 0.25);
+      expect(result.overall).toBeCloseTo(1.0 * 0.2 + 1.0 * 0.4 + 1.0 * 0.2 + 1.0 * 0.2);
     });
 
     it('computes correct weighted score for partial results', () => {
-      // parsing=0 (marker kept), execution=1 (content changed), integrity=1 (marker valid)
+      // parsing=0 (marker kept), execution=1 (content changed),
+      // integrity=1 (marker valid), anchorIntegrity=1 (anchor still resolves)
       const m = makeMarker({ id: 'c1', anchor: 'Hello' });
       const input = `Hello ${m}world`;
       const output = `Hello ${m}world — addressed`;
       const expected = makeExpected();
 
       const result = score('partial', input, output, expected);
-      // parsing = 0.0, execution = 1.0, integrity = 1.0
-      const expectedOverall = 0.0 * 0.25 + 1.0 * 0.5 + 1.0 * 0.25;
+      const expectedOverall = 0.0 * 0.2 + 1.0 * 0.4 + 1.0 * 0.2 + 1.0 * 0.2;
       expect(result.overall).toBeCloseTo(expectedOverall);
-      expect(result.overall).toBeCloseTo(0.75);
+      expect(result.overall).toBeCloseTo(0.8);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 5b. Anchor integrity dimension
+  // -----------------------------------------------------------------------
+  describe('anchorIntegrity score', () => {
+    it('scores 1.0 when every surviving anchor still resolves', () => {
+      const m = makeMarker({ id: 'c1', anchor: 'Hello' });
+      const result = score(
+        'intact',
+        `Hello ${m}world`,
+        `Hello ${m}world — addressed`,
+        makeExpected(),
+      );
+      expect(result.scores.anchorIntegrity).toBe(1.0);
+    });
+
+    it('reports n/a when no markers were expected to survive', () => {
+      // Not 1.0: a remove-mode case ends with no markers by design, so there
+      // is no anchor to keep or lose. Scoring the absent surface as perfect
+      // would hand every such case a free fifth of its total.
+      const result = score('none', `Hello ${makeMarker()}world`, 'Hello world', makeExpected());
+      expect(result.scores.anchorIntegrity).toBeNull();
+    });
+
+    it('renormalizes the overall score over the dimensions that apply', () => {
+      // parsing=1, execution=1, integrity=1, anchorIntegrity=n/a. The three
+      // that apply keep their original relative weights (0.25/0.50/0.25).
+      const clean = score(
+        'none',
+        `Hello ${makeMarker()}world`,
+        'Hello world — addressed',
+        makeExpected(),
+      );
+      expect(clean.scores.anchorIntegrity).toBeNull();
+      expect(clean.overall).toBeCloseTo(1.0);
+
+      // parsing=0 and the rest 1: 0*0.25 + 1*0.50 + 1*0.25 = 0.75, the same
+      // number this case scored before anchorIntegrity existed.
+      const m = makeMarker({ id: 'c1', anchor: 'Hello' });
+      const partial = score('kept', `Hello ${m}world`, `Hello ${m}world — done`, {
+        ...makeExpected(),
+        comments: [{ id: 'c1', expectedAction: 'address' }],
+      });
+      expect(partial.scores.anchorIntegrity).toBe(1.0);
+    });
+
+    it('gives half credit when the rewrite is only caught by position recovery', () => {
+      // The real regression: the agent restructures the prose the marker sits
+      // in front of, resolves the comment, and leaves the anchor pointing at
+      // text it just deleted.
+      const m = makeMarker({
+        id: 'c1',
+        anchor: 'Is it already live?',
+        status: 'resolved',
+        resolved: true,
+        replies: [{ id: 'r1', text: 'done', author: 'Claude', timestamp: '2024-01-01T00:00:00Z' }],
+      });
+      const input = `# Notes\n\n${m}Is it already live?\n`;
+      const output = `# Notes\n\n${m}### A1. One terminal screen at the end of setup\n`;
+
+      const result = score('recovered', input, output, makeExpected({ markerMode: 'resolve' }));
+
+      expect(result.scores.anchorIntegrity).toBe(0.5);
+      expect(result.details.join('\n')).toContain('recovered by position');
+    });
+
+    it('scores 0 when a marker is stranded with nothing to recover from', () => {
+      const m = makeMarker({ id: 'c1', anchor: 'the deleted paragraph' });
+      const input = `Intro\n\n${m}the deleted paragraph\n`;
+      const output = `Intro\n\n${m}`;
+
+      const result = score('detached', input, output, makeExpected({ markerMode: 'resolve' }));
+
+      expect(result.scores.anchorIntegrity).toBe(0);
+      expect(result.details.join('\n')).toContain('no longer locatable in document');
+    });
+
+    it('does not reward deleting every marker in resolve mode', () => {
+      // The worst possible anchor outcome — delete the markers, taking their
+      // anchors with them — must not be the one outcome scored 1.0 for free
+      // because there is nothing left to check.
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = 'Hello world — addressed';
+
+      const result = score('all-deleted', input, output, makeExpected({ markerMode: 'resolve' }));
+
+      expect(result.scores.anchorIntegrity).toBe(0);
+      expect(result.details.join('\n')).toContain('taking its anchor with it');
+    });
+
+    it('does not penalize deleted markers in remove mode, where that is correct', () => {
+      // The same output that scores 0 under resolve mode is simply not
+      // measurable under remove mode, rather than good or bad.
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const result = score('removed', input, 'Hello world', makeExpected());
+      expect(result.scores.anchorIntegrity).toBeNull();
+      expect(result.scores.parsing).toBe(1.0);
+    });
+
+    it('gives no credit for an emptied anchor', () => {
+      // An empty anchor has no parts to locate, so a presence check accepts it
+      // against any document. Erasing the field is not re-anchoring.
+      const m = makeMarker({
+        id: 'c1',
+        anchor: '',
+        status: 'resolved',
+        resolved: true,
+        replies: [{ id: 'r1', text: 'done', author: 'Claude', timestamp: '2024-01-01T00:00:00Z' }],
+      });
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = `Hello ${m}world — addressed`;
+
+      const result = score('emptied', input, output, makeExpected({ markerMode: 'resolve' }));
+      expect(result.scores.anchorIntegrity).toBe(0);
+    });
+
+    it('counts resolved comments, which the rail deliberately does not', () => {
+      // Resolving a comment does not make its anchor disposable: the resolved
+      // thread is the record of why the document says what it says.
+      const m = makeMarker({
+        id: 'c1',
+        anchor: 'gone entirely',
+        status: 'resolved',
+        resolved: true,
+      });
+      const input = `Keep\n\n${m}gone entirely\n`;
+      const output = `Keep\n\n${m}`;
+
+      const result = score(
+        'resolved-detached',
+        input,
+        output,
+        makeExpected({ markerMode: 'resolve' }),
+      );
+
+      expect(result.scores.anchorIntegrity).toBe(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 5c. Resolve marker mode
+  // -----------------------------------------------------------------------
+  describe('resolve marker mode', () => {
+    const resolvedMarker = makeMarker({
+      id: 'c1',
+      anchor: 'Hello',
+      status: 'resolved',
+      resolved: true,
+      replies: [{ id: 'r1', text: 'done', author: 'Claude', timestamp: '2024-01-01T00:00:00Z' }],
+    });
+
+    it('credits a marker that was resolved with a reply', () => {
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = `Hello ${resolvedMarker}world — addressed`;
+
+      const result = score('resolve', input, output, makeExpected({ markerMode: 'resolve' }));
+      expect(result.scores.parsing).toBe(1.0);
+    });
+
+    it('does not credit a marker that was deleted instead of resolved', () => {
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = 'Hello world — addressed';
+
+      const result = score('deleted', input, output, makeExpected({ markerMode: 'resolve' }));
+      expect(result.scores.parsing).toBe(0);
+      expect(result.details.join('\n')).toContain('should have been resolved');
+    });
+
+    it('does not credit a resolved marker with no reply on it', () => {
+      const noReply = makeMarker({
+        id: 'c1',
+        anchor: 'Hello',
+        status: 'resolved',
+        resolved: true,
+      });
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = `Hello ${noReply}world — addressed`;
+
+      const result = score('no-reply', input, output, makeExpected({ markerMode: 'resolve' }));
+      expect(result.scores.parsing).toBe(0);
+      expect(result.details.join('\n')).toContain('no reply added');
     });
   });
 

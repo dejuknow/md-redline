@@ -5,7 +5,7 @@ import type { ExplorerContextMenuInfo } from '../components/FileExplorer';
 import type { TabContextMenuInfo } from '../components/TabBar';
 import type { SidebarContextMenuInfo } from '../components/CommentListSurface';
 import type { MdComment, SelectionInfo } from '../types';
-import { getEffectiveStatus } from '../types';
+import { displayAnchor, getEffectiveStatus } from '../types';
 import { getParentDir, getPathBasename } from '../lib/path-utils';
 
 type ContextMenuInstance = {
@@ -175,7 +175,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           { type: 'divider' as const },
           {
             label: 'Copy Anchor Text',
-            onClick: () => navigator.clipboard.writeText(comment.anchor),
+            onClick: () => navigator.clipboard.writeText(displayAnchor(comment)),
           },
           {
             label: 'Copy Comment Text',
@@ -388,7 +388,10 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         ...resolveItems,
         { label: 'Delete', danger: true, onClick: () => handleDelete(info.commentId) },
         { type: 'divider' as const },
-        { label: 'Copy Anchor Text', onClick: () => navigator.clipboard.writeText(comment.anchor) },
+        {
+          label: 'Copy Anchor Text',
+          onClick: () => navigator.clipboard.writeText(displayAnchor(comment)),
+        },
         { label: 'Copy Comment Text', onClick: () => navigator.clipboard.writeText(comment.text) },
         { type: 'divider' as const },
         {

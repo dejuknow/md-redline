@@ -1,13 +1,15 @@
-import { parseComments } from '../src/lib/comment-parser.js';
+import { parseComments, detectMissingAnchors } from '../src/lib/comment-parser.js';
+import { getEffectiveStatus } from '../src/types.js';
 import type { ExpectedCriteria, ScoringResult, DimensionScores } from './types.js';
 
 // Regex with capture group for JSON parsing — different from the shared COMMENT_MARKER_RE
 const COMMENT_MARKER_RE = /<!-- @comment(\{.*?\}) -->/gs;
 
 const WEIGHTS: Record<keyof DimensionScores, number> = {
-  parsing: 0.25,
-  execution: 0.5,
-  integrity: 0.25,
+  parsing: 0.2,
+  execution: 0.4,
+  integrity: 0.2,
+  anchorIntegrity: 0.2,
 };
 
 export function score(
@@ -40,18 +42,40 @@ export function score(
         `warning: actionableComments (${expected.actionableComments}) does not match computed count (${actionable.length})`,
       );
     }
+    const markerMode = expected.markerMode ?? 'remove';
     let correct = 0;
     for (const exp of actionable) {
-      // Marker should be removed after addressing
-      if (!outputById.has(exp.id)) {
+      const survivor = outputById.get(exp.id);
+      if (markerMode === 'remove') {
+        if (!survivor) {
+          correct++;
+          details.push(`parsing: ${exp.id} — marker correctly removed`);
+        } else {
+          details.push(`parsing: ${exp.id} — marker should have been removed but was preserved`);
+        }
+        continue;
+      }
+      // resolve mode: the marker stays, gains a reply, and is marked resolved
+      if (!survivor) {
+        details.push(`parsing: ${exp.id} — marker was deleted but should have been resolved`);
+        continue;
+      }
+      const isResolved = getEffectiveStatus(survivor) === 'resolved';
+      const hasReply = (survivor.replies?.length ?? 0) > 0;
+      if (isResolved && hasReply) {
         correct++;
-        details.push(`parsing: ${exp.id} — marker correctly removed`);
+        details.push(`parsing: ${exp.id} — marker resolved with a reply`);
       } else {
-        details.push(`parsing: ${exp.id} — marker should have been removed but was preserved`);
+        const missing = [!isResolved && 'not resolved', !hasReply && 'no reply added']
+          .filter(Boolean)
+          .join(', ');
+        details.push(`parsing: ${exp.id} — marker preserved but ${missing}`);
       }
     }
     parsingScore = actionable.length > 0 ? correct / actionable.length : 1.0;
-    details.push(`parsing: ${correct}/${actionable.length} markers correctly handled`);
+    details.push(
+      `parsing: ${correct}/${actionable.length} markers correctly handled (${markerMode})`,
+    );
   }
 
   // --- 2. Execution: Did content changes address the feedback? ---
@@ -144,14 +168,89 @@ export function score(
     details.push(`integrity: ${valid}/${rawMarkers.length} markers valid`);
   }
 
+  // --- 4. Anchor integrity: do surviving markers still point at real text? ---
+  // Scored on the agent's own output, with resolved comments included: an
+  // agent that resolves a comment and rewrites its anchor text in the same
+  // pass has still detached it.
+  //
+  // Half credit where md-redline recovered the anchor from the marker's
+  // position. Recovery is the app's safety net, not the agent doing its job:
+  // scoring it as a pass would let an agent rewrite every anchor in the file
+  // and still come out clean, and scoring it as a failure would not
+  // distinguish it from a marker stranded with nothing to point at.
+  const RECOVERED_CREDIT = 0.5;
+  let anchorScore: number | null;
+  const survivors = outputParsed.comments;
+  // In resolve mode the markers are SUPPOSED to survive, so a deleted one is
+  // scored as detached rather than dropped from the denominator. Otherwise the
+  // worst possible anchor outcome — delete every marker, taking every anchor
+  // with it — is the one outcome this dimension cannot punish.
+  const expectedSurvivorIds =
+    (expected.markerMode ?? 'remove') === 'resolve'
+      ? expected.comments.filter((c) => c.expectedAction === 'address').map((c) => c.id)
+      : [];
+  const missingSurvivors = expectedSurvivorIds.filter((id) => !outputById.has(id));
+  const denominator = survivors.length + missingSurvivors.length;
+
+  if (denominator === 0) {
+    // Not applicable rather than perfect. A remove-mode case ends with no
+    // markers by design, so there is no anchor to keep or lose — awarding 1.0
+    // would be a constant fifth of the score that measures nothing, dilute the
+    // dimensions that do, and make every pre-existing result incomparable.
+    // Null drops it and renormalizes the rest to their original proportions.
+    anchorScore = null;
+    details.push('anchorIntegrity: n/a (no markers expected to survive)');
+  } else {
+    const detached = detectMissingAnchors(outputParsed.cleanMarkdown, survivors, {
+      includeResolved: true,
+    });
+    let credit = 0;
+    let intact = 0;
+    let recoveredCount = 0;
+    for (const c of survivors) {
+      // An empty anchor matches everything by construction (no parts to
+      // locate), so presence alone would hand out full credit for erasing the
+      // field. Nothing can be re-anchored to nothing.
+      if (detached.has(c.id) || c.anchor.trim() === '') {
+        details.push(
+          `anchorIntegrity: ${c.id} — anchor "${trunc(c.anchor)}" no longer locatable in document`,
+        );
+      } else if (c.recoveredAnchor) {
+        recoveredCount++;
+        credit += RECOVERED_CREDIT;
+        details.push(
+          `anchorIntegrity: ${c.id} — anchor rewritten without updating the marker, recovered by position to "${trunc(c.recoveredAnchor)}"`,
+        );
+      } else {
+        intact++;
+        credit += 1;
+      }
+    }
+    for (const id of missingSurvivors) {
+      details.push(`anchorIntegrity: ${id} — marker deleted, taking its anchor with it`);
+    }
+    anchorScore = credit / denominator;
+    details.push(
+      `anchorIntegrity: ${intact} intact, ${recoveredCount} recovered by position, ${denominator - intact - recoveredCount} detached (of ${denominator})`,
+    );
+  }
+
   const scores: DimensionScores = {
     parsing: parsingScore,
     execution: executionScore,
     integrity: integrityScore,
+    anchorIntegrity: anchorScore,
   };
 
-  const overall = Object.entries(WEIGHTS).reduce(
-    (sum, [key, weight]) => sum + scores[key as keyof DimensionScores] * weight,
+  // Renormalize over the dimensions that apply, so a case with no anchor
+  // surface is scored out of the three that do at their original relative
+  // weights (0.25 / 0.50 / 0.25) rather than being handed a free fifth.
+  const applicable = Object.entries(WEIGHTS).filter(
+    ([key]) => scores[key as keyof DimensionScores] !== null,
+  );
+  const totalWeight = applicable.reduce((sum, [, weight]) => sum + weight, 0);
+  const overall = applicable.reduce(
+    (sum, [key, weight]) => sum + scores[key as keyof DimensionScores]! * (weight / totalWeight),
     0,
   );
 

@@ -66,10 +66,10 @@ Markers sit immediately **before** the anchor text they refer to:
 Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment body","author":"User","timestamp":"ISO-8601","status":"open","replies":[{"id":"uuid","text":"reply","author":"User","timestamp":"ISO-8601"}]} -->highlighted text continues here.
 ```
 
-- `anchor` — the originally selected text (what the comment refers to)
+- `anchor` — the originally selected text (what the comment refers to). It is a lookup key, not a label: an edit that rewrites the anchored text without updating this field detaches the comment. The hand-off prompt tells agents to keep it in sync, and `parseComments` recovers from the marker's position when they don't (see "Anchor recovery after a rewrite")
 - `text` — the reviewer's feedback
 - `replies` — threaded discussion array
-- `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is considered an **orphan** when its `anchor` text can no longer be located in the current document
+- `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
 - `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_review`).
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
@@ -698,6 +698,80 @@ button. This calls `moveComment` under the hood and restores the comment at the
 new position. When comments first become orphaned, a debounced toast fires after
 500 ms: `"N comment(s) lost their anchor. See "Needs re-anchoring" in Comments."`
 
+#### Anchor recovery after a rewrite
+A comment only reaches "Needs re-anchoring" once **recovery** has failed. A
+marker is written immediately before the text it anchors to, so when an edit
+rewrites that text but leaves the marker in place, the marker's own position
+still points at whatever replaced it. `parseComments` uses that: for any comment
+whose `anchor` no longer resolves, it sets `anchorStale: true` and calls
+`recoverAnchorAtOffset`, which takes the first line following the marker,
+strips leading scaffolding (heading hashes, bullets, blockquote arrows,
+ordered-list numbering, table pipes) and inline formatting, and returns it as
+`recoveredAnchor` (8 to 120 chars, truncated back to a word boundary). Both
+fields are parse-time only and stripped by `serializeComment`.
+
+Five guards keep recovery from attaching a comment to text that is not its own,
+each of which produced a wrong anchor before it existed:
+
+- **Relocated markers are not recoverable.** `insertComment` moves a marker out
+  of every container that cannot hold one (see "Protected containers"), which
+  is precisely the case where it no longer sits before its anchor. Fenced
+  blocks and HTML comments are refused by `NON_PROSE_LINE`, since a fence
+  delimiter and `<!--` are never visible text. Frontmatter needs its own check:
+  it is the one container the marker TRAILS (frontmatter is recognized only at
+  offset 0, so there is nowhere above it to go), so the marker parks on the
+  closing fence with its anchor behind it and the document's first heading
+  ahead. `parseComments` refuses recovery for a marker sitting at the
+  frontmatter's end offset, or a comment on a `status:` field silently
+  re-points at the page title.
+
+- **The marker's own offset, never `cleanOffset`.** The fuzzy re-match runs
+  first and may have moved `cleanOffset` to a guess; its `contextAfter`-only
+  fallback rewinds by the OLD anchor's length, which a rewrite is precisely
+  what invalidates. Following it lands mid-word in the preceding paragraph.
+  `parseComments` keeps the marker positions in a separate map for this.
+- **A newline budget.** 0 for a standalone marker (whose own trailing newline
+  is stripped, leaving the next line flush against its offset) and 1 for an
+  inline marker ending its line. Crossing a blank line means the block is gone
+  rather than rewritten, so the comment orphans instead of re-pointing at an
+  unrelated later section.
+- **Validation through `anchorResolves`.** A candidate that cannot be located
+  is worse than none: it suppresses the orphan badge while the viewer
+  highlights nothing.
+- **Source-only text is refused outright** (`NON_PROSE_LINE`, `HTML_ENTITY`,
+  and the cell-separator check). Recovery is the only producer of anchors read
+  out of SOURCE text — every other anchor comes from DOM `textContent` — and
+  `anchorResolves` compares against source too, so it structurally cannot catch
+  a candidate that exists in the source and never in the rendered document.
+  Refused: fence delimiters and `|---|` rows (not text), HTML comments (rehype
+  drops them), HTML entities (`&amp;` in source, `&` in the DOM), table rows
+  (adjacent cells concatenate with NO separator in the DOM, and
+  `flexibleIndexOf` requires whitespace between parts, so no readable
+  extraction can match), and footnote definitions (rendered into a separate
+  Footnotes section). Pipes inside inline code are left alone, since a union
+  type is text the reader sees.
+- **Live anchors are off limits.** A candidate equal to another comment's
+  still-resolving anchor belongs to that comment. Comments clustered on the
+  same rewritten block are unaffected, since none of their anchors resolves.
+
+Recovery is what keeps an agent's document restructure from detaching the whole
+review at once. It is never silent: the card badges **Re-anchored** in a quiet
+style and its `title` carries the original anchor, and `MarkdownViewer`
+highlights `recoveredAnchor ?? anchor` so the comment keeps a mark in the
+document. A comment with a `recoveredAnchor` is deliberately **not** in
+`detectMissingAnchors` — it is attached, just not where it was written. Only a
+marker with nothing usable after it (end of file, blank lines, another marker)
+stays a true orphan.
+
+`detectMissingAnchors` takes an options bag: `{ includeResolved }` (default
+`false`). The rail leaves resolved comments out, since the reviewer cannot act
+on them; the card reads `comment.anchorStale` directly and the eval scorer
+passes `includeResolved: true` — an agent that
+rewrites the document while resolving comments detaches resolved anchors just
+as thoroughly, and exempting them reports all-clear on a review whose history
+no longer points anywhere. A resolved comment with a stale, unrecovered anchor
+gets the quiet **Changed** badge rather than the red one.
+
 Orphan detection is a separate matcher from the viewer's: `detectMissingAnchors`
 (`comment-parser.ts`) searches the markdown **source**, where an anchor captured
 from rendered text meets syntax the reader never sees. `partsAppearContiguously`
@@ -1176,7 +1250,9 @@ Key exports from `src/lib/comment-parser.ts`:
 - `removeAllComments(rawMarkdown)` — strip all markers
 - `resolveAllComments(rawMarkdown)` — resolve all open comments
 - `removeResolvedComments(rawMarkdown)` — delete resolved markers
-- `detectMissingAnchors(cleanMarkdown, comments)` — find orphaned comments (returns `Set<string>` of comment ids whose anchor text is absent from `cleanMarkdown`)
+- `detectMissingAnchors(cleanMarkdown, comments, options?)` — find orphaned comments (returns `Set<string>` of comment ids whose anchor text is absent from `cleanMarkdown` and could not be recovered). `options.includeResolved` (default `false`) also checks resolved comments
+- `recoverAnchorAtOffset(cleanMarkdown, cleanOffset, newlineBudget)` — derive a replacement anchor from the text following a marker, or `null` when nothing usable follows it. `newlineBudget` is 0 for a standalone marker, 1 for an inline one
+- `displayAnchor(comment)` / `anchorSearchText(comment)` (`types.ts`) — the anchor as the reviewer sees it (recovered when stale) and the lowercased search haystack covering both. Anything read, copied, searched, or navigated by should go through these
 - `moveComment(rawMarkdown, id, newAnchor, hintOffset?)` — re-anchor an existing comment to `newAnchor`; preserves id, author, timestamp, replies, and status; refreshes context
 - `stripInlineFormatting(md)` — plain text with offset mapping
 
@@ -1241,9 +1317,13 @@ the "no content changes" empty state, and the diff-reference/handoff plumbing.
 
 ## Eval notes
 
-- `eval/fixtures/` currently contains 15 cases.
+- `eval/fixtures/` currently contains 16 cases.
 - Results are written to `eval/results/<timestamp>_<agent>_<format>/`.
-- Scoring weights: parsing 25% (markers removed?), execution 50% (content changes address feedback?), integrity 25% (valid markdown, no malformed markers?).
+- Scoring weights: parsing 20% (markers handled per `markerMode`?), execution 40% (content changes address feedback?), integrity 20% (valid markdown, no malformed markers?), anchorIntegrity 20% (do surviving anchors still resolve?).
+- `expected.json` takes an optional `markerMode`: `remove` (default, the original contract, marker deleted once addressed) or `resolve` (marker stays, gains a reply, gets `status: resolved`). Anchor drift only shows up under `resolve`, since a deleted marker takes its anchor with it.
+- Agents: `claude-cli` (default, hand-written preamble, remove mode) and `claude-cli-resolve`, which drives the agent with the **shipped** `buildAddressCommentsPrompt` output in resolve mode. Use the latter to keep the real hand-off wording under test, so a regression in it shows up as a score drop rather than in someone's review session.
+- `anchorIntegrity` scores each surviving marker: 1 for an anchor that still resolves, 0.5 where only position recovery saved it (the agent rewrote the anchored text without updating the marker), 0 for a detached anchor. Resolved comments are included. Half credit is deliberate: recovery is the app's safety net, not the agent doing its job.
+- `16-restructuring-rewrite` is the regression case for that failure — raw notes with anchors quoting them verbatim, and comments that can only be addressed by rewriting those quotes into decisions.
 
 ## Release notes
 

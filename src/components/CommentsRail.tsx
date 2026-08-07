@@ -329,6 +329,7 @@ function AnchoredCards({
   onDeleteReply,
   onContextMenu,
   requestedEditor,
+  onReanchorToSelection,
 }: CommentsRailProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -466,6 +467,7 @@ function AnchoredCards({
                 layout.orphanIds.includes(comment.id) || missingAnchors.has(comment.id)
               }
               sent={sentCommentIds.includes(comment.id)}
+              onReanchorToSelection={onReanchorToSelection}
               onSelect={onActivate}
               onReply={onReply}
               onResolve={onResolve}

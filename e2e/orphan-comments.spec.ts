@@ -7,12 +7,21 @@ import { resetTestAppState } from './helpers/test-state';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
 
+// The anchored sentence sits LAST on purpose. A marker only becomes a true
+// orphan when there is nothing after it to recover from: a marker still
+// followed by text re-anchors to that text by position and gets the quiet
+// "Re-anchored" badge instead. Deleting the trailing sentence strands the
+// marker at end of file, while the landing spot survives above it for the
+// re-anchor flow to target.
 const FIXTURE = `# Orphan Test
 
-Sentence one with the original anchor phrase inside it.
-
 Sentence two holds a fresh landing spot for recovery.
+
+Sentence one with the original anchor phrase inside it.
 `;
+
+/** The body text an external rewrite deletes to strand the marker. */
+const ANCHORED_SENTENCE_TAIL = 'original anchor phrase inside it.';
 
 let fixtureDir = '';
 let fixturePath = '';
@@ -117,14 +126,11 @@ test('comment whose anchor disappears moves into Needs re-anchoring section', as
     .poll(() => readFileSync(fixturePath, 'utf8'), { timeout: 5000 })
     .toContain('@comment');
 
-  // The external rewrite replaces the first occurrence of "original anchor phrase"
-  // in the raw file.  The comment marker is placed BEFORE the anchor text, so
-  // the first occurrence is inside the JSON ("anchor":"original anchor phrase").
-  // This changes the anchor field to "totally different wording" while leaving
-  // the visible rendered text unchanged, making the comment an orphan.
+  // Delete the anchored text outright. The marker is written immediately
+  // before it and is the last thing in the file, so nothing follows it to
+  // recover from and the comment orphans for real.
   const currentRaw = readFileSync(fixturePath, 'utf8');
-  const rewritten = currentRaw.replace('original anchor phrase', 'totally different wording');
-  writeFileSync(fixturePath, rewritten);
+  writeFileSync(fixturePath, currentRaw.replace(ANCHORED_SENTENCE_TAIL, ''));
 
   await expect(page.getByText('Needs re-anchoring (1)')).toBeVisible({ timeout: 5000 });
   await expect(page.getByText('Was anchored here:')).toBeVisible();
@@ -147,10 +153,7 @@ test('Re-anchor to selection binds the orphan comment to new text', async ({ pag
     .toContain('@comment');
 
   const currentRaw = readFileSync(fixturePath, 'utf8');
-  writeFileSync(
-    fixturePath,
-    currentRaw.replace('original anchor phrase', 'totally different wording'),
-  );
+  writeFileSync(fixturePath, currentRaw.replace(ANCHORED_SENTENCE_TAIL, ''));
   await expect(page.getByText('Needs re-anchoring (1)')).toBeVisible({ timeout: 5000 });
 
   // The natural flow: select replacement text first, then click Re-anchor.
@@ -175,11 +178,12 @@ test('Re-anchor to selection picks the selected occurrence when anchor text is d
 }) => {
   // Use a fixture where "landing spot" appears twice so we can test that
   // hintOffset routes re-anchoring to the actually-selected occurrence.
+  // Anchored sentence last, for the same reason as the shared FIXTURE.
   const DUP_FIXTURE = `# Orphan Test
 
-Sentence one with the original anchor phrase inside it.
-
 First landing spot sits here. Second landing spot sits farther down for selection.
+
+Sentence one with the original anchor phrase inside it.
 `;
   writeFileSync(fixturePath, DUP_FIXTURE);
 
@@ -192,10 +196,7 @@ First landing spot sits here. Second landing spot sits farther down for selectio
     .toContain('@comment');
 
   const currentRaw = readFileSync(fixturePath, 'utf8');
-  writeFileSync(
-    fixturePath,
-    currentRaw.replace('original anchor phrase', 'totally different wording'),
-  );
+  writeFileSync(fixturePath, currentRaw.replace(ANCHORED_SENTENCE_TAIL, ''));
   await expect(page.getByText('Needs re-anchoring (1)')).toBeVisible({ timeout: 5000 });
 
   // Select the SECOND occurrence of "landing spot" (occurrence index 1)
@@ -213,4 +214,73 @@ First landing spot sits here. Second landing spot sits farther down for selectio
   await expect
     .poll(() => readFileSync(fixturePath, 'utf8'), { timeout: 3000 })
     .toMatch(/"contextBefore":"[^"]*Second [^"]*"/);
+});
+
+test('a rewritten anchor re-anchors by position instead of orphaning', async ({ page }) => {
+  // The failure this exists for: an agent addresses comments by restructuring
+  // the document, so every anchor quoting the old prose stops existing at once.
+  // The markers survive in place, so the text that replaced the prose is right
+  // there after them.
+  await openFixture(page);
+  await addComment(page, 'original anchor phrase', 'note about phrase');
+  await switchToListDensity(page);
+
+  await expect
+    .poll(() => readFileSync(fixturePath, 'utf8'), { timeout: 5000 })
+    .toContain('@comment');
+
+  const currentRaw = readFileSync(fixturePath, 'utf8');
+  writeFileSync(
+    fixturePath,
+    currentRaw.replace(ANCHORED_SENTENCE_TAIL, 'a completely rewritten decision item.'),
+  );
+
+  // Attached, not orphaned: no re-anchoring section, and the card quotes where
+  // the comment now points.
+  await expect(page.getByText('Re-anchored')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText('Needs re-anchoring')).not.toBeVisible();
+  // Scoped to the card's own quote element. Matching the page at large would
+  // pass on the rendered document body, which contains this sentence whether
+  // or not the card ever followed the recovery.
+  await expect(page.locator('[data-anchor-quote]').first()).toContainText(
+    'a completely rewritten decision item.',
+  );
+
+  // Recovery is a display aid. The stored anchor is untouched on disk, so the
+  // reviewer's original words survive and re-anchoring stays their decision.
+  expect(readFileSync(fixturePath, 'utf8')).toContain('"anchor":"original anchor phrase"');
+  expect(readFileSync(fixturePath, 'utf8')).not.toContain('recoveredAnchor');
+});
+
+test('Keep this anchor writes the recovered anchor into the file', async ({ page }) => {
+  // Without this, a recovered comment is the one detached state with no way
+  // out: excluded from "Needs re-anchoring", so it never gets the re-anchor
+  // button, and the stale anchor sits in the file permanently.
+  await openFixture(page);
+  await addComment(page, 'original anchor phrase', 'note about phrase');
+  await switchToListDensity(page);
+
+  await expect
+    .poll(() => readFileSync(fixturePath, 'utf8'), { timeout: 5000 })
+    .toContain('@comment');
+
+  const currentRaw = readFileSync(fixturePath, 'utf8');
+  writeFileSync(
+    fixturePath,
+    currentRaw.replace(ANCHORED_SENTENCE_TAIL, 'a completely rewritten decision item.'),
+  );
+  await expect(page.getByText('Re-anchored')).toBeVisible({ timeout: 5000 });
+
+  await page.getByText('note about phrase').click();
+  const keepBtn = page.getByRole('button', { name: 'Keep this anchor' });
+  await expect(keepBtn).toBeVisible({ timeout: 3000 });
+  await keepBtn.click();
+
+  await expect
+    .poll(() => readFileSync(fixturePath, 'utf8'), { timeout: 5000 })
+    .toContain('"anchor":"a completely rewritten decision item."');
+
+  // The recovery is spent: the anchor now resolves on its own, so the badge
+  // that invited the click is gone.
+  await expect(page.getByText('Re-anchored')).not.toBeVisible();
 });

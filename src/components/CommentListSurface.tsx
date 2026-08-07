@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { MdComment } from '../types';
-import { getEffectiveStatus } from '../types';
+import { anchorSearchText, getEffectiveStatus } from '../types';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { ThreadCard } from './ThreadCard';
 import { useSettings } from '../contexts/SettingsContext';
@@ -149,7 +149,7 @@ export function CommentListSurface({
     const hiddenBySearch =
       search !== '' &&
       !c.text.toLowerCase().includes(q) &&
-      !c.anchor.toLowerCase().includes(q) &&
+      !anchorSearchText(c).includes(q) &&
       !c.author.toLowerCase().includes(q) &&
       !(c.replies?.some((r) => r.text.toLowerCase().includes(q)) ?? false);
     if (hiddenBySearch) setSearch('');
@@ -216,7 +216,7 @@ export function CommentListSurface({
     if (search) {
       const q = search.toLowerCase();
       const matchesText = c.text.toLowerCase().includes(q);
-      const matchesAnchor = c.anchor.toLowerCase().includes(q);
+      const matchesAnchor = anchorSearchText(c).includes(q);
       const matchesAuthor = c.author.toLowerCase().includes(q);
       const matchesReply = c.replies?.some((r) => r.text.toLowerCase().includes(q)) ?? false;
       if (!matchesText && !matchesAnchor && !matchesAuthor && !matchesReply) return false;
@@ -379,6 +379,7 @@ export function CommentListSurface({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
@@ -422,6 +423,7 @@ export function CommentListSurface({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}

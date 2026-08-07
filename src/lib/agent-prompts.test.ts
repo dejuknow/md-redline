@@ -71,6 +71,47 @@ describe('buildAddressCommentsPrompt', () => {
   });
 });
 
+describe('buildAddressCommentsPrompt — anchor maintenance', () => {
+  // A rewrite that leaves anchors pointing at text it deleted detaches the
+  // review from the document, and the reviewer only finds out afterwards. The
+  // prompt has to say the anchor is a lookup key, not just a description.
+  it.each([true, false])(
+    'tells the agent to keep anchors in sync (resolve=%s)',
+    (enableResolve) => {
+      const prompt = buildAddressCommentsPrompt({
+        filePaths: ['/tmp/spec.md'],
+        commentCounts: new Map([['/tmp/spec.md', 3]]),
+        enableResolve,
+      });
+
+      expect(prompt).toContain('## Keeping anchors valid');
+      expect(prompt).toContain('lookup key');
+      expect(prompt).toContain('contextBefore');
+      expect(prompt).toMatch(
+        /Never leave an `anchor` pointing at text that is no longer in the file/,
+      );
+    },
+  );
+
+  it('covers resolved comments, not just the ones left open', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 1]]),
+      enableResolve: true,
+    });
+    expect(prompt).toContain('comments you resolve as well as ones you leave open');
+  });
+
+  it('tells the agent to say so rather than re-point a deleted anchor', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 1]]),
+      enableResolve: true,
+    });
+    expect(prompt).toContain('re-pointing the anchor at unrelated text');
+  });
+});
+
 describe('buildAddressCommentsPrompt — mdr_ask hint', () => {
   it('mentions the mdr_ask tool so agents know it exists', () => {
     const prompt = buildAddressCommentsPrompt({
