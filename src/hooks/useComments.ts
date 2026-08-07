@@ -38,6 +38,21 @@ interface TabInfo {
   rawMarkdown: string;
 }
 
+/**
+ * Why a comment-focus request was made. Declared once: App owns the state and
+ * this hook is handed the setter, and the two copies had already drifted
+ * ('highlight' was added to App's union only).
+ *
+ * Only 'highlight' leaves DOM focus where it is. It means the reviewer clicked
+ * a highlight in the prose (or its density tick) while reading, and the card
+ * they want is being scrolled into view beside the text; moving focus there
+ * would take the caret, the space bar and a screen reader out of the passage
+ * mid-sentence. The rest are deliberate requests to go to a card: 'reveal'
+ * opened a surface to hold it, 'jump' came from the palette or an agent ask,
+ * 'creation' just wrote it.
+ */
+export type CommentFocusOrigin = 'creation' | 'jump' | 'highlight' | 'reveal';
+
 export interface UseCommentsParams {
   rawMarkdown: string | undefined;
   rawMarkdownRef: RefObject<string | undefined>;
@@ -52,7 +67,7 @@ export interface UseCommentsParams {
   showToast: ShowToast;
   clearSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
-  requestCommentFocus: (commentId: string, origin?: 'creation' | 'jump') => void;
+  requestCommentFocus: (commentId: string, origin?: CommentFocusOrigin) => void;
 }
 
 export function useComments(params: UseCommentsParams) {

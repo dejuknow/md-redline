@@ -71,7 +71,7 @@ import { useSearch } from './hooks/useSearch';
 import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
 import { useDiffSnapshot } from './hooks/useDiffSnapshot';
 import { shouldAdvanceFrontier, formatReferenceLabel } from './lib/review-frontier';
-import { useComments } from './hooks/useComments';
+import { useComments, type CommentFocusOrigin } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
@@ -450,7 +450,7 @@ export default function App() {
   const [requestedCommentFocus, setRequestedCommentFocus] = useState<{
     commentId: string;
     token: number;
-    origin: 'creation' | 'jump';
+    origin: CommentFocusOrigin;
   } | null>(null);
 
   // Modal state — only one modal can be open at a time
@@ -581,7 +581,7 @@ export default function App() {
     containerRef as RefObject<HTMLElement | null>,
   );
   const requestCommentFocus = useCallback(
-    (commentId: string, origin: 'creation' | 'jump' = 'jump') =>
+    (commentId: string, origin: CommentFocusOrigin = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
     [],
   );
@@ -698,6 +698,19 @@ export default function App() {
   // eligibility changes.
   const railCapable = viewMode === 'rendered' && !(diffEnabled && currentSnapshot);
   const railAllowed = railCapable && sidebarVisible && !focusMode;
+  // Resolved comments still paint a faint trace on their anchor, but they get
+  // no margin card: one would read as an orphan, and the whole point of
+  // Anchored density is that the column holds what still needs a decision.
+  const marginComments = useMemo(
+    () => comments.filter((c) => getEffectiveStatus(c) !== 'resolved'),
+    [comments],
+  );
+  // Membership, not a scan: railWouldShowThread below runs in the render body
+  // whenever a popover is open, and App re-renders on every scroll frame.
+  const marginCommentIds = useMemo(
+    () => new Set(marginComments.map((c) => c.id)),
+    [marginComments],
+  );
   // The anchored rail earns its gutter width only once it has a card to
   // place. List density always reserves — its panel is intentional even when
   // empty. Anchored + zero non-resolved comments collapses the empty margin
@@ -706,8 +719,7 @@ export default function App() {
   // unchanged); only the sheet width drops and re-centers, and colWidth is
   // held constant so the first comment slides the gutter open without
   // reflowing the text.
-  const railHasContent =
-    railDensity === 'list' || comments.some((c) => getEffectiveStatus(c) !== 'resolved');
+  const railHasContent = railDensity === 'list' || marginComments.length > 0;
   const geometry = usePageGeometry(
     containerRef as RefObject<HTMLElement | null>,
     railAllowed,
@@ -716,6 +728,32 @@ export default function App() {
     railHasContent,
   );
   const railShown = geometry.railShown;
+
+  // Whether the rail would draw this comment's thread at all, setting aside
+  // whether it happens to be on screen. Anchored density draws only
+  // marginComments, so a resolved comment has no card there however wide the
+  // window is; List density keeps every comment. Callers that are about to
+  // OPEN a surface want this one; callers asking what the user can see right
+  // now want railCanShowThread below.
+  const railWouldShowThread = useCallback(
+    (commentId: string) => railDensity !== 'anchored' || marginCommentIds.has(commentId),
+    [railDensity, marginCommentIds],
+  );
+
+  // List density reveals a card by widening its filter toward whichever comment
+  // is being activated, and that widen fires on an activation CHANGE. Any entry
+  // point that can target a comment which is ALREADY active has to send the
+  // request as an event instead, or it changes no state and lands nowhere. That
+  // is every entry point a trace added: clicking it, its density tick, and the
+  // context menu it opens.
+  const requestListFocus = useCallback(
+    (commentId: string) => {
+      if (railShown && railDensity !== 'anchored') {
+        requestCommentFocus(commentId, 'highlight');
+      }
+    },
+    [railShown, railDensity, requestCommentFocus],
+  );
 
   // The comments drawer is the fallback comment surface wherever the rail
   // cannot show: raw view, diff mode, or a rendered view too narrow to fit
@@ -726,21 +764,65 @@ export default function App() {
     if (railShown) setDrawerOpen(false);
   }, [railShown]);
 
+  // The highlight popover is the single-thread comment surface for contexts
+  // the rail can't serve: a click on a highlight or a resolved trace, or a
+  // comment created while the rail is hidden, opens one thread inline instead
+  // of routing through the drawer. Declared here so ensureCommentSurface can
+  // hand the thread over when it picks the drawer instead.
+  const [popoverCommentId, setPopoverCommentId] = useState<string | null>(null);
+
   // Guarantees a comment surface is open for callers that need one to exist
   // right now (the viewer context menu's Edit/Reply/Jump to Sidebar actions
   // set an activeCommentId or requestedEditor that only a mounted surface
   // consumes). Bare setSidebarVisible(true) is not enough: at a narrow width
   // the rail cannot render at all regardless of sidebarVisible, so the
   // request would strand until some later surface mount fired it
-  // unprompted. Mirrors the rail-can-show predicate the drawer fallback and
-  // the Cmd+\ shortcut already use.
-  const ensureCommentSurface = useCallback(() => {
-    if (railCapable && geometry.railFits) {
-      setSidebarVisibleGuarded(true);
-    } else {
-      setDrawerOpen(true);
-    }
-  }, [railCapable, geometry.railFits, setSidebarVisibleGuarded]);
+  // unprompted.
+  //
+  // Pass the comment being acted on whenever there is one. The rail being able
+  // to render is not the same as the rail being willing to draw THAT thread:
+  // Anchored density gives a resolved comment no card, so revealing the rail
+  // for one strands the request exactly as a too-narrow window would. The
+  // drawer is already the surface that answers for both cases.
+  const ensureCommentSurface = useCallback(
+    (commentId?: string) => {
+      const railServes =
+        railCapable &&
+        geometry.railFits &&
+        (commentId === undefined || railWouldShowThread(commentId));
+      if (railServes) {
+        setSidebarVisibleGuarded(true);
+      } else {
+        setDrawerOpen(true);
+        // The drawer is the surface now. A popover left open under it (a
+        // resolved trace clicked before this, which Anchored density answers
+        // with a popover) sits behind the drawer's overlay showing a second
+        // copy of the same thread, and reappears when the drawer closes.
+        setPopoverCommentId(null);
+      }
+      // Send the request whenever a List surface will be there to take it.
+      // Not via requestListFocus: that reads `railShown`, which is still the
+      // pre-reveal value inside this call, so it would drop the request in
+      // the one case that most needs it, a rail this very call is opening.
+      //
+      // 'reveal', not 'highlight': everything reaching here asked for the
+      // card by name (the viewer's context menu, a created comment), and a
+      // surface was just opened to hold it, so landing focus on it is the
+      // whole point. A click on the highlight itself goes through
+      // requestListFocus and stays out of the reviewer's way.
+      if (commentId !== undefined && railServes && railDensity !== 'anchored') {
+        requestCommentFocus(commentId, 'reveal');
+      }
+    },
+    [
+      railCapable,
+      geometry.railFits,
+      railDensity,
+      railWouldShowThread,
+      setSidebarVisibleGuarded,
+      requestCommentFocus,
+    ],
+  );
 
   // Shared decision behind both comment-surface toggles: the Cmd+\ shortcut
   // and the command palette's "Toggle comments rail" command. Toggle the
@@ -756,11 +838,6 @@ export default function App() {
       toggleSidebarPane();
     }
   }, [railCapable, geometry.railFits, toggleSidebarPane]);
-
-  // The highlight popover is the single-thread comment surface for
-  // rail-hidden contexts: a click on a highlight, or a comment created while
-  // hidden, opens one thread inline instead of routing through the drawer.
-  const [popoverCommentId, setPopoverCommentId] = useState<string | null>(null);
 
   // Creation while the rail is hidden (rendered view, form only exists
   // there): open the popover on the new comment instead of leaving it with
@@ -788,14 +865,18 @@ export default function App() {
     }
   }, [requestedCommentFocus, drawerOpen, railShown, railCapable]);
 
-  // Close the popover once the rail can show its own surface, or when the
-  // file changes out from under it.
-  useEffect(() => {
-    if (railShown) setPopoverCommentId(null);
-  }, [railShown]);
+  // Close the popover when the file changes out from under it, or when the
+  // view stops being one the popover belongs to (raw view, diff overlay).
+  // railCapable is exactly that test, and keying on it covers both edges: the
+  // popover unmounts on the way into raw view but its id used to survive, so
+  // a resolved trace's popover (which railCanShowThread never clears, by
+  // design) reappeared unprompted on the way back. Entering diff mode is the
+  // same story with a worse ending: the popover renders over
+  // RenderedDiffView, which paints no marks, so it parks itself unanchored.
+  // The rail-took-over case is handled below, next to railCanShowThread.
   useEffect(() => {
     setPopoverCommentId(null);
-  }, [activeFilePath]);
+  }, [activeFilePath, railCapable]);
   // A deleted comment (or one an agent rewrite removed) must not leave a
   // stale id behind: if the same id ever reappeared (undo, rewrite), the
   // popover would pop back open unprompted.
@@ -822,22 +903,62 @@ export default function App() {
     }
   }, [requestedCommentFocus, railShown, railDensity, activeCommentId, handleSidebarActivate]);
 
+  // Whether the rail is drawing this comment's thread right now: the same
+  // question railWouldShowThread answers, plus the rail actually being up.
+  const railCanShowThread = useCallback(
+    (commentId: string) => railShown && railWouldShowThread(commentId),
+    [railShown, railWouldShowThread],
+  );
+
+  // Close the popover once the rail can draw this thread itself. Keyed on
+  // railCanShowThread rather than on railShown alone: a resolved trace keeps
+  // its popover with the rail open, since Anchored density gives it no card,
+  // and what should take the popover away is the rail gaining that card:
+  // reopening the comment, or switching to List density. Watching railShown
+  // instead left the id behind whenever the gate closed for one of those other
+  // reasons, so the popover reappeared unprompted the next time it reopened.
+  useEffect(() => {
+    setPopoverCommentId((prev) => (prev !== null && railCanShowThread(prev) ? null : prev));
+  }, [railCanShowThread]);
+
+  // Every route to a single comment ends here: a click on its highlight, on the
+  // faint trace a resolved anchor leaves, or on its density-strip tick. Where
+  // the thread appears is not the caller's business, it is a question about
+  // what the rail can currently draw.
+  const revealCommentThread = useCallback(
+    (commentId: string) => {
+      // Always assign, never only set: with the rail shown, a resolved trace
+      // opens a popover that the next click on an OPEN highlight would
+      // otherwise strand on screen, pointing at a different comment than the
+      // one now active. Clearing it is the same statement as opening it.
+      setPopoverCommentId(railCanShowThread(commentId) ? null : commentId);
+      requestListFocus(commentId);
+    },
+    [railCanShowThread, requestListFocus],
+  );
+
   // Wraps the base highlight-click handler (which only sets activeCommentId)
-  // with the popover trigger: when the rail can't show, a click on a
-  // highlight opens the single-thread popover.
+  // with the surface decision above: when the rail can't show the thread, a
+  // click on a highlight opens the single-thread popover instead of doing
+  // nothing visible. That covers the rail being hidden and, since resolved
+  // anchors paint a trace, clicking one in Anchored density.
   const handleHighlightClickWithPopover = useCallback(
     (commentId: string) => {
       handleHighlightClick(commentId);
-      if (!railShown) setPopoverCommentId(commentId);
+      revealCommentThread(commentId);
     },
-    [handleHighlightClick, railShown],
+    [handleHighlightClick, revealCommentThread],
   );
 
-  // Resolved comments have no highlight marks and would render as fake
-  // orphans in the margin; they live in the List surface instead.
-  const marginComments = useMemo(
-    () => comments.filter((c) => getEffectiveStatus(c) !== 'resolved'),
-    [comments],
+  // A density-strip tick is a highlight click at a distance, and resolved
+  // comments now reach the strip. Activating without deciding where the thread
+  // goes reintroduces the dead click on exactly the surface this change added.
+  const handleDensityJump = useCallback(
+    (commentId: string) => {
+      handleSidebarActivate(commentId);
+      revealCommentThread(commentId);
+    },
+    [handleSidebarActivate, revealCommentThread],
   );
   const marginLayout = useMarginLayout(
     containerRef as RefObject<HTMLElement | null>,
@@ -2821,7 +2942,7 @@ export default function App() {
                           />
                         )}
                         {popoverCommentId &&
-                          !railShown &&
+                          !railCanShowThread(popoverCommentId) &&
                           (() => {
                             const c = comments.find((x) => x.id === popoverCommentId);
                             if (!c) return null;
@@ -2844,7 +2965,7 @@ export default function App() {
                           })()}
                       </div>
                     </div>
-                    <DensityStrip ticks={commentTicks} onJump={handleSidebarActivate} />
+                    <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
                   </div>
                 )}
               </div>

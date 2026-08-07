@@ -962,6 +962,64 @@ mark.comment-highlight-active {
   outline: 1px solid var(--theme-comment-ring);
 }
 
+/* A resolved anchor keeps a trace, not a highlight: the conversation is over,
+   so nothing about it should compete with the prose or with the open comments
+   still asking for a decision. No fill, no ink change, just a dotted rule
+   under the words that were discussed. Resolved comments have no margin card
+   (App filters them out of marginComments), so clicking a trace opens the
+   single-thread popover instead.
+
+   Kept in the comment ink rather than a neutral, so a trace still reads as
+   belonging to the comment system. Deriving it from each theme's own ink is
+   what lets one declaration hold for all eight; a fixed neutral could not,
+   since the faintest ink that whispers on a light ground disappears on a dark
+   one.
+
+   Quiet through coverage, not through opacity. Fading the ink costs legibility
+   per pixel, and costs it fastest on a light ground: the base underline at 42%
+   measures 1.38:1 against white, under the 3:1 floor that applies once a mark
+   is also a control, and no opacity reaches that floor because the base ink
+   itself only manages 2.15:1 at full strength. The ACTIVE ink does clear 3:1
+   in all eight themes (3.01:1 in the tightest, Sepia), so one hairline of it
+   at full strength is both more legible and less present than two pixels of a
+   wash. Measured against real prose in every theme, not picked from a palette.
+
+   Hover and active move the weight, not the colour, since full strength is
+   already spent at rest. 1px to 2px stays under the open highlight's 3px solid
+   plus fill, so a settled thread never reads as a live one. */
+.prose mark.comment-highlight-resolved,
+mark.comment-highlight-resolved {
+  background-color: transparent;
+  color: inherit;
+  text-decoration: underline dotted 1px var(--theme-comment-underline-active);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: text-decoration-thickness 0.15s ease;
+}
+
+/* The active selector names both classes the mark actually carries, so it
+   outranks the base rule on specificity rather than on being declared later.
+   A tie would let any equal-weight rule inserted between the two silently
+   flatten the active trace back to a hairline. */
+.prose mark.comment-highlight-resolved:hover,
+mark.comment-highlight-resolved:hover,
+.prose mark.comment-highlight-resolved.comment-highlight-resolved-active,
+mark.comment-highlight-resolved.comment-highlight-resolved-active {
+  text-decoration-thickness: 2px;
+}
+
+/* Inside a diagram the mark lives in an SVG foreignObject, where a CSS
+   text-decoration stops the label from wrapping (see the Mermaid quirks note
+   in MarkdownViewer). Diagrams keep the pre-trace behaviour: nothing painted.
+   The post-render pass strips these classes outright, so this only has to hold
+   for the window before it runs. Scoped tighter than the .prose rule it
+   overrides so that source order is not what decides the tie. */
+.prose .mermaid-block mark.comment-highlight-resolved,
+.mermaid-block mark.comment-highlight-resolved {
+  text-decoration: none;
+  cursor: auto;
+}
+
 /* Smooth scrolling for the viewer */
 .overflow-y-auto {
   scroll-behavior: smooth;

@@ -439,6 +439,18 @@ describe('buildRangeHtml', () => {
     expect(html).toContain('found');
   });
 
+  it('unwraps the resolved trace marks too', () => {
+    // A resolved anchor is still app chrome, not document content: copying a
+    // settled passage has to paste the prose, not a <mark> carrying the trace.
+    const container = mount(
+      '<p><mark class="comment-highlight-resolved">settled</mark> and <mark class="comment-highlight-resolved comment-highlight-resolved-active">current</mark></p>',
+    );
+    const html = buildRangeHtml(rangeAcross(container, 'p'), container) ?? '';
+    expect(html).not.toContain('<mark');
+    expect(html).toContain('settled');
+    expect(html).toContain('current');
+  });
+
   it('strips viewer chrome that overlaps the selection', () => {
     const container = mount('<p>kept<span data-drag-handle>handle</span> also kept</p>');
     const html = buildRangeHtml(rangeAcross(container, 'p'), container) ?? '';

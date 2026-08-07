@@ -619,10 +619,47 @@ on `--theme-bg-inset`), never the crimson accent:
   down by the residual instead of lifting other cards further. Comments
   whose anchor text can't be found in the document (orphans) stack in a
   block at the top of the rail, above the
-  anchored cards. Resolved comments do not appear in this density at all;
-  they stay in List density's / the drawer's Resolved filter. Geometry comes
-  from `useMarginLayout`; card and connector position changes animate over
-  150ms via `.margin-note-pos`, disabled under `prefers-reduced-motion`.
+  anchored cards. Resolved comments get no card in this density (App's
+  `marginComments` filters them out); their thread lives in List density's /
+  the drawer's Resolved filter. Their anchor still paints a faint dotted
+  underline in the prose (`mark.comment-highlight-resolved`) so a passage that
+  was discussed keeps a trace, and clicking that trace opens the single-thread
+  `CommentPopover` — the same surface used when the rail is hidden — because
+  `railCanShowThread` reports that Anchored density has nowhere to put it. A
+  highlight group paints the resolved treatment only when every comment in it
+  is resolved; one open comment on the same anchor keeps the full highlight,
+  and the settled ids stay out of that mark's `data-comment-ids` entirely. The
+  consequence is worth knowing: a resolved comment sharing an anchor with an
+  open one gets no trace, no density tick, and no scroll target, and is
+  reachable only from List density / the drawer.
+  The trace is suppressed inside Mermaid blocks, where a CSS `text-decoration`
+  on a `<mark>` stops foreignObject labels from wrapping; the post-render pass
+  in `MarkdownViewer` strips the resolved classes and the `data-comment-ids`
+  from those marks, so a diagram label is not left invisibly clickable. (The
+  fullscreen diagram modal does not share that strip and still paints resolved
+  labels as live.) Because the marks now exist, resolved comments also reach
+  the density strip as green `resolved` ticks (`useCommentTicks`), which they
+  never could before. A tick click routes through the same surface decision as
+  a highlight click (`revealCommentThread`), so it opens the popover rather
+  than activating a comment the rail will not draw. Right-clicking a trace
+  omits Edit and Reply, matching the card surfaces, which hide both while a
+  thread is settled; Jump to Sidebar calls `ensureCommentSurface(commentId)`,
+  which falls back to the drawer when the rail would draw no card for that
+  comment (and closes the popover on the way, so the two never stack).
+  Anchors that OVERLAP without matching land in separate highlight groups, so
+  the same-anchor rule above does not cover them: `wrapText` walks into marks
+  that are already painted, which nests the shorter anchor inside the longer
+  one. `markToAct` in `MarkdownViewer` resolves clicks and right-clicks to the
+  nearest OPEN ancestor mark rather than to the innermost one, so a live
+  highlight keeps its own clicks; a trace entirely enclosed by one is visible
+  but not clickable, and is reachable from List density / the drawer. Drag
+  handles can be dragged straight across a trace: `useDragHandles` excludes
+  `.comment-highlight-resolved` from the "don't drag into another comment's
+  mark" guard, since overlapping a settled anchor is what resizing did for as
+  long as resolved comments painted nothing.
+  Geometry comes from `useMarginLayout`; card and connector position changes
+  animate over 150ms via `.margin-note-pos`, disabled under
+  `prefers-reduced-motion`.
 - **List**: a pinned instance of `CommentListSurface`, with full search, status
   filter (All / Open / Resolved), sort, and bulk actions. Filters and search
   share a single header row (search input placeholder is "Search"). The same
@@ -656,16 +693,24 @@ opens the rail where it fits and the drawer everywhere else):
   removed.)
 - **Comment popover** (`CommentPopover.tsx`, `data-comment-popover`): a
   single-thread surface positioned under the clicked highlight, page-relative
-  so it scrolls with the text. Opens when a highlight is clicked (or a new
-  comment created) while the rail is hidden and the drawer is closed; the
-  drawer's own focus-forwarding takes priority when the drawer is already
-  open. Closes on Escape, an outside click, the rail becoming available, or
-  the active file changing.
+  so it scrolls with the text. Opens when a highlight, a resolved anchor's
+  trace, or a density tick is clicked (or a new comment created) and the rail
+  is not drawing that thread; the drawer's own focus-forwarding takes priority
+  when the drawer is already open. The gate is `railCanShowThread(id)`, not
+  `railShown`: in Anchored density a resolved comment has no card however wide
+  the window is, so its popover opens and stays open with the rail up. Closes
+  on Escape, an outside click, the rail gaining that card (reopening the
+  comment, or switching to List density), `ensureCommentSurface` handing the
+  thread to the drawer instead, the view leaving rendered mode, or the active
+  file changing.
 
 Every comment focus request (jump-to-next/prev, agent-ask navigation, toast
 actions, palette commands) is guaranteed to reach one of these surfaces, rail,
-drawer, or popover: never a dead click. Each request carries an origin,
-`'creation'` or `'jump'` (the default set by `requestCommentFocus`). In
+drawer, or popover: never a dead click. Each request carries an origin
+(`CommentFocusOrigin` in `useComments.ts`): `'creation'`, `'jump'` (the
+default set by `requestCommentFocus`), `'highlight'` for the requests a click
+on a highlight, a trace, or a density tick sends into List density, or
+`'reveal'` when `ensureCommentSurface` opened a surface to hold the card. In
 Anchored density a `'creation'` request (a just-added comment, from
 `handleAddComment` in `useComments.ts`) is consumed without activating the
 card, so the anchored stack stays put instead of pinning and shoving cards
@@ -673,6 +718,13 @@ around the new comment; jump-to-ask, palette jumps, and the review banner's
 View action all use the `'jump'` origin and still activate and scroll to the
 card. Creating a comment while the rail is hidden still opens the popover
 regardless of origin.
+
+Origin also decides whether the card takes DOM focus. `'highlight'` scrolls the
+card into view and stops there: a click in the prose means "show me this", the
+card is already beside the text, and moving focus out of the document would
+send the next space or PageDown to the rail and lift a screen reader out of the
+passage. Every other origin names the card deliberately, so the List surface
+focuses it (`ThreadCard` carries `tabIndex={-1}` for exactly this).
 
 **`Cmd+\`** toggles the rail where it fits in the current rendered view;
 otherwise it toggles the drawer, since that's the only comment surface left.
@@ -824,9 +876,12 @@ signals kind: the theme accent color for an agent's open `mdr_ask` question,
 the theme success color for a resolved comment, and the standard
 comment-underline color for a regular open comment. Each tick's title tooltip
 is author-prefixed: `"{author}: {first 60 characters of the comment text}"`.
-Clicking a tick jumps to and activates that comment's anchor, the same as
-clicking it from the rail or drawer. Hidden when there are no anchored
-comments, in raw view, or while the diff overlay is showing.
+Clicking a tick jumps to and activates that comment's anchor, then routes the
+thread through the same surface decision a highlight click makes
+(`revealCommentThread`): usually the card the rail already holds, but a
+popover for a resolved comment in Anchored density, where the rail draws no
+card. Hidden when there are no anchored comments, in raw view, or while the
+diff overlay is showing.
 
 ### Section breadcrumb
 An inline breadcrumb (`data-section-breadcrumb`) rendered in the panel

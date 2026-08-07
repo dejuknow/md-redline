@@ -41,7 +41,7 @@ export interface UseContextMenuItemsParams {
    * sidebarVisible, so bare `setSidebarVisible(true)` would strand the
    * request until some later surface mount fired it unprompted.
    */
-  ensureCommentSurface: () => void;
+  ensureCommentSurface: (commentId?: string) => void;
   selectionRef: RefObject<SelectionInfo | null>;
   lockSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
@@ -139,32 +139,48 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         const comment = comments.find((c) => c.id === commentId);
         if (!comment) return;
 
+        const isResolved = enableResolve && getEffectiveStatus(comment) === 'resolved';
+
+        // A resolved comment can be reopened, deleted or copied, but not edited
+        // or replied to: every card surface hides both affordances while the
+        // thread is settled (see CommentCard's isResolved gates). Resolved
+        // anchors became right-clickable when they started painting a trace,
+        // so offering the items here would be the only place in the app that
+        // promises an action nothing can carry out.
+        const threadItems: ContextMenuEntry[] = isResolved
+          ? []
+          : [
+              {
+                label: 'Edit',
+                onClick: () => {
+                  setActiveCommentId(commentId);
+                  ensureCommentSurface(commentId);
+                  triggerEdit(commentId);
+                },
+              },
+              {
+                label: 'Reply',
+                onClick: () => {
+                  setActiveCommentId(commentId);
+                  ensureCommentSurface(commentId);
+                  triggerReply(commentId);
+                },
+              },
+            ];
+
         const resolveItems: ContextMenuEntry[] = enableResolve
           ? [
-              { type: 'divider' as const },
-              getEffectiveStatus(comment) === 'resolved'
+              // No leading rule when Edit/Reply are absent: it would open the
+              // menu on a divider.
+              ...(threadItems.length ? [{ type: 'divider' as const }] : []),
+              isResolved
                 ? { label: 'Reopen', onClick: () => handleUnresolve(commentId) }
                 : { label: 'Resolve', onClick: () => handleResolve(commentId) },
             ]
           : [];
 
         const items: ContextMenuEntry[] = [
-          {
-            label: 'Edit',
-            onClick: () => {
-              setActiveCommentId(commentId);
-              ensureCommentSurface();
-              triggerEdit(commentId);
-            },
-          },
-          {
-            label: 'Reply',
-            onClick: () => {
-              setActiveCommentId(commentId);
-              ensureCommentSurface();
-              triggerReply(commentId);
-            },
-          },
+          ...threadItems,
           ...resolveItems,
           { type: 'divider' as const },
           {
@@ -185,7 +201,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
             label: 'Jump to Sidebar',
             onClick: () => {
               setActiveCommentId(commentId);
-              ensureCommentSurface();
+              ensureCommentSurface(commentId);
             },
           },
         ];

@@ -10,7 +10,7 @@
 
 /** Highlight wrappers the app paints. None of them are document content. */
 const APP_MARK_SELECTOR =
-  'mark.selection-highlight, mark.comment-highlight, mark.comment-highlight-sent, mark.comment-highlight-active, mark.search-highlight, mark.search-highlight-active';
+  'mark.selection-highlight, mark.comment-highlight, mark.comment-highlight-sent, mark.comment-highlight-active, mark.comment-highlight-resolved, mark.comment-highlight-resolved-active, mark.search-highlight, mark.search-highlight-active';
 
 /** List containers whose items must stay wrapped to paste as a list. */
 const LIST_TAGS = new Set(['UL', 'OL']);
