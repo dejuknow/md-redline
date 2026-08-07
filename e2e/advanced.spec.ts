@@ -259,6 +259,46 @@ test.describe('Multi-tab support', () => {
     await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
     await expect(page.locator('button[title="Open file"]')).toBeVisible();
   });
+
+  test('a file opened on top of a full tab strip lands fully in view', async ({ page }) => {
+    // Regression: the new tab was scrolled into view before the overflow
+    // arrows mounted and narrowed the strip, and scrollIntoView knows nothing
+    // about the open-file button pinned to the right edge. Both left the tab
+    // clipped in half.
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.goto('/');
+    await page.evaluate((tabs) => {
+      localStorage.setItem(
+        'md-redline-session',
+        JSON.stringify({ openTabs: tabs, activeFilePath: tabs[tabs.length - 1] }),
+      );
+    }, OVERFLOW_FIXTURES);
+
+    await page.goto(`/?file=${FIXTURE_1}`);
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator('button[title="Scroll tabs right"]')).toBeVisible();
+
+    const activeTab = page.locator(`.h-11 button[title="${FIXTURE_1}"]`);
+    const openFileButton = page.locator('button[title="Open file"]');
+    const tabStrip = page.locator('.h-11 .overflow-x-auto');
+
+    // Both edges matter: clearing the sticky button is satisfied by any tab
+    // left of it, including one scrolled off the start of the strip entirely.
+    await expect
+      .poll(async () => {
+        const tab = await activeTab.boundingBox();
+        const openButton = await openFileButton.boundingBox();
+        const strip = await tabStrip.boundingBox();
+        if (!tab || !openButton || !strip) return null;
+        return {
+          clearsOpenFileButton: Math.round(openButton.x - (tab.x + tab.width)) >= 0,
+          startsInsideStrip: Math.round(tab.x - strip.x) >= 0,
+        };
+      })
+      .toEqual({ clearsOpenFileButton: true, startsInsideStrip: true });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -441,6 +441,11 @@ button and the rest of the toolbar controls on the same baseline. Below it, the
 per-panel toolbar (`PanelToolbar.tsx`: search, view-mode, diff controls) is a
 slimmer 2rem strip.
 
+The open-file button is sticky at the right edge of the tab strip, so it overlays
+whichever tab ends there. The strip carries a `scroll-pr-10` that must stay at or
+above that button's `w-9`, otherwise the browser parks the active tab underneath
+it when scrolling the tab into view.
+
 ### Review banner
 When a review session is active, a sticky banner appears at the top with one row
 per session:
