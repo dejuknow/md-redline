@@ -63,21 +63,32 @@ const collapsedChevron = (
 );
 
 /**
- * Distinct authors of a reply list, in first-appearance order. A margin card is
- * narrow, so the summary line names at most two and counts the rest.
+ * A margin card is narrow, so the summary line names at most this many authors
+ * and counts the rest. The author dots render from the same cap, so every dot
+ * belongs to a name the reader can actually see.
  */
+const MAX_NAMED_AUTHORS = 2;
+
+/** Distinct authors of a reply list, in first-appearance order. */
 function replyAuthors(replies: CommentReply[]): string[] {
   return [...new Set(replies.map((reply) => reply.author))];
 }
 
+/** The authors the summary line names, and the dots that stand next to it. */
+function namedReplyAuthors(replies: CommentReply[]): string[] {
+  return replyAuthors(replies).slice(0, MAX_NAMED_AUTHORS);
+}
+
 function summarizeReplies(replies: CommentReply[], isNew: boolean): string {
   const authors = replyAuthors(replies);
+  const named = authors.slice(0, MAX_NAMED_AUTHORS);
+  const rest = authors.length - named.length;
   const who =
-    authors.length === 1
-      ? authors[0]
-      : authors.length === 2
-        ? `${authors[0]} and ${authors[1]}`
-        : `${authors[0]} +${authors.length - 1}`;
+    named.length === 1
+      ? named[0]
+      : rest === 0
+        ? `${named[0]} and ${named[1]}`
+        : `${named.join(', ')} +${rest}`;
   const noun = replies.length === 1 ? 'reply' : 'replies';
   return `${replies.length}${isNew ? ' new' : ''} ${noun} from ${who}`;
 }
@@ -669,16 +680,24 @@ export const CommentCard = memo(function CommentCard({
           type="button"
           data-testid="reply-summary"
           data-unread={hasUnread ? 'true' : undefined}
+          // Always collapsed: this control only exists on a compact card, and
+          // activating the card is what replaces it with the full thread.
+          aria-expanded={false}
           title={
-            replies.length === 1
+            summaryReplies.length === 1
               ? 'Open this comment to read the reply'
-              : `Open this comment to read all ${replies.length} replies`
+              : `Open this comment to read all ${summaryReplies.length} replies`
           }
           onClick={(e) => {
             e.stopPropagation();
             onActivate(comment.id);
           }}
-          className={`flex w-full items-center gap-1.5 px-3 pb-2 text-xs text-left rounded-b-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
+          // Rounds the card's bottom edge, so only when it is the bottom edge:
+          // the reply composer opens below this line on a compact card, and a
+          // rounded corner (and the ring it clips) mid-card reads as a seam.
+          className={`flex w-full items-center gap-1.5 px-3 pb-2 text-xs text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
+            !isResolved && isReplying ? '' : 'rounded-b-lg'
+          } ${
             hasUnread
               ? 'font-medium text-primary-text'
               : 'text-content-muted hover:text-content-secondary'
@@ -686,15 +705,13 @@ export const CommentCard = memo(function CommentCard({
         >
           {collapsedChevron}
           <span className="flex shrink-0 items-center -space-x-0.5">
-            {replyAuthors(summaryReplies)
-              .slice(0, 3)
-              .map((author) => (
-                <span
-                  key={author}
-                  className="inline-block w-2 h-2 rounded-full ring-1 ring-surface-raised"
-                  style={{ backgroundColor: getAuthorColor(author).text }}
-                />
-              ))}
+            {namedReplyAuthors(summaryReplies).map((author) => (
+              <span
+                key={author}
+                className="inline-block w-2 h-2 rounded-full ring-1 ring-surface-raised"
+                style={{ backgroundColor: getAuthorColor(author).text }}
+              />
+            ))}
           </span>
           <span className="truncate">{summarizeReplies(summaryReplies, hasUnread)}</span>
         </button>

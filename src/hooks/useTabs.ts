@@ -137,8 +137,33 @@ export function applyLoadedTabState(
   };
 }
 
-export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
+export function useTabs(options?: {
+  onSaveError?: (msg: string) => void;
+  /**
+   * Applied to content that arrives from disk on an explicit reload, before it
+   * lands in the tab. Reload is a third way external content reaches a tab
+   * (alongside the two watchers), so it has to run the same arriving-reply
+   * bookkeeping. Returns the content to store.
+   */
+  onExternalContent?: (
+    path: string,
+    priorContent: string,
+    content: string,
+    mtime?: number,
+  ) => string;
+  /**
+   * Fired when the server resolves the path we asked for into a different real
+   * path, so state keyed by the requested path can move with the tab.
+   */
+  onPathResolved?: (requestedPath: string, loadedPath: string) => void;
+}) {
   const onSaveError = options?.onSaveError;
+  // Held in refs so a caller passing inline callbacks doesn't churn the
+  // identity of every callback below them.
+  const onExternalContentRef = useRef(options?.onExternalContent);
+  onExternalContentRef.current = options?.onExternalContent;
+  const onPathResolvedRef = useRef(options?.onPathResolved);
+  onPathResolvedRef.current = options?.onPathResolved;
   const [tabOrder, setTabOrder] = useState<string[]>([]);
   const [tabData, setTabData] = useState<Map<string, TabState>>(new Map());
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -218,6 +243,9 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
 
   const applyLoadedResponse = useCallback(
     (requestedPath: string, loadedPath: string, content: string) => {
+      if (requestedPath !== loadedPath) {
+        onPathResolvedRef.current?.(requestedPath, loadedPath);
+      }
       const next = applyLoadedTabState(
         tabDataRef.current,
         tabOrderRef.current,
@@ -561,13 +589,20 @@ export function useTabs(options?: { onSaveError?: (msg: string) => void }) {
     if (!activeFilePath) return;
     updateTab(activeFilePath, { isLoading: true, error: null });
     try {
+      const priorContent = tabDataRef.current.get(activeFilePath)?.rawMarkdown ?? '';
       const res = await fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`);
       const data = await readJsonResponse<FileResponse>(res);
       if (!res.ok || !data) {
         throw new Error(getApiErrorMessage(res, data, 'Failed to reload file'));
       }
+      // A reply can reach the client for the first time here: the tab was
+      // hidden, and both the SSE stream and the visibility-restore fetch
+      // missed it. Without this hook that reply would never be marked unread.
+      const content =
+        onExternalContentRef.current?.(activeFilePath, priorContent, data.content, data.mtime) ??
+        data.content;
       updateTab(activeFilePath, {
-        rawMarkdown: data.content,
+        rawMarkdown: content,
         isLoading: false,
         lastSaved: new Date(),
         error: null,

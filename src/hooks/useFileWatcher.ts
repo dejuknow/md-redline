@@ -3,7 +3,13 @@ import { usePageVisible } from './usePageVisible';
 
 interface Options {
   filePath: string | null;
-  onExternalChange: (content: string, mtime?: number) => void;
+  /**
+   * `path` is the file the event is about, not whichever tab is active by the
+   * time it lands. The callback is re-pointed on every render while the
+   * EventSource is torn down in a passive effect cleanup, so an event queued
+   * before a tab switch runs against the new tab's state.
+   */
+  onExternalChange: (content: string, mtime: number | undefined, path: string) => void;
 }
 
 /**
@@ -27,8 +33,8 @@ export function useFileWatcher({ filePath, onExternalChange }: Options) {
 
     es.addEventListener('change', (e) => {
       try {
-        const { content, mtime } = JSON.parse(e.data);
-        callbackRef.current(content, mtime);
+        const { content, mtime, path } = JSON.parse(e.data);
+        callbackRef.current(content, mtime, typeof path === 'string' ? path : filePath);
       } catch {
         // Ignore malformed events
       }

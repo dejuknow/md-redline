@@ -321,7 +321,7 @@ test.describe('File watcher - external changes', () => {
     await expect(page.getByText('Yes, "active" is more precise.')).toBeVisible();
     await expect(page.getByTestId('reply-summary')).toHaveCount(0);
 
-    // Focusing the other card collapses this one again — the reply is now an
+    // Focusing the other card collapses this one again: the reply is now an
     // ordinary summary, not a second round of "new".
     await page.locator('[data-comment-card-id="unread-c2"]').click();
     await expect(summary).toHaveText('1 reply from Claude');

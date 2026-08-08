@@ -618,10 +618,19 @@ on `--theme-bg-inset`), never the crimson accent:
   `useUnreadReplies` (session-only, never persisted) and fed in as
   `unreadReplyIds`; when a card has any, the line counts and attributes only
   those, reading "1 new reply from Claude" in the accent color with
-  `data-unread="true"`. Both watcher paths mark them (the active tab's
-  `onExternalChange` and the multiplexed background-tab SSE handler, which is
-  the case that matters most since no toast fires there). Activating a comment
-  marks its replies read in either density. A connector line runs
+  `data-unread="true"`. The line names at most two authors and counts the rest
+  ("3 replies from Claude, Dennis +1"); the author dots come from the same cap,
+  so every dot belongs to a name on the line. All three paths that take content
+  from disk mark arriving replies, through `applyExternalContent` in App: the
+  active tab's `onExternalChange`, the multiplexed background-tab SSE handler
+  (the case that matters most, since no toast fires there), and an explicit
+  reload. None of them mark anything while a tab's first fetch is still in
+  flight, since with no prior content to diff against the file's whole reply
+  history would look new. Activating a comment marks its replies read, in
+  either density. Only anchored density surfaces the unread state, because
+  it is the only one that hides reply text; List density renders every reply
+  in full but does not clear the marks by itself, so a reply read there stays
+  marked until the reader opens that comment. A connector line runs
   from the anchor to the active (or hovered) card along the rail's left edge.
   Cards never overlap: they resolve top-down by anchor position, and the
   active card gets priority to sit at its anchor, compressing cards above it

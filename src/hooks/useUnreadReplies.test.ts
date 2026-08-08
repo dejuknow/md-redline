@@ -41,6 +41,33 @@ describe('useUnreadReplies', () => {
     expect(result.current.unreadByPath).toBe(afterMark);
   });
 
+  it('moves marks to the resolved path when the server normalizes it', () => {
+    // The CLI hands its argument through unnormalized, so the first tab of a
+    // session routinely opens under a relative or symlinked path and gets
+    // re-keyed once the server answers. A mark left behind under the old key
+    // is unreachable: nothing ever looks it up again.
+    const { result } = renderHook(() => useUnreadReplies());
+
+    act(() => result.current.markRepliesUnread('./notes.md', ['r1']));
+    act(() => result.current.markRepliesUnread('/real/notes.md', ['r2']));
+    act(() => result.current.migrateUnreadPath('./notes.md', '/real/notes.md'));
+
+    expect(result.current.unreadByPath['./notes.md']).toBeUndefined();
+    expect(result.current.unreadByPath['/real/notes.md']).toEqual(['r2', 'r1']);
+  });
+
+  it('leaves state alone when the path did not actually change', () => {
+    const { result } = renderHook(() => useUnreadReplies());
+
+    act(() => result.current.markRepliesUnread('/a.md', ['r1']));
+    const before = result.current.unreadByPath;
+
+    act(() => result.current.migrateUnreadPath('/a.md', '/a.md'));
+    act(() => result.current.migrateUnreadPath('/never-seen.md', '/b.md'));
+
+    expect(result.current.unreadByPath).toBe(before);
+  });
+
   it('deduplicates a reply seen twice, so a redelivered SSE event does not double it', () => {
     const { result } = renderHook(() => useUnreadReplies());
 

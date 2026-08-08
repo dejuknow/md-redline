@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
 
 /**
- * Session-scoped record of replies that arrived from outside the app — an agent
- * writing to the file, typically — and that the reader has not opened yet.
+ * Session-scoped record of replies that arrived from outside the app (an agent
+ * writing to the file, typically) and that the reader has not opened yet.
  *
  * Keyed by file path, because the common shape of a handoff is that the agent
  * answers on a background tab while the reader works elsewhere; each tab has to
@@ -39,5 +39,23 @@ export function useUnreadReplies() {
     });
   }, []);
 
-  return { unreadByPath, markRepliesUnread, markRepliesRead };
+  /**
+   * Re-key a file's unread set when the server resolves the path we asked for
+   * into its real one (relative paths, `~`, symlinked parents). Marks recorded
+   * against the pre-resolution key are looked up under the resolved key
+   * afterwards, so without this they are silently unreachable.
+   */
+  const migrateUnreadPath = useCallback((fromPath: string, toPath: string) => {
+    if (fromPath === toPath) return;
+    setUnreadByPath((prev) => {
+      const moving = prev[fromPath];
+      if (!moving) return prev;
+      const next = { ...prev };
+      delete next[fromPath];
+      next[toPath] = [...new Set([...(prev[toPath] ?? []), ...moving])];
+      return next;
+    });
+  }, []);
+
+  return { unreadByPath, markRepliesUnread, markRepliesRead, migrateUnreadPath };
 }

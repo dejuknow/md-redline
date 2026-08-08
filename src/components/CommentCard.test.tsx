@@ -187,7 +187,61 @@ describe('CommentCard: compact mode', () => {
       },
       compact: true,
     });
-    expect(await screen.findByText('3 replies from Claude +2')).toBeTruthy();
+    expect(await screen.findByText('3 replies from Claude, Dennis +1')).toBeTruthy();
+  });
+
+  it('renders one author dot per named author, never an unnamed one', async () => {
+    const stamp = new Date().toISOString();
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'a', author: 'Claude', timestamp: stamp },
+          { id: 'r2', text: 'b', author: 'Dennis', timestamp: stamp },
+          { id: 'r3', text: 'c', author: 'Bianca', timestamp: stamp },
+          { id: 'r4', text: 'd', author: 'Sam', timestamp: stamp },
+        ],
+      },
+      compact: true,
+    });
+    const summary = await screen.findByTestId('reply-summary');
+    expect(summary.textContent).toContain('4 replies from Claude, Dennis +2');
+    // Two names on the line, so two dots. A dot for an author the reader
+    // can't see named is a colour with nothing to attach it to.
+    expect(summary.querySelectorAll('span[style*="background-color"]').length).toBe(2);
+  });
+
+  it('the summary tooltip counts the same replies the line does', async () => {
+    const stamp = new Date().toISOString();
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'read already', author: 'Dennis', timestamp: stamp },
+          { id: 'r2', text: 'read already too', author: 'Dennis', timestamp: stamp },
+          { id: 'r3', text: 'just landed', author: 'Claude', timestamp: stamp },
+        ],
+      },
+      compact: true,
+      unreadReplyIds: new Set(['r3']),
+    });
+    const summary = await screen.findByTestId('reply-summary');
+    expect(summary.textContent).toContain('1 new reply from Claude');
+    expect(summary.getAttribute('title')).toBe('Open this comment to read the reply');
+  });
+
+  it('marks the summary as a collapsed disclosure for assistive tech', async () => {
+    renderCard({
+      comment: {
+        ...baseComment,
+        replies: [
+          { id: 'r1', text: 'Only reply', author: 'Dennis', timestamp: new Date().toISOString() },
+        ],
+      },
+      compact: true,
+    });
+    const summary = await screen.findByTestId('reply-summary');
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('the summary counts and attributes only the unread replies', async () => {
