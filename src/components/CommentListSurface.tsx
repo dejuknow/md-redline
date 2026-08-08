@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import type { MdComment } from '../types';
+import type { CommentStatus, MdComment } from '../types';
+import type { CommentFocusOrigin } from '../hooks/useComments';
 import { anchorSearchText, getEffectiveStatus } from '../types';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { ThreadCard } from './ThreadCard';
@@ -16,6 +17,7 @@ export interface SidebarContextMenuInfo {
 export interface SidebarCommentFocusRequest {
   commentId: string;
   token: number;
+  origin?: CommentFocusOrigin;
 }
 
 interface Props {
@@ -44,6 +46,34 @@ interface Props {
 }
 
 type FilterMode = 'all' | 'open' | 'resolved';
+
+/**
+ * Whether a comment survives the list's search box. One definition for the
+ * three places that ask: the rendered list, the activation widen, and the
+ * focus-request widen. They disagreed before, which is how a focus request
+ * came to throw away a search that was not hiding anything.
+ */
+function matchesSearch(c: MdComment, search: string): boolean {
+  if (!search) return true;
+  const q = search.toLowerCase();
+  return (
+    c.text.toLowerCase().includes(q) ||
+    anchorSearchText(c).includes(q) ||
+    c.author.toLowerCase().includes(q) ||
+    (c.replies?.some((r) => r.text.toLowerCase().includes(q)) ?? false)
+  );
+}
+
+/**
+ * The filter to widen to so a comment of `status` becomes visible, or null
+ * when the current filter already shows it. Resolved widens to All rather
+ * than Resolved: the reviewer asked to see one settled thread, not to hide
+ * every open one.
+ */
+function widenedFilter(filter: FilterMode, status: CommentStatus): FilterMode | null {
+  if (filter === 'all' || filter === status) return null;
+  return status === 'open' ? 'open' : 'all';
+}
 
 export function CommentListSurface({
   comments,
@@ -108,25 +138,51 @@ export function CommentListSurface({
   useEffect(() => {
     if (!requestedFocus) return;
 
-    if (search) {
+    const target = comments.find((c) => c.id === requestedFocus.commentId);
+
+    // Clear the search only when the search is what hides the card. Every
+    // highlight click and density tick routes a focus request through here
+    // now, so an unconditional clear threw away a reviewer's search on a
+    // click that was already showing them the card they asked for.
+    if (search && !(target && matchesSearch(target, search))) {
       setSearch('');
       return;
     }
 
-    if (resolveEnabled && filter === 'resolved') {
-      setFilter('open');
-      return;
+    // Widen toward the requested comment's own status, not toward a fixed
+    // filter. Both halves of the filter can hide a card: Open hides a resolved
+    // comment whose trace was just clicked, and Resolved hides an open one.
+    // Picking a destination without reading the status gets the second case
+    // right and the first case backwards. A request naming a comment that no
+    // longer exists widens nothing: there is no status to widen toward, and
+    // guessing "open" used to yank the reviewer off the Resolved filter for a
+    // card that was never going to appear.
+    if (resolveEnabled && target) {
+      const widened = widenedFilter(filter, getEffectiveStatus(target));
+      if (widened) {
+        setFilter(widened);
+        return;
+      }
     }
 
     const node = commentRefs.current.get(requestedFocus.commentId);
     if (!node) return;
 
+    // Scroll always; take DOM focus only when the reviewer asked to go to the
+    // card. A click on a highlight in the prose is a request to SEE it, and
+    // the card is right there beside the text once scrolled; pulling focus
+    // out of the document for it means the next space or PageDown scrolls
+    // the rail, Tab walks the cards, and a screen reader is lifted out of the
+    // sentence being read. Requests that named the card (see
+    // CommentFocusOrigin) still land on it.
+    const takesFocus = requestedFocus.origin !== 'highlight';
+
     scrollCardIntoList(node);
     requestAnimationFrame(() => {
-      node.focus({ preventScroll: true });
+      if (takesFocus) node.focus({ preventScroll: true });
       onFocusHandled?.();
     });
-  }, [requestedFocus, resolveEnabled, filter, search, onFocusHandled]);
+  }, [requestedFocus, resolveEnabled, filter, search, comments, onFocusHandled]);
 
   // Activating a comment the current filter or search hides widens the view
   // so its card is visible. Clicking a highlight means "show me this
@@ -140,20 +196,9 @@ export function CommentListSurface({
     if (!activeCommentId) return;
     const c = comments.find((x) => x.id === activeCommentId);
     if (!c) return;
-    const status = getEffectiveStatus(c);
-    const hiddenByFilter =
-      resolveEnabled &&
-      ((filter === 'open' && status !== 'open') ||
-        (filter === 'resolved' && status !== 'resolved'));
-    const q = search.toLowerCase();
-    const hiddenBySearch =
-      search !== '' &&
-      !c.text.toLowerCase().includes(q) &&
-      !anchorSearchText(c).includes(q) &&
-      !c.author.toLowerCase().includes(q) &&
-      !(c.replies?.some((r) => r.text.toLowerCase().includes(q)) ?? false);
-    if (hiddenBySearch) setSearch('');
-    if (hiddenByFilter) setFilter(status === 'open' ? 'open' : 'all');
+    const widened = resolveEnabled ? widenedFilter(filter, getEffectiveStatus(c)) : null;
+    if (!matchesSearch(c, search)) setSearch('');
+    if (widened) setFilter(widened);
   }, [activeCommentId, comments, filter, search, resolveEnabled]);
 
   useEffect(() => {
@@ -213,16 +258,7 @@ export function CommentListSurface({
     }
 
     // Text search
-    if (search) {
-      const q = search.toLowerCase();
-      const matchesText = c.text.toLowerCase().includes(q);
-      const matchesAnchor = anchorSearchText(c).includes(q);
-      const matchesAuthor = c.author.toLowerCase().includes(q);
-      const matchesReply = c.replies?.some((r) => r.text.toLowerCase().includes(q)) ?? false;
-      if (!matchesText && !matchesAnchor && !matchesAuthor && !matchesReply) return false;
-    }
-
-    return true;
+    return matchesSearch(c, search);
   });
 
   // Sort: open first, then resolved (only when resolve enabled).

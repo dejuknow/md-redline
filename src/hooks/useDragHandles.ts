@@ -265,8 +265,15 @@ export function useDragHandles({
         const caret = caretFromPoint(e.clientX, e.clientY);
         if (!caret || !container.contains(caret.node)) return;
 
-        // Don't allow dragging into another comment's mark
-        const parentMark = (caret.node.parentElement as Element)?.closest?.('mark');
+        // Don't allow dragging into another comment's mark. A resolved
+        // anchor's trace is not one: it is a memento of a settled thread, and
+        // overlapping it is what the drag did freely for as long as resolved
+        // comments painted nothing at all. Counting it here turns the trace
+        // into an invisible wall the drag stops dead against, with only a 1px
+        // dotted underline on screen to explain why.
+        const parentMark = (caret.node.parentElement as Element)?.closest?.(
+          'mark:not(.comment-highlight-resolved)',
+        );
         if (
           parentMark &&
           !drag.markEls.some((m) => m.contains(caret.node)) &&

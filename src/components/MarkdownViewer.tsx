@@ -59,6 +59,46 @@ export interface TocHeading {
   level: number; // 1-6
 }
 
+/**
+ * Every painted comment mark that answers for a thread: what a click, a
+ * right-click, and scroll-to-comment all look for. One list, because the three
+ * of them have to agree: a class wired into the click path but missed in the
+ * context-menu path is a mark you can open but not act on.
+ *
+ * Deliberately NOT the list the active-mark queries use. Those drive
+ * drag-resize, and `comment-highlight-resolved-active` is left out of them on
+ * purpose: a settled thread offers no anchor handles, and nothing in
+ * useDragHandles checks status, so this omission is the only thing enforcing
+ * that.
+ */
+const COMMENT_MARK_SELECTOR =
+  '.comment-highlight, .comment-highlight-sent, .comment-highlight-resolved, .mermaid-comment-highlight';
+
+/**
+ * The mark a pointer event should act on. `closest` returns the innermost, and
+ * for anchors that OVERLAP without matching, the innermost is whichever group
+ * happened to be painted last: wrapText walks into existing marks, so a
+ * resolved trace on "brute force" nests inside an open comment's mark on
+ * "brute force attacks". Clicking the shared words would then open the settled
+ * thread while the live comment's card sat untouched.
+ *
+ * An open comment still needs a decision and a resolved one is a memento, so
+ * the live ancestor wins. The cost is that a trace entirely enclosed by an open
+ * highlight cannot be clicked; it stays visible, and the thread is still
+ * reachable from the rail. Traces that merely start or end inside another
+ * anchor keep the part of themselves that sticks out.
+ */
+function markToAct(target: HTMLElement): HTMLElement | null {
+  const mark = target.closest(COMMENT_MARK_SELECTOR) as HTMLElement | null;
+  if (!mark?.classList.contains('comment-highlight-resolved')) return mark;
+  let ancestor = mark.parentElement?.closest(COMMENT_MARK_SELECTOR) as HTMLElement | null;
+  while (ancestor) {
+    if (!ancestor.classList.contains('comment-highlight-resolved')) return ancestor;
+    ancestor = ancestor.parentElement?.closest(COMMENT_MARK_SELECTOR) as HTMLElement | null;
+  }
+  return mark;
+}
+
 export interface MarkdownViewerHandle {
   getContainer: () => HTMLElement | null;
   scrollToComment: (commentId: string) => void;
@@ -126,9 +166,7 @@ export const MarkdownViewer = memo(
       getContainer: () => containerRef.current,
       scrollToComment: (commentId: string) => {
         if (!containerRef.current) return;
-        const marks = containerRef.current.querySelectorAll(
-          '.comment-highlight, .comment-highlight-sent, .mermaid-comment-highlight',
-        );
+        const marks = containerRef.current.querySelectorAll(COMMENT_MARK_SELECTOR);
         const mark = Array.from(marks).find((m) =>
           (m as HTMLElement).dataset.commentIds?.split(',').includes(commentId),
         );
@@ -271,10 +309,20 @@ export const MarkdownViewer = memo(
       // second comment silently rides along on it. Their contexts differ, so
       // including them keeps the groups apart and lets findMatchRange resolve
       // each one to its own occurrence.
+      // Open and resolved ids are collected apart because a group that has any
+      // open member paints the full highlight, and that mark then answers for
+      // its OPEN comments only. Everything downstream consumes the whole id
+      // list: the click handler and context menu take the first, drag-resize
+      // rewrites the anchor of every one, useCommentTicks emits one tick per
+      // one. A settled id riding along in a mark that paints as live drags a
+      // thread nobody can see into all three. Resolved anchors earn a mark of
+      // their own only where nothing live is already covering the passage,
+      // which is what the pass did before it grouped them at all.
       const highlightGroups = new Map<
         string,
         {
-          ids: string[];
+          openIds: string[];
+          resolvedIds: string[];
           anchor: string;
           plainOffset?: number;
           contextBefore?: string;
@@ -282,7 +330,11 @@ export const MarkdownViewer = memo(
         }
       >();
       for (const comment of comments) {
-        if (enableResolve && getEffectiveStatus(comment) === 'resolved') continue;
+        // Resolved anchors used to be dropped here, which left no trace that a
+        // passage had ever been discussed. They now paint a faint dotted
+        // underline instead (see comment-highlight-resolved) and still get no
+        // margin card, since marginComments filters them out in App.
+        const isResolved = enableResolve === true && getEffectiveStatus(comment) === 'resolved';
         const plainOffset =
           comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
         // Joined on an explicit NUL escape, never a raw NUL byte in the
@@ -310,13 +362,14 @@ export const MarkdownViewer = memo(
           contextAfter ?? '',
         ].join('\u0000');
         const group = highlightGroups.get(key) || {
-          ids: [],
+          openIds: [],
+          resolvedIds: [],
           anchor: anchorText,
           plainOffset,
           contextBefore,
           contextAfter,
         };
-        group.ids.push(comment.id);
+        (isResolved ? group.resolvedIds : group.openIds).push(comment.id);
         highlightGroups.set(key, group);
       }
 
@@ -324,11 +377,17 @@ export const MarkdownViewer = memo(
 
       for (const {
         anchor,
-        ids,
+        openIds,
+        resolvedIds,
         plainOffset,
         contextBefore,
         contextAfter,
       } of highlightGroups.values()) {
+        // Nothing open on this passage means the trace is the whole story;
+        // otherwise the live comments own the mark and the settled ones sit it
+        // out, exactly as they did before they were painted at all.
+        const allResolved = openIds.length === 0;
+        const ids = allResolved ? resolvedIds : openIds;
         const isActive = ids.includes(activeCommentId || '');
         const allSent =
           sentCommentIds &&
@@ -338,10 +397,18 @@ export const MarkdownViewer = memo(
           container,
           anchor,
           (mark) => {
-            mark.className = allSent ? 'comment-highlight-sent' : 'comment-highlight';
+            mark.className = allResolved
+              ? 'comment-highlight-resolved'
+              : allSent
+                ? 'comment-highlight-sent'
+                : 'comment-highlight';
             mark.dataset.commentIds = ids.join(',');
             if (isActive) {
-              mark.classList.add('comment-highlight-active');
+              // The open active style fills the background, which would undo
+              // the whole point of a trace, so resolved gets its own.
+              mark.classList.add(
+                allResolved ? 'comment-highlight-resolved-active' : 'comment-highlight-active',
+              );
             }
           },
           plainOffset,
@@ -354,6 +421,10 @@ export const MarkdownViewer = memo(
           // `.mermaid-comment-highlight` + `dataset.commentIds`.
           (textEl, matchStart, matchEnd) => {
             if (!textEl.closest('.mermaid-block')) return;
+            // A trace inside a diagram would have to be drawn as a rect over
+            // the label, which is not faint by any reading. Resolved anchors
+            // stay unpainted in diagrams, exactly as before this change.
+            if (allResolved) return;
             textEl.classList.add('mermaid-comment-highlight');
             if (isActive) {
               textEl.classList.add('mermaid-comment-highlight-active');
@@ -388,9 +459,20 @@ export const MarkdownViewer = memo(
       // 4. Headless Chromium does NOT reproduce these issues — can't verify headlessly.
       // Solution: keep the <mark> but swap class styles for inline styles.
       for (const mark of container.querySelectorAll(
-        '.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-sent, .mermaid-block mark.comment-highlight-active',
+        '.mermaid-block mark.comment-highlight, .mermaid-block mark.comment-highlight-sent, .mermaid-block mark.comment-highlight-active, .mermaid-block mark.comment-highlight-resolved',
       )) {
         const el = mark as HTMLElement;
+        // A resolved anchor inside a diagram paints nothing (quirk 2 rules out
+        // the underline), which leaves a mark that is invisible and still a
+        // click target: it would open a popover from blank-looking label text
+        // and put a density tick where there is no trace to jump to. Diagrams
+        // keep the pre-trace behaviour, so strip what makes it interactive
+        // rather than only what makes it visible.
+        if (el.classList.contains('comment-highlight-resolved')) {
+          el.classList.remove('comment-highlight-resolved', 'comment-highlight-resolved-active');
+          delete el.dataset.commentIds;
+          continue;
+        }
         const isActive = el.classList.contains('comment-highlight-active');
         el.classList.remove(
           'comment-highlight',
@@ -525,9 +607,7 @@ export const MarkdownViewer = memo(
         return;
       }
 
-      const mark = (e.target as HTMLElement).closest(
-        '.comment-highlight, .comment-highlight-sent, .mermaid-comment-highlight',
-      ) as HTMLElement | null;
+      const mark = markToAct(e.target as HTMLElement);
       if (mark?.dataset.commentIds) {
         const ids = mark.dataset.commentIds.split(',');
         onHighlightClick(ids[0]);
@@ -538,9 +618,7 @@ export const MarkdownViewer = memo(
       if (!onCtxMenu) return;
 
       // Check if right-click is on a comment highlight
-      const mark = (e.target as HTMLElement).closest(
-        '.comment-highlight, .comment-highlight-sent, .mermaid-comment-highlight',
-      ) as HTMLElement | null;
+      const mark = markToAct(e.target as HTMLElement);
       if (mark?.dataset.commentIds) {
         e.preventDefault();
         const ids = mark.dataset.commentIds.split(',');

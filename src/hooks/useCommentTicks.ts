@@ -40,11 +40,14 @@ export function useCommentTicks(
     for (const c of comments) {
       const top = anchorTops.get(c.id);
       if (top === undefined) continue;
-      const kind: TickKind = c.expectsReply
-        ? 'ask'
-        : getEffectiveStatus(c) === 'resolved'
-          ? 'resolved'
-          : 'open';
+      // Resolved outranks expectsReply. Only a reply clears that flag, so an
+      // ask the reviewer settled without answering still carries it, and the
+      // accent tick is reserved for questions still waiting on someone. This
+      // matches selectAgentAsks, which filters asks to open comments for the
+      // same reason. It only became reachable once resolved anchors started
+      // painting a mark for measureAnchorTops to find.
+      const kind: TickKind =
+        getEffectiveStatus(c) === 'resolved' ? 'resolved' : c.expectsReply ? 'ask' : 'open';
       next.push({
         id: c.id,
         y01: Math.min(Math.max(top / scrollHeight, 0), 1),

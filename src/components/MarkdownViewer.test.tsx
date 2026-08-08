@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MarkdownViewer,
@@ -475,5 +475,251 @@ describe('MarkdownViewer selection highlights', () => {
 
     const leadingCode = paragraph?.querySelector('mark.selection-highlight > code');
     expect(leadingCode?.textContent).toBe('md-redline');
+  });
+});
+
+describe('MarkdownViewer comment highlights — resolved anchors', () => {
+  const markdown = '# Doc\n\nThe timing question is two questions being conflated here.\n';
+  const html = renderMarkdown(markdown);
+
+  const base = {
+    anchor: 'two questions',
+    text: 'Worth splitting?',
+    author: 'Dennis',
+    timestamp: new Date().toISOString(),
+  };
+
+  function renderWith(comments: Parameters<typeof MarkdownViewer>[0]['comments'], resolve = true) {
+    return render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={comments}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        enableResolve={resolve}
+        onHighlightClick={vi.fn()}
+      />,
+    );
+  }
+
+  it('paints a resolved anchor as a trace rather than dropping it', async () => {
+    // Resolved anchors used to be skipped entirely, which left no sign that a
+    // passage had ever been discussed.
+    const { container } = renderWith([{ ...base, id: 'c1', status: 'resolved' as const }]);
+
+    await waitFor(() => {
+      const mark = container.querySelector('mark.comment-highlight-resolved');
+      expect(mark).not.toBeNull();
+      expect(mark?.textContent).toBe('two questions');
+      expect((mark as HTMLElement).dataset.commentIds).toBe('c1');
+    });
+    expect(container.querySelector('mark.comment-highlight')).toBeNull();
+  });
+
+  it('keeps the full highlight when one comment on the anchor is still open', async () => {
+    // Same anchor and offset puts both comments in one highlight group, and
+    // that group paints one mark. The passage still has something live on it,
+    // so the open treatment has to win.
+    //
+    // The resolved id stays OUT of that mark. Consumers read this list as the
+    // comments the mark answers for: the click handler and context menu take
+    // the first, drag-resize rewrites the anchor of every one, and the density
+    // strip emits a tick per one. A settled id riding along in a mark that
+    // paints as live reaches all three, and the drag one writes to the file.
+    const { container } = renderWith([
+      { ...base, id: 'c1', status: 'resolved' as const },
+      { ...base, id: 'c2' },
+    ]);
+
+    await waitFor(() => {
+      const mark = container.querySelector('mark.comment-highlight');
+      expect(mark).not.toBeNull();
+      expect((mark as HTMLElement).dataset.commentIds).toBe('c2');
+    });
+    expect(container.querySelector('mark.comment-highlight-resolved')).toBeNull();
+  });
+
+  it('clicking a mixed group activates the open comment, not the resolved one', async () => {
+    // The mark paints as open, and the rail is holding the open comment's card.
+    // Handing the click to the resolved id would open the settled thread in a
+    // popover while the card the user is looking at stays untouched.
+    const onHighlightClick = vi.fn();
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[
+          { ...base, id: 'c1', status: 'resolved' as const },
+          { ...base, id: 'c2' },
+        ]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        enableResolve
+        onHighlightClick={onHighlightClick}
+      />,
+    );
+
+    const mark = await waitFor(() => {
+      const el = container.querySelector('mark.comment-highlight');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+
+    fireEvent.click(mark);
+    expect(onHighlightClick).toHaveBeenCalledWith('c2');
+  });
+
+  it('does not light a mixed group when the resolved member is the active one', async () => {
+    // The active styles are the open ones here, and getActiveMarks feeds
+    // drag-resize off `.comment-highlight-active`. Letting a settled comment
+    // switch them on puts the full fill on the passage and hands out anchor
+    // handles for a thread that cannot even be edited.
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[
+          { ...base, id: 'c1', status: 'resolved' as const },
+          { ...base, id: 'c2' },
+        ]}
+        activeCommentId="c1"
+        selectionText={null}
+        selectionOffset={null}
+        enableResolve
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('mark.comment-highlight')).not.toBeNull();
+    });
+    expect(container.querySelector('mark.comment-highlight-active')).toBeNull();
+    expect(container.querySelector('mark.comment-highlight-resolved-active')).toBeNull();
+  });
+
+  it('treats resolved as open when the resolve feature is off', async () => {
+    const { container } = renderWith([{ ...base, id: 'c1', status: 'resolved' as const }], false);
+
+    await waitFor(() => {
+      expect(container.querySelector('mark.comment-highlight')).not.toBeNull();
+    });
+    expect(container.querySelector('mark.comment-highlight-resolved')).toBeNull();
+  });
+
+  it('marks the active resolved trace without giving it the open active fill', async () => {
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[{ ...base, id: 'c1', status: 'resolved' as const }]}
+        activeCommentId="c1"
+        selectionText={null}
+        selectionOffset={null}
+        enableResolve
+        onHighlightClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('mark.comment-highlight-resolved-active')).not.toBeNull();
+    });
+    expect(container.querySelector('mark.comment-highlight-active')).toBeNull();
+  });
+});
+
+describe('MarkdownViewer comment highlights — overlapping resolved and open anchors', () => {
+  // Anchors that OVERLAP without matching land in different highlight groups,
+  // so the mixed-group rules above never see them. wrapText walks into marks
+  // that are already painted, so the shorter anchor nests inside the longer
+  // one and `closest` hands a click on the shared words to the inner mark.
+  const markdown = '# Doc\n\nThe system blocks brute force attacks reliably.\n';
+  const html = renderMarkdown(markdown);
+
+  const base = {
+    text: 'Worth a look',
+    author: 'Dennis',
+    timestamp: new Date().toISOString(),
+  };
+
+  function renderOverlapping(onHighlightClick: () => void) {
+    return render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[
+          { ...base, id: 'open-1', anchor: 'brute force attacks' },
+          { ...base, id: 'settled-1', anchor: 'brute force', status: 'resolved' as const },
+        ]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        enableResolve
+        onHighlightClick={onHighlightClick}
+      />,
+    );
+  }
+
+  it('nests the trace inside the live highlight', async () => {
+    const { container } = renderOverlapping(vi.fn());
+
+    // Pins the premise the click test below depends on. If painting ever
+    // stops nesting these, that test would pass for the wrong reason.
+    const trace = await waitFor(() => {
+      const el = container.querySelector('mark.comment-highlight-resolved');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(trace.closest('mark.comment-highlight')).not.toBeNull();
+  });
+
+  it('gives a click on the overlap to the open comment, not the settled one', async () => {
+    const onHighlightClick = vi.fn();
+    const { container } = renderOverlapping(onHighlightClick);
+
+    const trace = await waitFor(() => {
+      const el = container.querySelector('mark.comment-highlight-resolved');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+
+    // A click that lands squarely on the trace: the innermost mark is the
+    // settled thread, and taking it would open a resolved comment while the
+    // live one's card sits untouched in the rail.
+    fireEvent.click(trace);
+    expect(onHighlightClick).toHaveBeenCalledWith('open-1');
+  });
+
+  it('still opens a trace that no live highlight encloses', async () => {
+    // The preference is for an OPEN ancestor, not against traces: a trace
+    // standing on its own is the only thing on that passage and stays
+    // clickable.
+    const onHighlightClick = vi.fn();
+    const { container } = render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[
+          { ...base, id: 'open-1', anchor: 'The system blocks' },
+          { ...base, id: 'settled-1', anchor: 'reliably', status: 'resolved' as const },
+        ]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        enableResolve
+        onHighlightClick={onHighlightClick}
+      />,
+    );
+
+    const trace = await waitFor(() => {
+      const el = container.querySelector('mark.comment-highlight-resolved');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+
+    fireEvent.click(trace);
+    expect(onHighlightClick).toHaveBeenCalledWith('settled-1');
   });
 });
