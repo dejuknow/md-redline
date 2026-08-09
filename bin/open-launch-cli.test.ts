@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn } from 'child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
 
@@ -40,13 +48,27 @@ function runCli(args: string[], env: NodeJS.ProcessEnv): Promise<number | null> 
   });
 }
 
-async function waitForFile(path: string, timeoutMs: number): Promise<boolean> {
+// Waits for content, not for the file. The Windows stub writes its marker as
+// `>"marker" <nul set /p "=%~1"`, and the redirect creates the file before
+// set /p puts anything in it. Polling on existence alone returns inside that
+// window, and the caller's readFileSync then reads "" and fails a test that
+// has nothing wrong with it. Every marker these tests wait on carries a URL,
+// so non-empty is the honest signal that the stub actually ran.
+function hasContent(path: string): boolean {
+  try {
+    return statSync(path).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForMarker(path: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (existsSync(path)) return true;
+    if (hasContent(path)) return true;
     await new Promise((r) => setTimeout(r, 50));
   }
-  return existsSync(path);
+  return hasContent(path);
 }
 
 // Shadows the platform's own opener on PATH so the no-override default path can
@@ -88,7 +110,7 @@ describe('mdr browser launcher (subprocess)', () => {
     // The launcher is detached, so it writes the marker shortly AFTER the CLI
     // has exited — poll for it. Pre-fix (non-detached on Windows) it never
     // appears because the child was torn down with the parent.
-    const launched = await waitForFile(marker, 5000);
+    const launched = await waitForMarker(marker, 5000);
     expect(launched, 'browser stub never ran: the launcher did not survive CLI exit').toBe(true);
     expect(readFileSync(marker, 'utf8')).toBe(url);
   }, 15_000);
@@ -103,7 +125,7 @@ describe('mdr browser launcher (subprocess)', () => {
     const url = 'http://127.0.0.1:65535/legacy';
     const code = await runCli(['__open', url], cleanEnv({ MDR_BROWSER: stub }));
     expect(code).toBe(0);
-    expect(await waitForFile(marker, 5000)).toBe(true);
+    expect(await waitForMarker(marker, 5000)).toBe(true);
     expect(readFileSync(marker, 'utf8')).toBe(url);
   }, 15_000);
 
@@ -122,7 +144,7 @@ describe('mdr browser launcher (subprocess)', () => {
         cleanEnv({ MD_REDLINE_BROWSER: blank, MDR_BROWSER: stub }),
       );
       expect(code).toBe(0);
-      expect(await waitForFile(marker, 5000)).toBe(true);
+      expect(await waitForMarker(marker, 5000)).toBe(true);
       expect(readFileSync(marker, 'utf8')).toBe(url);
     },
     15_000,
@@ -147,7 +169,7 @@ describe('mdr browser launcher (subprocess)', () => {
       cleanEnv({ MD_REDLINE_BROWSER: wantedStub, MDR_BROWSER: legacyStub }),
     );
     expect(code).toBe(0);
-    expect(await waitForFile(wanted, 5000)).toBe(true);
+    expect(await waitForMarker(wanted, 5000)).toBe(true);
     expect(existsSync(legacy)).toBe(false);
   }, 15_000);
 
@@ -172,7 +194,7 @@ describe('mdr browser launcher (subprocess)', () => {
       const url = 'http://127.0.0.1:65535/default-path';
       const code = await runCli(['__open', url], env);
       expect(code).toBe(0);
-      expect(await waitForFile(marker, 5000)).toBe(true);
+      expect(await waitForMarker(marker, 5000)).toBe(true);
       expect(readFileSync(marker, 'utf8')).toBe(url);
     },
     15_000,

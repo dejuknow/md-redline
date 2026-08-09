@@ -24,8 +24,12 @@ export function hashString(str: string): number {
   return Math.abs(hash);
 }
 
+// Author names reach this from comment markers in the file, so a hand-edited
+// or agent-written marker can hand it something that isn't a string. The
+// parser drops those, but this is a render path with no error boundary above
+// it: one bad value must not be able to blank the app.
 export function getAuthorColor(author: string) {
-  return AUTHOR_COLORS[hashString(author) % AUTHOR_COLORS.length];
+  return AUTHOR_COLORS[hashString(typeof author === 'string' ? author : '') % AUTHOR_COLORS.length];
 }
 
 export function useAuthor() {

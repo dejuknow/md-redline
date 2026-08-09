@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import {
   applyLoadedTabState,
   applyPendingTabState,
   findAccessDeniedTabs,
   isAccessDeniedError,
+  useTabs,
   type TabState,
 } from './useTabs';
 
@@ -345,5 +348,69 @@ describe('findAccessDeniedTabs', () => {
 
   it('returns an empty array for an empty map', () => {
     expect(findAccessDeniedTabs(new Map())).toEqual([]);
+  });
+});
+
+describe('useTabs: external content hooks', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(responses: Array<{ path?: string; content: string; mtime?: number }>) {
+    const queue = [...responses];
+    const fetchMock = vi.fn(async (url: string) => {
+      const next = queue.shift() ?? responses[responses.length - 1];
+      const path = next.path ?? decodeURIComponent(String(url).split('path=')[1] ?? '');
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ path, content: next.content, mtime: next.mtime ?? 1 }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('routes reloaded content through onExternalContent before storing it', async () => {
+    // Reload is the third way external content reaches a tab, and the one that
+    // catches up on a reply both watchers missed. Skipping the hook here is
+    // how the unread mark for that reply gets lost.
+    stubFetch([{ content: '# before\n' }, { content: '# after\n' }]);
+    const onExternalContent = vi.fn(() => '# after, stamped\n');
+    const { result } = renderHook(() => useTabs({ onExternalContent }));
+
+    await act(async () => {
+      await result.current.openTab('/notes.md');
+    });
+    await act(async () => {
+      await result.current.reloadFile();
+    });
+
+    expect(onExternalContent).toHaveBeenCalledWith('/notes.md', '# before\n', '# after\n', 1);
+    await waitFor(() => expect(result.current.rawMarkdown).toBe('# after, stamped\n'));
+  });
+
+  it('reports a server-resolved path so path-keyed state can move with the tab', async () => {
+    stubFetch([{ path: '/private/tmp/notes.md', content: '# loaded\n' }]);
+    const onPathResolved = vi.fn();
+    const { result } = renderHook(() => useTabs({ onPathResolved }));
+
+    await act(async () => {
+      await result.current.openTab('/tmp/notes.md');
+    });
+
+    expect(onPathResolved).toHaveBeenCalledWith('/tmp/notes.md', '/private/tmp/notes.md');
+  });
+
+  it('stays quiet when the path came back unchanged', async () => {
+    stubFetch([{ content: '# loaded\n' }]);
+    const onPathResolved = vi.fn();
+    const { result } = renderHook(() => useTabs({ onPathResolved }));
+
+    await act(async () => {
+      await result.current.openTab('/notes.md');
+    });
+
+    expect(onPathResolved).not.toHaveBeenCalled();
   });
 });

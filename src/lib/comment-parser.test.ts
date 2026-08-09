@@ -81,6 +81,27 @@ describe('parseComments', () => {
     expect(result.cleanMarkdown).toBe('Some text');
   });
 
+  it('drops replies missing the fields every render path assumes', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A hand-edit or a confused agent can leave a reply with no author. It
+    // used to reach getAuthorColor, which hashes it, and take down the app.
+    const raw =
+      '<!-- @comment{"id":"c1","anchor":"hello","text":"why?","author":"Dennis","timestamp":"2024-01-01T00:00:00.000Z","replies":[{"id":"r1","text":"no author here"},{"id":"r2","text":"fine","author":"Claude","timestamp":"2024-01-01T00:00:00.000Z"}]} -->hello';
+    const result = parseComments(raw);
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0].replies?.map((r) => r.id)).toEqual(['r2']);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('keeps a comment whose replies are all well-formed untouched', () => {
+    const replies = [
+      { id: 'r1', text: 'a', author: 'Claude', timestamp: '2024-01-01T00:00:00.000Z' },
+    ];
+    const result = parseComments(`${marker({ id: 'c1', anchor: 'hello', replies })}hello`);
+    expect(result.comments[0].replies).toEqual(replies);
+  });
+
   it('ignores placeholder markers inside inline code spans', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const raw = 'Docs: `<!-- @comment{...} -->` explains the format.';

@@ -608,9 +608,29 @@ the sendable-only map. Inline code in prose renders neutral (`--theme-text`
 on `--theme-bg-inset`), never the crimson accent:
 
 - **Anchored** (default): cards align to their document anchors. Cards are
-  compact by default (anchor text, comment preview, reply count); the active
+  compact by default (anchor text, comment preview, reply summary); the active
   card (selected by clicking its highlight or the card itself) expands to the
-  full thread view with all actions, including Reply. A connector line runs
+  full thread view with all actions, including Reply. A compact card's replies
+  collapse to a clickable disclosure line naming who replied ("2 replies from
+  Claude and Dennis", `data-testid="reply-summary"`); clicking it activates the
+  card, which is what expands the thread. Replies that arrived from outside the
+  app since the reader last opened that card are tracked per file path by
+  `useUnreadReplies` (session-only, never persisted) and fed in as
+  `unreadReplyIds`; when a card has any, the line counts and attributes only
+  those, reading "1 new reply from Claude" in the accent color with
+  `data-unread="true"`. The line names at most two authors and counts the rest
+  ("3 replies from Claude, Dennis +1"); the author dots come from the same cap,
+  so every dot belongs to a name on the line. All three paths that take content
+  from disk mark arriving replies, through `applyExternalContent` in App: the
+  active tab's `onExternalChange`, the multiplexed background-tab SSE handler
+  (the case that matters most, since no toast fires there), and an explicit
+  reload. None of them mark anything while a tab's first fetch is still in
+  flight, since with no prior content to diff against the file's whole reply
+  history would look new. Activating a comment marks its replies read, in
+  either density. Only anchored density surfaces the unread state, because
+  it is the only one that hides reply text; List density renders every reply
+  in full but does not clear the marks by itself, so a reply read there stays
+  marked until the reader opens that comment. A connector line runs
   from the anchor to the active (or hovered) card along the rail's left edge.
   Cards never overlap: they resolve top-down by anchor position, and the
   active card gets priority to sit at its anchor, compressing cards above it

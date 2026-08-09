@@ -237,16 +237,30 @@ describe('CommentsRail', () => {
       expect(orphan.style.top).toBe('0px');
     });
 
-    it('inactive cards are compact: replies collapse to a count line', async () => {
+    it('inactive cards are compact: replies collapse to a summary line', async () => {
       renderRail();
-      expect(await screen.findByText('1 reply')).toBeTruthy();
+      expect(await screen.findByText('1 reply from Dennis')).toBeTruthy();
       expect(screen.queryByText('A reply')).toBeNull();
     });
 
     it('the active card is not compact: replies render fully', async () => {
       renderRail({ activeCommentId: 'c2' });
       expect(await screen.findByText('A reply')).toBeTruthy();
-      expect(screen.queryByText('1 reply')).toBeNull();
+      expect(screen.queryByTestId('reply-summary')).toBeNull();
+    });
+
+    it('clicking the collapsed summary activates the card that owns it', async () => {
+      const onActivate = vi.fn();
+      renderRail({ onActivate });
+      fireEvent.click(await screen.findByTestId('reply-summary'));
+      expect(onActivate).toHaveBeenCalledWith('c2');
+    });
+
+    it('forwards unread reply IDs so the summary marks them new', async () => {
+      renderRail({ unreadReplyIds: new Set(['r1']) });
+      const summary = await screen.findByTestId('reply-summary');
+      expect(summary.textContent).toContain('1 new reply from Dennis');
+      expect(summary.getAttribute('data-unread')).toBe('true');
     });
 
     it('clicking a card activates the comment', async () => {

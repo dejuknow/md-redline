@@ -13,6 +13,7 @@ import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
+import { useUnreadReplies } from './hooks/useUnreadReplies';
 import { usePageVisible } from './hooks/usePageVisible';
 import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
@@ -93,6 +94,9 @@ import { headingChain } from './lib/heading-chain';
 import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 
+/** Shared empty result for the "no replies arrived" case. */
+const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
+
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
@@ -112,6 +116,23 @@ export default function App() {
   const showToastRef = useRef<ShowToast | null>(null);
   const onSaveError = useCallback(
     (msg: string) => showToastRef.current?.(`Save failed: ${msg}`, 'error'),
+    [],
+  );
+
+  // useTabs runs before the reply-tracking state below it exists, so the two
+  // hooks it needs are handed over through refs assigned later in this render.
+  const applyExternalContentRef = useRef<
+    ((path: string, priorContent: string, content: string, mtime?: number) => string) | null
+  >(null);
+  const migrateUnreadPathRef = useRef<((fromPath: string, toPath: string) => void) | null>(null);
+  const onReloadedContent = useCallback(
+    (path: string, priorContent: string, content: string, mtime?: number) =>
+      applyExternalContentRef.current?.(path, priorContent, content, mtime) ?? content,
+    [],
+  );
+  const onPathResolved = useCallback(
+    (requestedPath: string, loadedPath: string) =>
+      migrateUnreadPathRef.current?.(requestedPath, loadedPath),
     [],
   );
   const {
@@ -136,7 +157,7 @@ export default function App() {
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,
-  } = useTabs({ onSaveError });
+  } = useTabs({ onSaveError, onExternalContent: onReloadedContent, onPathResolved });
 
   // Dirty-tab close guard: when closing tabs that have unsaved changes
   // (e.g. save failed), show a confirmation dialog before discarding.
@@ -1324,20 +1345,39 @@ export default function App() {
     }
   }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId]);
 
-  // Override agent-supplied reply timestamps with the file's mtime. LLM agents
-  // can't reliably know "now," so without this they hallucinate timestamps
-  // that look like reasonable ISO-8601 strings but are hours stale. Returns
-  // the corrected content (or the original if no override was needed).
-  const correctReplyTimestamps = useCallback(
-    (oldContent: string, newContent: string, mtime: number | undefined): string => {
+  // IDs of the replies present in newContent but not in oldContent. Kept
+  // separate from the two things done with them (marking unread, stamping a
+  // timestamp) so a caller that has already parsed both sides can pass its own
+  // result in rather than paying for the parse twice.
+  const findArrivingReplies = useCallback(
+    (oldContent: string, newContent: string): ReadonlySet<string> => {
       try {
         const { comments: oldComments } = parseComments(oldContent);
         const { comments: newComments } = parseComments(newContent);
-        const newReplyIds = findNewReplyIds(oldComments, newComments);
-        if (newReplyIds.size === 0) return newContent;
+        return findNewReplyIds(oldComments, newComments);
+      } catch {
+        return NO_REPLY_IDS;
+      }
+    },
+    [],
+  );
+
+  // Override agent-supplied reply timestamps with the file's mtime. LLM agents
+  // can't reliably know "now," so without this they hallucinate timestamps
+  // that look like reasonable ISO-8601 strings but are hours stale. Only the
+  // replies that just arrived are stamped; the rest keep whatever the file
+  // says, which is why an unknown prior state must never reach this.
+  const correctReplyTimestamps = useCallback(
+    (
+      newContent: string,
+      arrivingReplyIds: ReadonlySet<string>,
+      mtime: number | undefined,
+    ): string => {
+      if (arrivingReplyIds.size === 0) return newContent;
+      try {
         const fallbackIso =
           mtime != null ? new Date(mtime).toISOString() : new Date().toISOString();
-        return backfillReplyTimestamps(newContent, newReplyIds, fallbackIso);
+        return backfillReplyTimestamps(newContent, arrivingReplyIds, fallbackIso);
       } catch {
         return newContent;
       }
@@ -1345,15 +1385,104 @@ export default function App() {
     [],
   );
 
+  // Replies an agent added while the reader was elsewhere. Anchored cards
+  // collapse a reply to a one-line summary, so without this the thing the
+  // reader handed off for looks identical to a thread they already read.
+  const { unreadByPath, markRepliesUnread, markRepliesRead, migrateUnreadPath } =
+    useUnreadReplies();
+  migrateUnreadPathRef.current = migrateUnreadPath;
+
+  /**
+   * Everything that has to happen to content arriving from disk before it can
+   * land in a tab: work out which replies are new, mark them unread against
+   * that file, and stamp them with a real timestamp. Three paths take external
+   * content (the active tab's watcher, the multiplexed background watcher, and
+   * an explicit reload) and all three need the full sequence, so it lives here
+   * once instead of being remembered at each call site.
+   *
+   * `priorLoaded` is the guard that matters: a tab whose first fetch hasn't
+   * landed has no prior content to diff against, which would make the file's
+   * entire reply history look like it just arrived. That is not only a wrong
+   * unread badge, it would restamp every historical reply with the mtime and
+   * then save that over the file.
+   */
+  const applyExternalContent = useCallback(
+    (
+      path: string,
+      priorContent: string,
+      content: string,
+      mtime: number | undefined,
+      opts: { priorLoaded: boolean; arrivingReplyIds?: ReadonlySet<string> },
+    ): { content: string; arrivingReplyIds: ReadonlySet<string> } => {
+      if (!opts.priorLoaded) return { content, arrivingReplyIds: NO_REPLY_IDS };
+      const arrivingReplyIds = opts.arrivingReplyIds ?? findArrivingReplies(priorContent, content);
+      markRepliesUnread(path, arrivingReplyIds);
+      return {
+        content: correctReplyTimestamps(content, arrivingReplyIds, mtime),
+        arrivingReplyIds,
+      };
+    },
+    [correctReplyTimestamps, findArrivingReplies, markRepliesUnread],
+  );
+
+  // Reload fetches on its own inside useTabs, so it reaches the sequence above
+  // through this ref rather than by threading the callback down. Prior content
+  // of "" means the tab never loaded, so there is nothing to diff against.
+  applyExternalContentRef.current = (path, priorContent, content, mtime) =>
+    applyExternalContent(path, priorContent, content, mtime, {
+      priorLoaded: priorContent.length > 0,
+    }).content;
+
+  const unreadReplyIds = useMemo(
+    () => new Set(activeFilePath ? (unreadByPath[activeFilePath] ?? []) : []),
+    [unreadByPath, activeFilePath],
+  );
+
+  // Opening a comment is what counts as reading it, in either density. In
+  // anchored density that is also what puts the reply text on screen, since
+  // activating a card is exactly what drops it out of compact rendering. List
+  // density renders every reply in full regardless, and shows no unread
+  // treatment at all, so a reply read there stays marked until the reader
+  // opens the comment. markRepliesRead returns the previous state when nothing
+  // changes, so re-running this on every reparse is free.
+  useEffect(() => {
+    if (!activeFilePath || !activeCommentId) return;
+    const active = comments.find((c) => c.id === activeCommentId);
+    if (!active?.replies?.length) return;
+    markRepliesRead(
+      activeFilePath,
+      active.replies.map((reply) => reply.id),
+    );
+  }, [activeCommentId, activeFilePath, comments, markRepliesRead]);
+
   // File watcher — live reload from server SSE (Feature 8: detect status transitions)
   const onExternalChange = useCallback(
-    (content: string, mtime?: number) => {
+    (content: string, mtime: number | undefined, path: string) => {
+      // The event names the file it was raised for, which is not necessarily
+      // the active tab by the time it lands: the callback is re-pointed on
+      // every render while the EventSource is only closed in an effect
+      // cleanup, so an event queued before a tab switch runs after it.
+      // Everything keyed by path uses the event's path; only what the reader
+      // is looking at (toast, diff hint, the active tab's content ref) is
+      // gated on this still being the active tab.
+      const isActiveTab = path === activeFilePath;
+      const snapshot = getTabSnapshot(path);
+      if (!isActiveTab && !snapshot) return;
+      // Once the event turns out to belong to a tab the reader has moved off,
+      // it gets the background handler's rules: never overwrite unsaved local
+      // edits, in memory or (via the debounced save below) on disk.
+      if (!isActiveTab && snapshot?.dirty === true) return;
+      // The active tab's live content lives in the ref, which is ahead of the
+      // snapshot; a background tab has only its snapshot. Either way, content
+      // that hasn't loaded yet is not a baseline to diff against.
+      const priorContent = isActiveTab ? rawMarkdownRef.current : (snapshot?.rawMarkdown ?? '');
+      const priorLoaded = snapshot ? !snapshot.isLoading : priorContent.length > 0;
+
       // Detect comment changes before updating so we can show toast/diff hints.
       let cleanContentChanged = false;
+      let arrivingReplyIds: ReadonlySet<string> = NO_REPLY_IDS;
       try {
-        const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(
-          rawMarkdownRef.current,
-        );
+        const { comments: oldComments, cleanMarkdown: oldClean } = parseComments(priorContent);
         const { comments: newComments, cleanMarkdown: newClean } = parseComments(content);
         cleanContentChanged = oldClean !== newClean;
         const newById = new Map(newComments.map((c) => [c.id, c]));
@@ -1374,53 +1503,63 @@ export default function App() {
             }
           }
         }
-        const newReplyCount = findNewReplyIds(oldComments, newComments).size;
+        // Computed once and handed to applyExternalContent below, which would
+        // otherwise re-parse both sides of the same comparison.
+        arrivingReplyIds = priorLoaded ? findNewReplyIds(oldComments, newComments) : NO_REPLY_IDS;
 
-        // Accumulate across rapid events so the toast coalesces
-        accResolvedRef.current += resolvedCount;
-        accDeletedRef.current += deletedCount;
-        accRepliesRef.current += newReplyCount;
+        // No toast for a file the reader isn't looking at, and none for a tab
+        // whose content hasn't loaded yet, where every count would be the
+        // file's whole history rather than what just changed.
+        if (isActiveTab && priorLoaded) {
+          // Accumulate across rapid events so the toast coalesces
+          accResolvedRef.current += resolvedCount;
+          accDeletedRef.current += deletedCount;
+          accRepliesRef.current += arrivingReplyIds.size;
 
-        const r = accResolvedRef.current;
-        const d = accDeletedRef.current;
-        const rp = accRepliesRef.current;
-        if (r > 0 || d > 0 || rp > 0) {
-          const parts: string[] = [];
-          if (r > 0) parts.push(`${r} resolved`);
-          if (d > 0) parts.push(`${d} addressed`);
-          if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
-          const diffAction =
-            cleanContentChanged && currentSnapshotRef.current
-              ? {
-                  label: 'View diff',
-                  // Stay in whatever view the user is in — diff overlay
-                  // works in both raw and rendered now.
-                  onClick: () => {
-                    setDiffEnabled(true);
-                    setDiffPending(false);
-                  },
-                }
-              : undefined;
-          showToast(`${parts.join(', ')} externally`, 'info', diffAction);
+          const r = accResolvedRef.current;
+          const d = accDeletedRef.current;
+          const rp = accRepliesRef.current;
+          if (r > 0 || d > 0 || rp > 0) {
+            const parts: string[] = [];
+            if (r > 0) parts.push(`${r} resolved`);
+            if (d > 0) parts.push(`${d} addressed`);
+            if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
+            const diffAction =
+              cleanContentChanged && currentSnapshotRef.current
+                ? {
+                    label: 'View diff',
+                    // Stay in whatever view the user is in — diff overlay
+                    // works in both raw and rendered now.
+                    onClick: () => {
+                      setDiffEnabled(true);
+                      setDiffPending(false);
+                    },
+                  }
+                : undefined;
+            showToast(`${parts.join(', ')} externally`, 'info', diffAction);
+          }
         }
       } catch {
         // Ignore parse errors — still update the content
       }
 
-      const nextContent = correctReplyTimestamps(rawMarkdownRef.current, content, mtime);
+      const { content: nextContent } = applyExternalContent(path, priorContent, content, mtime, {
+        priorLoaded,
+        arrivingReplyIds,
+      });
 
       // Update content directly via updateTab (NOT setRawMarkdown which marks
       // dirty:true). External changes already match disk, so dirty must be false.
       // Also synchronously update rawMarkdownRef so back-to-back user edits
       // (e.g. add-comment right after SSE) read the latest content, not stale state.
-      rawMarkdownRef.current = nextContent;
-      if (activeFilePath) {
-        updateTab(activeFilePath, {
-          rawMarkdown: nextContent,
-          ...(mtime != null ? { mtime } : {}),
-          dirty: false,
-        });
+      if (isActiveTab) {
+        rawMarkdownRef.current = nextContent;
       }
+      updateTab(path, {
+        rawMarkdown: nextContent,
+        ...(mtime != null ? { mtime } : {}),
+        dirty: false,
+      });
 
       // Persist the corrected timestamps back to disk so reloads see the right
       // values. Debounced to avoid a write-watch-write bounce when an agent
@@ -1433,9 +1572,9 @@ export default function App() {
       // a "Save failed" toast on 409 CONFLICT. Since the agent modifies the
       // file between the SSE event and the debounced save, 409s are expected
       // and benign — the next SSE event will re-trigger the backfill.
-      if (nextContent !== content && activeFilePath) {
+      if (nextContent !== content) {
         if (backfillTimerRef.current) clearTimeout(backfillTimerRef.current);
-        const pathToSave = activeFilePath;
+        const pathToSave = path;
         const contentToSave = nextContent;
         const mtimeToSave = mtime;
         backfillTimerRef.current = setTimeout(async () => {
@@ -1475,7 +1614,8 @@ export default function App() {
     },
     [
       activeFilePath,
-      correctReplyTimestamps,
+      applyExternalContent,
+      getTabSnapshot,
       setDiffEnabled,
       settings.enableResolve,
       showToast,
@@ -1518,11 +1658,19 @@ export default function App() {
         // saveFileAt below). They should resolve the conflict by switching
         // to the tab and reloading explicitly.
         if (snapshot?.dirty === true) return;
-        // Backfill agent-supplied reply timestamps the same way the active-tab
-        // handler does, so background files don't show stale times when the
-        // user switches to them. No toast — background tabs aren't visible.
-        const oldContent = snapshot?.rawMarkdown ?? '';
-        const nextContent = correctReplyTimestamps(oldContent, content, mtime);
+        if (!snapshot) return;
+        // Same sequence the active-tab handler runs (stamp the arriving
+        // replies, mark them unread), minus the toast, since background tabs
+        // aren't visible. The background case is the one that matters most: a
+        // handoff answered on a tab the reader isn't looking at, where the
+        // unread mark is the only thing that survives until they switch to it.
+        const { content: nextContent } = applyExternalContent(
+          path,
+          snapshot.rawMarkdown,
+          content,
+          mtime,
+          { priorLoaded: !snapshot.isLoading },
+        );
         updateTab(path, {
           rawMarkdown: nextContent,
           ...(mtime != null ? { mtime } : {}),
@@ -1537,8 +1685,8 @@ export default function App() {
 
     return () => es.close();
   }, [
+    applyExternalContent,
     backgroundPathsKey,
-    correctReplyTimestamps,
     getTabSnapshot,
     pageVisible,
     saveFileAt,
@@ -1564,7 +1712,7 @@ export default function App() {
         .then((data: { content?: string; mtime?: number } | null) => {
           if (!data?.content) return;
           if (data.content !== rawMarkdownRef.current) {
-            onExternalChangeRef.current(data.content, data.mtime);
+            onExternalChangeRef.current(data.content, data.mtime, activeFilePath);
           }
         })
         .catch((err) => {
@@ -2939,6 +3087,7 @@ export default function App() {
                             requestedEditor={requestedEditor}
                             requestedFocus={requestedCommentFocus}
                             onFocusHandled={() => setRequestedCommentFocus(null)}
+                            unreadReplyIds={unreadReplyIds}
                           />
                         )}
                         {popoverCommentId &&

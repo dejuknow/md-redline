@@ -191,6 +191,37 @@ function getStandaloneStripEnd(
   return isStartOfLine && rawMarkdown[markerEnd] === '\n' ? markerEnd + 1 : markerEnd;
 }
 
+/**
+ * Replies come from whatever wrote the file, so a hand-edit or a confused
+ * agent can leave one with no author or text. Every render path assumes those
+ * are strings (author colors hash them, bylines print them), so drop the
+ * malformed ones at the parse boundary instead of letting one bad reply take
+ * down a card. Warns for the same reason a malformed marker does: the loss
+ * should be visible. A dropped reply survives in the file until something
+ * rewrites that marker, at which point it is gone for good.
+ */
+function validReplies(replies: unknown[], commentId: string): CommentReply[] {
+  const kept: CommentReply[] = [];
+  for (const reply of replies) {
+    const candidate = reply as CommentReply | null;
+    if (
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      typeof candidate.id === 'string' &&
+      typeof candidate.text === 'string' &&
+      typeof candidate.author === 'string'
+    ) {
+      kept.push(candidate);
+    } else {
+      console.warn(
+        `[comment-parser] dropping malformed reply on comment ${commentId}; id, text and author must all be strings`,
+        reply,
+      );
+    }
+  }
+  return kept;
+}
+
 function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
   const fencedRanges = getCodeBlockRanges(rawMarkdown);
   const inlineRanges = getInlineCodeRanges(rawMarkdown, fencedRanges);
@@ -212,7 +243,9 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
         typeof data.author === 'string' &&
         (!data.replies || Array.isArray(data.replies))
       ) {
-        parsedComment = data;
+        parsedComment = data.replies
+          ? { ...data, replies: validReplies(data.replies, data.id) }
+          : data;
       }
     } catch (err) {
       // Inside inline code, a literal `{...}` placeholder is documentation
