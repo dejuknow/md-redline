@@ -11,7 +11,7 @@
  * Types live in `fs-atomic.d.ts`.
  */
 
-import { open, readFile, rename, unlink } from 'fs/promises';
+import { chmod, open, readFile, rename, stat, unlink } from 'fs/promises';
 import { randomBytes } from 'crypto';
 
 // Windows bounces filesystem calls with these codes while another handle is
@@ -30,30 +30,46 @@ export const FS_RETRY_BASE_MS = 10;
 export const FS_RETRY_BUDGET_MS =
   ((FS_MAX_ATTEMPTS * (FS_MAX_ATTEMPTS - 1)) / 2) * FS_RETRY_BASE_MS;
 
-const TRANSIENT_FS_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+/**
+ * Contention, on every platform. A handle is open on the path right now and
+ * will not be shortly: a scanner or indexer on Windows, and on POSIX the
+ * network and cloud-sync filesystems md-redline documents actually live on
+ * (SMB, NFS, and the FUSE and FileProvider mounts behind Dropbox, Google Drive
+ * and iCloud), which return it while the provider holds or hydrates a file.
+ */
+const CONTENTION_FS_CODES = new Set(['EBUSY']);
 
 /**
- * Windows is the only platform where these codes mean "try again". POSIX
- * reports the same three for conditions that are permanent by construction: an
- * unwritable directory, a sticky bit, a macOS `uchg` flag, a denied
- * Files-and-Folders grant. There, every attempt fails identically, so the loop
- * buys nothing and costs the caller its full budget before surfacing the error
- * the user actually needs to see. Reproduced on Darwin against a locked
- * document, on the app's highest-frequency write path.
+ * Contention on Windows, permission on POSIX. Windows AV and sync clients
+ * bounce calls with these while they hold a handle, so retrying clears them.
+ * POSIX reports the same two only for conditions that are permanent by
+ * construction: an unwritable directory, a sticky bit, a macOS `uchg` flag, a
+ * denied Files-and-Folders grant. There, every attempt fails identically and
+ * the loop only delays the error the user needs to see. Reproduced on Darwin
+ * against a `uchg` document, on the app's highest-frequency write path.
  *
- * Read per call rather than captured at module load, so the tests can exercise
- * both sides on whichever platform they run.
+ * Gating by errno rather than by platform matters: a blanket win32 check would
+ * also stop retrying EBUSY above, which is genuinely transient everywhere.
  */
-function platformRetriesTransientCodes() {
-  return process.platform === 'win32';
-}
+const WINDOWS_ONLY_TRANSIENT_FS_CODES = new Set(['EPERM', 'EACCES']);
 
+/**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
 export function isTransientFsError(err) {
-  if (!platformRetriesTransientCodes()) return false;
-  const code = err?.code;
-  return !!code && TRANSIENT_FS_CODES.has(code);
+  const code = /** @type {NodeJS.ErrnoException} */ (err)?.code;
+  if (!code) return false;
+  if (CONTENTION_FS_CODES.has(code)) return true;
+  // Read per call rather than captured at module load, so the tests can
+  // exercise both sides on whichever platform they run.
+  return process.platform === 'win32' && WINDOWS_ONLY_TRANSIENT_FS_CODES.has(code);
 }
 
+/**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
 export function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
@@ -61,7 +77,11 @@ export function sleep(ms) {
 /**
  * Run a filesystem call, retrying the transient failures above. Every other
  * code (EXDEV, ENOSPC, ENOENT) is a real failure and rethrows on the first
- * attempt, as does everything off Windows (see isTransientFsError).
+ * attempt, as do EPERM and EACCES off Windows (see isTransientFsError).
+ *
+ * @template T
+ * @param {() => Promise<T>} op
+ * @returns {Promise<T>}
  */
 export async function retryTransient(op) {
   let lastErr;
@@ -82,6 +102,10 @@ export async function retryTransient(op) {
  * preferences before the event loop is doing anything else. Atomics.wait is
  * the only way to sleep without yielding; blocking for at most 100ms once at
  * boot beats losing the user's trusted roots to a scanner.
+ *
+ * @template T
+ * @param {() => T} op
+ * @returns {T}
  */
 export function retryTransientSync(op) {
   let lastErr;
@@ -107,9 +131,19 @@ export function retryTransientSync(op) {
  *
  * Both the create and the rename are retried, because both are calls Windows
  * bounces: the create because AV hooks file creation, the rename because it
- * touches the destination the user just had open. On any failure the temp file
- * is removed rather than left in the user's folder, where it would show up in
- * Explorer and in `git status`.
+ * touches the destination the user just had open.
+ *
+ * On any failure the temp file is removed, so it does not sit in the user's
+ * folder showing up in Explorer and in `git status`. That cleanup is single
+ * attempt and its own errors are swallowed, which means the same interference
+ * that failed the save can also leave the `.tmp` behind: a deliberate trade,
+ * since the worst case is one stray file and the alternative is more machinery
+ * on the path where something is already going wrong. It is the one syscall
+ * here that is neither retried nor reported.
+ *
+ * @param {string} tmpPath
+ * @param {string} content
+ * @returns {Promise<void>}
  */
 async function writeTempFile(tmpPath, content) {
   // Creating the temp file is bounceable for the same reason the rename is:
@@ -144,6 +178,12 @@ async function writeTempFile(tmpPath, content) {
   if (failure) throw failure;
 }
 
+/**
+ * @param {string} tmpPath
+ * @param {string} path
+ * @param {string} content
+ * @returns {Promise<void>}
+ */
 async function renameIntoPlace(tmpPath, path, content) {
   let attempted = false;
   await retryTransient(async () => {
@@ -165,10 +205,43 @@ async function renameIntoPlace(tmpPath, path, content) {
   });
 }
 
+/**
+ * Carry the destination's permission bits over to the replacement.
+ *
+ * A temp file is created at the default 0600-and-umask, so without this a
+ * rename silently RELAXES the mode of anything the user or another tool had
+ * tightened: a 0600 file comes back 0644. That matters most for the file this
+ * module does not own, Claude Desktop's MCP config, because it holds every
+ * other server's `env` block and those routinely carry API tokens.
+ *
+ * Best effort in both directions. No destination yet (the ordinary create) and
+ * there is nothing to copy; a chmod that fails leaves the default, which is
+ * never more permissive than what a fresh file would have got anyway, and is
+ * not worth failing an otherwise good save over.
+ *
+ * @param {string} tmpPath
+ * @param {string} path
+ * @returns {Promise<void>}
+ */
+async function inheritMode(tmpPath, path) {
+  try {
+    const existing = await stat(path);
+    await chmod(tmpPath, existing.mode & 0o7777);
+  } catch {
+    /* no destination, or a filesystem without modes (Windows) */
+  }
+}
+
+/**
+ * @param {string} path
+ * @param {string} content
+ * @returns {Promise<void>}
+ */
 export async function atomicWriteFile(path, content) {
   const tmpPath = `${path}.${randomBytes(6).toString('hex')}.tmp`;
   try {
     await writeTempFile(tmpPath, content);
+    await inheritMode(tmpPath, path);
     await renameIntoPlace(tmpPath, path, content);
   } catch (err) {
     await unlink(tmpPath).catch(() => {});

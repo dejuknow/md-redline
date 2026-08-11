@@ -437,13 +437,21 @@ describe('corrupted prefs quarantine', () => {
     const logs = captureErrors();
     try {
       await writePreferences(testDir, { author: 'Alice' });
+      // Corrupt it again so the SECOND write re-enters the quarantine path
+      // with the rename still failing. Without this the file is valid JSON by
+      // then and the second write never reaches the branch under test, so the
+      // case would pass whether or not a failed quarantine wedges anything.
+      await writeFile(join(testDir, '.md-redline.json'), '{ broken again');
       fault.rename.failuresLeft = Number.MAX_SAFE_INTEGER;
       await writePreferences(testDir, { theme: 'dark' });
     } finally {
       logs.restore();
     }
 
-    expect(await readPreferences(testDir)).toEqual({ author: 'Alice', theme: 'dark' });
+    // The second write started from a quarantine that failed, so it merges
+    // onto {} rather than onto the earlier author.
+    expect(await readPreferences(testDir)).toEqual({ theme: 'dark' });
+    expect(logs.messages.filter((m) => m.includes('could not be moved to'))).toHaveLength(2);
   });
 
   it('does not quarantine a healthy prefs file', async () => {

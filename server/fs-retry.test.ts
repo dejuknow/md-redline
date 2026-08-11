@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, writeFile, readFile, readdir } from 'fs/promises';
+import { chmod, mkdtemp, rm, stat, writeFile, readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -305,6 +305,20 @@ describe('atomicWriteFile', () => {
     expect(await readFile(docPath, 'utf-8')).toBe('old\n');
   });
 
+  it('keeps the permissions the destination already had', async () => {
+    // A temp file is created at 0600-and-umask, so without carrying the mode
+    // over, the rename RELAXES anything the user or another tool tightened.
+    // Claude Desktop's MCP config is the file that makes this matter: it holds
+    // every other server's env block, and those carry API tokens.
+    await writeFile(docPath, 'old\n', { mode: 0o600 });
+    await chmod(docPath, 0o600);
+
+    await atomicWriteFile(docPath, 'new\n');
+
+    expect((await stat(docPath)).mode & 0o777).toBe(0o600);
+    expect(await readFile(docPath, 'utf-8')).toBe('new\n');
+  });
+
   it('does not retry a permanent rename failure', async () => {
     fault.rename.failuresLeft = 1;
     fault.rename.code = 'EXDEV';
@@ -315,14 +329,23 @@ describe('atomicWriteFile', () => {
 });
 
 describe('off Windows', () => {
-  // EPERM/EACCES/EBUSY are permanent on POSIX (an unwritable directory, a
-  // sticky bit, a macOS uchg flag, a denied Files-and-Folders grant), so the
-  // budget would be spent waiting for something that cannot clear.
+  // The gate is per-errno, not per-platform, and the split is the whole point:
+  // EPERM/EACCES on POSIX mean a permanent permission condition (an unwritable
+  // directory, a sticky bit, a macOS uchg flag, a denied Files-and-Folders
+  // grant) where the budget buys nothing, while EBUSY means contention on
+  // every platform and is what SMB, NFS and the FUSE/FileProvider mounts
+  // behind Dropbox, Google Drive and iCloud return while they hold a file.
   beforeEach(() => setPlatform('darwin'));
   afterEach(() => setPlatform('win32'));
 
-  it.each(['EPERM', 'EACCES', 'EBUSY'])('treats %s as permanent', (code) => {
+  it.each(['EPERM', 'EACCES'])('treats %s as permanent', (code) => {
     expect(isTransientFsError(faultError(code, 'x'))).toBe(false);
+  });
+
+  it('still treats EBUSY as contention, because on POSIX it is', () => {
+    // Gating this to win32 as well would strand every save onto a cloud-sync
+    // or network volume, which is where these documents actually live.
+    expect(isTransientFsError(faultError('EBUSY', 'x'))).toBe(true);
   });
 
   it('fails a bounced call on the first attempt instead of burning the budget', async () => {
@@ -345,10 +368,23 @@ describe('off Windows', () => {
     expect(() =>
       retryTransientSync(() => {
         calls += 1;
-        throw faultError('EBUSY', 'locked');
+        throw faultError('EACCES', 'denied');
       }),
-    ).toThrow(/EBUSY/);
+    ).toThrow(/EACCES/);
     expect(calls).toBe(1);
+  });
+
+  it('rides out a contended save on a network or cloud volume', async () => {
+    // The regression this guards: a blanket win32 gate made this save fail on
+    // the first bounce, losing a comment the user had just written.
+    await writeFile(docPath, 'old\n');
+    fault.rename.failuresLeft = 3;
+    fault.rename.code = 'EBUSY';
+
+    await atomicWriteFile(docPath, 'new\n');
+
+    expect(await readFile(docPath, 'utf-8')).toBe('new\n');
+    expect(fault.rename.attempts).toBe(4);
   });
 
   it('surfaces a bounced save immediately, with the destination intact', async () => {

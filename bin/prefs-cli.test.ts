@@ -30,17 +30,25 @@ interface CliResult {
   stderr: string;
 }
 
-function runCli(args: string[], home: string): Promise<CliResult> {
+function runCli(
+  args: string[],
+  home: string,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<CliResult> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
       env: {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
+        // Inherited from the developer's shell this would move the prefs file
+        // out of the scratch home for every test in the file.
+        MD_REDLINE_HOME: '',
         // getClaudeDesktopConfigPath reads APPDATA before falling back to the
         // home dir, so a real one on Windows would send the write outside the
         // scratch dir and into the developer's own Claude config.
         APPDATA: join(home, 'AppData', 'Roaming'),
+        ...extraEnv,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -112,25 +120,54 @@ describe('mdr --restrict', () => {
     expect(readdirSync(home).filter((e) => e.endsWith('.lock') || e.endsWith('.tmp'))).toEqual([]);
   });
 
-  it.skipIf(!canDenyRead)(
-    'refuses rather than guessing when the prefs file cannot be stat-ed',
-    async () => {
-      // An unreadable home is the case that used to fall into the "safe to
-      // write" branch and clobber trust settings the CLI could not see.
-      const home = makeHome();
-      writeFileSync(join(home, PREFS), JSON.stringify({ trustedRoots: ['/vault'] }));
-      chmodSync(home, 0o000);
+  it.skipIf(!canDenyRead)('refuses when the home directory is unwritable', async () => {
+    // Named for what it actually reaches. An unreadable home fails at the
+    // LOCK, one syscall before the stat guard, so this does not cover that
+    // guard and must not claim to: the run below never executes the
+    // non-ENOENT stat branch at all.
+    const home = makeHome();
+    writeFileSync(join(home, PREFS), JSON.stringify({ trustedRoots: ['/vault'] }));
+    chmodSync(home, 0o000);
 
-      const result = await runCli(['--restrict'], home);
+    const result = await runCli(['--restrict'], home);
 
-      chmodSync(home, 0o700);
-      expect(result.code).toBe(1);
-      expect(result.stderr).toContain('Refusing to write over a file');
-      expect(JSON.parse(readFileSync(join(home, PREFS), 'utf8'))).toEqual({
-        trustedRoots: ['/vault'],
-      });
-    },
-  );
+    chmodSync(home, 0o700);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/Could not lock/);
+    expect(JSON.parse(readFileSync(join(home, PREFS), 'utf8'))).toEqual({
+      trustedRoots: ['/vault'],
+    });
+  });
+
+  it('writes where the server reads, not where $HOME points', async () => {
+    // MD_REDLINE_HOME moves the prefs file for the server (resolveHomeDir).
+    // A CLI using bare homedir() locked and wrote a DIFFERENT file and still
+    // printed success, so the user believed trust was revoked when it was not,
+    // and the lock the two sides are supposed to share was taken on two paths.
+    const home = makeHome();
+    const prefsHome = makeHome();
+
+    const result = await runCli(['--restrict'], home, { MD_REDLINE_HOME: prefsHome });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(readFileSync(join(prefsHome, PREFS), 'utf8'))).toEqual({ trustedRoots: [] });
+    expect(existsSync(join(home, PREFS))).toBe(false);
+  });
+
+  it('refuses against the file MD_REDLINE_HOME points at', async () => {
+    // The guard has to follow the file too, or --restrict silently clobbers
+    // trust settings whenever that variable is set.
+    const home = makeHome();
+    const prefsHome = makeHome();
+    const saved = JSON.stringify({ trustedRoots: ['/vault'] });
+    writeFileSync(join(prefsHome, PREFS), saved);
+
+    const result = await runCli(['--restrict'], home, { MD_REDLINE_HOME: prefsHome });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('Refusing to overwrite');
+    expect(readFileSync(join(prefsHome, PREFS), 'utf8')).toBe(saved);
+  });
 
   it('gives up instead of racing a lock another process is holding', async () => {
     const home = makeHome();
@@ -148,24 +185,27 @@ describe('mdr --restrict', () => {
 });
 
 describe('mdr __first-launch', () => {
-  it('is a first launch when no prefs file exists', async () => {
+  it('discloses the home-trust seed when no prefs file exists', async () => {
     const home = makeHome();
 
-    expect((await runCli(['__first-launch'], home)).stdout.trim()).toBe('true');
+    expect((await runCli(['__first-launch'], home)).stdout.trim()).toBe('seeded');
   });
 
-  it('is not a first launch once trustedRoots has been recorded', async () => {
+  it('stays quiet once trustedRoots has been recorded', async () => {
     const home = makeHome();
     writeFileSync(join(home, PREFS), JSON.stringify({ trustedRoots: ['/vault'] }));
 
-    expect((await runCli(['__first-launch'], home)).stdout.trim()).toBe('false');
+    expect((await runCli(['__first-launch'], home)).stdout.trim()).toBe('configured');
   });
 
   it.skipIf(!canDenyRead)(
-    'is not a first launch when the prefs file exists but cannot be read',
+    'still discloses when the prefs file exists but cannot be read',
     async () => {
-      // Returning true here greets a user who has run mdr for months with the
-      // trust disclosure, on every single launch.
+      // The server's first-launch branch fires on `trustedRoots === undefined`
+      // and an unreadable file looks exactly like that, so it seeds home trust
+      // in memory for the session. Staying silent here hides that from a user
+      // who may have run --restrict specifically to prevent it. Greeting them
+      // as a newcomer would be wrong too, hence a state of its own.
       const home = makeHome();
       writeFileSync(join(home, PREFS), JSON.stringify({ trustedRoots: ['/vault'] }));
       chmodSync(join(home, PREFS), 0o000);
@@ -173,17 +213,17 @@ describe('mdr __first-launch', () => {
       const result = await runCli(['__first-launch'], home);
 
       chmodSync(join(home, PREFS), 0o600);
-      expect(result.stdout.trim()).toBe('false');
+      expect(result.stdout.trim()).toBe('unreadable');
     },
   );
 
-  it('is a first launch when the prefs file is unparseable', async () => {
+  it('discloses when the prefs file is unparseable', async () => {
     // The server quarantines it on boot and starts fresh with default trust,
     // so the disclosure is accurate.
     const home = makeHome();
     writeFileSync(join(home, PREFS), '{ not json');
 
-    expect((await runCli(['__first-launch'], home)).stdout.trim()).toBe('true');
+    expect((await runCli(['__first-launch'], home)).stdout.trim()).toBe('seeded');
   });
 });
 

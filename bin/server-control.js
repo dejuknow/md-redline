@@ -62,7 +62,7 @@ export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000 } =
     // Validate this is actually mdr's /api/config — other dev servers
     // (e.g. Next.js) return 200 with their SPA shell for unknown paths,
     // which would otherwise fool the port scan and hijack the browser open.
-    const data = await response.json();
+    const data = /** @type {Record<string, unknown> | null} */ (await response.json());
     return !!data && typeof data === 'object' && typeof data.homeDir === 'string';
   } catch {
     return false;

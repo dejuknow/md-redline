@@ -31,6 +31,27 @@ export const LOCK_MAX_WAIT_MS = 15 * FS_RETRY_BUDGET_MS;
 const LOCK_MAX_ATTEMPTS = Math.ceil(LOCK_MAX_WAIT_MS / LOCK_RETRY_BASE_MS);
 
 /**
+ * Thrown when the attempt budget runs out, as opposed to a filesystem error,
+ * which is rethrown with its errno intact. Callers word their advice from this
+ * distinction: waiting helps for contention and never helps for a permission
+ * problem, and an untyped throw made every permanent condition look like the
+ * former. `cause` carries the last errno seen, when there was one.
+ */
+export class LockContentionError extends Error {
+  /**
+   * @param {string} lockPath
+   * @param {unknown} [cause]
+   */
+  constructor(lockPath, cause) {
+    super(`Could not acquire lock at ${lockPath} after ${LOCK_MAX_WAIT_MS}ms`);
+    this.name = 'LockContentionError';
+    this.code = 'ELOCKBUSY';
+    this.lockPath = lockPath;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+/**
  * Acquire a cross-process lock on `filePath` before performing a
  * read-modify-write, and return the release closure. An in-process promise
  * chain only serializes within one Node process; two `mdr` invocations, or the
@@ -39,9 +60,15 @@ const LOCK_MAX_ATTEMPTS = Math.ceil(LOCK_MAX_WAIT_MS / LOCK_RETRY_BASE_MS);
  *
  * Implementation: O_EXCL sentinel file. If the lock is older than
  * LOCK_STALE_MS we treat it as abandoned (the holder crashed) and steal it.
+ *
+ * @param {string} filePath
+ * @returns {Promise<() => Promise<void>>} release closure
+ * @throws {LockContentionError} when the attempt budget runs out. Any other
+ *   throw is a filesystem error with its errno intact.
  */
 export async function acquireFileLock(filePath) {
   const lockPath = `${filePath}${LOCK_SUFFIX}`;
+  let lastErr;
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
     let fd;
     try {
@@ -49,6 +76,7 @@ export async function acquireFileLock(filePath) {
     } catch (err) {
       const code = err?.code;
       if (code !== 'EEXIST') {
+        lastErr = err;
         // The lock file is created and removed on every write, which makes it
         // the same scanner bait as the temp file. Back off on the transient
         // codes instead of failing the whole write.
@@ -57,18 +85,36 @@ export async function acquireFileLock(filePath) {
         continue;
       }
       // Lock exists. If it's stale (holder crashed), steal it.
+      let lockStat;
       try {
-        const lockStat = await stat(lockPath);
-        if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
-          try {
-            await unlink(lockPath);
-          } catch {
-            /* someone else just released it */
+        lockStat = await stat(lockPath);
+      } catch (statErr) {
+        // ENOENT means the lock vanished between the EEXIST and the stat, so
+        // the path is free right now and there is nothing to wait for.
+        if (statErr?.code === 'ENOENT') continue;
+        // Anything else is a condition that does NOT clear on its own at this
+        // speed: a dangling symlink at the lock path (open reports EEXIST
+        // while stat follows the link and fails), an unreadable directory, or
+        // a scanner bouncing the stat on Windows. Retrying with no delay burns
+        // the entire attempt budget in a couple of milliseconds and reports
+        // contention for something that is not contention.
+        lastErr = statErr;
+        await sleep(LOCK_RETRY_BASE_MS);
+        continue;
+      }
+      if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
+        try {
+          await unlink(lockPath);
+        } catch (unlinkErr) {
+          // ENOENT is the benign race: someone else released it first.
+          if (unlinkErr?.code !== 'ENOENT') {
+            // We cannot remove an abandoned lock, so the recovery path this
+            // branch exists for will not fire. Back off rather than spinning,
+            // and keep the errno so the caller can say what is actually wrong.
+            lastErr = unlinkErr;
+            await sleep(LOCK_RETRY_BASE_MS);
           }
-          continue;
         }
-      } catch {
-        // Lock vanished between EEXIST and stat — retry immediately.
         continue;
       }
       // Backoff with a small random jitter to avoid thundering herd.
@@ -114,5 +160,5 @@ export async function acquireFileLock(filePath) {
       }
     };
   }
-  throw new Error(`Could not acquire lock at ${lockPath}`);
+  throw new LockContentionError(lockPath, lastErr);
 }

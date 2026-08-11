@@ -47,11 +47,19 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
   transient-error retry both the document save paths and preferences write through. Windows
   bounces filesystem calls with EPERM/EACCES/EBUSY while a scanner or indexer holds a handle;
   every write of a user-visible file should go through `atomicWriteFile` rather than a bare rename.
-  The retry is gated to `win32`: POSIX reports those same codes for permanent conditions, where
-  the loop only delays the error. `server/fs-retry.ts` re-exports it for server-side importers
+  It also carries the destination's mode onto the replacement, so a save never relaxes 0600 to
+  0644. The retry gate is per-errno, NOT per-platform: EBUSY is contention everywhere (SMB, NFS,
+  and the FUSE/FileProvider mounts behind Dropbox, Google Drive and iCloud all return it), while
+  EPERM/EACCES are retried only on `win32`, because on POSIX they mean a permanent permission
+  condition. `server/fs-retry.ts` re-exports it for server-side importers
 - `bin/file-lock.js`: `acquireFileLock`, the O_EXCL cross-process lock every writer of
   `.md-redline.json` takes around a read-modify-write. Shared so `mdr --restrict` and the server
-  cannot interleave; its attempt budget derives from `FS_RETRY_BUDGET_MS`
+  cannot interleave; its attempt budget derives from `FS_RETRY_BUDGET_MS`. Exhausting that budget
+  throws `LockContentionError`; any other throw is a filesystem error with its errno intact, and
+  callers word their advice from that difference
+- `bin/home-dir.js`: `resolveHomeDir` (`MD_REDLINE_HOME` or the OS home), which decides where
+  `.md-redline.json` lives. Shared because a CLI resolving it differently from the server locks
+  and writes a file the server never reads
 - `bin/version-compare.js`: strict x.y.z version compare shared by the server's update checker and the CLI
 - `src/lib/comment-parser.ts`: parse, insert, edit, delete, reply, resolve, anchor updates
 - `src/markdown/pipeline.ts`: markdown -> sanitized HTML pipeline
@@ -274,13 +282,34 @@ not from a compiler flag: `bin/version-compare.js` has been shared between the C
 and `server/update-check.ts` the same way since before this module existed, and
 `allowJs` would have typed every future `bin/` import as unchecked `any`.
 
-`bin/fs-atomic.js` and `bin/file-lock.js` live there for the same reason, and it
-matters more for them: the CLI writes `.md-redline.json` (`mdr --restrict`) and
-Claude Desktop's MCP config, both of which another process also writes. A second
-copy of the retry would drift, and a second copy of the lock would not be a lock
-at all, since two writers taking different locks are not serialized against each
-other. `server/fs-retry.ts` re-exports the first; `server/preferences.ts` imports
-the second directly.
+`bin/fs-atomic.js`, `bin/file-lock.js` and `bin/home-dir.js` live there for the
+same reason, and it matters more for them: the CLI writes `.md-redline.json`
+(`mdr --restrict`, and the trust disclosure reads it) while the server rewrites
+it on every boot. A second copy of the retry would drift, and a second copy of
+the lock would not be a lock at all, since two writers taking different locks
+are not serialized against each other. `resolveHomeDir` is in the same set for a
+sharper reason: a lock is only shared if both sides compute the same PATH, and
+under `MD_REDLINE_HOME` a CLI using bare `homedir()` locked and wrote a file the
+server never read, then reported success. `server/fs-retry.ts` re-exports the
+first, `server/env.ts` the third; `server/preferences.ts` imports the second
+directly.
+
+The lock covers `.md-redline.json` only. Claude Desktop's MCP config gets the
+atomic write, which is what keeps a bounced or interrupted write from
+truncating every other MCP server out of it, but NOT the lock: Claude Desktop
+does not take ours, so a read-modify-write there still races that app. Nothing
+in this repo can fix that; `mdr mcp install` is a one-shot the user runs
+deliberately, which is what keeps the window small.
+
+**`bin/` is checked by `tsconfig.bin.json` (`checkJs`) and its own eslint block.**
+It has no build step, so before those existed eslint matched none of it and
+exited 0 having checked nothing, which reads exactly like passing, and `tsc`
+never saw it at all. A call to an undefined function survived both gates. The
+config is deliberately looser than `tsconfig.node.json` (no `strict`, no
+`noImplicitAny`) because the older modules here predate it and were written
+untyped; `fs-atomic.js` and `file-lock.js` carry JSDoc types so they are checked
+as thoroughly as they were when they were TypeScript. `bin/md-redline` itself is
+extensionless and so still invisible to `tsc`; its tests are the gate there.
 
 `MD_REDLINE_REGISTRY_URL` and `MD_REDLINE_BASE_URL` keep a plain `??` by choice:
 both are development or background-only, and a blank value fails visibly at the
@@ -322,12 +351,19 @@ The undocumented `mdr __port` prints the API port the CLI resolved and exits, wh
 is the only way to observe it: that value only seeds the fallback scan inside
 `findServerPort`, and `--stop` would kill whatever it found. The same test file uses
 it to prove the CLI agrees with the server and `vite.config.ts`.
-The undocumented `mdr __first-launch` prints whether this invocation counts as a
-first launch and exits, for the same reason: the answer is otherwise one line of
-welcome text in the middle of a real startup. `bin/prefs-cli.test.ts` uses it to
-pin the distinction that matters, which is that only ENOENT means "first launch".
-An unreadable prefs file is a returning user whose file we cannot read, and
-greeting them with the trust disclosure on every run is both wrong and alarming.
+The undocumented `mdr __first-launch` prints which trust disclosure this
+invocation would print (`seeded`, `unreadable` or `configured`) and exits, for
+the same reason: the answer is otherwise a line or two of text in the middle of
+a real startup. `bin/prefs-cli.test.ts` pins all three.
+
+The three-way split exists because the two obvious answers are both wrong. A
+returning user should not be greeted as a newcomer, but staying silent when the
+prefs file is UNREADABLE hides something they need: `createApp`'s first-launch
+branch fires on `trustedRoots === undefined`, an unreadable file is
+indistinguishable from that, and the branch applies the home-directory seed in
+memory even though it refuses to persist it. So a user who ran `mdr --restrict`
+gets home trust back for that session, silently, which is exactly what they opted
+out of. `unreadable` says so in its own words rather than welcoming them.
 
 **CLI stale-server upgrade**: on every plain `mdr` invocation,
 `ensureServerRunning()` in `bin/md-redline` asks the running server for

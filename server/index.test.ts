@@ -50,12 +50,15 @@ vi.mock('fs', async (importOriginal) => {
 // save in progress, and armed per test, off by default: every other test in
 // this file runs against a clean filesystem.
 // `target` narrows the fault to saves landing on one file, which is what makes
-// a mid-batch failure (and the rollback of the files already written) stageable.
+// a mid-batch failure (and the rollback of the files already written)
+// stageable. null means every path, since '' would make endsWith('') true and
+// read as narrowing while narrowing nothing.
 const saveFault = vi.hoisted(() => ({
   failuresLeft: 0,
   code: 'EPERM',
   attempts: 0,
-  target: '',
+  /** @type {string | null} */
+  target: null as string | null,
 }));
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -64,7 +67,9 @@ vi.mock('fs/promises', async (importOriginal) => {
     ...actual,
     rename: async (from: string, to: string) => {
       if (!String(from).endsWith('.tmp')) return actual.rename(from, to);
-      if (!String(to).endsWith(saveFault.target)) return actual.rename(from, to);
+      if (saveFault.target !== null && !String(to).endsWith(saveFault.target)) {
+        return actual.rename(from, to);
+      }
       saveFault.attempts += 1;
       if (saveFault.failuresLeft > 0) {
         saveFault.failuresLeft -= 1;
@@ -4409,7 +4414,7 @@ describe('save path under filesystem faults', () => {
     saveFault.failuresLeft = 0;
     saveFault.code = 'EPERM';
     saveFault.attempts = 0;
-    saveFault.target = '';
+    saveFault.target = null;
     setPlatform(REAL_PLATFORM);
     await writeFile(faultFile, '# Original\n');
   });
@@ -4417,7 +4422,7 @@ describe('save path under filesystem faults', () => {
   afterEach(async () => {
     setPlatform(REAL_PLATFORM);
     saveFault.failuresLeft = 0;
-    saveFault.target = '';
+    saveFault.target = null;
     await rm(faultFile, { force: true });
   });
 
@@ -4462,6 +4467,10 @@ describe('save path under filesystem faults', () => {
     // Same hazard, one step earlier: the second request chains onto the first
     // while it is still in flight, so it takes the rejection directly rather
     // than finding the map already cleaned up.
+    // A code the retry never absorbs, so exactly one save fails on every
+    // platform. EPERM would be retried away on Windows, where this branch is
+    // aimed, and the test would pass there for the wrong reason.
+    saveFault.code = 'ENOSPC';
     saveFault.failuresLeft = 1;
     const [first, second] = await Promise.all([
       save(faultFile, '# First\n'),
@@ -4473,6 +4482,9 @@ describe('save path under filesystem faults', () => {
     // Before the fix both came back 500, the second without a write attempted.
     const statuses = [first.response.status, second.response.status].sort();
     expect(statuses).toEqual([200, 500]);
+    // Exactly one rename reached the fault, so the other save genuinely ran
+    // rather than being skipped by an inherited rejection.
+    expect(saveFault.attempts).toBe(2);
     expect(await readFile(faultFile, 'utf-8')).toBe(
       first.response.status === 200 ? '# First\n' : '# Second\n',
     );
@@ -4585,6 +4597,31 @@ describe('writePortFile', () => {
     expect((await readdir(dir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
 
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('clears a stale entry when it cannot write its own', async () => {
+    // The fallback only works if the file is GONE. The CLI reads it first and
+    // takes the port it names as soon as that port answers, so an entry left
+    // naming a still-live orphan server from an earlier launch sends the
+    // user's document to the orphan, which has its own trusted roots.
+    const dir = await mkdtemp(join(tmpdir(), 'md-redline-portfile-'));
+    const portFile = join(dir, 'md-redline.port');
+    await writeFile(portFile, '6373');
+    saveFault.target = 'md-redline.port';
+    saveFault.failuresLeft = Number.MAX_SAFE_INTEGER;
+    saveFault.code = 'ENOSPC';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await writePortFile(portFile, 6374)).toBe(false);
+      await expect(readFile(portFile, 'utf8')).rejects.toThrow();
+    } finally {
+      logged.mockRestore();
+      saveFault.failuresLeft = 0;
+      saveFault.target = null;
+      saveFault.code = 'EPERM';
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('reports failure instead of throwing, so a boot is never lost to it', async () => {

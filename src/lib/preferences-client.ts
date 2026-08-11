@@ -14,9 +14,20 @@ export interface DiskPreferences {
   updateDismissedVersion?: string;
 }
 
+/**
+ * Ceiling on a single preferences read. The server answers this from a local
+ * file in milliseconds, so anything near this is a request that will never
+ * come back: the dev server killed mid-request, the Vite proxy losing its
+ * backend, a suspended laptop dropping the socket without an RST. Without a
+ * bound, one of those would pin the shared promise below forever.
+ */
+const PREFERENCES_FETCH_TIMEOUT_MS = 10_000;
+
 async function requestPreferences(): Promise<DiskPreferences> {
   try {
-    const res = await fetch('/api/preferences');
+    const res = await fetch('/api/preferences', {
+      signal: AbortSignal.timeout(PREFERENCES_FETCH_TIMEOUT_MS),
+    });
     const data = await readJsonResponse<DiskPreferences>(res);
     if (!res.ok || !data) return {};
     return data;
@@ -45,9 +56,13 @@ let inFlight: Promise<DiskPreferences> | null = null;
  */
 export function fetchPreferences(): Promise<DiskPreferences> {
   if (!inFlight) {
-    inFlight = requestPreferences().finally(() => {
-      inFlight = null;
+    const pending: Promise<DiskPreferences> = requestPreferences().finally(() => {
+      // Identity-checked: a reset (or any future invalidation) can replace
+      // `inFlight` while this request is still open, and clearing
+      // unconditionally would null out the newer promise instead of its own.
+      if (inFlight === pending) inFlight = null;
     });
+    inFlight = pending;
   }
   return inFlight;
 }

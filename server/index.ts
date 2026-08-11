@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
-import { readFile, readdir, stat, realpath, open } from 'fs/promises';
+import { readFile, readdir, stat, realpath, open, unlink } from 'fs/promises';
 import { promises as fsPromises } from 'fs';
 import { watch, statSync, realpathSync, readFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
@@ -1568,6 +1568,14 @@ export async function writePortFile(portFile: string, port: number): Promise<boo
     await atomicWriteFile(portFile, String(port));
     return true;
   } catch (err) {
+    // Remove whatever is still there before falling back, because the fallback
+    // only works if the file is gone. The CLI reads this file FIRST and takes
+    // the port it names as soon as that port answers, scanning only when it
+    // does not. A stale entry naming a still-live orphan server from an
+    // earlier launch would therefore send the user's document to the orphan,
+    // which has its own trusted roots and its own watcher. The old boot path
+    // unlinked before rewriting and never left that window open.
+    await unlink(portFile).catch(() => {});
     console.error(
       `Could not record the port at ${portFile}; ` +
         'the CLI will fall back to scanning for this server:',
