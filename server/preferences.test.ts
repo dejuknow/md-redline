@@ -476,7 +476,9 @@ describe('transient filesystem failures (Windows)', () => {
     try {
       await writePreferences(testDir, { author: 'Alice' });
       expect(logged).toHaveBeenCalledTimes(1);
-      expect(String(logged.mock.calls[0][0])).toContain('Could not release the preferences lock');
+      expect(String(logged.mock.calls[0][0])).toContain(
+        'Could not release the lock at ' + join(testDir, '.md-redline.json.lock'),
+      );
     } finally {
       logged.mockRestore();
       fault.unlink = { failuresLeft: 0, code: 'EBUSY' };

@@ -2,13 +2,15 @@
 
 import { spawn } from 'child_process';
 import { readdirSync, statSync } from 'fs';
-import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { mkdir, readFile, stat, unlink } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import process from 'process';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
+import { acquireFileLock } from './file-lock.js';
+import { atomicWriteFile, retryTransient } from './fs-atomic.js';
 import { resolveApiPort } from './ports.js';
 
 import { checkServer, gracefulShutdown, killPort } from './server-control.js';
@@ -64,9 +66,20 @@ function printHelp() {
 
 async function isFirstLaunch() {
   const prefsPath = join(homedir(), '.md-redline.json');
+  let raw;
   try {
-    const raw = await readFile(prefsPath, 'utf8');
+    raw = await retryTransient(() => readFile(prefsPath, 'utf8'));
+  } catch (err) {
+    // ENOENT is the only error that means "first launch". Anything else is a
+    // prefs file that exists and could not be read — a scanner holding it, a
+    // permission problem — and greeting a returning user with the trust
+    // disclosure on every run is both wrong and alarming. Stay quiet.
+    return err.code === 'ENOENT';
+  }
+  try {
     const parsed = JSON.parse(raw);
+    // Garbage or a non-object: the server quarantines it on boot and starts
+    // fresh with default trust, so the disclosure is accurate.
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return true;
     return parsed.trustedRoots === undefined;
   } catch {
@@ -277,18 +290,54 @@ async function stopServer(quiet = false) {
 
 async function enableRestrictedMode() {
   const prefsPath = join(homedir(), '.md-redline.json');
+
+  // The server takes this same lock around its own read-modify-write of the
+  // prefs file. Without it, `mdr --restrict` racing a booting server either
+  // clobbers the trust settings it promises not to touch, or has its own write
+  // swallowed by the server's rename and silently fails to restrict anything.
+  let release;
   try {
-    await stat(prefsPath);
-    console.error(`Refusing to overwrite existing ${prefsPath}.`);
-    console.error('Restricted mode would clobber your trust settings.');
-    console.error('Edit the file manually to set trustedRoots: [].');
+    release = await acquireFileLock(prefsPath);
+  } catch (err) {
+    // A filesystem error carries an errno; running out of attempts does not.
+    // The two need different advice, and telling someone with an unwritable
+    // home directory to wait for another process is a dead end.
+    if (err.code) {
+      console.error(`Could not lock ${prefsPath} (${err.code}): ${err.message}`);
+      console.error('Refusing to write over a file that may hold your trust settings.');
+    } else {
+      console.error(`Could not lock ${prefsPath}.`);
+      console.error('Another mdr process is writing it. Try again in a moment.');
+    }
     process.exitCode = 1;
     return;
-  } catch {
-    /* file does not exist; safe to write */
   }
 
-  await writeFile(prefsPath, JSON.stringify({ trustedRoots: [] }, null, 2) + '\n', 'utf-8');
+  try {
+    // Checked under the lock, and only ENOENT counts as absent. A stat that
+    // bounces off a scanner cannot prove the file is missing, and guessing
+    // wrong here overwrites the trust settings this branch exists to protect.
+    try {
+      await retryTransient(() => stat(prefsPath));
+      console.error(`Refusing to overwrite existing ${prefsPath}.`);
+      console.error('Restricted mode would clobber your trust settings.');
+      console.error('Edit the file manually to set trustedRoots: [].');
+      process.exitCode = 1;
+      return;
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.error(`Could not check ${prefsPath} (${err.code}).`);
+        console.error('Refusing to write over a file that may hold your trust settings.');
+        process.exitCode = 1;
+        return;
+      }
+    }
+
+    await atomicWriteFile(prefsPath, JSON.stringify({ trustedRoots: [] }, null, 2) + '\n');
+  } finally {
+    await release();
+  }
+
   console.log('Restricted mode enabled. Each folder will require explicit consent.');
   console.log(`Wrote ${prefsPath}`);
 }
@@ -482,16 +531,28 @@ async function installForClaudeDesktop() {
   const configPath = getClaudeDesktopConfigPath();
 
   let config = {};
+  let existing;
   try {
-    const existing = await readFile(configPath, 'utf8');
-    config = JSON.parse(existing);
+    existing = await retryTransient(() => readFile(configPath, 'utf8'));
   } catch (err) {
+    // Only a missing file may be treated as "start fresh". Every other read
+    // failure has to abort, because writing a fresh config over a file we
+    // could not read would delete every other MCP server in it.
     if (err.code !== 'ENOENT') {
+      throw new Error(
+        `Cannot read ${configPath} (${err.code}): ${err.message}\n` +
+          'Fix the permissions and retry; refusing to overwrite a config that may hold other MCP servers.',
+      );
+    }
+  }
+  if (existing !== undefined) {
+    try {
+      config = JSON.parse(existing);
+    } catch (err) {
       throw new Error(
         `Cannot parse ${configPath}: ${err.message}\nPlease fix the JSON syntax and retry.`,
       );
     }
-    // File missing — start fresh
   }
 
   if (typeof config !== 'object' || config === null) config = {};
@@ -516,7 +577,10 @@ async function installForClaudeDesktop() {
   config.mcpServers = mcpServers;
 
   await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  // Temp file + rename, never a bare write. This file is not ours: it holds
+  // every OTHER MCP server the user has configured, and a truncated write
+  // takes all of them down, not just md-redline's entry.
+  await atomicWriteFile(configPath, JSON.stringify(config, null, 2) + '\n');
   console.log(
     hadLegacyKey
       ? `[Claude Desktop] Renamed legacy mdr entry to md-redline in ${configPath}`
@@ -592,6 +656,13 @@ async function installMcpConfig(target) {
     } catch (err) {
       results.push({ name: 'Claude Code', ok: false, error: err instanceof Error ? err.message : 'unknown error' });
     }
+  }
+
+  // A thrown installer error was being captured here and never printed, so a
+  // failed install exited 1 with nothing on stderr to say why. installForClaudeCode
+  // reports its own failures and sets no `error`, so this never doubles up.
+  for (const result of results) {
+    if (!result.ok && result.error) console.error(`[${result.name}] ${result.error}`);
   }
 
   const anyChanged = results.some((r) => r.changed);
@@ -722,6 +793,16 @@ async function main() {
     // detached-teardown race — and honors MD_REDLINE_BROWSER like every other path.
     const target = process.argv[3];
     if (target) await openInBrowser(target);
+    return;
+  }
+
+  if (process.argv[2] === '__first-launch') {
+    // Internal, undocumented seam, same idea as __open above: print whether
+    // this invocation counts as a first launch and exit, without booting a
+    // server. The answer is otherwise only observable as one line of welcome
+    // text printed in the middle of a real startup, which a test cannot reach
+    // without spawning the whole app.
+    console.log(String(await isFirstLaunch()));
     return;
   }
 

@@ -1,14 +1,9 @@
-import { readFile, rename, open, stat, unlink } from 'fs/promises';
+import { readFile, rename } from 'fs/promises';
 import { readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
-import {
-  atomicWriteFile,
-  isTransientFsError,
-  retryTransient,
-  retryTransientSync,
-  sleep,
-} from './fs-retry';
+import { atomicWriteFile, retryTransient, retryTransientSync } from './fs-retry';
+import { acquireFileLock } from '../bin/file-lock.js';
 import {
   DOC_WIDTHS,
   PROSE_FONTS,
@@ -18,10 +13,6 @@ import {
 } from '../src/lib/settings';
 
 const PREFS_FILENAME = '.md-redline.json';
-const LOCK_SUFFIX = '.lock';
-const LOCK_STALE_MS = 30_000;
-const LOCK_MAX_ATTEMPTS = 60;
-const LOCK_RETRY_BASE_MS = 25;
 
 export interface RecentFile {
   path: string;
@@ -222,92 +213,6 @@ export async function readPreferences(homeDir: string): Promise<Preferences> {
 
 export function readPreferencesSync(homeDir: string): Preferences {
   return readPreferencesSyncResult(homeDir).prefs;
-}
-
-/**
- * Acquire a cross-process lock on the preferences file before performing a
- * read-modify-write. The in-process `writeLock` only serializes within a
- * single Node process; running two `mdr` instances against the same home
- * directory would otherwise race the read+write cycle and lose updates.
- *
- * Implementation: O_EXCL sentinel file. If the lock is older than
- * LOCK_STALE_MS we treat it as abandoned (the holder crashed) and steal it.
- */
-async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
-  const lockPath = `${filePath}${LOCK_SUFFIX}`;
-  for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
-    let fd;
-    try {
-      fd = await open(lockPath, 'wx');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EEXIST') {
-        // The lock file is created and removed on every write, which makes it
-        // the same scanner bait as the temp file. Back off on the transient
-        // codes instead of failing the whole write.
-        if (!isTransientFsError(err)) throw err;
-        await sleep(LOCK_RETRY_BASE_MS);
-        continue;
-      }
-      // Lock exists. If it's stale (holder crashed), steal it.
-      try {
-        const lockStat = await stat(lockPath);
-        if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
-          try {
-            await unlink(lockPath);
-          } catch {
-            /* someone else just released it */
-          }
-          continue;
-        }
-      } catch {
-        // Lock vanished between EEXIST and stat — retry immediately.
-        continue;
-      }
-      // Backoff with a small random jitter to avoid thundering herd.
-      await sleep(LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS));
-      continue;
-    }
-
-    // The lock file exists and is ours from here. Anything that fails before
-    // we return the release closure has to remove it, or the next attempt
-    // deadlocks against our own orphan: it is far too young for the
-    // stale-steal branch above, so the loop burns every remaining attempt and
-    // then blocks all writers until LOCK_STALE_MS elapses.
-    let writeErr: unknown;
-    try {
-      await fd.writeFile(`${process.pid}`);
-    } catch (err) {
-      writeErr = err;
-    }
-    // Close before unlinking: Windows refuses to remove a file that still has
-    // an open handle, which would defeat the cleanup below. The pid is only a
-    // debugging aid (staleness is decided by mtime), so a failed close on the
-    // success path is not worth failing the write over.
-    await fd.close().catch(() => {});
-    if (writeErr) {
-      await unlink(lockPath).catch(() => {});
-      if (!isTransientFsError(writeErr)) throw writeErr;
-      await sleep(LOCK_RETRY_BASE_MS);
-      continue;
-    }
-
-    return async () => {
-      try {
-        await retryTransient(() => unlink(lockPath));
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
-        // An orphaned lock blocks every writer, in this process and any other
-        // mdr instance, until it ages out. Never silent.
-        console.error(
-          `Could not release the preferences lock at ${lockPath}; writes are ` +
-            `blocked until it ages out after ${LOCK_STALE_MS}ms:`,
-          err,
-        );
-      }
-    };
-  }
-  throw new Error(`Could not acquire preferences lock at ${lockPath}`);
 }
 
 /**
