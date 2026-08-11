@@ -2,9 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
-import { readFile, readdir, stat, realpath, rename, open } from 'fs/promises';
+import { readFile, readdir, stat, realpath, open } from 'fs/promises';
 import { promises as fsPromises } from 'fs';
-import { randomBytes } from 'crypto';
 import { watch, statSync, realpathSync, readFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { platform, tmpdir } from 'os';
@@ -14,9 +13,15 @@ import { createRequire } from 'module';
 import {
   addTrustedRoot,
   readPreferences,
-  readPreferencesSync,
+  readPreferencesSyncResult,
   writePreferences,
 } from './preferences';
+// Note for every caller below: atomicWriteFile intentionally does NOT update
+// `lastWrittenContent`. That dedupe map exists to suppress the SSE echo when
+// the client that just wrote a file would otherwise receive its own change
+// frame. For agent writes the browser IS the consumer of the SSE, so the user
+// needs to see the marker arrive; the user-edit handler sets the entry inline.
+import { atomicWriteFile } from './fs-retry';
 import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
@@ -332,7 +337,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
   // Hydrate allowedRoots from persisted trustedRoots in preferences. This
   // restores folders the user previously consented to via /api/pick-file
   // across server restarts. Stale entries are pruned from disk.
-  const persistedPrefs = readPreferencesSync(homeDir);
+  const { prefs: persistedPrefs, unreadable: prefsUnreadable } = readPreferencesSyncResult(homeDir);
   let persistedRoots = persistedPrefs.trustedRoots;
   let migratedFromRecent = false;
 
@@ -400,7 +405,15 @@ export function createAppFull(options: CreateAppOptions = {}) {
   const prunedSomething =
     survivingRoots.length !== persistedRoots.length ||
     survivingRoots.some((p, i) => p !== persistedRoots[i]);
-  if (migratedFromRecent || prunedSomething) {
+  // Never persist roots derived from a prefs file we could not read. An
+  // unreadable file looks exactly like "trustedRoots was never written", which
+  // sends us down the first-launch seed above; writing that back replaces
+  // every folder the user had granted with just the home directory. The seed
+  // still applies in memory so the app stays usable for this session, it just
+  // does not become the new truth on disk.
+  if (prefsUnreadable) {
+    console.error('Not persisting derived trustedRoots: preferences were unreadable at startup.');
+  } else if (migratedFromRecent || prunedSomething) {
     void writePreferences(homeDir, { trustedRoots: survivingRoots }).catch((err) => {
       console.error('Failed to persist trustedRoots:', err);
     });
@@ -576,26 +589,6 @@ export function createAppFull(options: CreateAppOptions = {}) {
     writeLocks.set(resolved, currentWrite);
     await currentWrite;
     return result;
-  }
-
-  // Atomic temp+rename write so a crash mid-write can't leave a half-written
-  // file. Used by both the user-edit handler and the agent-comments route
-  // (the latter via withFileLock to serialize the surrounding read-modify-write).
-  //
-  // Intentionally does NOT update `lastWrittenContent`: that dedupe map exists
-  // to suppress the SSE echo when the same client that just wrote a file
-  // would otherwise receive its own change frame. For agent writes the
-  // browser IS the consumer of the SSE — the user needs to see the marker
-  // arrive. The user-edit handler populates lastWrittenContent inline.
-  async function atomicWriteFile(resolved: string, content: string): Promise<void> {
-    const tmpPath = `${resolved}.${randomBytes(6).toString('hex')}.tmp`;
-    const fd = await open(tmpPath, 'wx');
-    try {
-      await fd.writeFile(content, 'utf-8');
-    } finally {
-      await fd.close();
-    }
-    await rename(tmpPath, resolved);
   }
 
   /**
@@ -851,18 +844,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
             }
           }
 
-          // Atomic write: write to a temp file then rename, so a crash
-          // mid-write can't leave a half-written file on disk.
-          // Use a random suffix to prevent DoS from a stale or adversarial
-          // .tmp file blocking saves, and O_EXCL to prevent symlink attacks.
-          const tmpPath = `${resolved}.${randomBytes(6).toString('hex')}.tmp`;
-          const fd = await open(tmpPath, 'wx');
-          try {
-            await fd.writeFile(body.content, 'utf-8');
-          } finally {
-            await fd.close();
-          }
-          await rename(tmpPath, resolved);
+          await atomicWriteFile(resolved, body.content);
           lastWrittenContent.set(resolved, body.content);
           // LRU eviction: cap cache size to prevent unbounded memory growth
           if (lastWrittenContent.size > MAX_WRITTEN_CACHE) {

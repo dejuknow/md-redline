@@ -3,6 +3,13 @@ import { readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 import {
+  atomicWriteFile,
+  isTransientFsError,
+  retryTransient,
+  retryTransientSync,
+  sleep,
+} from './fs-retry';
+import {
   DOC_WIDTHS,
   PROSE_FONTS,
   PROSE_SIZES,
@@ -160,24 +167,61 @@ function corruptQuarantinePath(filePath: string): string {
   return `${filePath}.corrupt-${stamp}-${rand}`;
 }
 
-export async function readPreferences(homeDir: string): Promise<Preferences> {
+export interface PreferencesRead {
+  prefs: Preferences;
+  /**
+   * True when a prefs file exists but could not be read. The {} fallback is
+   * indistinguishable from "no prefs yet", and that ambiguity is destructive:
+   * a caller that derives state from {} and writes it back with a plain patch
+   * overwrites the very keys it could not see, because writePreferences
+   * merges shallowly and a key present in the patch always beats the
+   * under-lock re-read. Callers that persist derived state MUST check this
+   * and skip the write. Consumers that only read can ignore it.
+   *
+   * A corrupt (unparseable) file does not set this: the write path quarantines
+   * it, so the original bytes survive and starting fresh is correct.
+   */
+  unreadable: boolean;
+}
+
+function emptyOnReadFailure(err: unknown, homeDir: string): PreferencesRead {
+  const code = (err as NodeJS.ErrnoException).code;
+  // ENOENT is the ordinary "no prefs yet" case; a SyntaxError has no code.
+  const unreadable = !!code && code !== 'ENOENT';
+  if (unreadable) {
+    console.error(
+      `Could not read preferences at ${prefsPath(homeDir)} (${code}); ` +
+        'continuing without saved settings for this session:',
+      err,
+    );
+  }
+  return { prefs: {}, unreadable };
+}
+
+export async function readPreferencesResult(homeDir: string): Promise<PreferencesRead> {
   try {
-    const raw = await readFile(prefsPath(homeDir), 'utf-8');
-    const parsed = JSON.parse(raw);
-    return sanitizePreferencesPatch(parsed) as Preferences;
-  } catch {
-    return {};
+    const raw = await retryTransient(() => readFile(prefsPath(homeDir), 'utf-8'));
+    return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
+  } catch (err) {
+    return emptyOnReadFailure(err, homeDir);
   }
 }
 
-export function readPreferencesSync(homeDir: string): Preferences {
+export function readPreferencesSyncResult(homeDir: string): PreferencesRead {
   try {
-    const raw = readFileSync(prefsPath(homeDir), 'utf-8');
-    const parsed = JSON.parse(raw);
-    return sanitizePreferencesPatch(parsed) as Preferences;
-  } catch {
-    return {};
+    const raw = retryTransientSync(() => readFileSync(prefsPath(homeDir), 'utf-8'));
+    return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
+  } catch (err) {
+    return emptyOnReadFailure(err, homeDir);
   }
+}
+
+export async function readPreferences(homeDir: string): Promise<Preferences> {
+  return (await readPreferencesResult(homeDir)).prefs;
+}
+
+export function readPreferencesSync(homeDir: string): Preferences {
+  return readPreferencesSyncResult(homeDir).prefs;
 }
 
 /**
@@ -192,23 +236,19 @@ export function readPreferencesSync(homeDir: string): Preferences {
 async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
   const lockPath = `${filePath}${LOCK_SUFFIX}`;
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
+    let fd;
     try {
-      const fd = await open(lockPath, 'wx');
-      try {
-        await fd.writeFile(`${process.pid}`);
-      } finally {
-        await fd.close();
-      }
-      return async () => {
-        try {
-          await unlink(lockPath);
-        } catch {
-          /* lock already released */
-        }
-      };
+      fd = await open(lockPath, 'wx');
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EEXIST') throw err;
+      if (code !== 'EEXIST') {
+        // The lock file is created and removed on every write, which makes it
+        // the same scanner bait as the temp file. Back off on the transient
+        // codes instead of failing the whole write.
+        if (!isTransientFsError(err)) throw err;
+        await sleep(LOCK_RETRY_BASE_MS);
+        continue;
+      }
       // Lock exists. If it's stale (holder crashed), steal it.
       try {
         const lockStat = await stat(lockPath);
@@ -225,9 +265,47 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
         continue;
       }
       // Backoff with a small random jitter to avoid thundering herd.
-      const delay = LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS);
-      await new Promise((res) => setTimeout(res, delay));
+      await sleep(LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS));
+      continue;
     }
+
+    // The lock file exists and is ours from here. Anything that fails before
+    // we return the release closure has to remove it, or the next attempt
+    // deadlocks against our own orphan: it is far too young for the
+    // stale-steal branch above, so the loop burns every remaining attempt and
+    // then blocks all writers until LOCK_STALE_MS elapses.
+    let writeErr: unknown;
+    try {
+      await fd.writeFile(`${process.pid}`);
+    } catch (err) {
+      writeErr = err;
+    }
+    // Close before unlinking: Windows refuses to remove a file that still has
+    // an open handle, which would defeat the cleanup below. The pid is only a
+    // debugging aid (staleness is decided by mtime), so a failed close on the
+    // success path is not worth failing the write over.
+    await fd.close().catch(() => {});
+    if (writeErr) {
+      await unlink(lockPath).catch(() => {});
+      if (!isTransientFsError(writeErr)) throw writeErr;
+      await sleep(LOCK_RETRY_BASE_MS);
+      continue;
+    }
+
+    return async () => {
+      try {
+        await retryTransient(() => unlink(lockPath));
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+        // An orphaned lock blocks every writer, in this process and any other
+        // mdr instance, until it ages out. Never silent.
+        console.error(
+          `Could not release the preferences lock at ${lockPath}; writes are ` +
+            `blocked until it ages out after ${LOCK_STALE_MS}ms:`,
+          err,
+        );
+      }
+    };
   }
   throw new Error(`Could not acquire preferences lock at ${lockPath}`);
 }
@@ -243,7 +321,10 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
 async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences> {
   let raw: string;
   try {
-    raw = await readFile(filePath, 'utf-8');
+    // Retried for the same reason the replace below is: a transient failure
+    // here aborts the whole write, which is what silently dropped the
+    // trustedRoots migration on Windows.
+    raw = await retryTransient(() => readFile(filePath, 'utf-8'));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
     throw err;
@@ -278,35 +359,43 @@ export type PreferencesPatch =
 
 export type PreferencesPatchFn = (current: Preferences) => Partial<Preferences>;
 
+/** Read-modify-write the prefs file. Caller must serialize on `writeLock`. */
+async function writeLocked(
+  filePath: string,
+  patchOrFn: PreferencesPatch | PreferencesPatchFn,
+): Promise<Preferences> {
+  const releaseLock = await acquireFileLock(filePath);
+  try {
+    const existing = await readAndQuarantineIfCorrupt(filePath);
+    const rawPatch: unknown = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
+    // Sanitize the patch even when it comes from a function callback,
+    // because the callback can be passed untrusted data via writePreferences
+    // call sites that forward HTTP request bodies.
+    const patch = sanitizePreferencesPatch(rawPatch);
+    const merged = { ...existing, ...patch };
+    await atomicWriteFile(filePath, JSON.stringify(merged, null, 2) + '\n');
+    return merged;
+  } finally {
+    await releaseLock();
+  }
+}
+
 export async function writePreferences(
   homeDir: string,
   patchOrFn: PreferencesPatch | PreferencesPatchFn,
 ): Promise<Preferences> {
   const result = await new Promise<Preferences>((resolve, reject) => {
     writeLock = writeLock.then(async () => {
-      const filePath = prefsPath(homeDir);
-      const releaseLock = await acquireFileLock(filePath);
+      // Everything, acquisition included, has to settle one side of this
+      // promise. A throw that escapes the callback settles neither: the caller
+      // awaits forever and `writeLock` becomes a rejected promise that wedges
+      // every later write in the process. Settling after writeLocked returns
+      // also means the lock file is gone by the time the caller observes the
+      // result.
       try {
-        const existing = await readAndQuarantineIfCorrupt(filePath);
-        const rawPatch: unknown = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
-        // Sanitize the patch even when it comes from a function callback,
-        // because the callback can be passed untrusted data via writePreferences
-        // call sites that forward HTTP request bodies.
-        const patch = sanitizePreferencesPatch(rawPatch);
-        const merged = { ...existing, ...patch };
-        const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
-        const fd = await open(tmpPath, 'wx');
-        try {
-          await fd.writeFile(JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-        } finally {
-          await fd.close();
-        }
-        await rename(tmpPath, filePath);
-        resolve(merged);
+        resolve(await writeLocked(prefsPath(homeDir), patchOrFn));
       } catch (err) {
         reject(err);
-      } finally {
-        await releaseLock();
       }
     });
   });

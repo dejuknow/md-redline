@@ -1,15 +1,109 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
   addTrustedRoot,
   readPreferences,
+  readPreferencesResult,
   readPreferencesSync,
+  readPreferencesSyncResult,
   sanitizePreferencesPatch,
   writePreferences,
 } from './preferences';
 import { DEFAULT_SETTINGS, type AppSettings as ClientAppSettings } from '../src/lib/settings';
+
+// Lets a test make a syscall fail the way Windows does when a scanner or
+// indexer briefly holds a handle on a path. Hoisted because vi.mock factories
+// run before the module body. Both faults are scoped to a filename suffix so
+// arming one never catches an unrelated call on another path (the quarantine
+// rename, the lock file).
+const fault = vi.hoisted(() => ({
+  rename: { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 },
+  open: { suffix: '', failuresLeft: 0, code: 'EPERM' },
+  read: { failuresLeft: 0, code: 'EPERM', attempts: 0 },
+  lockWrite: { failuresLeft: 0, code: 'EBUSY' },
+  unlink: { failuresLeft: 0, code: 'EBUSY' },
+}));
+
+function faultError(code: string, detail: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(`${code}: simulated failure, ${detail}`);
+  err.code = code;
+  return err;
+}
+
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  return {
+    ...actual,
+    rename: async (from: string, to: string) => {
+      if (!from.endsWith(fault.rename.suffix)) return actual.rename(from, to);
+      fault.rename.attempts += 1;
+      if (fault.rename.failuresLeft > 0) {
+        fault.rename.failuresLeft -= 1;
+        throw faultError(fault.rename.code, `rename '${from}' -> '${to}'`);
+      }
+      return actual.rename(from, to);
+    },
+    open: async (path: string, flags: string) => {
+      if (fault.open.failuresLeft > 0 && fault.open.suffix && path.endsWith(fault.open.suffix)) {
+        fault.open.failuresLeft -= 1;
+        throw faultError(fault.open.code, `open '${path}'`);
+      }
+      const handle = await actual.open(path, flags);
+      if (!path.endsWith('.lock')) return handle;
+      // Fault the lock file's pid write, which happens after O_EXCL has already
+      // created the file. Only writeFile and close are used on that handle.
+      return {
+        writeFile: async (content: string) => {
+          if (fault.lockWrite.failuresLeft > 0) {
+            fault.lockWrite.failuresLeft -= 1;
+            throw faultError(fault.lockWrite.code, `write '${path}'`);
+          }
+          return handle.writeFile(content);
+        },
+        close: () => handle.close(),
+      };
+    },
+    unlink: async (path: string) => {
+      if (fault.unlink.failuresLeft > 0 && path.endsWith('.lock')) {
+        fault.unlink.failuresLeft -= 1;
+        throw faultError(fault.unlink.code, `unlink '${path}'`);
+      }
+      return actual.unlink(path);
+    },
+    readFile: async (path: string, encoding: BufferEncoding) => {
+      if (!path.endsWith('.md-redline.json')) return actual.readFile(path, encoding);
+      fault.read.attempts += 1;
+      if (fault.read.failuresLeft > 0) {
+        fault.read.failuresLeft -= 1;
+        throw faultError(fault.read.code, `read '${path}'`);
+      }
+      return actual.readFile(path, encoding);
+    },
+  };
+});
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    readFileSync: (path: string, encoding: BufferEncoding) => {
+      if (!path.endsWith('.md-redline.json')) return actual.readFileSync(path, encoding);
+      fault.read.attempts += 1;
+      if (fault.read.failuresLeft > 0) {
+        fault.read.failuresLeft -= 1;
+        throw faultError(fault.read.code, `read '${path}'`);
+      }
+      return actual.readFileSync(path, encoding);
+    },
+  };
+});
+
+/** Assert a rejection carries an errno code, the property the retry keys off. */
+async function expectRejectionCode(promise: Promise<unknown>, code: string): Promise<void> {
+  await expect(promise).rejects.toMatchObject({ code });
+}
 
 let testDir: string;
 
@@ -22,6 +116,11 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  fault.rename = { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 };
+  fault.open = { suffix: '', failuresLeft: 0, code: 'EPERM' };
+  fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
+  fault.lockWrite = { failuresLeft: 0, code: 'EBUSY' };
+  fault.unlink = { failuresLeft: 0, code: 'EBUSY' };
   // Clean up the prefs file and any quarantined / lock siblings between tests
   const entries = await readdir(testDir).catch(() => [] as string[]);
   for (const entry of entries) {
@@ -260,6 +359,225 @@ describe('corrupted prefs quarantine', () => {
 
     const final = await readPreferences(testDir);
     expect(final).toEqual({ author: 'Healthy', theme: 'dark' });
+  });
+});
+
+describe('transient filesystem failures (Windows)', () => {
+  it('retries the atomic replace over an existing file and still persists', async () => {
+    // Replacing an existing destination is the case Windows actually bounces:
+    // the scanner holds the file being overwritten, not the temp file.
+    await writePreferences(testDir, { author: 'Alice', theme: 'dark' });
+    fault.rename.attempts = 0;
+    fault.rename.failuresLeft = 3;
+
+    await expect(writePreferences(testDir, { author: 'Bob' })).resolves.toEqual({
+      author: 'Bob',
+      theme: 'dark',
+    });
+    expect(fault.rename.attempts).toBe(4);
+    expect(await readPreferences(testDir)).toEqual({ author: 'Bob', theme: 'dark' });
+  });
+
+  it('gives up after exactly the retry budget and rejects', async () => {
+    fault.rename.failuresLeft = Number.MAX_SAFE_INTEGER;
+
+    await expectRejectionCode(writePreferences(testDir, { author: 'Alice' }), 'EPERM');
+    // Pins the budget: raising it stalls the write lock, lowering it guts the fix.
+    expect(fault.rename.attempts).toBe(5);
+
+    // The lock must not survive a failed write, or every later write wedges.
+    const entries = await readdir(testDir);
+    expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
+    // Nor may the unusable temp file be left behind in the user's home dir.
+    expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('does not retry an error that will not clear on its own', async () => {
+    fault.rename.failuresLeft = 1;
+    fault.rename.code = 'EXDEV';
+
+    await expectRejectionCode(writePreferences(testDir, { author: 'Alice' }), 'EXDEV');
+    expect(fault.rename.attempts).toBe(1);
+  });
+
+  it('retries a transient failure opening the lock file', async () => {
+    fault.open = { suffix: '.lock', failuresLeft: 2, code: 'EBUSY' };
+
+    await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+      author: 'Alice',
+    });
+  });
+
+  it('rejects instead of hanging when the lock cannot be acquired', async () => {
+    // A throw from acquireFileLock used to escape the writeLock callback,
+    // settling neither side of the caller's promise.
+    fault.open = { suffix: '.lock', failuresLeft: 1, code: 'ENOSPC' };
+
+    const hung = Symbol('hung');
+    const outcome = await Promise.race([
+      writePreferences(testDir, { author: 'Alice' }).catch(
+        (err: NodeJS.ErrnoException) => err.code,
+      ),
+      new Promise((res) => setTimeout(() => res(hung), 1000)),
+    ]);
+    expect(outcome).toBe('ENOSPC');
+
+    // And the failure must not poison the shared write chain for later writes.
+    await expect(writePreferences(testDir, { author: 'Bob' })).resolves.toEqual({ author: 'Bob' });
+  });
+
+  it('leaves no temp file behind when the write itself fails', async () => {
+    fault.open = { suffix: '.tmp', failuresLeft: 1, code: 'ENOSPC' };
+
+    await expectRejectionCode(writePreferences(testDir, { author: 'Alice' }), 'ENOSPC');
+    const entries = await readdir(testDir);
+    expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
+    expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
+  });
+
+  it('does not orphan the lock when initializing it bounces', async () => {
+    // O_EXCL already created the file at this point. Leaving it behind makes
+    // the next attempt collide with an orphan far too young to look stale, so
+    // the loop burns all 60 attempts and then blocks every writer for 30s.
+    fault.lockWrite.failuresLeft = 2;
+
+    await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+      author: 'Alice',
+    });
+    expect((await readdir(testDir)).some((e) => e.endsWith('.lock'))).toBe(false);
+  });
+
+  it('does not wedge later writes when releasing the lock bounces', async () => {
+    fault.unlink.failuresLeft = 2;
+
+    await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+      author: 'Alice',
+    });
+    expect((await readdir(testDir)).some((e) => e.endsWith('.lock'))).toBe(false);
+    // The next write must not collide with an orphan left by the last one.
+    await expect(writePreferences(testDir, { theme: 'dark' })).resolves.toEqual({
+      author: 'Alice',
+      theme: 'dark',
+    });
+  });
+
+  it('logs rather than silently orphaning a lock it cannot release', async () => {
+    fault.unlink = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EBUSY' };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await writePreferences(testDir, { author: 'Alice' });
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(String(logged.mock.calls[0][0])).toContain('Could not release the preferences lock');
+    } finally {
+      logged.mockRestore();
+      fault.unlink = { failuresLeft: 0, code: 'EBUSY' };
+      await rm(join(testDir, '.md-redline.json.lock'), { force: true }).catch(() => {});
+    }
+  });
+
+  it('retries a transient read inside the locked read-modify-write', async () => {
+    // A bounced read here used to abort the whole write, which is how the
+    // trustedRoots migration got dropped on Windows.
+    await writePreferences(testDir, { author: 'Alice' });
+    fault.read.failuresLeft = 2;
+
+    await expect(writePreferences(testDir, { theme: 'dark' })).resolves.toEqual({
+      author: 'Alice',
+      theme: 'dark',
+    });
+  });
+});
+
+describe('transient read failures', () => {
+  it('readPreferences retries and returns the file', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ author: 'Alice' }));
+    fault.read.failuresLeft = 3;
+
+    expect(await readPreferences(testDir)).toEqual({ author: 'Alice' });
+    expect(fault.read.attempts).toBe(4);
+  });
+
+  it('readPreferencesSync retries and returns the file', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ theme: 'dark' }));
+    fault.read.failuresLeft = 3;
+
+    expect(readPreferencesSync(testDir)).toEqual({ theme: 'dark' });
+    expect(fault.read.attempts).toBe(4);
+  });
+
+  it('falls back to {} and logs when the file exists but cannot be read', async () => {
+    // Losing saved trustedRoots re-prompts the user for a folder they already
+    // granted, so it must not happen silently.
+    await writeFile(
+      join(testDir, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: ['/vault'] }),
+    );
+    fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferences(testDir)).toEqual({});
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(String(logged.mock.calls[0][0])).toContain('Could not read preferences');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('stays silent when there is simply no prefs file yet', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferences(testDir)).toEqual({});
+      expect(readPreferencesSync(testDir)).toEqual({});
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('flags an unreadable file so callers do not persist state derived from {}', async () => {
+    // {} is indistinguishable from "no prefs yet", and a caller that writes
+    // derived state back with a plain patch overwrites the keys it could not
+    // see. This flag is the only thing separating the two cases.
+    await writeFile(
+      join(testDir, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: ['/vault'] }),
+    );
+    fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferencesResult(testDir)).toEqual({ prefs: {}, unreadable: true });
+      expect(readPreferencesSyncResult(testDir)).toEqual({ prefs: {}, unreadable: true });
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('does not flag an absent file, which is the ordinary first run', async () => {
+    expect(await readPreferencesResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+    expect(readPreferencesSyncResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+  });
+
+  it('does not flag a corrupt file, whose bytes the write path quarantines', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), '{ not json');
+
+    expect(await readPreferencesResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+    expect(readPreferencesSyncResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+  });
+
+  it('stays silent for a corrupt file, which the write path quarantines', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), '{ not json');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferences(testDir)).toEqual({});
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
   });
 });
 
