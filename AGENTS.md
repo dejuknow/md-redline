@@ -764,12 +764,13 @@ scroll-follow coalesces into one measurement per animation frame, because touch
 scrolling outpaces the compositor and measuring per event reads as jitter.
 
 The anchor drag handles (`DragHandles.tsx`, `useDragHandles.ts`) run on pointer
-events for the same reason. Their `pointerdown` stops propagating, which is
-load-bearing rather than incidental: `useSelection`'s document listener bumps a
-gesture epoch that invalidates any in-flight selection timer, and a press on a
-handle is not a new selection gesture. Letting it through made comment creation
-flaky on a heavy document, measured at one to two flakes in five runs against
-none. They were mouse-only, and reacted to a tap because
+events for the same reason. Their `pointerdown` stops propagating, and that is a
+reasoned choice rather than a measured one: `useSelection`'s document listener
+bumps a gesture epoch that invalidates any in-flight selection timer, and a
+press on a handle is not a new selection gesture. A review argued for letting it
+through, because the same listener names `[data-drag-handle]` in its
+preserved-selection selector; that concern is filed and unresolved. Both
+arrangements pass 20 consecutive runs of the heaviest insertion spec. They were mouse-only, and reacted to a tap because
 iOS synthesises a `mousedown`, so the handle highlighted and the drag appeared
 to start and then received no `mousemove` for the rest of the gesture: dead on a
 tablet, with nothing on screen to say so. Three things make the conversion work

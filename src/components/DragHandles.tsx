@@ -28,17 +28,19 @@ export function DragHandles({ startPos, endPos, onPointerDown }: DragHandlesProp
     // movement afterwards went on re-anchoring the comment with nothing held.
     if (!e.isPrimary || e.button !== 0) return;
 
-    // Both, and the stopPropagation is load-bearing. A code review argued for
-    // dropping it, because `useSelection` listens for pointerdown on the
-    // document and names [data-drag-handle] in the selector deciding which
-    // gestures may keep the current selection, so it looks starved. Letting the
-    // event through instead made comment creation flaky on a heavy document:
-    // that listener bumps a gesture epoch which invalidates any in-flight
-    // selection timer, and a press on a handle is not a new selection gesture.
-    // Measured over five runs each, on the stress spec's Mermaid-heavy fixture:
-    // clean with this line, one to two flakes without it. The listener was
-    // written for a world where handles emit no pointerdown, and this keeps
-    // that true rather than half-changing it.
+    // Both. The stopPropagation is kept on reasoning, not measurement: the
+    // first thing `useSelection`'s document listener does is bump a gesture
+    // epoch that invalidates any in-flight selection timer, and a press on a
+    // drag handle is not a new selection gesture. That listener was written for
+    // a world where handles emit no pointerdown, and this keeps it true rather
+    // than half-changing it.
+    //
+    // A code review argued the opposite, since the same listener names
+    // [data-drag-handle] in the selector deciding which gestures may keep the
+    // current selection, so stopping the event looks like starving it. That
+    // concern is real and unresolved: see the linked issue. Both arrangements
+    // pass 20 consecutive runs of the heaviest insertion spec, so nothing here
+    // is settled by a flake rate.
     e.preventDefault();
     e.stopPropagation();
 
