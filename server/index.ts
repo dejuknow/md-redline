@@ -827,7 +827,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
       let conflictResponse: Response | null = null;
       const currentWrite = prevLock
-        // Settle, don't succeed — see withFileLock. A save that queued behind
+        // Settle, don't succeed. See withFileLock. A save that queued behind
         // a failing one used to inherit its rejection and answer 500 without
         // ever attempting the write, and because each failure became the next
         // request's prevLock, one bounced save could take the whole queue
@@ -1556,8 +1556,8 @@ export function removePortFileIfOwned(portFile: string, port: number): void {
  * CLI scans the port range instead and finds the server anyway. It used to be
  * written with an unretried O_EXCL open whose only error path was the boot
  * handler's `process.exit(1)`, which turned one bounced syscall in
- * `os.tmpdir()` — among the most heavily scanned directories on Windows — into
- * a server that never starts, before the user reaches a document at all.
+ * `os.tmpdir()`, among the most heavily scanned directories on Windows, into a
+ * server that never starts, before the user reaches a document at all.
  *
  * atomicWriteFile brings the retry and keeps the symlink safety the O_EXCL was
  * there for: the temp file is created with O_EXCL and the rename replaces

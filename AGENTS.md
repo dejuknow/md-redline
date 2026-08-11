@@ -43,10 +43,15 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `server/routes/review-sessions.ts`: HTTP routes for review session endpoints
 - `server/mcp-stdio/`: MCP stdio server (handler, client, server, types, validate)
 - `server/update-check.ts`: daily npm registry check for a newer published version, cached via preferences
-- `server/fs-retry.ts`: `atomicWriteFile` (temp + rename, temp removed on failure) and the
+- `bin/fs-atomic.js`: `atomicWriteFile` (temp + rename, temp removed on failure) and the
   transient-error retry both the document save paths and preferences write through. Windows
   bounces filesystem calls with EPERM/EACCES/EBUSY while a scanner or indexer holds a handle;
-  every write of a user-visible file should go through `atomicWriteFile` rather than a bare rename
+  every write of a user-visible file should go through `atomicWriteFile` rather than a bare rename.
+  The retry is gated to `win32`: POSIX reports those same codes for permanent conditions, where
+  the loop only delays the error. `server/fs-retry.ts` re-exports it for server-side importers
+- `bin/file-lock.js`: `acquireFileLock`, the O_EXCL cross-process lock every writer of
+  `.md-redline.json` takes around a read-modify-write. Shared so `mdr --restrict` and the server
+  cannot interleave; its attempt budget derives from `FS_RETRY_BUDGET_MS`
 - `bin/version-compare.js`: strict x.y.z version compare shared by the server's update checker and the CLI
 - `src/lib/comment-parser.ts`: parse, insert, edit, delete, reply, resolve, anchor updates
 - `src/markdown/pipeline.ts`: markdown -> sanitized HTML pipeline
@@ -269,6 +274,14 @@ not from a compiler flag: `bin/version-compare.js` has been shared between the C
 and `server/update-check.ts` the same way since before this module existed, and
 `allowJs` would have typed every future `bin/` import as unchecked `any`.
 
+`bin/fs-atomic.js` and `bin/file-lock.js` live there for the same reason, and it
+matters more for them: the CLI writes `.md-redline.json` (`mdr --restrict`) and
+Claude Desktop's MCP config, both of which another process also writes. A second
+copy of the retry would drift, and a second copy of the lock would not be a lock
+at all, since two writers taking different locks are not serialized against each
+other. `server/fs-retry.ts` re-exports the first; `server/preferences.ts` imports
+the second directly.
+
 `MD_REDLINE_REGISTRY_URL` and `MD_REDLINE_BASE_URL` keep a plain `??` by choice:
 both are development or background-only, and a blank value fails visibly at the
 first fetch rather than quietly doing the wrong thing. `NO_UPDATE_NOTIFIER` and
@@ -309,6 +322,12 @@ The undocumented `mdr __port` prints the API port the CLI resolved and exits, wh
 is the only way to observe it: that value only seeds the fallback scan inside
 `findServerPort`, and `--stop` would kill whatever it found. The same test file uses
 it to prove the CLI agrees with the server and `vite.config.ts`.
+The undocumented `mdr __first-launch` prints whether this invocation counts as a
+first launch and exits, for the same reason: the answer is otherwise one line of
+welcome text in the middle of a real startup. `bin/prefs-cli.test.ts` uses it to
+pin the distinction that matters, which is that only ENOENT means "first launch".
+An unreadable prefs file is a returning user whose file we cannot read, and
+greeting them with the trust disclosure on every run is both wrong and alarming.
 
 **CLI stale-server upgrade**: on every plain `mdr` invocation,
 `ensureServerRunning()` in `bin/md-redline` asks the running server for

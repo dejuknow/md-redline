@@ -71,8 +71,8 @@ async function isFirstLaunch() {
     raw = await retryTransient(() => readFile(prefsPath, 'utf8'));
   } catch (err) {
     // ENOENT is the only error that means "first launch". Anything else is a
-    // prefs file that exists and could not be read — a scanner holding it, a
-    // permission problem — and greeting a returning user with the trust
+    // prefs file that exists and could not be read (a scanner holding it, a
+    // permission problem), and greeting a returning user with the trust
     // disclosure on every run is both wrong and alarming. Stay quiet.
     return err.code === 'ENOENT';
   }

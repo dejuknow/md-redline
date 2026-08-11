@@ -61,7 +61,7 @@ export function sleep(ms) {
 /**
  * Run a filesystem call, retrying the transient failures above. Every other
  * code (EXDEV, ENOSPC, ENOENT) is a real failure and rethrows on the first
- * attempt, as does everything off Windows — see isTransientFsError.
+ * attempt, as does everything off Windows (see isTransientFsError).
  */
 export async function retryTransient(op) {
   let lastErr;
