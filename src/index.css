@@ -1094,6 +1094,11 @@ mark.search-highlight-active {
   cursor: ew-resize;
   z-index: 10;
   position: absolute;
+  /* Without this the browser claims a touch drag for scrolling before the page
+     sees a single pointermove, and the handle sits still while the document
+     slides under it. That looks exactly like the mouse-only bug this replaced,
+     which is what makes it worth stating rather than inheriting. */
+  touch-action: none;
   transition: background-color 0.15s ease, transform 0.1s ease;
 }
 

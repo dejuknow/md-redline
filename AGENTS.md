@@ -734,10 +734,23 @@ coalesce handle-drag event streams; it gates nothing user-visible. The pill's
 scroll-follow coalesces into one measurement per animation frame, because touch
 scrolling outpaces the compositor and measuring per event reads as jitter.
 
-Known gap (#35): the anchor drag handles (`DragHandles.tsx`,
-`useDragHandles.ts`) are still mouse-only. They react to a tap because iOS
-synthesises a `mousedown`, but a touch drag emits no `mousemove`, so they cannot
-be moved on a tablet.
+The anchor drag handles (`DragHandles.tsx`, `useDragHandles.ts`) run on pointer
+events for the same reason. They were mouse-only, and reacted to a tap because
+iOS synthesises a `mousedown`, so the handle highlighted and the drag appeared
+to start and then received no `mousemove` for the rest of the gesture: dead on a
+tablet, with nothing on screen to say so. Three things make the conversion work
+and each is easy to leave out. `setPointerCapture` on the handle keeps the drag
+alive once the pointer leaves it; `touch-action: none` in `.drag-handle` stops
+the browser claiming the gesture for scrolling before the page sees a move; and
+`pointercancel` ends a drag the system took away, which touch fires and a mouse
+effectively never does. Every ending (released, cancelled, Escape, unmounted)
+runs one `detach`, because four copies of the teardown is how the fifth one gets
+forgotten. The drag also records the `pointerId` that began it and ignores every
+other, so a second finger cannot move an anchor.
+
+`e2e/touch-drag-handles.spec.ts` drives this through CDP
+`Input.dispatchTouchEvent`, not dispatched DOM events: #33 established that
+synthetic-pointer tests here pass even with the touch handlers deleted.
 
 ### Comments rail
 The single comment surface for the rendered view: a fixed-width column at the

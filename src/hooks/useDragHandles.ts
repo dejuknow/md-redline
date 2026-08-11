@@ -28,7 +28,7 @@ interface UseDragHandlesOptions {
 interface UseDragHandlesReturn {
   handlePositions: HandlePositions | null;
   isDragging: boolean;
-  onHandleMouseDown: (handle: 'start' | 'end') => void;
+  onHandlePointerDown: (handle: 'start' | 'end', pointerId: number) => void;
 }
 
 function caretFromPoint(x: number, y: number): { node: Node; offset: number } | null {
@@ -125,6 +125,11 @@ export function useDragHandles({
   // Refs for drag state (avoid stale closures in event handlers)
   const dragRef = useRef<{
     handle: 'start' | 'end';
+    /**
+     * The pointer that started this drag. A tablet has more than one, and
+     * without this a second finger anywhere on the page moves the anchor.
+     */
+    pointerId: number;
     commentIds: string[];
     originalAnchor: string;
     initialHtml: string;
@@ -209,8 +214,8 @@ export function useDragHandles({
     };
   }, [activeCommentId, scrollContainerRef, pageRef, updatePositions]);
 
-  const onHandleMouseDown = useCallback(
-    (handle: 'start' | 'end') => {
+  const onHandlePointerDown = useCallback(
+    (handle: 'start' | 'end', pointerId: number) => {
       const markEls = viewerRef.current?.getActiveMarks() || [];
       const container = viewerRef.current?.getContainer();
       if (markEls.length === 0 || !container) return;
@@ -244,6 +249,7 @@ export function useDragHandles({
 
       dragRef.current = {
         handle,
+        pointerId,
         commentIds,
         originalAnchor,
         initialHtml: container.innerHTML,
@@ -258,10 +264,11 @@ export function useDragHandles({
       setIsDragging(true);
       document.body.classList.add('anchor-dragging');
 
-      const handleMouseMove = (e: MouseEvent) => {
+      const handlePointerMove = (e: PointerEvent) => {
         const drag = dragRef.current;
-        if (!drag) return;
+        if (!drag || e.pointerId !== drag.pointerId) return;
 
+        // PointerEvent extends MouseEvent, so the caret lookup is unchanged.
         const caret = caretFromPoint(e.clientX, e.clientY);
         if (!caret || !container.contains(caret.node)) return;
 
@@ -404,8 +411,43 @@ export function useDragHandles({
         }
       };
 
-      const handleMouseUp = () => {
+      /**
+       * Detach and forget, once, for every way a drag can end.
+       *
+       * There are four: released, cancelled by the system, abandoned with
+       * Escape, and unmounted mid-gesture. Each used to carry its own copy of
+       * the removals, which is exactly the shape that loses one when a fifth
+       * arrives. `pointercancel` IS that fifth: touch fires it and a mouse
+       * effectively never does, so a missed teardown there leaves the hook
+       * mid-drag with listeners attached and the page still marked dragging,
+       * on the platform least able to recover from it.
+       */
+      const detach = () => {
+        document.removeEventListener('pointermove', handlePointerMove);
+        document.removeEventListener('pointerup', handlePointerUp);
+        document.removeEventListener('pointercancel', handlePointerCancel);
+        document.removeEventListener('keydown', handleKeyDown);
+        document.body.classList.remove('anchor-dragging');
+        dragRef.current = null;
+        dragCleanupRef.current = null;
+        setIsDragging(false);
+      };
+
+      /** Put the document back the way it was before the drag touched it. */
+      const revert = () => {
         const drag = dragRef.current;
+        if (!drag) return;
+        container.innerHTML = drag.initialHtml;
+        drag.markEls = Array.from(
+          container.querySelectorAll(
+            'mark.comment-highlight-active, mark.mermaid-comment-highlight-active',
+          ),
+        ) as HTMLElement[];
+      };
+
+      const handlePointerUp = (e: PointerEvent) => {
+        const drag = dragRef.current;
+        if (drag && e.pointerId !== drag.pointerId) return;
         if (drag) {
           // Use container text offsets to get the full anchor including whitespace
           // between styled elements that weren't wrapped in marks
@@ -417,49 +459,37 @@ export function useDragHandles({
             onAnchorChange(drag.commentIds, newAnchor);
           }
         }
+        detach();
+      };
 
-        dragRef.current = null;
-        setIsDragging(false);
-        document.body.classList.remove('anchor-dragging');
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-        document.removeEventListener('keydown', handleKeyDown);
-        dragCleanupRef.current = null;
+      /**
+       * The system took the gesture away: a palm landed, a system edge swipe
+       * started, the browser decided this was a scroll after all. Nothing was
+       * released, so committing the half-finished anchor would write an edit
+       * the reader never completed. Revert, exactly as Escape does.
+       */
+      const handlePointerCancel = (e: PointerEvent) => {
+        const drag = dragRef.current;
+        if (drag && e.pointerId !== drag.pointerId) return;
+        revert();
+        detach();
+        updatePositions();
       };
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
-          const drag = dragRef.current;
-          if (drag) {
-            container.innerHTML = drag.initialHtml;
-            drag.markEls = Array.from(
-              container.querySelectorAll(
-                'mark.comment-highlight-active, mark.mermaid-comment-highlight-active',
-              ),
-            ) as HTMLElement[];
-          }
-          dragRef.current = null;
-          setIsDragging(false);
-          document.body.classList.remove('anchor-dragging');
-          document.removeEventListener('mousemove', handleMouseMove);
-          document.removeEventListener('mouseup', handleMouseUp);
-          document.removeEventListener('keydown', handleKeyDown);
-          dragCleanupRef.current = null;
+          revert();
+          detach();
           updatePositions();
         }
       };
 
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+      document.addEventListener('pointermove', handlePointerMove);
+      document.addEventListener('pointerup', handlePointerUp);
+      document.addEventListener('pointercancel', handlePointerCancel);
       document.addEventListener('keydown', handleKeyDown);
 
-      dragCleanupRef.current = () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-        document.removeEventListener('keydown', handleKeyDown);
-        document.body.classList.remove('anchor-dragging');
-        dragRef.current = null;
-      };
+      dragCleanupRef.current = detach;
     },
     [viewerRef, pageRef, onAnchorChange, updatePositions],
   );
@@ -474,6 +504,6 @@ export function useDragHandles({
   return {
     handlePositions: activeCommentId ? handlePositions : null,
     isDragging,
-    onHandleMouseDown,
+    onHandlePointerDown,
   };
 }
