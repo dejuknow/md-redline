@@ -57,6 +57,36 @@ export function resolvePort(env, names, fallback) {
 }
 
 /**
+ * Sentinel for "no candidate held a usable port". Outside 1-65535, so
+ * `resolvePort` can never return it from a real value.
+ */
+const NO_PORT = -1;
+
+/** Candidates for the API port, in priority order. */
+const API_PORT_NAMES = /** @type {const} */ (['MD_REDLINE_PORT', 'PORT']);
+
+/**
+ * The API port the environment NAMES, or null when it names none.
+ *
+ * The difference from `resolveApiPort` is the whole point: that one cannot tell
+ * an explicit `MD_REDLINE_PORT=6373` from nothing set at all, because both
+ * arrive as 6373. A caller that needs to know whether the user pointed at a
+ * specific server, rather than accepting whatever is running, has to ask this
+ * instead.
+ *
+ * A value that is set but unusable is not a name: `resolvePort` has already
+ * warned about it and moved on, and treating a typo as "the user named this"
+ * would aim a command at a port nobody asked for.
+ *
+ * @param {Record<string, string | undefined>} [env] Defaults to `process.env`.
+ * @returns {number | null}
+ */
+export function resolveNamedApiPort(env = process.env) {
+  const port = resolvePort(env, API_PORT_NAMES, NO_PORT);
+  return port === NO_PORT ? null : port;
+}
+
+/**
  * The API server's port. `PORT` is a documented alias for `MD_REDLINE_PORT`, kept
  * because it shipped; the prefixed name wins.
  *
@@ -64,5 +94,35 @@ export function resolvePort(env, names, fallback) {
  * @returns {number} A port between 1 and 65535.
  */
 export function resolveApiPort(env = process.env) {
-  return resolvePort(env, ['MD_REDLINE_PORT', 'PORT'], FALLBACK_PORT);
+  return resolveNamedApiPort(env) ?? FALLBACK_PORT;
+}
+
+/**
+ * Ports to probe, in order, when looking for a server that is already running.
+ *
+ * Order is the whole content of this function, and it is a correctness
+ * property rather than a performance one. The port file records whichever
+ * server started last, so consulting it first means a command aimed at a
+ * specific server acts on a different one and reports success: `--stop` killed
+ * the wrong instance, and a plain `mdr` attached to it. A port the user NAMED
+ * therefore outranks the recorded one.
+ *
+ * With nothing named, the port file still comes first, and has to: it is how a
+ * server that scanned upward past a busy default is found at all.
+ *
+ * @param {object} options
+ * @param {number | null} options.namedPort Port the user asked for, if any.
+ * @param {number | null} options.portFilePort Port recorded by a running server.
+ * @param {readonly number[]} options.scanBases Range starts, in order.
+ * @param {number} options.scanCount Ports to try from each base.
+ * @returns {number[]} Deduped, so a port already tried is not probed twice.
+ */
+export function serverProbeOrder({ namedPort, portFilePort, scanBases, scanCount }) {
+  const ordered = [];
+  if (namedPort !== null) ordered.push(namedPort);
+  if (portFilePort !== null) ordered.push(portFilePort);
+  for (const base of scanBases) {
+    for (let offset = 0; offset < scanCount; offset++) ordered.push(base + offset);
+  }
+  return [...new Set(ordered)];
 }
