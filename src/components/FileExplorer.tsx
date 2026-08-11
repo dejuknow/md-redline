@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getApiErrorMessage, readJsonResponse, type ApiErrorPayload } from '../lib/http';
-import { getParentDir, getPathBasename, tildeShortenPath } from '../lib/path-utils';
+import { getParentDir, getPathBasename } from '../lib/path-utils';
+import { AccessRequest } from './AccessRequest';
 
 interface BrowseResult {
   dir: string;
@@ -45,7 +46,23 @@ interface Props {
   onClose: () => void;
   onContextMenu?: (info: ExplorerContextMenuInfo) => void;
   hideHeader?: boolean;
-  onTrustFolder?: (deniedDir: string) => Promise<void>;
+  /** Resolves true only when a folder was actually granted. */
+  onTrustFolder?: (deniedDir: string) => Promise<boolean>;
+  /**
+   * True while any surface owns the native picker. Shared rather than local so
+   * this panel's button does not keep inviting clicks while the document
+   * area's dialog is up; a click that lands then is swallowed by the app's
+   * re-entrancy guard and spends this panel's retry on a still-denied folder.
+   */
+  trustPending?: boolean;
+  /**
+   * Bumped by the app on every completed grant, including grants made from
+   * the document area's card. Both surfaces are usually refused by the same
+   * folder, so the panel has to re-browse on someone else's grant or it sits
+   * on a stale refusal whose only affordance reopens the picker for a folder
+   * that is already trusted.
+   */
+  grantNonce?: number;
 }
 
 export function FileExplorer({
@@ -61,6 +78,8 @@ export function FileExplorer({
   onContextMenu: onCtxMenu,
   hideHeader,
   onTrustFolder,
+  trustPending,
+  grantNonce = 0,
 }: Props) {
   const [data, setData] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -123,6 +142,18 @@ export function FileExplorer({
     };
   }, [browse, initialDir, revealNonce]);
 
+  // Retry a refused browse when a grant lands anywhere in the app, which covers
+  // the grant made from the document area's card. Gated on this panel actually
+  // being refused so an unrelated grant does not re-fetch a healthy listing.
+  const deniedDirRef = useRef<string | null>(null);
+  deniedDirRef.current = errorKind === 'access-denied' ? accessDeniedDir : null;
+  const firstGrantNonceRef = useRef(grantNonce);
+  useEffect(() => {
+    if (grantNonce === firstGrantNonceRef.current) return;
+    const denied = deniedDirRef.current;
+    if (denied !== null) browse(denied);
+  }, [grantNonce, browse]);
+
   // Keep the open file visible when the listing changes or a reveal lands, so
   // it is not stranded below the fold in a long directory. A revealed file that
   // is not the active one gets a brief flash so the eye can find it.
@@ -167,6 +198,13 @@ export function FileExplorer({
     const timer = window.setTimeout(() => setFlashPath(null), 1600);
     return () => window.clearTimeout(timer);
   }, [flashPath]);
+
+  // One boolean rather than a predicate and its hand-written negation below,
+  // which desync into either a blank panel or two stacked error states the
+  // moment one of the five terms is edited.
+  const showAccessRequest = Boolean(
+    error && !data && errorKind === 'access-denied' && onTrustFolder && accessDeniedDir,
+  );
 
   const dirName = getPathBasename(data?.dir || '') || data?.dir || 'Files';
 
@@ -230,28 +268,25 @@ export function FileExplorer({
         </div>
       )}
 
-      {/* Error */}
-      {error && !data && (
-        <div className="flex-1 flex flex-col items-center justify-center text-xs text-danger px-3 text-center gap-2">
-          <span className="break-all" title={accessDeniedDir ?? undefined}>
-            {errorKind === 'access-denied' && accessDeniedDir
-              ? `Allow md-redline to read ${tildeShortenPath(accessDeniedDir, homeDir)}?`
-              : errorKind === 'access-denied'
-                ? 'Allow md-redline to read this folder?'
-                : error}
-          </span>
-          {errorKind === 'access-denied' && onTrustFolder && accessDeniedDir && (
-            <button
-              type="button"
-              onClick={async () => {
-                await onTrustFolder(accessDeniedDir);
-                browse(accessDeniedDir);
-              }}
-              className="px-2 py-0.5 rounded border border-danger/50 text-danger hover:bg-danger/10 transition-colors text-[11px] font-medium"
-            >
-              Allow access
-            </button>
-          )}
+      {/* A refused folder is a permission ask, not a failure, so it gets the
+          same card as the document area rather than red error text. */}
+      {showAccessRequest && (
+        <AccessRequest
+          variant="panel"
+          dir={accessDeniedDir}
+          homeDir={homeDir}
+          pending={trustPending}
+          onAllow={async () => {
+            // Only re-browse on an actual grant. A cancelled dialog leaves the
+            // folder exactly as refused as it was, so refetching costs a round
+            // trip and a card flash that reads like the grant failed.
+            if (await onTrustFolder!(accessDeniedDir!)) browse(accessDeniedDir!);
+          }}
+        />
+      )}
+      {error && !data && !showAccessRequest && (
+        <div className="flex-1 flex items-center justify-center text-xs text-danger px-3 text-center">
+          <span className="break-all">{error}</span>
         </div>
       )}
 

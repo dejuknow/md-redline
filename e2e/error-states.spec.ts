@@ -23,39 +23,37 @@ test.afterAll(() => {
 // ---------------------------------------------------------------------------
 
 test.describe('Error states', () => {
-  test('opening a non-existent file shows an error', async ({ page }) => {
+  // Anything under /tmp is outside the e2e webServer's cwd, so resolveAndValidate
+  // 403s before the file is ever stat'd and before the .md check. These paths
+  // therefore land on the permission card, NOT on a 404 or an unsupported-type
+  // error, and asserting "some problem was reported" would pass even with those
+  // server branches deleted. Assert the card specifically; the 404 and 400
+  // branches are the server's own tests to cover.
+  const accessCard = (page: import('@playwright/test').Page) => page.getByTestId('access-request');
+
+  test('a non-existent file under a denied root shows the permission card', async ({ page }) => {
     await page.goto('/?file=/tmp/nonexistent-file-abc123.md');
 
-    // The toolbar should show an error message (rendered with text-danger class)
-    const errorText = page.locator('.text-danger').first();
-    await expect(errorText).toBeVisible({ timeout: 10_000 });
-    const text = await errorText.textContent();
-    // Error message should indicate an access or load problem (the new
-    // friendly copy replaces "denied" with an "allow ..." prompt; both
-    // are valid).
-    expect(text?.toLowerCase()).toMatch(/not found|not readable|error|denied|allow/);
+    await expect(accessCard(page)).toBeVisible({ timeout: 10_000 });
+    // The heading uses a typographic apostrophe, so match around it.
+    await expect(accessCard(page)).toContainText(/read this folder/);
+    await expect(accessCard(page).getByTestId('access-request-allow')).toBeVisible();
   });
 
-  test('opening a non-.md file shows an error', async ({ page }) => {
+  test('a non-.md file under a denied root shows the permission card', async ({ page }) => {
     // Create a temporary .txt file
     const txtFile = '/tmp/md-redline-test-error.txt';
     writeFileSync(txtFile, 'This is a plain text file.');
 
     await page.goto(`/?file=${txtFile}`);
 
-    // The toolbar should show an error about unsupported file type
-    const errorText = page.locator('.text-danger').first();
-    await expect(errorText).toBeVisible({ timeout: 10_000 });
-    const text = await errorText.textContent();
-    // Should indicate either an unsupported-file error OR an access-denied
-    // prompt (the latter fires first because /tmp is outside cwd).
-    expect(text?.toLowerCase()).toMatch(/\.md|not supported|supported|error|denied|allow/);
+    await expect(accessCard(page)).toBeVisible({ timeout: 10_000 });
   });
 
   test('app does not crash on error — navigation still works', async ({ page }) => {
     // Load a bad file first
     await page.goto('/?file=/tmp/nonexistent-file-abc123.md');
-    await expect(page.locator('.text-danger').first()).toBeVisible({ timeout: 10_000 });
+    await expect(accessCard(page)).toBeVisible({ timeout: 10_000 });
 
     // Now open a valid file via the file opener
     await page.locator('button[title="Open file"]').click();
@@ -68,29 +66,27 @@ test.describe('Error states', () => {
     });
   });
 
-  test('access-denied error shows the Allow access button', async ({ page }) => {
+  test('access-denied shows the permission card in the document area', async ({ page }) => {
     // /tmp is outside the e2e webServer's cwd, so this file (even if it
     // existed) would 403 with Access denied. We don't need it to exist; the
     // 403 fires before stat.
     const outOfRootFile = '/tmp/md-redline-e2e-trust-prompt-test.md';
     await page.goto(`/?file=${encodeURIComponent(outOfRootFile)}`);
 
-    // The toolbar should show the friendly permission prompt.
-    const errorText = page.locator('.text-danger').first();
-    await expect(errorText).toBeVisible({ timeout: 10_000 });
-    const text = await errorText.textContent();
-    expect(text?.toLowerCase()).toContain('allow');
+    // The document area owns the ask: the folder's name, the reason, and the button.
+    const card = page.getByTestId('access-request');
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toContainText('tmp');
+    await expect(card.getByTestId('access-request-allow')).toBeVisible();
 
-    // The Allow access button must be visible alongside the prompt. Both
-    // the toolbar and the file explorer can render trust buttons in this
-    // scenario (since /tmp is denied for both file load and dir browse);
-    // scope to the toolbar's button by using its <span class="text-danger">
-    // parent (the explorer wraps its error in a <div>, not a <span>).
-    const trustButton = page.locator('span.text-danger button', { hasText: 'Allow access' });
-    await expect(trustButton).toBeVisible({ timeout: 5_000 });
+    // And no surface repeats it as a red error strip. Scoped by role rather
+    // than by the toolbar's height utility, which the card's own icon box also
+    // happens to carry.
+    await expect(page.locator('.text-danger')).toHaveCount(0);
+    await expect(page.getByTestId('toolbar-allow-access')).toHaveCount(0);
   });
 
-  test('clicking Allow access retries access-denied tabs after grant', async ({ page }) => {
+  test('allowing the folder retries access-denied tabs after grant', async ({ page }) => {
     const testFile = '/tmp/md-redline-e2e-trust-retry-test.md';
     let fileFetchCount = 0;
 
@@ -131,11 +127,9 @@ test.describe('Error states', () => {
     // Navigate to the test file. Real server returns 403 (first /api/file call).
     await page.goto(`/?file=${encodeURIComponent(testFile)}`);
 
-    // Wait for the access-denied error and the trust button. Both the
-    // toolbar and the file explorer render trust buttons here; we scope
-    // to the toolbar's button via its <span class="text-danger"> parent
-    // (the explorer wraps its error in a <div>, not a <span>).
-    const trustButton = page.locator('span.text-danger button', { hasText: 'Allow access' });
+    // Wait for the permission card. The explorer renders its own quieter
+    // version of the same ask, so scope to the document area's card.
+    const trustButton = page.getByTestId('access-request').getByTestId('access-request-allow');
     await expect(trustButton).toBeVisible({ timeout: 10_000 });
 
     // Click the button → /api/pick-folder (mocked) → retryAllAccessDenied → second /api/file (mocked).
@@ -148,6 +142,26 @@ test.describe('Error states', () => {
 
     // The error and trust button should be gone after the successful retry.
     await expect(trustButton).toBeHidden();
+
+    // The document that comes back has to have LIVE geometry. The card covers
+    // the viewer rather than replacing it because usePageGeometry observes the
+    // scroll container once, with deps that do not change when the card
+    // clears: replacing the container left the ResizeObserver attached to a
+    // detached node, so the sheet kept whatever width it measured before the
+    // refusal and stopped tracking the window for the rest of the session.
+    //
+    // Resize and assert the width follows. The rendered width alone proves
+    // nothing here — the stale value is a plausible one, and the sheet's
+    // `max-width: calc(100% - 24px)` makes even a dead layout appear to
+    // respond — so read the inline width usePageGeometry actually sets.
+    const sheet = page.locator('[data-doc-page]');
+    await expect(sheet).toBeVisible();
+    const widthStyle = () => sheet.evaluate((el) => (el as HTMLElement).style.width);
+    const before = await widthStyle();
+    expect(before).not.toBe('');
+
+    await page.setViewportSize({ width: 900, height: 720 });
+    await expect.poll(widthStyle).not.toBe(before);
 
     // Sanity check the route handler ran twice.
     expect(fileFetchCount).toBeGreaterThanOrEqual(2);
