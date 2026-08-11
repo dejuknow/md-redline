@@ -15,6 +15,12 @@ const LOCK_SUFFIX = '.lock';
 const LOCK_STALE_MS = 30_000;
 const LOCK_MAX_ATTEMPTS = 60;
 const LOCK_RETRY_BASE_MS = 25;
+// Windows bounces filesystem calls with these codes while another handle is
+// open on the path. 5 attempts spread over 100ms of linear backoff
+// (10+20+30+40) clear the scanner window without stalling a real failure.
+const FS_MAX_ATTEMPTS = 5;
+const FS_RETRY_BASE_MS = 10;
+const TRANSIENT_FS_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
 
 export interface RecentFile {
   path: string;
@@ -180,6 +186,37 @@ export function readPreferencesSync(homeDir: string): Preferences {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+/**
+ * Run a filesystem call, retrying the transient failures Windows reports while
+ * a virus scanner, the search indexer, or a sync client holds a handle on a
+ * path for a few milliseconds. Those surface as EPERM/EACCES/EBUSY and clear
+ * on their own; every other code (EXDEV, ENOSPC, ENOENT) is a real failure and
+ * rethrows on the first attempt.
+ *
+ * POSIX reports the same codes for permanent conditions instead (an unwritable
+ * directory, a sticky bit, a macOS immutable flag, a denied Files-and-Folders
+ * grant), so the loop is not free there. FS_MAX_ATTEMPTS caps what a
+ * hopeless call wastes at 100ms.
+ */
+async function retryTransient<T>(op: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= FS_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await op();
+    } catch (err) {
+      lastErr = err;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (!code || !TRANSIENT_FS_CODES.has(code)) throw err;
+      if (attempt < FS_MAX_ATTEMPTS) await sleep(FS_RETRY_BASE_MS * attempt);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Acquire a cross-process lock on the preferences file before performing a
  * read-modify-write. The in-process `writeLock` only serializes within a
@@ -208,7 +245,14 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
       };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EEXIST') throw err;
+      if (code !== 'EEXIST') {
+        // The lock file is created and removed on every write, which makes it
+        // the same scanner bait as the temp file. Back off on the transient
+        // codes instead of failing the whole write.
+        if (!code || !TRANSIENT_FS_CODES.has(code)) throw err;
+        await sleep(LOCK_RETRY_BASE_MS);
+        continue;
+      }
       // Lock exists. If it's stale (holder crashed), steal it.
       try {
         const lockStat = await stat(lockPath);
@@ -225,8 +269,7 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
         continue;
       }
       // Backoff with a small random jitter to avoid thundering herd.
-      const delay = LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS);
-      await new Promise((res) => setTimeout(res, delay));
+      await sleep(LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS));
     }
   }
   throw new Error(`Could not acquire preferences lock at ${lockPath}`);
@@ -243,7 +286,10 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
 async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences> {
   let raw: string;
   try {
-    raw = await readFile(filePath, 'utf-8');
+    // Retried for the same reason the replace below is: a transient failure
+    // here aborts the whole write, which is what silently dropped the
+    // trustedRoots migration on Windows.
+    raw = await retryTransient(() => readFile(filePath, 'utf-8'));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
     throw err;
@@ -278,35 +324,58 @@ export type PreferencesPatch =
 
 export type PreferencesPatchFn = (current: Preferences) => Partial<Preferences>;
 
+/** Read-modify-write the prefs file. Caller must serialize on `writeLock`. */
+async function writeLocked(
+  filePath: string,
+  patchOrFn: PreferencesPatch | PreferencesPatchFn,
+): Promise<Preferences> {
+  const releaseLock = await acquireFileLock(filePath);
+  try {
+    const existing = await readAndQuarantineIfCorrupt(filePath);
+    const rawPatch: unknown = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
+    // Sanitize the patch even when it comes from a function callback,
+    // because the callback can be passed untrusted data via writePreferences
+    // call sites that forward HTTP request bodies.
+    const patch = sanitizePreferencesPatch(rawPatch);
+    const merged = { ...existing, ...patch };
+    const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      const fd = await open(tmpPath, 'wx');
+      try {
+        await fd.writeFile(JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+      } finally {
+        await fd.close();
+      }
+      await retryTransient(() => rename(tmpPath, filePath));
+    } catch (err) {
+      // However the write failed, the temp file is unusable. Leaving it behind
+      // litters the user's home directory with one file per failed write, and
+      // prefs are written on every settings toggle and file open.
+      await unlink(tmpPath).catch(() => {});
+      throw err;
+    }
+    return merged;
+  } finally {
+    await releaseLock();
+  }
+}
+
 export async function writePreferences(
   homeDir: string,
   patchOrFn: PreferencesPatch | PreferencesPatchFn,
 ): Promise<Preferences> {
   const result = await new Promise<Preferences>((resolve, reject) => {
     writeLock = writeLock.then(async () => {
-      const filePath = prefsPath(homeDir);
-      const releaseLock = await acquireFileLock(filePath);
+      // Everything, acquisition included, has to settle one side of this
+      // promise. A throw that escapes the callback settles neither: the caller
+      // awaits forever and `writeLock` becomes a rejected promise that wedges
+      // every later write in the process. Settling after writeLocked returns
+      // also means the lock file is gone by the time the caller observes the
+      // result.
       try {
-        const existing = await readAndQuarantineIfCorrupt(filePath);
-        const rawPatch: unknown = typeof patchOrFn === 'function' ? patchOrFn(existing) : patchOrFn;
-        // Sanitize the patch even when it comes from a function callback,
-        // because the callback can be passed untrusted data via writePreferences
-        // call sites that forward HTTP request bodies.
-        const patch = sanitizePreferencesPatch(rawPatch);
-        const merged = { ...existing, ...patch };
-        const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
-        const fd = await open(tmpPath, 'wx');
-        try {
-          await fd.writeFile(JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-        } finally {
-          await fd.close();
-        }
-        await rename(tmpPath, filePath);
-        resolve(merged);
+        resolve(await writeLocked(prefsPath(homeDir), patchOrFn));
       } catch (err) {
         reject(err);
-      } finally {
-        await releaseLock();
       }
     });
   });

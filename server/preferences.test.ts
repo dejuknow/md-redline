@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -11,6 +11,50 @@ import {
 } from './preferences';
 import { DEFAULT_SETTINGS, type AppSettings as ClientAppSettings } from '../src/lib/settings';
 
+// Lets a test make a syscall fail the way Windows does when a scanner or
+// indexer briefly holds a handle on a path. Hoisted because vi.mock factories
+// run before the module body. Both faults are scoped to a filename suffix so
+// arming one never catches an unrelated call on another path (the quarantine
+// rename, the lock file).
+const fault = vi.hoisted(() => ({
+  rename: { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 },
+  open: { suffix: '', failuresLeft: 0, code: 'EPERM' },
+}));
+
+function faultError(code: string, detail: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(`${code}: simulated failure, ${detail}`);
+  err.code = code;
+  return err;
+}
+
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  return {
+    ...actual,
+    rename: async (from: string, to: string) => {
+      if (!from.endsWith(fault.rename.suffix)) return actual.rename(from, to);
+      fault.rename.attempts += 1;
+      if (fault.rename.failuresLeft > 0) {
+        fault.rename.failuresLeft -= 1;
+        throw faultError(fault.rename.code, `rename '${from}' -> '${to}'`);
+      }
+      return actual.rename(from, to);
+    },
+    open: async (path: string, flags: string) => {
+      if (fault.open.failuresLeft > 0 && fault.open.suffix && path.endsWith(fault.open.suffix)) {
+        fault.open.failuresLeft -= 1;
+        throw faultError(fault.open.code, `open '${path}'`);
+      }
+      return actual.open(path, flags);
+    },
+  };
+});
+
+/** Assert a rejection carries an errno code, the property the retry keys off. */
+async function expectRejectionCode(promise: Promise<unknown>, code: string): Promise<void> {
+  await expect(promise).rejects.toMatchObject({ code });
+}
+
 let testDir: string;
 
 beforeAll(async () => {
@@ -22,6 +66,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  fault.rename = { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 };
+  fault.open = { suffix: '', failuresLeft: 0, code: 'EPERM' };
   // Clean up the prefs file and any quarantined / lock siblings between tests
   const entries = await readdir(testDir).catch(() => [] as string[]);
   for (const entry of entries) {
@@ -260,6 +306,80 @@ describe('corrupted prefs quarantine', () => {
 
     const final = await readPreferences(testDir);
     expect(final).toEqual({ author: 'Healthy', theme: 'dark' });
+  });
+});
+
+describe('transient filesystem failures (Windows)', () => {
+  it('retries the atomic replace over an existing file and still persists', async () => {
+    // Replacing an existing destination is the case Windows actually bounces:
+    // the scanner holds the file being overwritten, not the temp file.
+    await writePreferences(testDir, { author: 'Alice', theme: 'dark' });
+    fault.rename.attempts = 0;
+    fault.rename.failuresLeft = 3;
+
+    await expect(writePreferences(testDir, { author: 'Bob' })).resolves.toEqual({
+      author: 'Bob',
+      theme: 'dark',
+    });
+    expect(fault.rename.attempts).toBe(4);
+    expect(await readPreferences(testDir)).toEqual({ author: 'Bob', theme: 'dark' });
+  });
+
+  it('gives up after exactly the retry budget and rejects', async () => {
+    fault.rename.failuresLeft = Number.MAX_SAFE_INTEGER;
+
+    await expectRejectionCode(writePreferences(testDir, { author: 'Alice' }), 'EPERM');
+    // Pins the budget: raising it stalls the write lock, lowering it guts the fix.
+    expect(fault.rename.attempts).toBe(5);
+
+    // The lock must not survive a failed write, or every later write wedges.
+    const entries = await readdir(testDir);
+    expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
+    // Nor may the unusable temp file be left behind in the user's home dir.
+    expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('does not retry an error that will not clear on its own', async () => {
+    fault.rename.failuresLeft = 1;
+    fault.rename.code = 'EXDEV';
+
+    await expectRejectionCode(writePreferences(testDir, { author: 'Alice' }), 'EXDEV');
+    expect(fault.rename.attempts).toBe(1);
+  });
+
+  it('retries a transient failure opening the lock file', async () => {
+    fault.open = { suffix: '.lock', failuresLeft: 2, code: 'EBUSY' };
+
+    await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+      author: 'Alice',
+    });
+  });
+
+  it('rejects instead of hanging when the lock cannot be acquired', async () => {
+    // A throw from acquireFileLock used to escape the writeLock callback,
+    // settling neither side of the caller's promise.
+    fault.open = { suffix: '.lock', failuresLeft: 1, code: 'ENOSPC' };
+
+    const hung = Symbol('hung');
+    const outcome = await Promise.race([
+      writePreferences(testDir, { author: 'Alice' }).catch(
+        (err: NodeJS.ErrnoException) => err.code,
+      ),
+      new Promise((res) => setTimeout(() => res(hung), 1000)),
+    ]);
+    expect(outcome).toBe('ENOSPC');
+
+    // And the failure must not poison the shared write chain for later writes.
+    await expect(writePreferences(testDir, { author: 'Bob' })).resolves.toEqual({ author: 'Bob' });
+  });
+
+  it('leaves no temp file behind when the write itself fails', async () => {
+    fault.open = { suffix: '.tmp', failuresLeft: 1, code: 'ENOSPC' };
+
+    await expectRejectionCode(writePreferences(testDir, { author: 'Alice' }), 'ENOSPC');
+    const entries = await readdir(testDir);
+    expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
+    expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
   });
 });
 
