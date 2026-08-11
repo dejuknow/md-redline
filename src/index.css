@@ -1094,16 +1094,27 @@ mark.search-highlight-active {
   cursor: ew-resize;
   z-index: 10;
   position: absolute;
+  /* Without this the browser claims a touch drag for scrolling before the page
+     sees a single pointermove, and the handle sits still while the document
+     slides under it. That looks exactly like the mouse-only bug this replaced,
+     which is what makes it worth stating rather than inheriting. */
+  touch-action: none;
   transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
+/* The hit target, which is not the 4px bar you can see. At -8px per side that
+   came to about 20px against a fingertip contact patch of 40-50px, so the
+   gesture stayed hard to start by finger even once the events worked. -12px
+   clears WCAG 2.5.8's 24px minimum. Wider trades against the gap between the
+   two handles on a short anchor, where overlapping pads would make the ends
+   fight over the same press. */
 .drag-handle::before {
   content: '';
   position: absolute;
-  top: -2px;
-  bottom: -2px;
-  left: -8px;
-  right: -8px;
+  top: -4px;
+  bottom: -4px;
+  left: -12px;
+  right: -12px;
 }
 
 .drag-handle:hover {

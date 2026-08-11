@@ -1905,7 +1905,7 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
-  const { handlePositions, onHandleMouseDown } = useDragHandles({
+  const { handlePositions, onHandlePointerDown } = useDragHandles({
     viewerRef,
     scrollContainerRef: containerRef,
     pageRef,
@@ -3132,7 +3132,7 @@ export default function App() {
                                 <DragHandles
                                   startPos={handlePositions?.start ?? null}
                                   endPos={handlePositions?.end ?? null}
-                                  onMouseDown={onHandleMouseDown}
+                                  onPointerDown={onHandlePointerDown}
                                 />
                               </>
                             )}
