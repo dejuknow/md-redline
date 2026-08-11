@@ -5,7 +5,7 @@
  * `.md-redline.json` too, and a lock only works if every writer takes the same
  * one. The server reaches it through `server/preferences.ts`.
  *
- * Types live in `file-lock.d.ts`.
+ * Types come from the JSDoc below, read directly by every importer.
  */
 
 import { open, readFile, stat, unlink } from 'fs/promises';

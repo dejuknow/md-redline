@@ -36,12 +36,11 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  /* Spelled out rather than a `bin/**` sweep, because a `.d.ts` in the include
-     list SHADOWS its `.js`: TypeScript drops the implementation from the
-     program and checks the declaration instead, silently un-checking
-     fs-atomic.js and file-lock.js, the two files here that most need it. The
-     hand-written declarations exist for the server, which imports these from a
-     project without allowJs, and they belong in that program rather than this
-     one. Verify with `tsc -p tsconfig.bin.json --listFiles` after editing. */
+  /* Spelled out rather than a `bin/**` sweep. A `.d.ts` caught by the glob
+     SHADOWS its `.js`: TypeScript drops the implementation from the program and
+     checks the declaration instead, which silently un-checks the file. There is
+     no `.d.ts` here to catch today, since `server/` reads these implementations
+     directly, but the list is what keeps that true if one comes back. Verify
+     with `tsc -p tsconfig.bin.json --listFiles` after editing. */
   "include": ["bin/**/*.js", "bin/**/*.test.ts", "bin/cli-browser-stub.ts"]
 }
