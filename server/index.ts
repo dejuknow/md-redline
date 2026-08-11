@@ -578,6 +578,13 @@ export function createAppFull(options: CreateAppOptions = {}) {
     const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
     let result!: T;
     const currentWrite = prevLock
+      // Wait for the write ahead of us to SETTLE, not to succeed. Chaining
+      // with a bare .then() means a rejection ahead in the queue skips our
+      // callback entirely and surfaces as our failure: our own write is never
+      // attempted, and the caller is told its content did not land when
+      // nothing was ever tried. The failure belongs to the request that
+      // caused it, which is awaiting this same promise and reports it.
+      .catch(() => {})
       .then(async () => {
         result = await fn();
       })
@@ -820,6 +827,12 @@ export function createAppFull(options: CreateAppOptions = {}) {
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
       let conflictResponse: Response | null = null;
       const currentWrite = prevLock
+        // Settle, don't succeed — see withFileLock. A save that queued behind
+        // a failing one used to inherit its rejection and answer 500 without
+        // ever attempting the write, and because each failure became the next
+        // request's prevLock, one bounced save could take the whole queue
+        // behind it down with it.
+        .catch(() => {})
         .then(async () => {
           // Conflict detection: if the client sent an expectedMtime, verify the
           // file hasn't been modified externally since the client last loaded it.

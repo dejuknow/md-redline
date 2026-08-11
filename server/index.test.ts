@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   mkdtemp,
   mkdir,
@@ -41,6 +41,38 @@ vi.mock('fs', async (importOriginal) => {
         throw err;
       }
       return actual.readFileSync(path, encoding);
+    },
+  };
+});
+
+// Fails the rename inside atomicWriteFile, which is how a save bounces off a
+// scanner on Windows. Scoped to the temp-file suffix so it only ever catches a
+// save in progress, and armed per test, off by default: every other test in
+// this file runs against a clean filesystem.
+// `target` narrows the fault to saves landing on one file, which is what makes
+// a mid-batch failure (and the rollback of the files already written) stageable.
+const saveFault = vi.hoisted(() => ({
+  failuresLeft: 0,
+  code: 'EPERM',
+  attempts: 0,
+  target: '',
+}));
+
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  return {
+    ...actual,
+    rename: async (from: string, to: string) => {
+      if (!String(from).endsWith('.tmp')) return actual.rename(from, to);
+      if (!String(to).endsWith(saveFault.target)) return actual.rename(from, to);
+      saveFault.attempts += 1;
+      if (saveFault.failuresLeft > 0) {
+        saveFault.failuresLeft -= 1;
+        const err: NodeJS.ErrnoException = new Error(`${saveFault.code}: simulated`);
+        err.code = saveFault.code;
+        throw err;
+      }
+      return actual.rename(from, to);
     },
   };
 });
@@ -4346,6 +4378,184 @@ describe('removePortFileIfOwned', () => {
     expect(() =>
       removePortFileIfOwned(join(tmpdir(), 'md-redline-portfile-nonexistent'), 6373),
     ).not.toThrow();
+  });
+});
+
+describe('save path under filesystem faults', () => {
+  // Every atomicWriteFile call site in this file is otherwise exercised only
+  // against a clean filesystem, so the retry's interaction with the writeLocks
+  // chain, the rollback and the expectedMtime check went untested. These arm
+  // the rename fault, which is how a save bounces off a scanner on Windows.
+  const REAL_PLATFORM = process.platform;
+  let faultFile: string;
+
+  function setPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  }
+
+  function save(path: string, content: string, expectedMtime?: number) {
+    return requestJson(app, '/api/file', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content, ...(expectedMtime != null ? { expectedMtime } : {}) }),
+    });
+  }
+
+  beforeAll(async () => {
+    faultFile = join(docsDir, 'fault-injection.md');
+  });
+
+  beforeEach(async () => {
+    saveFault.failuresLeft = 0;
+    saveFault.code = 'EPERM';
+    saveFault.attempts = 0;
+    saveFault.target = '';
+    setPlatform(REAL_PLATFORM);
+    await writeFile(faultFile, '# Original\n');
+  });
+
+  afterEach(async () => {
+    setPlatform(REAL_PLATFORM);
+    saveFault.failuresLeft = 0;
+    saveFault.target = '';
+    await rm(faultFile, { force: true });
+  });
+
+  it('reports a failed save as a failure and leaves the file untouched', async () => {
+    // The one outcome that must never happen: 200 with the old bytes on disk,
+    // which tells the editor its content is safe when it is not.
+    saveFault.failuresLeft = Number.MAX_SAFE_INTEGER;
+
+    const { response } = await save(faultFile, '# Saved\n');
+
+    expect(response.status).toBe(500);
+    expect(await readFile(faultFile, 'utf-8')).toBe('# Original\n');
+    expect((await readdir(docsDir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('rides out a bounced save on Windows without the client seeing it', async () => {
+    setPlatform('win32');
+    saveFault.failuresLeft = 3;
+
+    const { response } = await save(faultFile, '# Saved\n');
+
+    expect(response.status).toBe(200);
+    expect(await readFile(faultFile, 'utf-8')).toBe('# Saved\n');
+    expect(saveFault.attempts).toBe(4);
+  });
+
+  it('does not wedge the writeLocks chain when a save fails', async () => {
+    // A failed write leaves a rejected promise in the per-path lock chain. If
+    // the next save inherits it, the file is locked out of saving for the rest
+    // of the session, which is worse than the failure that caused it.
+    saveFault.failuresLeft = Number.MAX_SAFE_INTEGER;
+    expect((await save(faultFile, '# Lost\n')).response.status).toBe(500);
+
+    saveFault.failuresLeft = 0;
+    const { response } = await save(faultFile, '# Recovered\n');
+
+    expect(response.status).toBe(200);
+    expect(await readFile(faultFile, 'utf-8')).toBe('# Recovered\n');
+  });
+
+  it('lets a queued save through when the one ahead of it fails', async () => {
+    // Same hazard, one step earlier: the second request chains onto the first
+    // while it is still in flight, so it takes the rejection directly rather
+    // than finding the map already cleaned up.
+    saveFault.failuresLeft = 1;
+    const [first, second] = await Promise.all([
+      save(faultFile, '# First\n'),
+      save(faultFile, '# Second\n'),
+    ]);
+
+    // Which of the two reaches the lock first is up to the event loop, so the
+    // invariant is what gets asserted: one save fails, the other still lands.
+    // Before the fix both came back 500, the second without a write attempted.
+    const statuses = [first.response.status, second.response.status].sort();
+    expect(statuses).toEqual([200, 500]);
+    expect(await readFile(faultFile, 'utf-8')).toBe(
+      first.response.status === 200 ? '# First\n' : '# Second\n',
+    );
+  });
+
+  it('keeps the conflict check ahead of the write when the write then fails', async () => {
+    // A stale expectedMtime must lose to the conflict branch, not to the write
+    // fault: a 500 here would send the editor into retry instead of showing
+    // the user the external edit it is about to destroy.
+    const first = await save(faultFile, '# Version 1\n');
+    expect(first.response.status).toBe(200);
+
+    await writeFile(faultFile, '# External edit\n', 'utf-8');
+    const future = new Date(Date.now() + 5000);
+    await utimes(faultFile, future, future);
+    saveFault.attempts = 0;
+    saveFault.failuresLeft = Number.MAX_SAFE_INTEGER;
+
+    const { response, body } = await save(faultFile, '# Version 2\n', first.body.mtime as number);
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe('CONFLICT');
+    expect(await readFile(faultFile, 'utf-8')).toBe('# External edit\n');
+    // The conflict short-circuits before the write, so the fault never fired.
+    expect(saveFault.attempts).toBe(0);
+  });
+
+  it('saves through a bounce when expectedMtime matches', async () => {
+    setPlatform('win32');
+    const first = await save(faultFile, '# Version 1\n');
+    saveFault.failuresLeft = 2;
+
+    const { response } = await save(faultFile, '# Version 2\n', first.body.mtime as number);
+
+    expect(response.status).toBe(200);
+    expect(await readFile(faultFile, 'utf-8')).toBe('# Version 2\n');
+  });
+
+  it('rolls the batch back when a later file in it cannot be written', async () => {
+    // The rollback exists for exactly this: a multi-file agent batch that
+    // fails partway leaves markers in the files it already wrote, and the
+    // agent is told the batch failed. Only a write fault reaches it, so it
+    // had never run.
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'mdr-rollback-')));
+    const first = join(dir, 'first.md');
+    const second = join(dir, 'second.md');
+    const secondOriginal = '# Second\n\nBravo anchor here.\n';
+    await writeFile(first, '# First\n\nAlpha anchor here.\n', 'utf8');
+    await writeFile(second, secondOriginal, 'utf8');
+
+    const { app: testApp } = await buildTestApp({ allowedRoots: [dir] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [first, second], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    saveFault.target = 'second.md';
+    saveFault.failuresLeft = Number.MAX_SAFE_INTEGER;
+
+    const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [
+          { filePath: first, anchor: 'Alpha anchor', text: 'a?' },
+          { filePath: second, anchor: 'Bravo anchor', text: 'b?' },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: expect.stringContaining('rolled back'),
+    });
+    // The marker that DID land has to come back out, or the user is left
+    // answering half a question set the agent never received.
+    expect(await readFile(first, 'utf8')).not.toMatch(/agentInitiated/);
+    expect(await readFile(second, 'utf8')).toBe(secondOriginal);
+    expect((await readdir(dir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
+
+    await rm(dir, { recursive: true, force: true });
   });
 });
 
