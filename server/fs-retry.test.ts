@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
   atomicWriteFile,
+  FS_RETRY_BUDGET_MS,
   isTransientFsError,
   retryTransient,
   retryTransientSync,
@@ -22,7 +23,7 @@ const fault = vi.hoisted(() => ({
     /** Delete the temp file while reporting failure, as a sync client can. */
     stealTmp: false,
   },
-  open: { failuresLeft: 0, code: 'ENOSPC' },
+  open: { failuresLeft: 0, code: 'ENOSPC', attempts: 0 },
   // Faults the temp file's write/close, AFTER the temp file exists, which is
   // what makes the cleanup assertions non-vacuous.
   write: { failuresLeft: 0, code: 'ENOSPC' },
@@ -52,6 +53,7 @@ vi.mock('fs/promises', async (importOriginal) => {
       return actual.rename(from, to);
     },
     open: async (path: string, flags: string) => {
+      if (path.endsWith('.tmp')) fault.open.attempts += 1;
       if (fault.open.failuresLeft > 0 && path.endsWith('.tmp')) {
         fault.open.failuresLeft -= 1;
         throw faultError(fault.open.code, `open '${path}'`);
@@ -80,15 +82,26 @@ vi.mock('fs/promises', async (importOriginal) => {
   };
 });
 
+// Retrying the transient codes is Windows-only behavior, so the suite has to
+// say which platform it is exercising rather than inheriting the runner's.
+// Everything below runs as Windows except the POSIX describe at the end.
+const REAL_PLATFORM = process.platform;
+
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+}
+
 let testDir: string;
 let docPath: string;
 
 beforeAll(async () => {
+  setPlatform('win32');
   testDir = await mkdtemp(join(tmpdir(), 'md-redline-fs-retry-'));
   docPath = join(testDir, 'doc.md');
 });
 
 afterAll(async () => {
+  setPlatform(REAL_PLATFORM);
   await rm(testDir, { recursive: true, force: true });
 });
 
@@ -100,7 +113,7 @@ beforeEach(async () => {
     commitAnyway: false,
     stealTmp: false,
   };
-  fault.open = { failuresLeft: 0, code: 'ENOSPC' };
+  fault.open = { failuresLeft: 0, code: 'ENOSPC', attempts: 0 };
   fault.write = { failuresLeft: 0, code: 'ENOSPC' };
   fault.close = { failuresLeft: 0, code: 'EIO' };
   for (const entry of await readdir(testDir).catch(() => [] as string[])) {
@@ -109,7 +122,7 @@ beforeEach(async () => {
 });
 
 describe('isTransientFsError', () => {
-  it.each(['EPERM', 'EACCES', 'EBUSY'])('treats %s as transient', (code) => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('treats %s as transient on Windows', (code) => {
     expect(isTransientFsError(faultError(code, 'x'))).toBe(true);
   });
 
@@ -227,6 +240,27 @@ describe('atomicWriteFile', () => {
     expect((await readdir(testDir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
   });
 
+  it('writes through a bounced temp-file create', async () => {
+    // Windows AV hooks file creation as readily as the rename, so the very
+    // first syscall of a save is bounceable too.
+    await writeFile(docPath, 'old\n');
+    fault.open.failuresLeft = 3;
+    fault.open.code = 'EBUSY';
+
+    await atomicWriteFile(docPath, 'new\n');
+
+    expect(await readFile(docPath, 'utf-8')).toBe('new\n');
+    expect(fault.open.attempts).toBe(4);
+  });
+
+  it('does not retry a permanent temp-file create failure', async () => {
+    fault.open.failuresLeft = 1;
+    fault.open.code = 'ENOSPC';
+
+    await expect(atomicWriteFile(docPath, 'new\n')).rejects.toMatchObject({ code: 'ENOSPC' });
+    expect(fault.open.attempts).toBe(1);
+  });
+
   it('reports the write error, not the close error that follows it', async () => {
     // close surfaces deferred write errors, so it fires on the way out of a
     // failed write. Reporting its code instead would send a permanent ENOSPC
@@ -277,5 +311,53 @@ describe('atomicWriteFile', () => {
 
     await expect(atomicWriteFile(docPath, 'new\n')).rejects.toMatchObject({ code: 'EXDEV' });
     expect(fault.rename.attempts).toBe(1);
+  });
+});
+
+describe('off Windows', () => {
+  // EPERM/EACCES/EBUSY are permanent on POSIX (an unwritable directory, a
+  // sticky bit, a macOS uchg flag, a denied Files-and-Folders grant), so the
+  // budget would be spent waiting for something that cannot clear.
+  beforeEach(() => setPlatform('darwin'));
+  afterEach(() => setPlatform('win32'));
+
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('treats %s as permanent', (code) => {
+    expect(isTransientFsError(faultError(code, 'x'))).toBe(false);
+  });
+
+  it('fails a bounced call on the first attempt instead of burning the budget', async () => {
+    let calls = 0;
+    const started = Date.now();
+    await expect(
+      retryTransient(async () => {
+        calls += 1;
+        throw faultError('EPERM', 'locked');
+      }),
+    ).rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(calls).toBe(1);
+    // The point of the gate: no backoff is paid for a hopeless call.
+    expect(Date.now() - started).toBeLessThan(FS_RETRY_BUDGET_MS);
+  });
+
+  it('fails a bounced sync call on the first attempt', () => {
+    let calls = 0;
+    expect(() =>
+      retryTransientSync(() => {
+        calls += 1;
+        throw faultError('EBUSY', 'locked');
+      }),
+    ).toThrow(/EBUSY/);
+    expect(calls).toBe(1);
+  });
+
+  it('surfaces a bounced save immediately, with the destination intact', async () => {
+    await writeFile(docPath, 'old\n');
+    fault.rename.failuresLeft = 1;
+
+    await expect(atomicWriteFile(docPath, 'new\n')).rejects.toMatchObject({ code: 'EPERM' });
+    expect(fault.rename.attempts).toBe(1);
+    expect(await readFile(docPath, 'utf-8')).toBe('old\n');
+    expect((await readdir(testDir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
   });
 });

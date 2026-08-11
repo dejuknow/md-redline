@@ -6,11 +6,36 @@ import { randomBytes } from 'crypto';
 // client like OneDrive or Dropbox. They clear on their own within a few
 // milliseconds. 5 attempts spread over 100ms of linear backoff (10+20+30+40)
 // cover the window without stalling a real failure.
-const FS_MAX_ATTEMPTS = 5;
-const FS_RETRY_BASE_MS = 10;
+export const FS_MAX_ATTEMPTS = 5;
+export const FS_RETRY_BASE_MS = 10;
+/**
+ * Wall-clock a hopeless call can spend inside retryTransient: the sum of the
+ * linear backoffs between attempts (10+20+30+40). Exported so callers that
+ * hand-roll their own contention loop can size themselves against it instead
+ * of drifting apart silently.
+ */
+export const FS_RETRY_BUDGET_MS =
+  ((FS_MAX_ATTEMPTS * (FS_MAX_ATTEMPTS - 1)) / 2) * FS_RETRY_BASE_MS;
 const TRANSIENT_FS_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
 
+/**
+ * Windows is the only platform where these codes mean "try again". POSIX
+ * reports the same three for conditions that are permanent by construction: an
+ * unwritable directory, a sticky bit, a macOS `uchg` flag, a denied
+ * Files-and-Folders grant. There, every attempt fails identically, so the loop
+ * buys nothing and costs the caller its full budget before surfacing the error
+ * the user actually needs to see. Reproduced on Darwin against a locked
+ * document, on the app's highest-frequency write path.
+ *
+ * Read per call rather than captured at module load, so the tests can exercise
+ * both sides on whichever platform they run.
+ */
+function platformRetriesTransientCodes(): boolean {
+  return process.platform === 'win32';
+}
+
 export function isTransientFsError(err: unknown): boolean {
+  if (!platformRetriesTransientCodes()) return false;
   const code = (err as NodeJS.ErrnoException).code;
   return !!code && TRANSIENT_FS_CODES.has(code);
 }
@@ -22,12 +47,7 @@ export function sleep(ms: number): Promise<void> {
 /**
  * Run a filesystem call, retrying the transient failures above. Every other
  * code (EXDEV, ENOSPC, ENOENT) is a real failure and rethrows on the first
- * attempt.
- *
- * POSIX reports the same codes for permanent conditions instead (an unwritable
- * directory, a sticky bit, a macOS immutable flag, a denied Files-and-Folders
- * grant), so the loop is not free there. FS_MAX_ATTEMPTS caps what a hopeless
- * call wastes at 100ms.
+ * attempt, as does everything off Windows — see isTransientFsError.
  */
 export async function retryTransient<T>(op: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
@@ -71,14 +91,26 @@ export function retryTransientSync<T>(op: () => T): T {
  * stale or adversarial `.tmp` cannot block writes, and O_EXCL keeps it from
  * following a symlink.
  *
- * The rename is retried because it is the call Windows bounces most often: it
- * touches both the temp file and the destination, and the destination is the
- * file the user just had open. On any failure the temp file is removed rather
- * than left in the user's folder, where it would show up in Explorer and in
- * `git status`.
+ * Both the create and the rename are retried, because both are calls Windows
+ * bounces: the create because AV hooks file creation, the rename because it
+ * touches the destination the user just had open. On any failure the temp file
+ * is removed rather than left in the user's folder, where it would show up in
+ * Explorer and in `git status`.
  */
 async function writeTempFile(tmpPath: string, content: string): Promise<void> {
-  const fd = await open(tmpPath, 'wx');
+  // Creating the temp file is bounceable for the same reason the rename is:
+  // Windows AV and sync clients hook file creation, and this is the first
+  // syscall of every save. Only the open retries. The write and the close are
+  // not idempotent against a file that now exists, and re-running them would
+  // need the O_EXCL create dropped, which is what keeps a symlink planted at
+  // tmpPath from being followed.
+  //
+  // A create that bounces AFTER the file lands makes the next attempt fail
+  // EEXIST, which is permanent and ends the save. That is the intended
+  // outcome: the caller removes the orphan, the destination is untouched, and
+  // the user retries. Recovering the file instead would mean unlinking a path
+  // this process cannot prove it owns.
+  const fd = await retryTransient(() => open(tmpPath, 'wx'));
   let failure: unknown;
   try {
     await fd.writeFile(content, 'utf-8');

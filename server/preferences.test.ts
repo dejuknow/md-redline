@@ -107,11 +107,19 @@ async function expectRejectionCode(promise: Promise<unknown>, code: string): Pro
 
 let testDir: string;
 
+// The transient-code retries only run on Windows (see isTransientFsError), so
+// the fault-injection tests below have to declare that platform rather than
+// inheriting the runner's and passing or failing by accident. fs-retry.test.ts
+// owns the POSIX side.
+const REAL_PLATFORM = process.platform;
+
 beforeAll(async () => {
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
   testDir = await mkdtemp(join(tmpdir(), 'md-redline-prefs-'));
 });
 
 afterAll(async () => {
+  Object.defineProperty(process, 'platform', { value: REAL_PLATFORM, configurable: true });
   await rm(testDir, { recursive: true });
 });
 
