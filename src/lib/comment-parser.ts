@@ -39,7 +39,10 @@ type CommentTransform =
   | { type: 'remove' }
   | { type: 'replace'; comment: MdComment };
 
-function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
+function getCodeBlockRanges(
+  rawMarkdown: string,
+  { unclosedRunsToEof = false }: { unclosedRunsToEof?: boolean } = {},
+): CodeBlockRange[] {
   const codeBlockRanges: CodeBlockRange[] = [];
   const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
   let fenceMatch: RegExpExecArray | null;
@@ -71,6 +74,17 @@ function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
       });
       openFence = null;
     }
+  }
+
+  // A fence with no closer runs to the end of the document, which is how every
+  // renderer reads it. Only PLACEMENT is told so, and the asymmetry is
+  // deliberate and one-directional: insertion protecting more than detection
+  // sees can only push a marker further OUT of a container, into text detection
+  // does read. The reverse, teaching detection about a container insertion does
+  // not know, is what silently loses comments, so detection keeps pairing
+  // fences exactly as it does today.
+  if (unclosedRunsToEof && openFence) {
+    codeBlockRanges.push({ start: openFence.start, end: rawMarkdown.length });
   }
 
   return codeBlockRanges;
@@ -867,7 +881,7 @@ export function insertComment(
   let ownLine = false;
   let leadingNewline = false;
   {
-    const fencedRanges = getCodeBlockRanges(cleanMarkdown);
+    const fencedRanges = getCodeBlockRanges(cleanMarkdown, { unclosedRunsToEof: true });
     const frontmatter = getFrontmatterRange(cleanMarkdown);
     // Fenced blocks: before the opening fence.
     for (const range of fencedRanges) {
