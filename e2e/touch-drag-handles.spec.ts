@@ -212,6 +212,43 @@ test.describe('Anchor drag handles by touch', () => {
     await expect(page.locator('mark.comment-highlight').first()).toBeVisible();
   });
 
+  test('a drag survives a machine that never renders a frame', async ({ page }) => {
+    // A guard against batching these moves onto an animation frame, which is
+    // tempting because each one rewrites the whole prose subtree. It cannot be
+    // done naively: the pipeline moves an anchor only when it walks, so
+    // applying one position per frame and discarding the rest moves the anchor
+    // nowhere at all. That shipped briefly and turned an existing spec red on
+    // CI, where a loaded runner starved the frame and collapsed a five-step
+    // drag into one jump. Frames are starved here deliberately, so any future
+    // attempt has to keep the intermediate positions to stay green.
+    const card = await commentWithHandles(page, 'followed by regular text', 'Frame starved');
+    const before = await anchorQuote(card);
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __queuedFrames?: FrameRequestCallback[] };
+      w.__queuedFrames = [];
+      window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+        w.__queuedFrames!.push(cb);
+        return 0;
+      }) as typeof window.requestAnimationFrame;
+    });
+
+    const handle = page.locator('[data-drag-handle]').first();
+    const box = (await handle.boundingBox())!;
+    await handle.hover();
+    await page.mouse.down();
+    await page.mouse.move(box.x - 300, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+
+    // No frame ever ran, so this can only have been committed by the release.
+    await expect.poll(() => anchorQuote(card), { timeout: 5_000 }).not.toBe(before);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __queuedFrames: unknown[] }).__queuedFrames.length,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
   test('the handles still work with a mouse', async ({ page }) => {
     // The conversion has to keep the pointer type it already supported. This is
     // the same gesture drag-regression.spec.ts drives, kept here so a touch

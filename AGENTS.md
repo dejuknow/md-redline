@@ -756,10 +756,16 @@ non-`isPrimary` pointer and the hook refuses to begin while one is in flight.
 Either alone is enough today, which is why `e2e/touch-drag-handles.spec.ts`
 asserts the behaviour rather than either mechanism. The `pointerId` recorded at
 the start filters moves for a drag already running; on its own it never stopped
-a second one beginning. Moves are coalesced to one per frame, because each runs
-two text walks, an `innerHTML` serialize, an unwrap-and-rewrap of the whole
+a second one beginning. Moves are NOT coalesced onto an animation frame, though each
+runs two text walks, an `innerHTML` serialize, an unwrap-and-rewrap of the whole
 prose subtree and a forced layout, and touch delivers them faster than the
-display.
+display. The pipeline moves an anchor only when it walks: a 300px drag in five
+steps extends it and the same drag in one step leaves it untouched, so applying
+only the last position of a frame moves it nowhere. Batching briefly shipped and
+turned an existing spec red on CI, where a loaded runner starved the frame and
+collapsed the steps into one jump. `e2e/touch-drag-handles.spec.ts` starves
+frames deliberately to keep that from coming back; anything that batches these
+has to preserve the intermediate positions.
 
 `e2e/touch-drag-handles.spec.ts` drives this through CDP
 `Input.dispatchTouchEvent`, not dispatched DOM events: #33 established that

@@ -439,25 +439,21 @@ export function useDragHandles({
         }
       };
 
-      // Coalesced to one apply per frame. A mouse delivers moves at roughly
-      // the display rate, but a touch drag on a tablet outpaces it, and every
-      // event was running the whole pipeline above over the entire document.
-      // The comment pill's scroll-follow already had to do this, for the same
-      // reason, on a handler that does far less work.
-      let pendingPoint: { x: number; y: number } | null = null;
-      let moveFrame = 0;
-
+      // NOT coalesced onto an animation frame, though the work per move is
+      // heavy enough to want it. The pipeline above only moves an anchor when
+      // it walks: applying just the last position of a gesture, which is what
+      // coalescing does, moves the anchor NOWHERE. Measured directly, with
+      // frames running normally: a 300px drag in 5 steps extends the anchor, and
+      // the same drag in 1 step leaves it exactly as it started. Coalescing
+      // therefore reads as a drag that silently does nothing, and it did: it
+      // turned an existing spec red on CI, where a loaded runner starved the
+      // frame and collapsed every step into one. Anything that batches these
+      // has to keep the intermediate positions, so understand why a jump is
+      // inert before trying again.
       const handlePointerMove = (e: PointerEvent) => {
         const drag = dragRef.current;
         if (!drag || e.pointerId !== drag.pointerId) return;
-        pendingPoint = { x: e.clientX, y: e.clientY };
-        if (moveFrame) return;
-        moveFrame = requestAnimationFrame(() => {
-          moveFrame = 0;
-          const point = pendingPoint;
-          pendingPoint = null;
-          if (point) applyMoveAt(point.x, point.y);
-        });
+        applyMoveAt(e.clientX, e.clientY);
       };
 
       /**
@@ -472,9 +468,6 @@ export function useDragHandles({
        * on the platform least able to recover from it.
        */
       const detach = () => {
-        if (moveFrame) cancelAnimationFrame(moveFrame);
-        moveFrame = 0;
-        pendingPoint = null;
         document.removeEventListener('pointermove', handlePointerMove);
         document.removeEventListener('pointerup', handlePointerUp);
         document.removeEventListener('pointercancel', handlePointerCancel);
