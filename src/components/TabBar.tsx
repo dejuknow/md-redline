@@ -4,6 +4,23 @@ import { getPathBasename } from '../lib/path-utils';
 interface Tab {
   filePath: string;
   error: string | null;
+  errorKind?: 'access-denied' | 'generic' | null;
+}
+
+// A tab waiting on a folder permission is not a failed tab, so its marker is
+// neutral. Red stays for the errors the user cannot resolve by answering a
+// prompt. Muted rather than faint: this dot is the only signal a background
+// denied tab gets, and faint sits under the 3:1 non-text contrast minimum.
+function errorDotClass(tab: Tab): string {
+  return tab.errorKind === 'access-denied' ? 'bg-content-muted' : 'bg-danger';
+}
+
+// The dot is 6px and unlabelled, so the tab's tooltip has to carry the meaning.
+function tabTitle(tab: Tab): string {
+  if (!tab.error) return tab.filePath;
+  const reason =
+    tab.errorKind === 'access-denied' ? 'Folder not allowed yet' : `Failed to load: ${tab.error}`;
+  return `${tab.filePath}\n${reason}`;
 }
 
 export interface TabContextMenuInfo {
@@ -248,7 +265,7 @@ export function TabBar({
                         : 'bg-surface text-content font-medium border-b-primary'
                       : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
                   }`}
-                  title={tab.filePath}
+                  title={tabTitle(tab)}
                 >
                   <span className="truncate">{fileName}</span>
                   {count > 0 ? (
@@ -269,7 +286,9 @@ export function TabBar({
                       {resolvedCount}
                     </span>
                   ) : null}
-                  {tab.error && <span className="w-1.5 h-1.5 rounded-full bg-danger shrink-0" />}
+                  {tab.error && (
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`} />
+                  )}
                   <span
                     role="button"
                     onClick={(e) => {
@@ -386,7 +405,7 @@ export function TabBar({
                         className={`w-full px-3 py-2 flex items-center gap-2 text-left transition-colors ${
                           isActive ? 'bg-surface-inset' : 'hover:bg-tint'
                         }`}
-                        title={tab.filePath}
+                        title={tabTitle(tab)}
                       >
                         <span
                           className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-primary' : 'bg-transparent'}`}
@@ -415,7 +434,9 @@ export function TabBar({
                           </span>
                         ) : null}
                         {tab.error && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-danger shrink-0" />
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`}
+                          />
                         )}
                       </button>
                     );

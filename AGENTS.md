@@ -51,6 +51,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/RenderedDiffView.tsx`: rendered prose view of the diff overlay
 - `src/components/ReviewBanner.tsx`: review session banner (send batch, finish, cancel)
 - `src/components/PanelToolbar.tsx`: shared per-panel toolbar (search, view-mode, copy, handoff, diff controls)
+- `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
@@ -445,6 +446,77 @@ The open-file button is sticky at the right edge of the tab strip, so it overlay
 whichever tab ends there. The strip carries a `scroll-pr-10` that must stay at or
 above that button's `w-9`, otherwise the browser parks the active tab underneath
 it when scrolling the tab into view.
+
+### Folder permission requests
+Opening a file outside the allowed roots is a consent moment, not a failure, and
+`AccessRequest.tsx` is the only place that says so. The document area renders it
+over the sheet (`variant="page"`), the explorer renders the quieter
+`variant="panel"` when a browse is refused, and the toolbar stays out of it
+whenever the card is up. Three surfaces shouting the same absolute path in
+`text-danger` was the state this replaced; if a fourth surface ever needs to
+report a refused folder, give it a variant here rather than its own copy.
+
+**The card covers the document, it does not replace it.** It is an
+`absolute inset-0` overlay inside the viewer's relative wrapper, and the viewer
+tree stays mounted behind it. Swapping it in as a sibling branch looks tidier
+and breaks two things: `usePageGeometry` observes `containerRef.current` in an
+effect keyed `[containerRef, enabled]`, neither of which changes when the card
+clears, so unmounting the scroll container leaves its ResizeObserver attached to
+a detached node and the sheet stops tracking the window for the rest of the
+session; and the viewers are what report the search match count, so a denied tab
+kept the previous document's count over a card with no text. Both are pinned by
+the resize assertion in `e2e/error-states.spec.ts`.
+
+Two conditions gate it, and they are not the same one:
+- `showAccessRequest` (App) is `errorKind === 'access-denied' && !rawMarkdown`.
+  The `!rawMarkdown` term is load-bearing: `reloadFile` keeps the loaded content
+  on failure, so a directory that rotates out from under an open file 403s a tab
+  the user is still reading. The card must not cover a document it cannot give
+  back. Those tabs keep their content and the toolbar reports the refusal with
+  its own compact Allow button, so exactly one surface ever owns the ask.
+- `accessDeniedDir` may be null (`?file=~`, a Windows drive-relative path, both
+  of which `getParentDir` answers with `''`). Null names no folder but still
+  renders the card: the picker works from the active file either way, and a
+  refusal nobody reports is a blank sheet with no way out.
+
+The card leads with the folder's basename and puts the path under it through
+`middleTruncatePath`, which elides whole segments rather than cutting names in
+half, with the untruncated path in the `title`. The CSS `truncate` on that line
+is an overflow guard for a panel dragged to its 160px minimum, not the
+shortener. Agent scratchpad directories are the common case and their paths are
+both long and generated, so a raw path wraps to four lines and still says
+nothing.
+
+The button opens the native picker (`POST /api/pick-folder`). Keep the native
+dialog: it is the local consent flow that `trustedRoots` depends on (see the
+security notes above), so an in-app one-click grant would move the filesystem
+boundary from "the user answered an OS dialog" to "something reached the
+server". The picker opens pointed at the refused folder, which is what keeps
+the extra step cheap, and the card's hint tells the user they can pick a parent
+to allow more at once.
+
+`handleTrustFolder` owns that call for every surface, and three things follow
+from the fact that two cards can be on screen at once:
+- It resolves `true` only on an actual grant. Callers refetch on `true` alone,
+  so a cancelled dialog does not spend a retry on a folder that is still
+  refused, and the re-entrancy guard reports `false` rather than a phantom
+  success to whichever surface did not get the dialog.
+- `trustFolderPending` is shared, not per-surface. A second button that stays
+  enabled while another owns the dialog invites a click the guard then swallows.
+- `grantNonce` bumps on every completed grant so the explorer re-browses after a
+  grant made from the document card. Without it the panel sits on a refusal that
+  no longer applies, offering to re-pick a folder that is already trusted.
+
+If the card is still up after a completed grant, the picked folder did not
+contain the file; `grantMissed` swaps the hint for a line that says so, because
+repeating the ask word for word reads as a dead button.
+
+An access-denied tab's dot in `TabBar` is neutral rather than red for the same
+reason the copy changed: the user can resolve it by answering a prompt. It is
+`content-muted`, not `content-faint`, which falls under the 3:1 non-text
+contrast minimum, and the tab's `title` carries the reason in words since a 6px
+dot cannot. Background tabs opened by session restore never render the card at
+all, so that dot is their only signal.
 
 ### Review banner
 When a review session is active, a sticky banner appears at the top with one row

@@ -34,6 +34,7 @@ import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
+import { AccessRequest } from './components/AccessRequest';
 import { DragHandles } from './components/DragHandles';
 import { RawView, type RawViewHandle } from './components/RawView';
 import { RenderedDiffView, type RenderedDiffViewHandle } from './components/RenderedDiffView';
@@ -237,21 +238,35 @@ export default function App() {
   );
 
   const trustFolderInFlightRef = useRef(false);
+  // Mirrors the ref for rendering. The ref stays because the re-entrancy guard
+  // has to be synchronous; state alone would let a double click through before
+  // React re-renders the disabled button.
+  const [trustFolderPending, setTrustFolderPending] = useState(false);
+  // Bumped once per completed grant. The explorer watches it so a grant made
+  // from the document area re-browses the panel too: both surfaces are usually
+  // refused by the same folder, and only one of them can own the picker call.
+  const [grantNonce, setGrantNonce] = useState(0);
+  // True once a grant has completed while the permission card is still up,
+  // which means the picked folder did not cover the file.
+  const [sawGrant, setSawGrant] = useState(false);
+  /**
+   * Opens the native picker for `defaultPathOverride` (or the active file's
+   * parent) and retries every access-denied tab if the user picks something.
+   * Resolves true only when a folder was actually granted, so callers can tell
+   * a cancelled dialog from a successful one and skip a refetch that is
+   * guaranteed to be refused again.
+   */
   const handleTrustFolder = useCallback(
-    async (defaultPathOverride?: string) => {
-      if (trustFolderInFlightRef.current) return;
+    async (defaultPathOverride?: string | null): Promise<boolean> => {
+      // A second surface can be showing the same ask while this one owns the
+      // dialog. Report failure rather than success: the caller has not been
+      // granted anything, and treating this as a grant sends it off to refetch
+      // against a directory that is still refused.
+      if (trustFolderInFlightRef.current) return false;
       trustFolderInFlightRef.current = true;
+      setTrustFolderPending(true);
       try {
-        // Only accept string overrides. The Toolbar binds this directly to a
-        // button onClick, which passes a SyntheticEvent as the first arg —
-        // we need to ignore it and fall back to deriving from activeFilePath.
-        const overrideDir = typeof defaultPathOverride === 'string' ? defaultPathOverride : null;
-        let hint: string | null = null;
-        if (overrideDir) {
-          hint = overrideDir;
-        } else if (activeFilePath) {
-          hint = getParentDir(activeFilePath) || null;
-        }
+        const hint = defaultPathOverride ?? (activeFilePath ? getParentDir(activeFilePath) : '');
         const url = hint
           ? `/api/pick-folder?defaultPath=${encodeURIComponent(hint)}`
           : '/api/pick-folder';
@@ -266,13 +281,18 @@ export default function App() {
         if (!res.ok || data.cancelled || !data.path) {
           // Cancelled, failed, or returned no path. Leave the existing error
           // in place; the user can click the button again or close the tab.
-          return;
+          return false;
         }
         await retryAllAccessDenied();
+        setGrantNonce((n) => n + 1);
+        setSawGrant(true);
+        return true;
       } catch {
         // Network or parse error. Leave the existing error in place.
+        return false;
       } finally {
         trustFolderInFlightRef.current = false;
+        setTrustFolderPending(false);
       }
     },
     [activeFilePath, retryAllAccessDenied],
@@ -2559,11 +2579,25 @@ export default function App() {
     ],
   );
 
-  // The directory the trust prompt would grant if the user clicks. For the
-  // toolbar's access-denied state, this is the parent dir of the active tab's
-  // file. Computed here so the Toolbar can render the path in its prompt.
+  // The folder the permission card names, or null when the active file's path
+  // has no derivable parent (`?file=~`, a Windows drive-relative path). Null
+  // does not suppress the card: the picker still works from the active file,
+  // and a refusal nobody reports is a blank sheet with no way out.
   const accessDeniedDir =
     errorKind === 'access-denied' && activeFilePath ? getParentDir(activeFilePath) || null : null;
+
+  // The card replaces the document, so it may only do that when there is no
+  // document to replace. `reloadFile` keeps the loaded content on failure, so
+  // a directory that rotates away under an open file 403s a tab the user is
+  // still reading; taking that over would hide their work behind a card with
+  // no dismiss. Those tabs keep their content and report through the toolbar.
+  const showAccessRequest = errorKind === 'access-denied' && !rawMarkdown;
+
+  // If the card is still up after a completed grant, the folder the user picked
+  // does not contain the file. See `sawGrant` above.
+  useEffect(() => {
+    if (!showAccessRequest) setSawGrant(false);
+  }, [showAccessRequest]);
 
   // Optimistic sent IDs: updated immediately when a batch is sent, before
   // the server round-trip completes. Merged with the server's sentCommentIds
@@ -2716,6 +2750,8 @@ export default function App() {
                     onClose={() => setExplorerVisible(false)}
                     onContextMenu={handleExplorerContextMenu}
                     onTrustFolder={handleTrustFolder}
+                    trustPending={trustFolderPending}
+                    grantNonce={grantNonce}
                     hideHeader
                   />
                 ) : (
@@ -2839,14 +2875,13 @@ export default function App() {
         <Toolbar
           error={error}
           errorKind={errorKind}
-          accessDeniedDir={accessDeniedDir}
-          homeDir={homeDir}
+          accessRequestShown={showAccessRequest}
+          onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
           isLoading={isLoading}
           commentsSurfaceVisible={railShown || drawerOpen}
           author={author}
           onAuthorChange={setAuthor}
           onToggleSidebar={toggleCommentsSurface}
-          onTrustFolder={handleTrustFolder}
           tabs={
             <TabBar
               embedded
@@ -2955,168 +2990,188 @@ export default function App() {
                     ) : undefined
                   }
                 />
-                {viewMode === 'raw' ? (
-                  <RawView
-                    ref={rawViewRef}
-                    scrollContainerRef={containerRef}
-                    rawMarkdown={rawMarkdown}
-                    searchQuery={showSearch ? searchQuery : undefined}
-                    searchActiveIndex={activeSearchIndex}
-                    onSearchCount={handleSearchCount}
-                    activeCommentId={activeCommentId}
-                    diffSnapshot={currentSnapshot}
-                    diffEnabled={diffEnabled}
-                    diffLines={diffLines}
-                    oldCleanToRawLine={oldCleanToRawLine}
-                    newCleanToRawLine={newCleanToRawLine}
-                  />
-                ) : (
-                  <div className="relative flex-1 min-h-0">
-                    <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
-                      <div
-                        ref={pageRef}
-                        data-doc-page
-                        className="doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] motion-safe:transition-[width] motion-safe:duration-150"
-                        style={{
-                          width: geometry.pageWidth,
-                          maxWidth: 'calc(100% - 24px)',
-                          minHeight: railShown
-                            ? `max(100%, ${marginLayout.layerHeight + 120}px)`
-                            : '100%',
-                        }}
-                      >
+                {/* A refused folder covers the document rather than leaving a
+                    blank sheet behind an error strip: the ask belongs on the
+                    surface the user is looking at. It covers rather than
+                    replaces because the viewer and the scroll container carry
+                    state that only re-derives on mount — usePageGeometry
+                    observes containerRef once, and the viewers are what report
+                    the search match count — so unmounting them here left the
+                    document rail-less and the search count stale once the
+                    grant landed. */}
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  {showAccessRequest && (
+                    <AccessRequest
+                      dir={accessDeniedDir}
+                      homeDir={homeDir}
+                      pending={trustFolderPending}
+                      grantMissed={sawGrant}
+                      onAllow={() => handleTrustFolder(accessDeniedDir)}
+                    />
+                  )}
+                  {viewMode === 'raw' ? (
+                    <RawView
+                      ref={rawViewRef}
+                      scrollContainerRef={containerRef}
+                      rawMarkdown={rawMarkdown}
+                      searchQuery={showSearch ? searchQuery : undefined}
+                      searchActiveIndex={activeSearchIndex}
+                      onSearchCount={handleSearchCount}
+                      activeCommentId={activeCommentId}
+                      diffSnapshot={currentSnapshot}
+                      diffEnabled={diffEnabled}
+                      diffLines={diffLines}
+                      oldCleanToRawLine={oldCleanToRawLine}
+                      newCleanToRawLine={newCleanToRawLine}
+                    />
+                  ) : (
+                    <div className="relative flex-1 min-h-0">
+                      <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
                         <div
-                          className="motion-safe:transition-[width] motion-safe:duration-150"
-                          style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                          ref={pageRef}
+                          data-doc-page
+                          className="doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] motion-safe:transition-[width] motion-safe:duration-150"
+                          style={{
+                            width: geometry.pageWidth,
+                            maxWidth: 'calc(100% - 24px)',
+                            minHeight: railShown
+                              ? `max(100%, ${marginLayout.layerHeight + 120}px)`
+                              : '100%',
+                          }}
                         >
-                          {diffEnabled && currentSnapshot && diffLines ? (
-                            // key on activeFilePath forces a remount when the user
-                            // switches files while the diff overlay is on, so the
-                            // mount-time auto-scroll-to-first-chunk fires for each
-                            // file's diff. Without this, the [] effect in
-                            // RenderedDiffView only runs for the first file viewed.
-                            <RenderedDiffView
-                              key={activeFilePath ?? ''}
-                              ref={renderedDiffRef}
-                              rawMarkdown={rawMarkdown}
-                              diffSnapshot={currentSnapshot}
-                              diffLines={diffLines}
+                          <div
+                            className="motion-safe:transition-[width] motion-safe:duration-150"
+                            style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                          >
+                            {diffEnabled && currentSnapshot && diffLines ? (
+                              // key on activeFilePath forces a remount when the user
+                              // switches files while the diff overlay is on, so the
+                              // mount-time auto-scroll-to-first-chunk fires for each
+                              // file's diff. Without this, the [] effect in
+                              // RenderedDiffView only runs for the first file viewed.
+                              <RenderedDiffView
+                                key={activeFilePath ?? ''}
+                                ref={renderedDiffRef}
+                                rawMarkdown={rawMarkdown}
+                                diffSnapshot={currentSnapshot}
+                                diffLines={diffLines}
+                              />
+                            ) : (
+                              <>
+                                {viewerNeedsTheme ? (
+                                  <ThemedMarkdownViewer
+                                    ref={viewerRef}
+                                    html={html}
+                                    cleanMarkdown={cleanMarkdown}
+                                    comments={comments}
+                                    activeCommentId={activeCommentId}
+                                    selectionText={selection?.text ?? null}
+                                    selectionOffset={selection?.offset ?? null}
+                                    onHighlightClick={handleHighlightClickWithPopover}
+                                    // Fragment arg is intentionally ignored in v1; openTab
+                                    // takes only the path. See spec §3 non-goals.
+                                    onLocalLinkClick={openTab}
+                                    onContextMenu={handleViewerContextMenu}
+                                    enableResolve={settings.enableResolve}
+                                    searchQuery={showSearch ? searchQuery : undefined}
+                                    searchActiveIndex={activeSearchIndex}
+                                    onSearchCount={handleSearchCount}
+                                    sentCommentIds={sentCommentIds}
+                                    mermaidSvgMap={mermaidSvgMap}
+                                    onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                    onHighlightsPainted={handleHighlightsPainted}
+                                  />
+                                ) : (
+                                  <MarkdownViewer
+                                    ref={viewerRef}
+                                    html={html}
+                                    cleanMarkdown={cleanMarkdown}
+                                    comments={comments}
+                                    activeCommentId={activeCommentId}
+                                    selectionText={selection?.text ?? null}
+                                    selectionOffset={selection?.offset ?? null}
+                                    onHighlightClick={handleHighlightClickWithPopover}
+                                    // Fragment arg is intentionally ignored in v1; openTab
+                                    // takes only the path. See spec §3 non-goals.
+                                    onLocalLinkClick={openTab}
+                                    onContextMenu={handleViewerContextMenu}
+                                    enableResolve={settings.enableResolve}
+                                    searchQuery={showSearch ? searchQuery : undefined}
+                                    searchActiveIndex={activeSearchIndex}
+                                    onSearchCount={handleSearchCount}
+                                    sentCommentIds={sentCommentIds}
+                                    mermaidSvgMap={mermaidSvgMap}
+                                    onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                    onHighlightsPainted={handleHighlightsPainted}
+                                  />
+                                )}
+                                <DragHandles
+                                  startPos={handlePositions?.start ?? null}
+                                  endPos={handlePositions?.end ?? null}
+                                  onMouseDown={onHandleMouseDown}
+                                />
+                              </>
+                            )}
+                          </div>
+                          {railShown && (
+                            <CommentsRail
+                              density={railDensity}
+                              scrollRef={containerRef as RefObject<HTMLElement | null>}
+                              layout={marginLayout}
+                              anchoredComments={marginComments}
+                              allComments={comments}
+                              activeCommentId={activeCommentId}
+                              missingAnchors={missingAnchors}
+                              sentCommentIds={sentCommentIds}
+                              onActivate={handleSidebarActivate}
+                              onReply={handleReply}
+                              onResolve={settings.enableResolve ? handleResolve : undefined}
+                              onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                              onDelete={handleDelete}
+                              onEdit={handleEdit}
+                              onEditReply={handleEditReply}
+                              onDeleteReply={handleDeleteReply}
+                              onBulkDelete={handleBulkDelete}
+                              onBulkResolve={handleBulkResolve}
+                              onBulkDeleteResolved={handleBulkDeleteResolved}
+                              onContextMenu={handleSidebarContextMenu}
+                              selectionText={selection?.text ?? null}
+                              selectionOffset={selection?.offset ?? null}
+                              onReanchorToSelection={handleReanchorToSelection}
+                              requestedEditor={requestedEditor}
+                              requestedFocus={requestedCommentFocus}
+                              onFocusHandled={() => setRequestedCommentFocus(null)}
+                              unreadReplyIds={unreadReplyIds}
                             />
-                          ) : (
-                            <>
-                              {viewerNeedsTheme ? (
-                                <ThemedMarkdownViewer
-                                  ref={viewerRef}
-                                  html={html}
-                                  cleanMarkdown={cleanMarkdown}
-                                  comments={comments}
-                                  activeCommentId={activeCommentId}
-                                  selectionText={selection?.text ?? null}
-                                  selectionOffset={selection?.offset ?? null}
-                                  onHighlightClick={handleHighlightClickWithPopover}
-                                  // Fragment arg is intentionally ignored in v1; openTab
-                                  // takes only the path. See spec §3 non-goals.
-                                  onLocalLinkClick={openTab}
-                                  onContextMenu={handleViewerContextMenu}
-                                  enableResolve={settings.enableResolve}
-                                  searchQuery={showSearch ? searchQuery : undefined}
-                                  searchActiveIndex={activeSearchIndex}
-                                  onSearchCount={handleSearchCount}
-                                  sentCommentIds={sentCommentIds}
-                                  mermaidSvgMap={mermaidSvgMap}
-                                  onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                  onHighlightsPainted={handleHighlightsPainted}
-                                />
-                              ) : (
-                                <MarkdownViewer
-                                  ref={viewerRef}
-                                  html={html}
-                                  cleanMarkdown={cleanMarkdown}
-                                  comments={comments}
-                                  activeCommentId={activeCommentId}
-                                  selectionText={selection?.text ?? null}
-                                  selectionOffset={selection?.offset ?? null}
-                                  onHighlightClick={handleHighlightClickWithPopover}
-                                  // Fragment arg is intentionally ignored in v1; openTab
-                                  // takes only the path. See spec §3 non-goals.
-                                  onLocalLinkClick={openTab}
-                                  onContextMenu={handleViewerContextMenu}
-                                  enableResolve={settings.enableResolve}
-                                  searchQuery={showSearch ? searchQuery : undefined}
-                                  searchActiveIndex={activeSearchIndex}
-                                  onSearchCount={handleSearchCount}
-                                  sentCommentIds={sentCommentIds}
-                                  mermaidSvgMap={mermaidSvgMap}
-                                  onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                  onHighlightsPainted={handleHighlightsPainted}
-                                />
-                              )}
-                              <DragHandles
-                                startPos={handlePositions?.start ?? null}
-                                endPos={handlePositions?.end ?? null}
-                                onMouseDown={onHandleMouseDown}
-                              />
-                            </>
                           )}
+                          {popoverCommentId &&
+                            !railCanShowThread(popoverCommentId) &&
+                            (() => {
+                              const c = comments.find((x) => x.id === popoverCommentId);
+                              if (!c) return null;
+                              return (
+                                <CommentPopover
+                                  comment={c}
+                                  pageRef={pageRef as RefObject<HTMLElement | null>}
+                                  onClose={() => setPopoverCommentId(null)}
+                                  sent={sentCommentIds.includes(c.id)}
+                                  anchorMissing={missingAnchors.has(c.id)}
+                                  onReply={handleReply}
+                                  onResolve={settings.enableResolve ? handleResolve : undefined}
+                                  onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                                  onDelete={handleDelete}
+                                  onEdit={handleEdit}
+                                  onEditReply={handleEditReply}
+                                  onDeleteReply={handleDeleteReply}
+                                />
+                              );
+                            })()}
                         </div>
-                        {railShown && (
-                          <CommentsRail
-                            density={railDensity}
-                            scrollRef={containerRef as RefObject<HTMLElement | null>}
-                            layout={marginLayout}
-                            anchoredComments={marginComments}
-                            allComments={comments}
-                            activeCommentId={activeCommentId}
-                            missingAnchors={missingAnchors}
-                            sentCommentIds={sentCommentIds}
-                            onActivate={handleSidebarActivate}
-                            onReply={handleReply}
-                            onResolve={settings.enableResolve ? handleResolve : undefined}
-                            onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-                            onDelete={handleDelete}
-                            onEdit={handleEdit}
-                            onEditReply={handleEditReply}
-                            onDeleteReply={handleDeleteReply}
-                            onBulkDelete={handleBulkDelete}
-                            onBulkResolve={handleBulkResolve}
-                            onBulkDeleteResolved={handleBulkDeleteResolved}
-                            onContextMenu={handleSidebarContextMenu}
-                            selectionText={selection?.text ?? null}
-                            selectionOffset={selection?.offset ?? null}
-                            onReanchorToSelection={handleReanchorToSelection}
-                            requestedEditor={requestedEditor}
-                            requestedFocus={requestedCommentFocus}
-                            onFocusHandled={() => setRequestedCommentFocus(null)}
-                            unreadReplyIds={unreadReplyIds}
-                          />
-                        )}
-                        {popoverCommentId &&
-                          !railCanShowThread(popoverCommentId) &&
-                          (() => {
-                            const c = comments.find((x) => x.id === popoverCommentId);
-                            if (!c) return null;
-                            return (
-                              <CommentPopover
-                                comment={c}
-                                pageRef={pageRef as RefObject<HTMLElement | null>}
-                                onClose={() => setPopoverCommentId(null)}
-                                sent={sentCommentIds.includes(c.id)}
-                                anchorMissing={missingAnchors.has(c.id)}
-                                onReply={handleReply}
-                                onResolve={settings.enableResolve ? handleResolve : undefined}
-                                onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
-                                onDelete={handleDelete}
-                                onEdit={handleEdit}
-                                onEditReply={handleEditReply}
-                                onDeleteReply={handleDeleteReply}
-                              />
-                            );
-                          })()}
                       </div>
+                      <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
                     </div>
-                    <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>

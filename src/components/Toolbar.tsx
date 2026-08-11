@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { getPrimaryModifierLabel } from '../lib/platform';
-import { tildeShortenPath } from '../lib/path-utils';
 import { IconButton } from './IconButton';
 
 export type ViewMode = 'rendered' | 'raw';
@@ -8,10 +7,15 @@ export type ViewMode = 'rendered' | 'raw';
 interface Props {
   error: string | null;
   errorKind: 'access-denied' | 'generic' | null;
-  /** When errorKind is 'access-denied', the directory the trust click would grant. */
-  accessDeniedDir: string | null;
-  /** User's home directory; used to tilde-shorten the path in the trust prompt. */
-  homeDir: string;
+  /**
+   * True when the document area is showing the permission card, which is the
+   * usual access-denied case. The toolbar then says nothing: repeating the ask
+   * in a strip too narrow for an absolute path was the whole problem. It still
+   * reports a refusal the card declines to take over, which is a tab that kept
+   * its content through a failed reload.
+   */
+  accessRequestShown: boolean;
+  onTrustFolder: () => void;
   isLoading: boolean;
   /** Whether a comments surface is actually on screen (rail or drawer), which
    * is what the toggle button's active state reflects. Not the same as the
@@ -21,21 +25,19 @@ interface Props {
   author: string;
   onAuthorChange: (name: string) => void;
   onToggleSidebar: () => void;
-  onTrustFolder: () => void;
   tabs?: React.ReactNode;
 }
 
 export function Toolbar({
   error,
   errorKind,
-  accessDeniedDir,
-  homeDir,
+  accessRequestShown,
+  onTrustFolder,
   isLoading,
   commentsSurfaceVisible,
   author,
   onAuthorChange,
   onToggleSidebar,
-  onTrustFolder,
   tabs,
 }: Props) {
   const [editingAuthor, setEditingAuthor] = useState(false);
@@ -66,26 +68,22 @@ export function Toolbar({
           so the active tab still merges into the sheet below. */}
       {tabs && <div className="flex-1 min-w-0 self-stretch flex items-end pt-1.5">{tabs}</div>}
 
-      {/* Center spacer with status */}
+      {/* Center spacer with status. */}
       <div className="flex items-center gap-2 min-w-0 shrink">
-        {error && (
-          <span className="text-xs text-danger font-medium flex items-center gap-2 min-w-0">
-            <span className="truncate" title={accessDeniedDir ?? undefined}>
-              {errorKind === 'access-denied'
-                ? accessDeniedDir
-                  ? `Allow md-redline to read ${tildeShortenPath(accessDeniedDir, homeDir)}?`
-                  : 'Allow md-redline to read this folder?'
-                : error}
-            </span>
-            {errorKind === 'access-denied' && (
-              <button
-                type="button"
-                onClick={() => onTrustFolder()}
-                className="shrink-0 px-2 py-0.5 rounded border border-danger/50 text-danger hover:bg-danger/10 transition-colors text-[11px] font-medium"
-              >
-                Allow access
-              </button>
-            )}
+        {error && errorKind !== 'access-denied' && (
+          <span className="text-xs text-danger font-medium truncate">{error}</span>
+        )}
+        {errorKind === 'access-denied' && !accessRequestShown && (
+          <span className="text-xs text-content-secondary flex items-center gap-2 min-w-0">
+            <span className="truncate">Lost access to this file&rsquo;s folder</span>
+            <button
+              type="button"
+              onClick={onTrustFolder}
+              data-testid="toolbar-allow-access"
+              className="shrink-0 px-2 py-0.5 rounded text-primary-text hover:bg-tint-primary transition-colors text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              Allow&hellip;
+            </button>
           </span>
         )}
         {isLoading && <span className="text-xs text-content-muted">Loading...</span>}
