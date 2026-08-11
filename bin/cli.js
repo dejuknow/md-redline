@@ -24,9 +24,9 @@ import { createRequire } from 'module';
 import { acquireFileLock, LOCK_MAX_WAIT_MS, LockContentionError } from './file-lock.js';
 import { atomicWriteFile, errorCode, retryTransient } from './fs-atomic.js';
 import { resolveHomeDir } from './home-dir.js';
-import { FALLBACK_PORT, resolveNamedApiPort, serverProbeOrder } from './ports.js';
+import { FALLBACK_PORT, isValidPort, resolveNamedApiPort } from './ports.js';
 
-import { checkServer, gracefulShutdown, killPort } from './server-control.js';
+import { checkServer, gracefulShutdown, killPort, serverProbeOrder } from './server-control.js';
 import { buildWindowsCommand } from './spawn-command.js';
 import { isNewerVersion } from './version-compare.js';
 
@@ -172,7 +172,7 @@ async function resolveTarget(arg) {
 async function readPortFile() {
   try {
     const port = Number((await readFile(PORT_FILE, 'utf8')).trim());
-    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+    return isValidPort(port) ? port : null;
   } catch {
     // No port file or an unreadable one. Both mean nothing is recorded.
     return null;
@@ -183,14 +183,12 @@ async function readPortFile() {
  * @returns {Promise<number | null>} The first port answering as mdr, or null.
  */
 async function findServerPort() {
-  const bases =
-    DEFAULT_SERVER_PORT === LEGACY_SERVER_PORT
-      ? [DEFAULT_SERVER_PORT]
-      : [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT];
+  // No guard against the two being equal: serverProbeOrder dedupes, so a
+  // repeated base contributes nothing and shifts nothing.
   const order = serverProbeOrder({
     namedPort: NAMED_SERVER_PORT,
     portFilePort: await readPortFile(),
-    scanBases: bases,
+    scanBases: [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT],
     scanCount: MAX_PORT_SCAN,
   });
   for (const port of order) {
@@ -373,11 +371,18 @@ async function stopServer(quiet = false) {
     killPort(clientPort);
   }
 
-  // Clean up port file
-  try {
-    await unlink(PORT_FILE);
-  } catch {
-    // Already gone is the ordinary case: the server removes it on the way out.
+  // Only when it records the server we just killed. Now that a named port can
+  // win over the recorded one, the two are no longer the same server, and
+  // deleting the record of one that is still running costs the next `mdr` its
+  // fast-path lookup: if that server sits outside the scan windows, the CLI
+  // starts a second one and orphans it. `removePortFileIfOwned` in
+  // server/index.ts is the same guard, for the same reason, on the way out.
+  if ((await readPortFile()) === serverPort) {
+    try {
+      await unlink(PORT_FILE);
+    } catch {
+      // Already gone is the ordinary case: the server removes it on the way out.
+    }
   }
 
   if (!quiet) console.log('mdr stopped.');

@@ -1,12 +1,14 @@
 import { execSync } from 'child_process';
 
+import { isValidPort } from './ports.js';
+
 /**
  * @param {number} port
  * @param {NodeJS.Platform} [platform]
  * @returns {string | null} null when the port is not a usable port number
  */
 export function buildKillCommand(port, platform = process.platform) {
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+  if (!isValidPort(port)) return null;
   if (platform === 'win32') {
     return `netstat -ano | findstr 127.0.0.1:${port} | findstr LISTENING`;
   }
@@ -143,4 +145,34 @@ export async function gracefulShutdown(
     await delay(pollMs);
   }
   return false;
+}
+
+/**
+ * Ports to probe, in order, when looking for a server that is already running.
+ *
+ * Order is the whole content of this function, and it is a correctness
+ * property rather than a performance one. The port file records whichever
+ * server started last, so consulting it first means a command aimed at a
+ * specific server acts on a different one and reports success: `--stop` killed
+ * the wrong instance, and a plain `mdr` attached to it. A port the user NAMED
+ * therefore outranks the recorded one.
+ *
+ * With nothing named, the port file still comes first, and has to: it is how a
+ * server that scanned upward past a busy default is found at all.
+ *
+ * @param {object} options
+ * @param {number | null} options.namedPort Port the user asked for, if any.
+ * @param {number | null} options.portFilePort Port recorded by a running server.
+ * @param {readonly number[]} options.scanBases Range starts, in order.
+ * @param {number} options.scanCount Ports to try from each base.
+ * @returns {number[]} Deduped, so a port already tried is not probed twice.
+ */
+export function serverProbeOrder({ namedPort, portFilePort, scanBases, scanCount }) {
+  const ordered = [];
+  if (namedPort !== null) ordered.push(namedPort);
+  if (portFilePort !== null) ordered.push(portFilePort);
+  for (const base of scanBases) {
+    for (let offset = 0; offset < scanCount; offset++) ordered.push(base + offset);
+  }
+  return [...new Set(ordered)];
 }

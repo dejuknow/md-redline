@@ -293,8 +293,10 @@ implementations. A wrong argument to any of them is a build error again, which
 is what the declarations were for, except that nothing had ever checked THEM
 against the code they described.
 
-**Which running server a command acts on is `serverProbeOrder`, and the order is
-a correctness property.** A port the user NAMED (`MD_REDLINE_PORT`, or the
+**Which running server a command acts on is `serverProbeOrder`** (in
+`bin/server-control.js`, with the rest of finding and acting on a running
+server, rather than in `ports.js`, which resolves what port to bind)**, and the
+order is a correctness property.** A port the user NAMED (`MD_REDLINE_PORT`, or the
 `PORT` alias) is probed before the one in the port file, then the scan ranges,
 deduped. The port file records whichever server started last, so consulting it
 first meant a command aimed at one instance acted on another and said it
@@ -392,6 +394,7 @@ The undocumented `mdr __port` prints the API port the CLI resolved and exits, wh
 is the only way to observe it: that value only seeds the fallback scan inside
 `findServerPort`, and `--stop` would kill whatever it found. The same test file uses
 it to prove the CLI agrees with the server and `vite.config.ts`.
+
 The undocumented `mdr __find-server` prints which running server this invocation
 would act on (or `none`) and touches nothing, which is the only way to observe
 that choice: every other command that makes it then either kills the server or

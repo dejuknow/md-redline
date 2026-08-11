@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -17,6 +17,7 @@ import { join } from 'path';
 const BIN = join(__dirname, 'md-redline');
 
 const servers: Server[] = [];
+const children: ChildProcess[] = [];
 let scratch: string | null = null;
 
 /**
@@ -73,10 +74,14 @@ function findServer(env: NodeJS.ProcessEnv = {}): Promise<string> {
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    children.push(child);
     let stdout = '';
     child.stdout.on('data', (chunk) => (stdout += String(chunk)));
     child.once('error', reject);
-    child.once('exit', () => resolvePromise(stdout.trim()));
+    // 'close', not 'exit': exit can fire before stdio has drained, and the
+    // port this reads IS the assertion. Every other subprocess test in bin/
+    // uses 'exit', but none of them races the child's last write.
+    child.once('close', () => resolvePromise(stdout.trim()));
   });
 }
 
@@ -85,6 +90,10 @@ function writePortFile(port: number): void {
 }
 
 afterEach(async () => {
+  // A child that never exits would otherwise outlive the test that spawned it:
+  // vitest abandons the awaiting promise on timeout, but nothing reaps the
+  // process. The servers get the same treatment, which they already had.
+  for (const child of children.splice(0)) child.kill();
   await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
   if (scratch) rmSync(scratch, { recursive: true, force: true });
   scratch = null;
@@ -136,10 +145,27 @@ describe('choosing which running server to act on', () => {
   });
 });
 
-/** A port nothing is listening on: bound, read back, released. */
+/**
+ * A port nothing is listening on: bound, read back, released.
+ *
+ * Deliberately not startFakeServer plus a pop() off the shared array. That
+ * borrowed both its request handling, which is irrelevant here, and an
+ * assumption that every caller awaits sequentially, which would silently close
+ * somebody else's server the first time two of these ran concurrently.
+ */
 async function unusedPort(): Promise<number> {
-  const { port } = await startFakeServer();
-  const server = servers.pop();
-  await new Promise((r) => server?.close(r));
+  const server = createServer();
+  const port = await new Promise<number>((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('no port assigned'));
+        return;
+      }
+      resolvePromise(address.port);
+    });
+  });
+  await new Promise((r) => server.close(r));
   return port;
 }

@@ -17,6 +17,18 @@
  * the prefixed name.
  */
 
+/**
+ * A number a server could actually bind. One definition, because the rule was
+ * written out in three places and they have to change together or the CLI's
+ * idea of a usable port drifts from what this module will accept.
+ *
+ * @param {number} port
+ * @returns {boolean}
+ */
+export function isValidPort(port) {
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
 /** 6373 spells "MDR" on a phone keypad, clear of the 3000-3010 range Next/Nest/CRA contend for. */
 export const FALLBACK_PORT = 6373;
 
@@ -37,10 +49,16 @@ export const FALLBACK_PORT = 6373;
  * evaluating, before the startup chain that renders errors as one readable line,
  * and a typo in a port should not brick a local tool.
  *
+ * The fallback is returned as given rather than coerced, so a caller that needs
+ * to distinguish "nobody named a port" from "somebody named the default" can
+ * pass null and be told, instead of decoding a sentinel port number that has to
+ * stay outside the valid range to work.
+ *
+ * @template T
  * @param {Record<string, string | undefined>} env
  * @param {readonly string[]} names Candidates in priority order.
- * @param {number} fallback Used when no candidate holds a usable port.
- * @returns {number} A port between 1 and 65535.
+ * @param {T} fallback Used when no candidate holds a usable port.
+ * @returns {number | T} A port between 1 and 65535, or `fallback`.
  */
 export function resolvePort(env, names, fallback) {
   for (const name of names) {
@@ -50,17 +68,11 @@ export function resolvePort(env, names, fallback) {
     // Number, not parseInt: parseInt('7100nonsense') is 7100, which would start
     // the server somewhere the user never asked for.
     const port = Number(value);
-    if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+    if (isValidPort(port)) return port;
     console.warn(`[md-redline] ${name}="${raw}" is not a valid port number; ignoring it.`);
   }
   return fallback;
 }
-
-/**
- * Sentinel for "no candidate held a usable port". Outside 1-65535, so
- * `resolvePort` can never return it from a real value.
- */
-const NO_PORT = -1;
 
 /** Candidates for the API port, in priority order. */
 const API_PORT_NAMES = /** @type {const} */ (['MD_REDLINE_PORT', 'PORT']);
@@ -82,8 +94,7 @@ const API_PORT_NAMES = /** @type {const} */ (['MD_REDLINE_PORT', 'PORT']);
  * @returns {number | null}
  */
 export function resolveNamedApiPort(env = process.env) {
-  const port = resolvePort(env, API_PORT_NAMES, NO_PORT);
-  return port === NO_PORT ? null : port;
+  return resolvePort(env, API_PORT_NAMES, null);
 }
 
 /**
@@ -95,34 +106,4 @@ export function resolveNamedApiPort(env = process.env) {
  */
 export function resolveApiPort(env = process.env) {
   return resolveNamedApiPort(env) ?? FALLBACK_PORT;
-}
-
-/**
- * Ports to probe, in order, when looking for a server that is already running.
- *
- * Order is the whole content of this function, and it is a correctness
- * property rather than a performance one. The port file records whichever
- * server started last, so consulting it first means a command aimed at a
- * specific server acts on a different one and reports success: `--stop` killed
- * the wrong instance, and a plain `mdr` attached to it. A port the user NAMED
- * therefore outranks the recorded one.
- *
- * With nothing named, the port file still comes first, and has to: it is how a
- * server that scanned upward past a busy default is found at all.
- *
- * @param {object} options
- * @param {number | null} options.namedPort Port the user asked for, if any.
- * @param {number | null} options.portFilePort Port recorded by a running server.
- * @param {readonly number[]} options.scanBases Range starts, in order.
- * @param {number} options.scanCount Ports to try from each base.
- * @returns {number[]} Deduped, so a port already tried is not probed twice.
- */
-export function serverProbeOrder({ namedPort, portFilePort, scanBases, scanCount }) {
-  const ordered = [];
-  if (namedPort !== null) ordered.push(namedPort);
-  if (portFilePort !== null) ordered.push(portFilePort);
-  for (const base of scanBases) {
-    for (let offset = 0; offset < scanCount; offset++) ordered.push(base + offset);
-  }
-  return [...new Set(ordered)];
 }
