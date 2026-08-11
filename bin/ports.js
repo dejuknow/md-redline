@@ -17,6 +17,18 @@
  * the prefixed name.
  */
 
+/**
+ * A number a server could actually bind. One definition, because the rule was
+ * written out in three places and they have to change together or the CLI's
+ * idea of a usable port drifts from what this module will accept.
+ *
+ * @param {number} port
+ * @returns {boolean}
+ */
+export function isValidPort(port) {
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
 /** 6373 spells "MDR" on a phone keypad, clear of the 3000-3010 range Next/Nest/CRA contend for. */
 export const FALLBACK_PORT = 6373;
 
@@ -37,10 +49,16 @@ export const FALLBACK_PORT = 6373;
  * evaluating, before the startup chain that renders errors as one readable line,
  * and a typo in a port should not brick a local tool.
  *
+ * The fallback is returned as given rather than coerced, so a caller that needs
+ * to distinguish "nobody named a port" from "somebody named the default" can
+ * pass null and be told, instead of decoding a sentinel port number that has to
+ * stay outside the valid range to work.
+ *
+ * @template T
  * @param {Record<string, string | undefined>} env
  * @param {readonly string[]} names Candidates in priority order.
- * @param {number} fallback Used when no candidate holds a usable port.
- * @returns {number} A port between 1 and 65535.
+ * @param {T} fallback Used when no candidate holds a usable port.
+ * @returns {number | T} A port between 1 and 65535, or `fallback`.
  */
 export function resolvePort(env, names, fallback) {
   for (const name of names) {
@@ -50,10 +68,33 @@ export function resolvePort(env, names, fallback) {
     // Number, not parseInt: parseInt('7100nonsense') is 7100, which would start
     // the server somewhere the user never asked for.
     const port = Number(value);
-    if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+    if (isValidPort(port)) return port;
     console.warn(`[md-redline] ${name}="${raw}" is not a valid port number; ignoring it.`);
   }
   return fallback;
+}
+
+/** Candidates for the API port, in priority order. */
+const API_PORT_NAMES = /** @type {const} */ (['MD_REDLINE_PORT', 'PORT']);
+
+/**
+ * The API port the environment NAMES, or null when it names none.
+ *
+ * The difference from `resolveApiPort` is the whole point: that one cannot tell
+ * an explicit `MD_REDLINE_PORT=6373` from nothing set at all, because both
+ * arrive as 6373. A caller that needs to know whether the user pointed at a
+ * specific server, rather than accepting whatever is running, has to ask this
+ * instead.
+ *
+ * A value that is set but unusable is not a name: `resolvePort` has already
+ * warned about it and moved on, and treating a typo as "the user named this"
+ * would aim a command at a port nobody asked for.
+ *
+ * @param {Record<string, string | undefined>} [env] Defaults to `process.env`.
+ * @returns {number | null}
+ */
+export function resolveNamedApiPort(env = process.env) {
+  return resolvePort(env, API_PORT_NAMES, null);
 }
 
 /**
@@ -64,5 +105,5 @@ export function resolvePort(env, names, fallback) {
  * @returns {number} A port between 1 and 65535.
  */
 export function resolveApiPort(env = process.env) {
-  return resolvePort(env, ['MD_REDLINE_PORT', 'PORT'], FALLBACK_PORT);
+  return resolveNamedApiPort(env) ?? FALLBACK_PORT;
 }

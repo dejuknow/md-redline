@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildKillCommand, checkServer, gracefulShutdown, killPort } from './server-control.js';
+import {
+  buildKillCommand,
+  checkServer,
+  gracefulShutdown,
+  killPort,
+  serverProbeOrder,
+} from './server-control.js';
 
 describe('buildKillCommand', () => {
   it('scopes lsof to loopback LISTEN sockets on macOS/Linux', () => {
@@ -208,5 +214,53 @@ describe('gracefulShutdown', () => {
     expect(result).toBe(false);
     // Shouldn't have polled — we bailed early on explicit failure.
     expect(checkServerFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('serverProbeOrder', () => {
+  const scan = { scanBases: [6373, 3001], scanCount: 3 };
+
+  it('probes a named port before the recorded one', () => {
+    // The bug: two servers up, the port file naming the one that started last.
+    // `MD_REDLINE_PORT=7441 mdr --stop` reported success and stopped 7440.
+    const order = serverProbeOrder({ namedPort: 7441, portFilePort: 7440, ...scan });
+
+    expect(order[0]).toBe(7441);
+    expect(order.indexOf(7441)).toBeLessThan(order.indexOf(7440));
+  });
+
+  it('still probes the recorded port when nothing was named', () => {
+    // Not a fallback worth losing: it is the only way to find a server that
+    // scanned upward past a busy default.
+    const order = serverProbeOrder({ namedPort: null, portFilePort: 6380, ...scan });
+
+    expect(order[0]).toBe(6380);
+  });
+
+  it('scans both ranges in order after the specific candidates', () => {
+    const order = serverProbeOrder({ namedPort: null, portFilePort: null, ...scan });
+
+    expect(order).toEqual([6373, 6374, 6375, 3001, 3002, 3003]);
+  });
+
+  it('probes a port once, however many ways it was reached', () => {
+    // The named port is usually inside the scan range, since resolveApiPort
+    // makes the range start there.
+    const order = serverProbeOrder({ namedPort: 6373, portFilePort: 6374, ...scan });
+
+    expect(order).toEqual([6373, 6374, 6375, 3001, 3002, 3003]);
+    expect(new Set(order).size).toBe(order.length);
+  });
+
+  it('keeps the recorded port ahead of the scan even when the scan would reach it', () => {
+    const order = serverProbeOrder({ namedPort: null, portFilePort: 6375, ...scan });
+
+    expect(order).toEqual([6375, 6373, 6374, 3001, 3002, 3003]);
+  });
+
+  it('is just the scan when there is nothing else to go on', () => {
+    expect(
+      serverProbeOrder({ namedPort: null, portFilePort: null, scanBases: [6373], scanCount: 1 }),
+    ).toEqual([6373]);
   });
 });

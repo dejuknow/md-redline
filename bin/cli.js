@@ -24,9 +24,9 @@ import { createRequire } from 'module';
 import { acquireFileLock, LOCK_MAX_WAIT_MS, LockContentionError } from './file-lock.js';
 import { atomicWriteFile, errorCode, retryTransient } from './fs-atomic.js';
 import { resolveHomeDir } from './home-dir.js';
-import { resolveApiPort } from './ports.js';
+import { FALLBACK_PORT, isValidPort, resolveNamedApiPort } from './ports.js';
 
-import { checkServer, gracefulShutdown, killPort } from './server-control.js';
+import { checkServer, gracefulShutdown, killPort, serverProbeOrder } from './server-control.js';
 import { buildWindowsCommand } from './spawn-command.js';
 import { isNewerVersion } from './version-compare.js';
 
@@ -37,7 +37,10 @@ const APP_DIR = resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
 const { version: CLI_VERSION } = require(join(APP_DIR, 'package.json'));
 const DIST_SERVER = join(APP_DIR, 'dist', 'server.js');
-const DEFAULT_SERVER_PORT = resolveApiPort();
+// Asked for once, not once per reader: `resolvePort` warns on a value it cannot
+// use, and calling it twice would say so twice for a single typo.
+const NAMED_SERVER_PORT = resolveNamedApiPort();
+const DEFAULT_SERVER_PORT = NAMED_SERVER_PORT ?? FALLBACK_PORT;
 // Pre-0.7 servers bound 3001+. 0.7.0 (2026-07-18) moved the default to 6373, and
 // 0.6.0 shipped four days before it, so a machine that has not rebooted since can
 // still have one running. Scanning the old range lets the stale-server upgrade path
@@ -161,26 +164,35 @@ async function resolveTarget(arg) {
   throw new Error(`not a file or directory: ${arg}`);
 }
 
-async function findServerPort() {
-  // Try the port file first (fast path)
+/**
+ * Port recorded by the server that started most recently, or null.
+ *
+ * @returns {Promise<number | null>}
+ */
+async function readPortFile() {
   try {
-    const saved = (await readFile(PORT_FILE, 'utf8')).trim();
-    const port = Number(saved);
-    if (port && (await checkServer(port))) return port;
+    const port = Number((await readFile(PORT_FILE, 'utf8')).trim());
+    return isValidPort(port) ? port : null;
   } catch {
-    // No port file, an unreadable one, or a port nothing answers on. All three
-    // mean the same thing here: nothing recorded, so scan for it.
+    // No port file or an unreadable one. Both mean nothing is recorded.
+    return null;
   }
+}
 
-  // Scan the port range as fallback, then the legacy pre-0.7 range
-  const bases =
-    DEFAULT_SERVER_PORT === LEGACY_SERVER_PORT
-      ? [DEFAULT_SERVER_PORT]
-      : [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT];
-  for (const base of bases) {
-    for (let p = base; p < base + MAX_PORT_SCAN; p++) {
-      if (await checkServer(p)) return p;
-    }
+/**
+ * @returns {Promise<number | null>} The first port answering as mdr, or null.
+ */
+async function findServerPort() {
+  // No guard against the two being equal: serverProbeOrder dedupes, so a
+  // repeated base contributes nothing and shifts nothing.
+  const order = serverProbeOrder({
+    namedPort: NAMED_SERVER_PORT,
+    portFilePort: await readPortFile(),
+    scanBases: [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT],
+    scanCount: MAX_PORT_SCAN,
+  });
+  for (const port of order) {
+    if (await checkServer(port)) return port;
   }
   return null;
 }
@@ -359,11 +371,18 @@ async function stopServer(quiet = false) {
     killPort(clientPort);
   }
 
-  // Clean up port file
-  try {
-    await unlink(PORT_FILE);
-  } catch {
-    // Already gone is the ordinary case: the server removes it on the way out.
+  // Only when it records the server we just killed. Now that a named port can
+  // win over the recorded one, the two are no longer the same server, and
+  // deleting the record of one that is still running costs the next `mdr` its
+  // fast-path lookup: if that server sits outside the scan windows, the CLI
+  // starts a second one and orphans it. `removePortFileIfOwned` in
+  // server/index.ts is the same guard, for the same reason, on the way out.
+  if ((await readPortFile()) === serverPort) {
+    try {
+      await unlink(PORT_FILE);
+    } catch {
+      // Already gone is the ordinary case: the server removes it on the way out.
+    }
   }
 
   if (!quiet) console.log('mdr stopped.');
@@ -1019,6 +1038,17 @@ async function main() {
     // (--stop) kills whatever it finds. Lets a test prove the CLI, the server and
     // vite.config all answer with the same port for the same environment.
     console.log(DEFAULT_SERVER_PORT);
+    return;
+  }
+
+  if (process.argv[2] === '__find-server') {
+    // Internal, undocumented seam, same idea as __open above: print which
+    // running server this invocation would act on, and touch nothing. Every
+    // command that picks a server picks it here, and the choice is otherwise
+    // observable only through what the command then does to it: --stop kills
+    // it, and everything else opens a browser at it. Neither is something a
+    // test can do to a developer's machine.
+    console.log((await findServerPort()) ?? 'none');
     return;
   }
 
