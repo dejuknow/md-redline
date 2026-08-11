@@ -9,7 +9,9 @@
  */
 
 import { open, readFile, stat, unlink } from 'fs/promises';
+import { readFileSync, unlinkSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { constants as osConstants } from 'os';
 
 import { FS_RETRY_BUDGET_MS, isTransientFsError, retryTransient, sleep } from './fs-atomic.js';
 
@@ -46,6 +48,117 @@ const LOCK_MAX_ATTEMPTS = Math.ceil(LOCK_MAX_WAIT_MS / LOCK_RETRY_BASE_MS);
  */
 function mintHolderToken() {
   return `${process.pid} ${randomUUID()}`;
+}
+
+/**
+ * Locks this process holds right now, keyed by lock path, valued by the token
+ * that proves each one is ours. An interrupt between acquiring and the caller's
+ * `finally` leaves the file behind otherwise, and an orphan wedges every writer
+ * of that path (this process, another mdr, the server) until it ages out
+ * LOCK_STALE_MS later. `mdr --restrict` is the shortest way to see it: one
+ * Ctrl-C inside a window the user has no way to know they are in.
+ *
+ * @type {Map<string, string>}
+ */
+const heldLocks = new Map();
+
+/**
+ * Signals that terminate the process by default, so a caller's `finally` never
+ * runs. `exit` is separately necessary: it does NOT fire on a default signal
+ * death, and the signal handlers below do not fire when something else's
+ * handler calls process.exit first, which is exactly what the server does.
+ */
+const CLEANUP_SIGNALS = /** @type {const} */ (['SIGINT', 'SIGTERM', 'SIGHUP']);
+
+/** @type {Map<string, () => void>} */
+const installedSignalHandlers = new Map();
+let exitHandlerInstalled = false;
+
+/**
+ * Remove every lock still held, synchronously, because this is all that a
+ * signal handler or an `exit` listener can do. Ownership is re-checked the same
+ * way release does it: a lock stolen while we stalled belongs to someone else
+ * now, and taking it with us on the way out is the failure this module works
+ * hardest to prevent.
+ *
+ * Best effort by construction. Nothing is retried and no error is reported: the
+ * process is on its way out, there is no one left to tell, and a lock left
+ * behind here is the exact 30-second orphan that this path exists to make rare
+ * rather than certain.
+ */
+function releaseHeldLocksSync() {
+  for (const [lockPath, token] of heldLocks) {
+    try {
+      if (readFileSync(lockPath, 'utf-8') === token) unlinkSync(lockPath);
+    } catch {
+      /* already gone, or unreadable; either way there is nothing safe to do */
+    }
+  }
+  // Cleared whether or not each unlink worked, so a re-raised signal cannot
+  // walk this list a second time.
+  heldLocks.clear();
+}
+
+/**
+ * @param {(typeof CLEANUP_SIGNALS)[number]} signal
+ * @returns {void}
+ */
+function handleTerminatingSignal(signal) {
+  releaseHeldLocksSync();
+
+  // Another listener owns the exit decision (the server shuts down and exits
+  // from its own SIGINT handler). Taking it away from them here would cut that
+  // shutdown short. The trade this accepts is the mirror of the one above: a
+  // handler that keeps running after releasing our lock is left unserialized
+  // for the rest of its shutdown, which is bounded and quiet, where the orphan
+  // it replaces blocks unrelated processes for a fixed 30 seconds.
+  if (process.listenerCount(signal) > 1) return;
+
+  // Nothing else is listening, and merely having a listener has already
+  // replaced Node's default disposition: without the re-raise, Ctrl-C would
+  // leave the process running. Remove ourselves first so the second delivery
+  // reaches that default, and the process dies with the same 128+n status a
+  // caller would have seen if this module had never installed anything.
+  uninstallCleanupHandlers();
+  process.kill(process.pid, signal);
+  // Unreachable on POSIX, where the re-raise terminates before returning.
+  // Windows has no signal to re-raise, so anything that gets here still has to
+  // stop rather than linger with the lock already gone.
+  process.exit(128 + (osConstants.signals[signal] ?? 15));
+}
+
+function installCleanupHandlers() {
+  if (exitHandlerInstalled) return;
+  exitHandlerInstalled = true;
+  process.on('exit', releaseHeldLocksSync);
+  for (const signal of CLEANUP_SIGNALS) {
+    const handler = () => handleTerminatingSignal(signal);
+    installedSignalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+}
+
+/**
+ * Uninstalled as soon as the last lock is released, not left for the life of
+ * the process. The server takes this lock on every preferences write, so
+ * handlers that accumulated would both leak listeners and keep changing how the
+ * process responds to a signal long after the reason for it was gone.
+ */
+function uninstallCleanupHandlers() {
+  if (!exitHandlerInstalled) return;
+  exitHandlerInstalled = false;
+  process.off('exit', releaseHeldLocksSync);
+  for (const [signal, handler] of installedSignalHandlers) process.off(signal, handler);
+  installedSignalHandlers.clear();
+}
+
+/**
+ * @param {string} lockPath
+ * @returns {void}
+ */
+function forgetHeldLock(lockPath) {
+  heldLocks.delete(lockPath);
+  if (heldLocks.size === 0) uninstallCleanupHandlers();
 }
 
 /**
@@ -178,7 +291,14 @@ export async function acquireFileLock(filePath) {
       continue;
     }
 
+    heldLocks.set(lockPath, token);
+    installCleanupHandlers();
+
     return async () => {
+      // Before the unlink, not after: whichever of the two paths gets there
+      // first, the other must not try the same removal again.
+      forgetHeldLock(lockPath);
+
       let holder;
       try {
         holder = await retryTransient(() => readFile(lockPath, 'utf-8'));

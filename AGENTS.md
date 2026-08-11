@@ -56,7 +56,11 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
   `.md-redline.json` takes around a read-modify-write. Shared so `mdr --restrict` and the server
   cannot interleave; its attempt budget derives from `FS_RETRY_BUDGET_MS`. Exhausting that budget
   throws `LockContentionError`; any other throw is a filesystem error with its errno intact, and
-  callers word their advice from that difference
+  callers word their advice from that difference. A lock older than `LOCK_STALE_MS` is stolen as
+  abandoned, so holding one is not the same as still holding it: each acquisition writes a
+  `pid uuid` token and release unlinks only a lock still carrying it. The module installs its own
+  SIGINT/SIGTERM/SIGHUP and `exit` handlers while any lock is held, removes them once the last one
+  is released, and re-raises the signal so the process still dies with the status it would have
 - `bin/home-dir.js`: `resolveHomeDir` (`MD_REDLINE_HOME` or the OS home), which decides where
   `.md-redline.json` lives. Shared because a CLI resolving it differently from the server locks
   and writes a file the server never reads

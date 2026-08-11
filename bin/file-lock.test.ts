@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
+import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
 
 import {
   acquireFileLock,
@@ -219,4 +221,142 @@ describe('a lock stolen out from under its holder', () => {
     },
     5_000 + LOCK_MAX_WAIT_MS,
   );
+});
+
+// An interrupt between acquiring and the caller's `finally` used to leave the
+// lock on disk, which wedges every writer of that file (this process, another
+// mdr, the server) until it ages out 30 seconds later. `mdr --restrict` is the
+// shortest path to it: one Ctrl-C in a window the user cannot see.
+//
+// Driven as real child processes because there is no in-process seam for a
+// signal: the handler under test is the one Node installs on the process, and
+// the exit status it produces is half of what the fix has to preserve.
+describe('an interrupt while the lock is held', () => {
+  const lockModule = pathToFileURL(join(__dirname, 'file-lock.js')).href;
+
+  interface Child {
+    kill: (signal: NodeJS.Signals) => void;
+    exited: Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
+  }
+
+  /** Start a child that acquires the lock, prints `ready`, and waits. */
+  async function holdLockInChild(body = ''): Promise<Child> {
+    const source = `
+      import { acquireFileLock } from ${JSON.stringify(lockModule)};
+      ${body}
+      const release = await acquireFileLock(${JSON.stringify(target)});
+      globalThis.__release = release;
+      console.log('ready');
+      setInterval(() => {}, 1000);
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.on('data', (chunk) => {
+        if (String(chunk).includes('ready')) resolve();
+      });
+      child.once('error', reject);
+      child.once('exit', () => reject(new Error(`child exited early: ${stderr}`)));
+    });
+
+    return {
+      kill: (signal) => child.kill(signal),
+      exited: new Promise((resolve) => {
+        child.once('exit', (code, signal) => resolve({ code, signal, stderr }));
+      }),
+    };
+  }
+
+  // On Windows there is no signal to deliver: child.kill() there is a
+  // TerminateProcess, which no handler can intercept. A real Ctrl-C in a
+  // console still reaches Node as a SIGINT event and still runs the cleanup
+  // below; it is only this way of provoking it that cannot exist.
+  const itPosix = it.skipIf(process.platform === 'win32');
+
+  itPosix('removes the lock instead of leaving it to age out', async () => {
+    const child = await holdLockInChild();
+    expect(existsSync(lockPath)).toBe(true);
+
+    child.kill('SIGINT');
+    await child.exited;
+
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  itPosix('still dies the way an uninterrupted Ctrl-C does', async () => {
+    // Handling a signal replaces Node's default disposition, so a cleanup
+    // handler that forgets to re-raise turns Ctrl-C into a hang or into the
+    // wrong exit status for every script that checks it.
+    const child = await holdLockInChild();
+    child.kill('SIGINT');
+
+    expect((await child.exited).signal).toBe('SIGINT');
+  });
+
+  itPosix('cleans up on SIGTERM too', async () => {
+    const child = await holdLockInChild();
+    child.kill('SIGTERM');
+    const { signal } = await child.exited;
+
+    expect(signal).toBe('SIGTERM');
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  itPosix("defers to the process's own handler rather than exiting under it", async () => {
+    // The server's shape: it already handles SIGINT and exits itself. Our
+    // cleanup has to run without taking that decision away from it, which is
+    // also the only path where process.exit runs instead of a signal death.
+    const child = await holdLockInChild(`
+      process.on('SIGINT', () => { console.error('server handler ran'); process.exit(3); });
+    `);
+    child.kill('SIGINT');
+    const { code, signal, stderr } = await child.exited;
+
+    expect(stderr).toContain('server handler ran');
+    expect(code).toBe(3);
+    expect(signal).toBe(null);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  itPosix('leaves a lock that was stolen while the process stalled', async () => {
+    const child = await holdLockInChild();
+    await makeStale(lockPath);
+    const stealer = await acquireFileLock(target);
+    const stolenToken = await readFile(lockPath, 'utf-8');
+
+    child.kill('SIGINT');
+    await child.exited;
+
+    expect(await readFile(lockPath, 'utf-8')).toBe(stolenToken);
+    await stealer();
+  });
+
+  itPosix('stops handling signals once the lock is released', async () => {
+    // Cleanup that outlives the lock changes how the process dies for reasons
+    // unrelated to the lock, and a listener nothing removes is a leak in a
+    // server that writes preferences on every boot and every settings change.
+    const source = `
+      import { acquireFileLock } from ${JSON.stringify(lockModule)};
+      const release = await acquireFileLock(${JSON.stringify(target)});
+      await release();
+      console.log(JSON.stringify({
+        sigint: process.listenerCount('SIGINT'),
+        sigterm: process.listenerCount('SIGTERM'),
+        exit: process.listenerCount('exit'),
+      }));
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+    const code = await new Promise<number | null>((resolve) => child.once('exit', resolve));
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ sigint: 0, sigterm: 0, exit: 0 });
+  });
 });
