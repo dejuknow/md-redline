@@ -8,7 +8,8 @@
  * Types live in `file-lock.d.ts`.
  */
 
-import { open, stat, unlink } from 'fs/promises';
+import { open, readFile, stat, unlink } from 'fs/promises';
+import { randomUUID } from 'crypto';
 
 import { FS_RETRY_BUDGET_MS, isTransientFsError, retryTransient, sleep } from './fs-atomic.js';
 
@@ -29,6 +30,23 @@ const LOCK_RETRY_BASE_MS = 25;
 export const LOCK_MAX_WAIT_MS = 15 * FS_RETRY_BUDGET_MS;
 
 const LOCK_MAX_ATTEMPTS = Math.ceil(LOCK_MAX_WAIT_MS / LOCK_RETRY_BASE_MS);
+
+/**
+ * What a holder writes into its lock file, and the only evidence that the lock
+ * on disk is still the one it took.
+ *
+ * The pid alone cannot do this job. It is not unique over time (pids are
+ * reused), it is not unique across machines (the prefs file lives on synced and
+ * network mounts), and a process that takes the lock twice in sequence writes
+ * the same bytes both times. A uuid alongside it makes every acquisition
+ * distinguishable from every other, and keeping the pid first leaves the file
+ * as readable to someone debugging an abandoned lock as it was before.
+ *
+ * @returns {string}
+ */
+function mintHolderToken() {
+  return `${process.pid} ${randomUUID()}`;
+}
 
 /**
  * Thrown when the attempt budget runs out, as opposed to a filesystem error,
@@ -61,6 +79,12 @@ export class LockContentionError extends Error {
  * Implementation: O_EXCL sentinel file. If the lock is older than
  * LOCK_STALE_MS we treat it as abandoned (the holder crashed) and steal it.
  *
+ * Because a lock CAN be stolen, holding one is not the same as still holding
+ * it: a holder that stalls past LOCK_STALE_MS (the machine suspends, a cloud
+ * mount hydrates the file) comes back to a lock path that now belongs to
+ * someone else. Every acquisition therefore writes a token that identifies it,
+ * and release unlinks only a lock still carrying that token.
+ *
  * @param {string} filePath
  * @returns {Promise<() => Promise<void>>} release closure
  * @throws {LockContentionError} when the attempt budget runs out. Any other
@@ -68,6 +92,7 @@ export class LockContentionError extends Error {
  */
 export async function acquireFileLock(filePath) {
   const lockPath = `${filePath}${LOCK_SUFFIX}`;
+  const token = mintHolderToken();
   let lastErr;
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
     let fd;
@@ -104,6 +129,13 @@ export async function acquireFileLock(filePath) {
       }
       if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
         try {
+          // Removing a lock this process does not hold, on the evidence of a
+          // stat taken a moment ago. If the abandoned holder released and a
+          // third writer acquired in the gap between that stat and this call,
+          // this unlinks the new holder's lock instead. No syscall compares and
+          // removes in one step, so the window cannot be closed here, only kept
+          // to the microseconds between two adjacent calls; the release path is
+          // where it was measured in the whole duration of a held lock.
           await unlink(lockPath);
         } catch (unlinkErr) {
           // ENOENT is the benign race: someone else released it first.
@@ -129,14 +161,15 @@ export async function acquireFileLock(filePath) {
     // then blocks all writers until LOCK_STALE_MS elapses.
     let writeErr;
     try {
-      await fd.writeFile(`${process.pid}`);
+      await fd.writeFile(token);
     } catch (err) {
       writeErr = err;
     }
     // Close before unlinking: Windows refuses to remove a file that still has
-    // an open handle, which would defeat the cleanup below. The pid is only a
-    // debugging aid (staleness is decided by mtime), so a failed close on the
-    // success path is not worth failing the write over.
+    // an open handle, which would defeat the cleanup below. A close that fails
+    // AFTER the token landed is not worth failing the write over; one that
+    // failed to flush it leaves a lock this holder can no longer prove is its
+    // own, and release treats that the same way it treats a stolen one.
     await fd.close().catch(() => {});
     if (writeErr) {
       await unlink(lockPath).catch(() => {});
@@ -146,6 +179,40 @@ export async function acquireFileLock(filePath) {
     }
 
     return async () => {
+      let holder;
+      try {
+        holder = await retryTransient(() => readFile(lockPath, 'utf-8'));
+      } catch (err) {
+        // Already gone: released twice, or stolen and released by whoever took
+        // it. Either way there is nothing here to remove.
+        if (err?.code === 'ENOENT') return;
+        // A read that will not succeed proves nothing about who holds the lock,
+        // and unlinking on that evidence is exactly the failure this check
+        // exists to prevent. Leaving it costs one stale window and then clears
+        // on its own; guessing wrong costs mutual exclusion.
+        console.error(
+          `Could not read the lock at ${lockPath} to confirm it is still ` +
+            `ours, so it was left in place; writes are blocked until it ages ` +
+            `out after ${LOCK_STALE_MS}ms:`,
+          err,
+        );
+        return;
+      }
+
+      if (holder !== token) {
+        // Our lock aged past LOCK_STALE_MS while we held it and another writer
+        // took it as abandoned. The write we just finished was NOT serialized
+        // against theirs, and unlinking this would hand a third writer the same
+        // window. Say so: a file that comes back different needs an explanation
+        // somewhere, and this is the only place that has one.
+        console.error(
+          `The lock at ${lockPath} was taken over by another writer while we ` +
+            `held it (ours was idle past ${LOCK_STALE_MS}ms), so this write ` +
+            `was not serialized against theirs. Leaving their lock in place.`,
+        );
+        return;
+      }
+
       try {
         await retryTransient(() => unlink(lockPath));
       } catch (err) {
