@@ -160,9 +160,9 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
         const info = resolveSelection(container);
         // The tap that engages the pill collapses the native selection. Dropping
         // pending then would leave the commit nothing to promote. But this must
-        // not veto a real adjustment: a handle drag arrives here with the flag
-        // set by its own pointerdown, which is why DragHandles does not stop
-        // that event from reaching this listener.
+        // not veto a real adjustment: handle drags emit no pointerdown here,
+        // because DragHandles stops it, so the flag is still set from that tap
+        // long after it mattered.
         if (info === null && pointerInPreserved) return;
         capturePending(info);
       }, 150);
