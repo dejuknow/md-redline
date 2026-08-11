@@ -6,8 +6,8 @@
  * npm install. The server gets it bundled into `dist/server.js` by esbuild, and
  * `vite.config.ts` imports it through `server/env.ts` to aim its dev proxy.
  *
- * It is plain JavaScript so `bin/md-redline` can import it directly, with types in
- * the hand-written `bin/ports.d.ts` sibling rather than a compiler flag: that is how
+ * It is plain JavaScript so the CLI can import it directly, with types read from
+ * the JSDoc below by every side that imports it: that is how
  * `bin/version-compare.js` is already shared between this CLI and
  * `server/update-check.ts`. The CLI is dependency-free with no build step of its
  * own, so a TypeScript module would have to be hand-copied into it, and a hand-copy

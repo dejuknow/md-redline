@@ -18,6 +18,11 @@
 // token delimiters for cmd builtins like `start`.
 const NEEDS_QUOTING = /[\s&|<>^(),;=]/;
 
+/**
+ * @param {string} command
+ * @param {string[]} [args]
+ * @returns {string}
+ */
 export function buildWindowsCommand(command, args = []) {
   return [command, ...args]
     .map((part) => (part === '' || NEEDS_QUOTING.test(part) ? `"${part}"` : part))

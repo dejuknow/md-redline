@@ -52,7 +52,9 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
   0644. The retry gate is per-errno, NOT per-platform: EBUSY is contention everywhere (SMB, NFS,
   and the FUSE/FileProvider mounts behind Dropbox, Google Drive and iCloud all return it), while
   EPERM/EACCES are retried only on `win32`, because on POSIX they mean a permanent permission
-  condition. `server/fs-retry.ts` re-exports it for server-side importers
+  condition. It also exports `errorCode`, the one place the unchecked cast from a caught
+  `unknown` to an errno-bearing error is written down, which is what every `catch` in `bin/`
+  reads a `.code` through. `server/fs-retry.ts` re-exports it for server-side importers
 - `bin/file-lock.js`: `acquireFileLock`, the O_EXCL cross-process lock every writer of
   `.md-redline.json` takes around a read-modify-write. Shared so `mdr --restrict` and the server
   cannot interleave; its attempt budget derives from `FS_RETRY_BUDGET_MS`. Exhausting that budget
@@ -282,10 +284,14 @@ stale, and it is a dependency-free CLI with no build step, so it can only import
 plain JavaScript. `bin/` is also what package.json ships next to `dist/`, so the
 module is present in an npm install. `server/env.ts` re-exports it, esbuild inlines
 it into `dist/server.js`, and `vite.config.ts` reaches it through `server/env.ts`.
-Three readers, one function. Types come from the hand-written `bin/ports.d.ts`,
-not from a compiler flag: `bin/version-compare.js` has been shared between the CLI
-and `server/update-check.ts` the same way since before this module existed, and
-`allowJs` would have typed every future `bin/` import as unchecked `any`.
+Three readers, one function. Types come from the JSDoc in the module itself.
+They used to come from a hand-written `bin/ports.d.ts`, because at the time
+`allowJs` really would have typed every `bin/` import as good as `any`: the
+sources carried no annotations to infer from. Once `tsconfig.bin.json` went
+strict they do, so the declarations were deleted and `server/` reads the
+implementations. A wrong argument to any of them is a build error again, which
+is what the declarations were for, except that nothing had ever checked THEM
+against the code they described.
 
 `bin/fs-atomic.js`, `bin/file-lock.js` and `bin/home-dir.js` live there for the
 same reason, and it matters more for them: the CLI writes `.md-redline.json`
@@ -310,14 +316,30 @@ deliberately, which is what keeps the window small.
 It has no build step, so before those existed eslint matched none of it and
 exited 0 having checked nothing, which reads exactly like passing, and `tsc`
 never saw it at all. A call to an undefined function survived both gates. The
-config is deliberately looser than `tsconfig.node.json` (no `strict`, no
-`noImplicitAny`) because the older modules here predate it and were written
-untyped; `fs-atomic.js` and `file-lock.js` carry JSDoc types so they are checked
-as thoroughly as they were when they were TypeScript. The CLI body is checked
-too, which is why it is `bin/cli.js` and not `bin/md-redline`: an extensionless
-file matches no glob `tsc` accepts, and that name is the published command and
-cannot change. What is left unchecked is the shim itself, which is why it does
-nothing but import.
+config now runs the same `strict` as `tsconfig.node.json`, so a JS file here is
+held to what a TS file is held to in `server/`; types are carried in JSDoc,
+since there is no build step to strip anything. The CLI body is checked too,
+which is why it is `bin/cli.js` and not `bin/md-redline`: an extensionless file
+matches no glob `tsc` accepts, and that name is the published command and cannot
+change. What is left unchecked is the shim itself, which is why it does nothing
+but import.
+
+The `include` list names `bin/**/*.js`, `bin/**/*.test.ts` and the browser stub
+one at a time, and must stay that way. A `.d.ts` caught by a wider glob SHADOWS
+its `.js`: TypeScript drops the implementation from the program and checks the
+declaration instead, which silently stops checking the file. Nothing here is a
+`.d.ts` today, and that list is what keeps a new one from quietly turning a
+checked module back into an unchecked one. After editing it, confirm what is
+actually in the program with `tsc -p tsconfig.bin.json --listFiles`.
+
+**`server/` imports these JS modules directly, under `allowJs`.** There are no
+hand-written declarations any more. They existed because untyped JS would
+otherwise have come across as `any`, which stopped being the case when this
+directory went strict: the JSDoc is now complete enough to type every importer,
+and a wrong argument in `server/` is a build error. The rule that replaces them:
+a JS module in `bin/` is only as good as the annotations on it, so anything
+`server/` imports has to stay inside `tsconfig.bin.json`'s include, which is
+what actually checks those annotations. `allowJs` alone would infer, not check.
 
 `MD_REDLINE_REGISTRY_URL` and `MD_REDLINE_BASE_URL` keep a plain `??` by choice:
 both are development or background-only, and a blank value fails visibly at the
