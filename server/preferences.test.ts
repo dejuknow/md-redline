@@ -8,6 +8,7 @@ import {
   readPreferencesResult,
   readPreferencesSync,
   readPreferencesSyncResult,
+  resetReadFailureReportingForTests,
   sanitizePreferencesPatch,
   writePreferences,
 } from './preferences';
@@ -124,6 +125,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // Read failures are reported once per condition and the record outlives a
+  // single test, so a case asserting on that log has to start from a clean one.
+  resetReadFailureReportingForTests();
   fault.rename = { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 };
   fault.open = { suffix: '', failuresLeft: 0, code: 'EPERM' };
   fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
@@ -614,6 +618,68 @@ describe('transient read failures', () => {
       expect(await readPreferences(testDir)).toEqual({});
       expect(logged).toHaveBeenCalledTimes(1);
       expect(String(logged.mock.calls[0][0])).toContain('Could not read preferences');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('reports a persistent read failure once, not once per request', async () => {
+    // GET /api/preferences reads the file per request and the client hydrates
+    // from several places on mount, so the same line was repeated several
+    // times per page load, indefinitely, burying the one that carried news.
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ trustedRoots: [] }));
+    fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await readPreferences(testDir);
+      await readPreferences(testDir);
+      readPreferencesSync(testDir);
+
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('reports again when the condition changes', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ trustedRoots: [] }));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+      await readPreferences(testDir);
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EACCES', attempts: 0 };
+      await readPreferences(testDir);
+
+      expect(logged.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining('(EPERM)'),
+        expect.stringContaining('(EACCES)'),
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('says so when the file becomes readable again', async () => {
+    // Onset without recovery leaves the log claiming a problem that is over.
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ author: 'Alice' }));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+      await readPreferences(testDir);
+      fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
+      expect(await readPreferences(testDir)).toEqual({ author: 'Alice' });
+      // And the next failure is news again, not swallowed by the old record.
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+      await readPreferences(testDir);
+
+      expect(logged.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining('Could not read preferences'),
+        expect.stringContaining('are readable again'),
+        expect.stringContaining('Could not read preferences'),
+      ]);
     } finally {
       logged.mockRestore();
     }

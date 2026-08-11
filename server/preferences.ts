@@ -175,13 +175,33 @@ export interface PreferencesRead {
   unreadable: boolean;
 }
 
+/**
+ * Errno of the last reported read failure, per prefs path, or absent once a
+ * read succeeds again.
+ *
+ * GET /api/preferences reads the file on every request, and the client hydrates
+ * from several places on mount and polls every five minutes after that. A
+ * persistently unreadable file therefore repeated the same line several times
+ * per page load, forever, which buries the one occurrence that carried
+ * information. Reported once per distinct condition instead, and again when it
+ * changes or clears.
+ */
+const reportedReadFailures = new Map<string, string>();
+
 function emptyOnReadFailure(err: unknown, homeDir: string): PreferencesRead {
   const code = (err as NodeJS.ErrnoException).code;
   // ENOENT is the ordinary "no prefs yet" case; a SyntaxError has no code.
   const unreadable = !!code && code !== 'ENOENT';
-  if (unreadable) {
+  const path = prefsPath(homeDir);
+  if (!unreadable) {
+    // The file is gone, or it parsed badly having been read fine. Either way
+    // whatever was blocking reads no longer is, and a later recurrence is news
+    // again. Silent: neither case is worth a line of its own here.
+    reportedReadFailures.delete(path);
+  } else if (reportedReadFailures.get(path) !== code) {
+    reportedReadFailures.set(path, code as string);
     console.error(
-      `Could not read preferences at ${prefsPath(homeDir)} (${code}); ` +
+      `Could not read preferences at ${path} (${code}); ` +
         'continuing without saved settings for this session:',
       err,
     );
@@ -189,9 +209,23 @@ function emptyOnReadFailure(err: unknown, homeDir: string): PreferencesRead {
   return { prefs: {}, unreadable };
 }
 
+/** Close the loop on a reported failure, so recovery is as visible as onset. */
+function noteReadSucceeded(homeDir: string): void {
+  const path = prefsPath(homeDir);
+  if (reportedReadFailures.delete(path)) {
+    console.error(`Preferences at ${path} are readable again.`);
+  }
+}
+
+/** Only for tests, which share a module instance across cases. */
+export function resetReadFailureReportingForTests(): void {
+  reportedReadFailures.clear();
+}
+
 export async function readPreferencesResult(homeDir: string): Promise<PreferencesRead> {
   try {
     const raw = await retryTransient(() => readFile(prefsPath(homeDir), 'utf-8'));
+    noteReadSucceeded(homeDir);
     return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
   } catch (err) {
     return emptyOnReadFailure(err, homeDir);
@@ -201,6 +235,7 @@ export async function readPreferencesResult(homeDir: string): Promise<Preference
 export function readPreferencesSyncResult(homeDir: string): PreferencesRead {
   try {
     const raw = retryTransientSync(() => readFileSync(prefsPath(homeDir), 'utf-8'));
+    noteReadSucceeded(homeDir);
     return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
   } catch (err) {
     return emptyOnReadFailure(err, homeDir);

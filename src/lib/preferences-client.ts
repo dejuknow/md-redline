@@ -14,7 +14,7 @@ export interface DiskPreferences {
   updateDismissedVersion?: string;
 }
 
-export async function fetchPreferences(): Promise<DiskPreferences> {
+async function requestPreferences(): Promise<DiskPreferences> {
   try {
     const res = await fetch('/api/preferences');
     const data = await readJsonResponse<DiskPreferences>(res);
@@ -23,6 +23,38 @@ export async function fetchPreferences(): Promise<DiskPreferences> {
   } catch {
     return {};
   }
+}
+
+let inFlight: Promise<DiskPreferences> | null = null;
+
+/**
+ * Read the on-disk preferences, sharing a request already in flight.
+ *
+ * Five independent consumers hydrate from this on mount (settings, theme,
+ * author, recent files, the localStorage migration) and each one used to open
+ * its own request, so every page load asked the server to read and parse the
+ * same file five times over. The server reads it per request, and on Windows
+ * each read can spend the whole filesystem retry budget, so the cost of the
+ * duplicates is not just a few extra sockets.
+ *
+ * Only concurrent calls share. The result is not cached, so the update
+ * notice's five-minute poll still sees fresh data, and a read that starts
+ * after a save reflects it. The one stale window is a call that joins a
+ * request already open when a save lands, which is a single request wide and
+ * behind every caller here, all of which read once on mount.
+ */
+export function fetchPreferences(): Promise<DiskPreferences> {
+  if (!inFlight) {
+    inFlight = requestPreferences().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+/** Only for tests, which share a module instance across cases. */
+export function resetPreferencesRequestForTests(): void {
+  inFlight = null;
 }
 
 export async function savePreferencesToDisk(patch: Partial<DiskPreferences>): Promise<boolean> {

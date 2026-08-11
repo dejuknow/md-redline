@@ -3,6 +3,7 @@ import {
   fetchPreferences,
   savePreferencesToDisk,
   migrateLocalStorageToDisk,
+  resetPreferencesRequestForTests,
 } from './preferences-client';
 
 // Mock localStorage
@@ -32,6 +33,7 @@ beforeEach(() => {
   localStorageMock.clear();
   mockFetch.mockReset();
   vi.clearAllMocks();
+  resetPreferencesRequestForTests();
 });
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -52,6 +54,47 @@ describe('fetchPreferences', () => {
     mockFetch.mockResolvedValue(jsonResponse({ error: 'boom' }, { status: 500 }));
     const result = await fetchPreferences();
     expect(result).toEqual({});
+  });
+
+  it('serves concurrent callers from one request', async () => {
+    // Settings, theme, author, recent files and the localStorage migration all
+    // hydrate on mount. Five requests per page load meant the server read and
+    // parsed the same file five times, each read carrying the full filesystem
+    // retry budget on Windows.
+    let release: (value: Response) => void = () => {};
+    mockFetch.mockReturnValue(
+      new Promise<Response>((res) => {
+        release = res;
+      }),
+    );
+
+    const all = Promise.all([fetchPreferences(), fetchPreferences(), fetchPreferences()]);
+    release(jsonResponse({ author: 'Alice' }));
+
+    expect(await all).toEqual([{ author: 'Alice' }, { author: 'Alice' }, { author: 'Alice' }]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not serve a later caller a stale result', async () => {
+    // Sharing is scoped to a request in flight, not cached. The update
+    // notice polls this every five minutes and has to see saves made since.
+    mockFetch.mockResolvedValueOnce(jsonResponse({ author: 'Alice' }));
+    expect(await fetchPreferences()).toEqual({ author: 'Alice' });
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ author: 'Bob' }));
+    expect(await fetchPreferences()).toEqual({ author: 'Bob' });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not wedge every later caller when a request fails', async () => {
+    // The shared promise has to be released on the failure path too, or one
+    // unreachable server leaves the app unable to read preferences until a
+    // reload.
+    mockFetch.mockRejectedValueOnce(new Error('offline'));
+    expect(await fetchPreferences()).toEqual({});
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ author: 'Alice' }));
+    expect(await fetchPreferences()).toEqual({ author: 'Alice' });
   });
 
   it('returns empty object on invalid JSON response', async () => {
