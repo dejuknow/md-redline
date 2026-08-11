@@ -98,6 +98,16 @@ import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
 
+/**
+ * How long a timestamp backfill waits before writing.
+ *
+ * Long enough that an agent finishes a batch of edits first. Each write it
+ * makes arrives as an SSE event, and answering every one of them immediately
+ * changes the file under the agent's feet, which it reports as "Error editing
+ * file" on its next edit.
+ */
+const BACKFILL_WRITE_DELAY_MS = 2000;
+
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
@@ -154,7 +164,6 @@ export default function App() {
     closeTabsToRight: closeTabsToRightDirect,
     switchTab,
     saveFile,
-    saveFileAt,
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,
@@ -599,12 +608,66 @@ export default function App() {
   // it from either view.
   const [copyFeedback, setCopyFeedback] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const backfillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keyed by path, not one timer for the whole app: two tabs can be backfilling
+  // at once, and a single timer meant whichever scheduled second cancelled the
+  // first, dropping its corrected timestamps until some later event happened to
+  // re-trigger it.
+  const backfillTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   useEffect(
     () => () => {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      for (const timer of backfillTimersRef.current.values()) clearTimeout(timer);
+      backfillTimersRef.current.clear();
     },
     [],
+  );
+
+  /**
+   * Write back content whose timestamps we corrected on the way in.
+   *
+   * Every watcher goes through here, foreground and background alike. This is
+   * NOT a user save and must not look like one: it is debounced so an agent can
+   * finish a batch first, and it writes with a direct fetch rather than through
+   * the save queue, because the queue reports a 409 as a failed save. A 409 is
+   * the ordinary outcome here, not a failure. The agent edits the file between
+   * the event that triggered this and the write itself, and the next event
+   * re-triggers the backfill anyway.
+   *
+   * A background tab used to take the queue instead, so the same expected 409
+   * surfaced on the tab as "File was modified externally. Reload to see
+   * changes." for a write the reader never asked for.
+   */
+  const scheduleBackfillWrite = useCallback(
+    (path: string, content: string, expectedMtime: number | undefined) => {
+      const pending = backfillTimersRef.current.get(path);
+      if (pending) clearTimeout(pending);
+      backfillTimersRef.current.set(
+        path,
+        setTimeout(async () => {
+          backfillTimersRef.current.delete(path);
+          try {
+            const res = await fetch('/api/file', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path, content, expectedMtime }),
+            });
+            // On success, sync the tab's mtime to the post-backfill value so
+            // the next user-initiated save doesn't 409 against the stale
+            // pre-backfill mtime. The backfill's own write is suppressed by
+            // the server's lastWrittenContent cache, so no SSE event will
+            // deliver this mtime — we have to read it from the response.
+            if (res.ok) {
+              const data = await readJsonResponse<{ mtime?: number }>(res);
+              if (data?.mtime != null) updateTab(path, { mtime: data.mtime });
+            }
+            // 409s are expected and benign here (see above) — ignore.
+          } catch {
+            // Network errors: the next SSE event will re-trigger the backfill.
+          }
+        }, BACKFILL_WRITE_DELAY_MS),
+      );
+    },
+    [updateTab],
   );
   const handleCopyDocument = useCallback(() => {
     const clean = rawMarkdownRef.current.replace(createCommentMarkerRegex(), '');
@@ -1582,49 +1645,9 @@ export default function App() {
       });
 
       // Persist the corrected timestamps back to disk so reloads see the right
-      // values. Debounced to avoid a write-watch-write bounce when an agent
-      // makes rapid edits: each agent write triggers an SSE event → backfill →
-      // save → SSE event, which changes the file under the agent's feet and
-      // causes "Error editing file" on its next edit. A 2s debounce lets the
-      // agent finish its batch of edits before we write the timestamps.
-      //
-      // Uses a direct fetch instead of saveFile() because the save queue shows
-      // a "Save failed" toast on 409 CONFLICT. Since the agent modifies the
-      // file between the SSE event and the debounced save, 409s are expected
-      // and benign — the next SSE event will re-trigger the backfill.
+      // values.
       if (nextContent !== content) {
-        if (backfillTimerRef.current) clearTimeout(backfillTimerRef.current);
-        const pathToSave = path;
-        const contentToSave = nextContent;
-        const mtimeToSave = mtime;
-        backfillTimerRef.current = setTimeout(async () => {
-          backfillTimerRef.current = null;
-          try {
-            const res = await fetch('/api/file', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                path: pathToSave,
-                content: contentToSave,
-                expectedMtime: mtimeToSave,
-              }),
-            });
-            // On success, sync the tab's mtime to the post-backfill value so
-            // the next user-initiated save doesn't 409 against the stale
-            // pre-backfill mtime. The backfill's own write is suppressed by
-            // the server's lastWrittenContent cache, so no SSE event will
-            // deliver this mtime — we have to read it from the response.
-            if (res.ok) {
-              const data = await readJsonResponse<{ mtime?: number }>(res);
-              if (data?.mtime != null) {
-                updateTab(pathToSave, { mtime: data.mtime });
-              }
-            }
-            // 409s are expected and benign here (see comment above) — ignore.
-          } catch {
-            // Network errors: the next SSE event will re-trigger the backfill.
-          }
-        }, 2000);
+        scheduleBackfillWrite(path, nextContent, mtime);
       }
 
       // Flag the diff button when content changed and a snapshot exists
@@ -1636,6 +1659,7 @@ export default function App() {
       activeFilePath,
       applyExternalContent,
       getTabSnapshot,
+      scheduleBackfillWrite,
       setDiffEnabled,
       settings.enableResolve,
       showToast,
@@ -1675,7 +1699,7 @@ export default function App() {
         const snapshot = getTabSnapshot(path);
         // Skip dirty background tabs entirely. The user has unsaved local
         // edits we'd otherwise overwrite (in memory AND on disk via the
-        // saveFileAt below). They should resolve the conflict by switching
+        // backfill write below). They should resolve the conflict by switching
         // to the tab and reloading explicitly.
         if (snapshot?.dirty === true) return;
         if (!snapshot) return;
@@ -1696,7 +1720,7 @@ export default function App() {
           ...(mtime != null ? { mtime } : {}),
         });
         if (nextContent !== content) {
-          saveFileAt(path, nextContent);
+          scheduleBackfillWrite(path, nextContent, mtime);
         }
       } catch {
         // ignore malformed events
@@ -1709,7 +1733,7 @@ export default function App() {
     backgroundPathsKey,
     getTabSnapshot,
     pageVisible,
-    saveFileAt,
+    scheduleBackfillWrite,
     updateTab,
   ]);
 

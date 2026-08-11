@@ -8,6 +8,7 @@ import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
+const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
 const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
 
 test.beforeEach(async ({ page }) => {
@@ -418,5 +419,60 @@ test.describe('File watcher - external changes', () => {
         timeout: 5_000,
       })
       .toBe(true);
+  });
+
+  test('a background tab backfills on the same debounce as the active tab', async ({ page }) => {
+    // The two watchers shared the code that stamps arriving replies but not the
+    // write that persists it. The active tab waits 2s and writes with a direct
+    // fetch; the background tab went straight to the save queue, which reports
+    // a 409 as a failed save. A 409 is the expected outcome here, because the
+    // agent writes again between the event and the write, so the reader got
+    // "File was modified externally" on a tab they were not even looking at,
+    // for a write they never asked for.
+    await openFixture(page);
+    await page.waitForTimeout(1500);
+
+    // Open a second file, which pushes the fixture into a background tab.
+    await page.locator('button[title="Open file"]').click();
+    const input = page.getByPlaceholder('File path or name...');
+    await expect(input).toBeVisible({ timeout: 5_000 });
+    await input.fill(FIXTURE_2);
+    await input.press('Enter');
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.waitForTimeout(1500);
+
+    const stampedAt = () =>
+      readFileSync(FIXTURE, 'utf-8').match(/"id":"bg-r1"[^}]*"timestamp":"([^"]+)"/)?.[1] ?? null;
+
+    // An agent-style reply, with no timestamp of its own, into the file behind
+    // the background tab.
+    writeFileSync(
+      FIXTURE,
+      FIXTURE_ORIGINAL.replace(
+        'valid credentials',
+        `<!-- @comment${JSON.stringify({
+          id: 'bg-c1',
+          anchor: 'valid credentials',
+          text: 'How are creds validated?',
+          author: 'Dennis',
+          timestamp: '2025-01-01T00:00:00.000Z',
+          replies: [{ id: 'bg-r1', text: 'JWT bearer.', author: 'Agent CLI' }],
+        })} -->valid credentials`,
+      ),
+    );
+
+    // The server debounces its watch events by 150ms, so an undebounced write
+    // lands within about 400ms. Nothing may be on disk at this point: waiting
+    // is what keeps an agent's next edit from failing under it.
+    await page.waitForTimeout(900);
+    expect(stampedAt()).toBeNull();
+
+    // And it still lands, once the debounce elapses.
+    await expect.poll(stampedAt, { timeout: 10_000 }).not.toBeNull();
+
+    // Nothing about a backfill is the reader's business, on any tab.
+    await expect(page.getByText(/modified externally/i)).not.toBeVisible();
   });
 });
