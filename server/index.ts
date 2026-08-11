@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
-import { readFile, readdir, stat, realpath, open } from 'fs/promises';
+import { readFile, readdir, stat, realpath, open, unlink } from 'fs/promises';
 import { promises as fsPromises } from 'fs';
 import { watch, statSync, realpathSync, readFileSync, unlinkSync, type FSWatcher } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
@@ -578,6 +578,13 @@ export function createAppFull(options: CreateAppOptions = {}) {
     const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
     let result!: T;
     const currentWrite = prevLock
+      // Wait for the write ahead of us to SETTLE, not to succeed. Chaining
+      // with a bare .then() means a rejection ahead in the queue skips our
+      // callback entirely and surfaces as our failure: our own write is never
+      // attempted, and the caller is told its content did not land when
+      // nothing was ever tried. The failure belongs to the request that
+      // caused it, which is awaiting this same promise and reports it.
+      .catch(() => {})
       .then(async () => {
         result = await fn();
       })
@@ -820,6 +827,12 @@ export function createAppFull(options: CreateAppOptions = {}) {
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
       let conflictResponse: Response | null = null;
       const currentWrite = prevLock
+        // Settle, don't succeed. See withFileLock. A save that queued behind
+        // a failing one used to inherit its rejection and answer 500 without
+        // ever attempting the write, and because each failure became the next
+        // request's prevLock, one bounced save could take the whole queue
+        // behind it down with it.
+        .catch(() => {})
         .then(async () => {
           // Conflict detection: if the client sent an expectedMtime, verify the
           // file hasn't been modified externally since the client last loaded it.
@@ -1536,6 +1549,42 @@ export function removePortFileIfOwned(portFile: string, port: number): void {
   }
 }
 
+/**
+ * Record the listening port for the CLI's fast-path lookup.
+ *
+ * Best effort by design. The file is a hint: when it is missing or stale the
+ * CLI scans the port range instead and finds the server anyway. It used to be
+ * written with an unretried O_EXCL open whose only error path was the boot
+ * handler's `process.exit(1)`, which turned one bounced syscall in
+ * `os.tmpdir()`, among the most heavily scanned directories on Windows, into a
+ * server that never starts, before the user reaches a document at all.
+ *
+ * atomicWriteFile brings the retry and keeps the symlink safety the O_EXCL was
+ * there for: the temp file is created with O_EXCL and the rename replaces
+ * whatever sits at the destination rather than writing through it.
+ */
+export async function writePortFile(portFile: string, port: number): Promise<boolean> {
+  try {
+    await atomicWriteFile(portFile, String(port));
+    return true;
+  } catch (err) {
+    // Remove whatever is still there before falling back, because the fallback
+    // only works if the file is gone. The CLI reads this file FIRST and takes
+    // the port it names as soon as that port answers, scanning only when it
+    // does not. A stale entry naming a still-live orphan server from an
+    // earlier launch would therefore send the user's document to the orphan,
+    // which has its own trusted roots and its own watcher. The old boot path
+    // unlinked before rewriting and never left that window open.
+    await unlink(portFile).catch(() => {});
+    console.error(
+      `Could not record the port at ${portFile}; ` +
+        'the CLI will fall back to scanning for this server:',
+      err,
+    );
+    return false;
+  }
+}
+
 function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
   return new Promise((res, rej) => {
     const server = serve({ fetch: appFetch, port, hostname: '127.0.0.1' }, () => res(port));
@@ -1561,23 +1610,7 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
 if (isMainModule) {
   findAvailablePort(app.fetch)
     .then(async (port) => {
-      // Write port file safely: use O_EXCL to prevent symlink clobber attacks.
-      // If the file already exists (previous unclean exit), unlink it first
-      // to avoid following a symlink that may have replaced the stale file.
-      try {
-        const fd = await open(PORT_FILE, 'wx');
-        await fd.writeFile(String(port));
-        await fd.close();
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
-          unlinkSync(PORT_FILE);
-          const fd = await open(PORT_FILE, 'wx');
-          await fd.writeFile(String(port));
-          await fd.close();
-        } else {
-          throw e;
-        }
-      }
+      await writePortFile(PORT_FILE, port);
       if (updatesEnabled) void updateChecker.start();
       console.log(`md-redline server running on http://127.0.0.1:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';

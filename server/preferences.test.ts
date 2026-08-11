@@ -8,6 +8,7 @@ import {
   readPreferencesResult,
   readPreferencesSync,
   readPreferencesSyncResult,
+  resetReadFailureReportingForTests,
   sanitizePreferencesPatch,
   writePreferences,
 } from './preferences';
@@ -107,15 +108,26 @@ async function expectRejectionCode(promise: Promise<unknown>, code: string): Pro
 
 let testDir: string;
 
+// The transient-code retries only run on Windows (see isTransientFsError), so
+// the fault-injection tests below have to declare that platform rather than
+// inheriting the runner's and passing or failing by accident. fs-retry.test.ts
+// owns the POSIX side.
+const REAL_PLATFORM = process.platform;
+
 beforeAll(async () => {
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
   testDir = await mkdtemp(join(tmpdir(), 'md-redline-prefs-'));
 });
 
 afterAll(async () => {
+  Object.defineProperty(process, 'platform', { value: REAL_PLATFORM, configurable: true });
   await rm(testDir, { recursive: true });
 });
 
 beforeEach(async () => {
+  // Read failures are reported once per condition and the record outlives a
+  // single test, so a case asserting on that log has to start from a clean one.
+  resetReadFailureReportingForTests();
   fault.rename = { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 };
   fault.open = { suffix: '', failuresLeft: 0, code: 'EPERM' };
   fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
@@ -311,6 +323,19 @@ describe('addTrustedRoot', () => {
 });
 
 describe('corrupted prefs quarantine', () => {
+  /**
+   * Quarantining always logs now, so tests that trigger it capture stderr.
+   * Messages are recorded as they arrive rather than read off `mock.calls`
+   * afterwards, because mockRestore() clears that history.
+   */
+  function captureErrors(): { messages: string[]; restore: () => void } {
+    const messages: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      messages.push(String(args[0]));
+    });
+    return { messages, restore: () => spy.mockRestore() };
+  }
+
   it('moves an unparseable prefs file aside instead of overwriting it', async () => {
     // Seed a corrupt file directly
     const prefsFile = join(testDir, '.md-redline.json');
@@ -318,7 +343,18 @@ describe('corrupted prefs quarantine', () => {
 
     // The next write must NOT silently obliterate the corrupt content. The
     // implementation moves the corrupt file to a `.corrupt-<ts>` sibling.
-    await writePreferences(testDir, { author: 'Recovered' });
+    const logs = captureErrors();
+    try {
+      await writePreferences(testDir, { author: 'Recovered' });
+    } finally {
+      logs.restore();
+    }
+
+    // Silence is what makes settings appear to vanish on their own: the log is
+    // how the user learns the copy exists and where it is.
+    const moved = logs.messages.find((m) => m.includes('Moved the file to'));
+    expect(moved).toContain('not valid JSON');
+    expect(moved).toContain('.md-redline.json.corrupt-');
 
     const entries = await readdir(testDir);
     const quarantined = entries.find(
@@ -339,7 +375,13 @@ describe('corrupted prefs quarantine', () => {
     const prefsFile = join(testDir, '.md-redline.json');
     await writeFile(prefsFile, '["not", "an", "object"]');
 
-    await writePreferences(testDir, { theme: 'dark' });
+    const logs = captureErrors();
+    try {
+      await writePreferences(testDir, { theme: 'dark' });
+    } finally {
+      logs.restore();
+    }
+    expect(logs.messages.some((m) => m.includes('not a JSON object'))).toBe(true);
 
     const entries = await readdir(testDir);
     expect(
@@ -348,6 +390,68 @@ describe('corrupted prefs quarantine', () => {
 
     const fresh = await readPreferences(testDir);
     expect(fresh).toEqual({ theme: 'dark' });
+  });
+
+  it('warns that the bytes are about to be lost when the move fails', async () => {
+    // The failure path is the one that matters: the write proceeds over the
+    // original either way, so this log is the user's only warning that their
+    // settings are being destroyed rather than set aside.
+    await writeFile(join(testDir, '.md-redline.json'), '{ this is not json');
+    // Scoped to the prefs path, so atomicWriteFile's own `.tmp` rename still
+    // works and the write below actually lands.
+    fault.rename = {
+      suffix: '.md-redline.json',
+      failuresLeft: Number.MAX_SAFE_INTEGER,
+      code: 'EPERM',
+      attempts: 0,
+    };
+
+    const logs = captureErrors();
+    try {
+      await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+        author: 'Alice',
+      });
+    } finally {
+      logs.restore();
+    }
+
+    const warning = logs.messages.find((m) => m.includes('could not be moved to'));
+    expect(warning).toContain('cannot be recovered');
+    // Retried, not attempted once: a bounced rename on Windows is exactly the
+    // case where a second try saves the file.
+    expect(fault.rename.attempts).toBe(5);
+  });
+
+  it('keeps saving settings after a failed quarantine', async () => {
+    // Refusing to write would be the safer-looking choice and the wrong one:
+    // it would leave the app unable to persist a single setting until the
+    // user cleaned up by hand.
+    await writeFile(join(testDir, '.md-redline.json'), '{ this is not json');
+    fault.rename = {
+      suffix: '.md-redline.json',
+      failuresLeft: Number.MAX_SAFE_INTEGER,
+      code: 'EPERM',
+      attempts: 0,
+    };
+
+    const logs = captureErrors();
+    try {
+      await writePreferences(testDir, { author: 'Alice' });
+      // Corrupt it again so the SECOND write re-enters the quarantine path
+      // with the rename still failing. Without this the file is valid JSON by
+      // then and the second write never reaches the branch under test, so the
+      // case would pass whether or not a failed quarantine wedges anything.
+      await writeFile(join(testDir, '.md-redline.json'), '{ broken again');
+      fault.rename.failuresLeft = Number.MAX_SAFE_INTEGER;
+      await writePreferences(testDir, { theme: 'dark' });
+    } finally {
+      logs.restore();
+    }
+
+    // The second write started from a quarantine that failed, so it merges
+    // onto {} rather than onto the earlier author.
+    expect(await readPreferences(testDir)).toEqual({ theme: 'dark' });
+    expect(logs.messages.filter((m) => m.includes('could not be moved to'))).toHaveLength(2);
   });
 
   it('does not quarantine a healthy prefs file', async () => {
@@ -468,7 +572,9 @@ describe('transient filesystem failures (Windows)', () => {
     try {
       await writePreferences(testDir, { author: 'Alice' });
       expect(logged).toHaveBeenCalledTimes(1);
-      expect(String(logged.mock.calls[0][0])).toContain('Could not release the preferences lock');
+      expect(String(logged.mock.calls[0][0])).toContain(
+        'Could not release the lock at ' + join(testDir, '.md-redline.json.lock'),
+      );
     } finally {
       logged.mockRestore();
       fault.unlink = { failuresLeft: 0, code: 'EBUSY' };
@@ -520,6 +626,68 @@ describe('transient read failures', () => {
       expect(await readPreferences(testDir)).toEqual({});
       expect(logged).toHaveBeenCalledTimes(1);
       expect(String(logged.mock.calls[0][0])).toContain('Could not read preferences');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('reports a persistent read failure once, not once per request', async () => {
+    // GET /api/preferences reads the file per request and the client hydrates
+    // from several places on mount, so the same line was repeated several
+    // times per page load, indefinitely, burying the one that carried news.
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ trustedRoots: [] }));
+    fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await readPreferences(testDir);
+      await readPreferences(testDir);
+      readPreferencesSync(testDir);
+
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('reports again when the condition changes', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ trustedRoots: [] }));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+      await readPreferences(testDir);
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EACCES', attempts: 0 };
+      await readPreferences(testDir);
+
+      expect(logged.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining('(EPERM)'),
+        expect.stringContaining('(EACCES)'),
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('says so when the file becomes readable again', async () => {
+    // Onset without recovery leaves the log claiming a problem that is over.
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ author: 'Alice' }));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+      await readPreferences(testDir);
+      fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
+      expect(await readPreferences(testDir)).toEqual({ author: 'Alice' });
+      // And the next failure is news again, not swallowed by the old record.
+      fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+      await readPreferences(testDir);
+
+      expect(logged.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining('Could not read preferences'),
+        expect.stringContaining('are readable again'),
+        expect.stringContaining('Could not read preferences'),
+      ]);
     } finally {
       logged.mockRestore();
     }

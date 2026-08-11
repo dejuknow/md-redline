@@ -2,13 +2,16 @@
 
 import { spawn } from 'child_process';
 import { readdirSync, statSync } from 'fs';
-import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { mkdir, readFile, stat, unlink } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import process from 'process';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
+import { acquireFileLock, LOCK_MAX_WAIT_MS, LockContentionError } from './file-lock.js';
+import { atomicWriteFile, retryTransient } from './fs-atomic.js';
+import { resolveHomeDir } from './home-dir.js';
 import { resolveApiPort } from './ports.js';
 
 import { checkServer, gracefulShutdown, killPort } from './server-control.js';
@@ -62,15 +65,36 @@ function printHelp() {
   console.log('Alias: md-redline');
 }
 
-async function isFirstLaunch() {
-  const prefsPath = join(homedir(), '.md-redline.json');
+/**
+ * What the server will do about trust on this launch, which is what decides
+ * whether to disclose it and in what words.
+ *
+ * 'seeded'     no trustedRoots on record, so the server seeds the home
+ *              directory. The genuine first launch, and the case a corrupt
+ *              file lands in too, since the server quarantines it and starts
+ *              fresh.
+ * 'unreadable' a prefs file exists and could not be read. The server ALSO
+ *              seeds home here (createApp's first-launch branch fires on
+ *              `trustedRoots === undefined`, and it applies in memory even
+ *              though it refuses to persist), so a user who ran `--restrict`
+ *              silently gets home trust back for this session. That has to be
+ *              said, and it is not a welcome.
+ * 'configured' trustedRoots is on record. Nothing to disclose.
+ */
+async function trustDisclosureState() {
+  const prefsPath = join(resolveHomeDir(), '.md-redline.json');
+  let raw;
   try {
-    const raw = await readFile(prefsPath, 'utf8');
+    raw = await retryTransient(() => readFile(prefsPath, 'utf8'));
+  } catch (err) {
+    return err.code === 'ENOENT' ? 'seeded' : 'unreadable';
+  }
+  try {
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return true;
-    return parsed.trustedRoots === undefined;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 'seeded';
+    return parsed.trustedRoots === undefined ? 'seeded' : 'configured';
   } catch {
-    return true;
+    return 'seeded';
   }
 }
 
@@ -93,7 +117,9 @@ async function resolveTarget(arg) {
     // Echo the resolved path too: `mdr ~/Desktop` on a OneDrive-redirected
     // Windows profile fails because C:\Users\<u>\Desktop does not exist,
     // which the raw argument alone cannot reveal.
-    throw new Error(target === arg ? `not found: ${arg}` : `not found: ${arg} (resolved to ${target})`);
+    throw new Error(
+      target === arg ? `not found: ${arg}` : `not found: ${arg} (resolved to ${target})`,
+    );
   }
 
   if (targetStat.isDirectory()) return { file: '', dir: target };
@@ -106,13 +132,14 @@ async function findServerPort() {
   try {
     const saved = (await readFile(PORT_FILE, 'utf8')).trim();
     const port = Number(saved);
-    if (port && await checkServer(port)) return port;
+    if (port && (await checkServer(port))) return port;
   } catch {}
 
   // Scan the port range as fallback, then the legacy pre-0.7 range
-  const bases = DEFAULT_SERVER_PORT === LEGACY_SERVER_PORT
-    ? [DEFAULT_SERVER_PORT]
-    : [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT];
+  const bases =
+    DEFAULT_SERVER_PORT === LEGACY_SERVER_PORT
+      ? [DEFAULT_SERVER_PORT]
+      : [DEFAULT_SERVER_PORT, LEGACY_SERVER_PORT];
   for (const base of bases) {
     for (let p = base; p < base + MAX_PORT_SCAN; p++) {
       if (await checkServer(p)) return p;
@@ -190,24 +217,28 @@ function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
       [BROWSER_URL_VAR]: url,
     };
     const child = shellCommand
-      ? spawn(process.env.ComSpec ?? 'cmd.exe', [
-          '/d',
-          '/s',
-          '/c',
-          // Outer quote pair is required: with /s, cmd strips only the first and
-          // last quote of the /c string, leaving `"cmd" "url"` intact. Pair it
-          // with windowsVerbatimArguments so Node does not backslash-escape the
-          // inner quotes (\") — cmd reads those literally and the command name
-          // becomes unrecognized.
-          `""%${BROWSER_COMMAND_VAR}%" "%${BROWSER_URL_VAR}%""`,
-        ], {
-          cwd: APP_DIR,
-          detached: true,
-          stdio: 'ignore',
-          env,
-          windowsHide: true,
-          windowsVerbatimArguments: true,
-        })
+      ? spawn(
+          process.env.ComSpec ?? 'cmd.exe',
+          [
+            '/d',
+            '/s',
+            '/c',
+            // Outer quote pair is required: with /s, cmd strips only the first and
+            // last quote of the /c string, leaving `"cmd" "url"` intact. Pair it
+            // with windowsVerbatimArguments so Node does not backslash-escape the
+            // inner quotes (\") — cmd reads those literally and the command name
+            // becomes unrecognized.
+            `""%${BROWSER_COMMAND_VAR}%" "%${BROWSER_URL_VAR}%""`,
+          ],
+          {
+            cwd: APP_DIR,
+            detached: true,
+            stdio: 'ignore',
+            env,
+            windowsHide: true,
+            windowsVerbatimArguments: true,
+          },
+        )
       : spawn(command, [url], {
           cwd: APP_DIR,
           detached: true,
@@ -231,19 +262,18 @@ function openWithWindowsShell(url) {
     // The outer quote pair plus windowsVerbatimArguments keeps cmd's /s quote
     // stripping and Node's argv escaping from mangling `start "" "url"` (without
     // them Node emits \" and the browser receives a corrupted \"url\").
-    const child = spawn(process.env.ComSpec ?? 'cmd.exe', [
-      '/d',
-      '/s',
-      '/c',
-      `"start "" "%${BROWSER_URL_VAR}%""`,
-    ], {
-      cwd: APP_DIR,
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, [BROWSER_URL_VAR]: url },
-      windowsHide: true,
-      windowsVerbatimArguments: true,
-    });
+    const child = spawn(
+      process.env.ComSpec ?? 'cmd.exe',
+      ['/d', '/s', '/c', `"start "" "%${BROWSER_URL_VAR}%""`],
+      {
+        cwd: APP_DIR,
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, [BROWSER_URL_VAR]: url },
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      },
+    );
 
     child.once('error', rejectSpawn);
     child.once('spawn', () => {
@@ -270,25 +300,82 @@ async function stopServer(quiet = false) {
   }
 
   // Clean up port file
-  try { await unlink(PORT_FILE); } catch {}
+  try {
+    await unlink(PORT_FILE);
+  } catch {}
 
   if (!quiet) console.log('mdr stopped.');
 }
 
 async function enableRestrictedMode() {
-  const prefsPath = join(homedir(), '.md-redline.json');
+  // resolveHomeDir, not homedir(): with MD_REDLINE_HOME set, a bare homedir()
+  // writes and locks a file the server never reads, so this would report
+  // success while trust stayed exactly as it was.
+  const prefsPath = join(resolveHomeDir(), '.md-redline.json');
+
+  // The server takes this same lock around its own read-modify-write of the
+  // prefs file. Without it, `mdr --restrict` racing a booting server either
+  // clobbers the trust settings it promises not to touch, or has its own write
+  // swallowed by the server's rename and silently fails to restrict anything.
+  let release;
   try {
-    await stat(prefsPath);
-    console.error(`Refusing to overwrite existing ${prefsPath}.`);
-    console.error('Restricted mode would clobber your trust settings.');
-    console.error('Edit the file manually to set trustedRoots: [].');
+    release = await acquireFileLock(prefsPath);
+  } catch (err) {
+    // Contention and a filesystem failure need different advice, and telling
+    // someone with an unwritable home directory to wait for another process is
+    // a dead end. Discriminating on `err.code` alone got this backwards: on
+    // Windows an EACCES on the lock file IS retried, so a permanent condition
+    // arrives here as an exhausted budget with no errno of its own.
+    if (err instanceof LockContentionError) {
+      console.error(`Could not lock ${prefsPath} after ${LOCK_MAX_WAIT_MS}ms.`);
+      if (err.cause?.code) {
+        console.error(`Last error: ${err.cause.code}. Check permissions on ${dirname(prefsPath)}.`);
+      } else {
+        console.error('Another mdr process is writing it. Try again in a moment.');
+      }
+    } else {
+      console.error(`Could not lock ${prefsPath} (${err.code}): ${err.message}`);
+      console.error('Refusing to write over a file that may hold your trust settings.');
+    }
     process.exitCode = 1;
     return;
-  } catch {
-    /* file does not exist; safe to write */
   }
 
-  await writeFile(prefsPath, JSON.stringify({ trustedRoots: [] }, null, 2) + '\n', 'utf-8');
+  try {
+    // Checked under the lock, and only ENOENT counts as absent. A stat that
+    // bounces off a scanner cannot prove the file is missing, and guessing
+    // wrong here overwrites the trust settings this branch exists to protect.
+    try {
+      await retryTransient(() => stat(prefsPath));
+      console.error(`Refusing to overwrite existing ${prefsPath}.`);
+      console.error('Restricted mode would clobber your trust settings.');
+      console.error('Edit the file manually to set trustedRoots: [].');
+      process.exitCode = 1;
+      return;
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.error(`Could not check ${prefsPath} (${err.code}).`);
+        console.error('Refusing to write over a file that may hold your trust settings.');
+        process.exitCode = 1;
+        return;
+      }
+    }
+
+    try {
+      await atomicWriteFile(prefsPath, JSON.stringify({ trustedRoots: [] }, null, 2) + '\n');
+    } catch (err) {
+      // Every other branch here exits 1 with an explanation. Letting this one
+      // escape to main() printed a raw stack instead, with nothing to say
+      // whether restricted mode had been applied.
+      console.error(`Could not write ${prefsPath} (${err.code ?? 'unknown'}): ${err.message}`);
+      console.error('Restricted mode was NOT enabled.');
+      process.exitCode = 1;
+      return;
+    }
+  } finally {
+    await release();
+  }
+
   console.log('Restricted mode enabled. Each folder will require explicit consent.');
   console.log(`Wrote ${prefsPath}`);
 }
@@ -348,9 +435,17 @@ async function ensureServerRunning() {
   // default trust behavior. The server itself will write the prefs file on
   // boot; we check BEFORE spawning so the message corresponds to the very
   // first invocation only.
-  if (await isFirstLaunch()) {
+  const disclosure = await trustDisclosureState();
+  if (disclosure === 'seeded') {
     console.log('Welcome to md-redline! Trusting your home directory by default.');
-    console.log('Run `mdr --restrict` to opt out. See https://github.com/dejuknow/md-redline#permissions for details.');
+    console.log(
+      'Run `mdr --restrict` to opt out. See https://github.com/dejuknow/md-redline#permissions for details.',
+    );
+  } else if (disclosure === 'unreadable') {
+    // Not a welcome. This user has run mdr before and may well have opted out
+    // of home trust, and the point is that their opt-out is not in effect.
+    console.log(`Could not read ${join(resolveHomeDir(), '.md-redline.json')}.`);
+    console.log('Trusting your home directory for this session until it can be read again.');
   }
 
   if (!existing) console.log('Starting mdr...');
@@ -465,10 +560,20 @@ async function openInBrowser(url) {
 function getClaudeDesktopConfigPath() {
   const isWin = process.platform === 'win32';
   if (isWin) {
-    return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
+    return join(
+      process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'),
+      'Claude',
+      'claude_desktop_config.json',
+    );
   }
   if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+    return join(
+      homedir(),
+      'Library',
+      'Application Support',
+      'Claude',
+      'claude_desktop_config.json',
+    );
   }
   return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json');
 }
@@ -482,22 +587,33 @@ async function installForClaudeDesktop() {
   const configPath = getClaudeDesktopConfigPath();
 
   let config = {};
+  let existing;
   try {
-    const existing = await readFile(configPath, 'utf8');
-    config = JSON.parse(existing);
+    existing = await retryTransient(() => readFile(configPath, 'utf8'));
   } catch (err) {
+    // Only a missing file may be treated as "start fresh". Every other read
+    // failure has to abort, because writing a fresh config over a file we
+    // could not read would delete every other MCP server in it.
     if (err.code !== 'ENOENT') {
+      throw new Error(
+        `Cannot read ${configPath} (${err.code}): ${err.message}\n` +
+          'Fix the permissions and retry; refusing to overwrite a config that may hold other MCP servers.',
+      );
+    }
+  }
+  if (existing !== undefined) {
+    try {
+      config = JSON.parse(existing);
+    } catch (err) {
       throw new Error(
         `Cannot parse ${configPath}: ${err.message}\nPlease fix the JSON syntax and retry.`,
       );
     }
-    // File missing — start fresh
   }
 
   if (typeof config !== 'object' || config === null) config = {};
-  const mcpServers = config.mcpServers && typeof config.mcpServers === 'object'
-    ? config.mcpServers
-    : {};
+  const mcpServers =
+    config.mcpServers && typeof config.mcpServers === 'object' ? config.mcpServers : {};
 
   const hadLegacyKey = Boolean(mcpServers.mdr) && !mcpServers['md-redline'];
   if (hadLegacyKey) {
@@ -516,7 +632,10 @@ async function installForClaudeDesktop() {
   config.mcpServers = mcpServers;
 
   await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  // Temp file + rename, never a bare write. This file is not ours: it holds
+  // every OTHER MCP server the user has configured, and a truncated write
+  // takes all of them down, not just md-redline's entry.
+  await atomicWriteFile(configPath, JSON.stringify(config, null, 2) + '\n');
   console.log(
     hadLegacyKey
       ? `[Claude Desktop] Renamed legacy mdr entry to md-redline in ${configPath}`
@@ -538,13 +657,17 @@ async function installForClaudeCode() {
     child.once('exit', (code) => resolve(code === 0));
   });
   if (!claudeCheck) {
-    console.log('[Claude Code] claude CLI not found on PATH — skipping. Install Claude Code or run `claude mcp add md-redline mdr mcp` manually.');
+    console.log(
+      '[Claude Code] claude CLI not found on PATH — skipping. Install Claude Code or run `claude mcp add md-redline mdr mcp` manually.',
+    );
     return { ok: false, changed: false };
   }
 
   // Check whether md-redline is already registered.
   const listOutput = await new Promise((resolve) => {
-    const child = spawn('claude', ['mcp', 'list', '--scope', 'user'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn('claude', ['mcp', 'list', '--scope', 'user'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     let out = '';
     child.stdout.on('data', (chunk) => {
       out += chunk.toString('utf8');
@@ -558,15 +681,24 @@ async function installForClaudeCode() {
   }
 
   const addResult = await new Promise((resolve) => {
-    const child = spawn('claude', ['mcp', 'add', '--scope', 'user', 'md-redline', '--', 'mdr', 'mcp'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      'claude',
+      ['mcp', 'add', '--scope', 'user', 'md-redline', '--', 'mdr', 'mcp'],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     let stderr = '';
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString('utf8');
     });
     child.once('error', (err) => resolve({ ok: false, error: err.message }));
-    child.once('exit', (code) => resolve({ ok: code === 0, error: code === 0 ? null : stderr.trim() || `exited with code ${code}` }));
+    child.once('exit', (code) =>
+      resolve({
+        ok: code === 0,
+        error: code === 0 ? null : stderr.trim() || `exited with code ${code}`,
+      }),
+    );
   });
 
   if (!addResult.ok) {
@@ -583,15 +715,30 @@ async function installMcpConfig(target) {
     try {
       results.push({ name: 'Claude Desktop', ...(await installForClaudeDesktop()) });
     } catch (err) {
-      results.push({ name: 'Claude Desktop', ok: false, error: err instanceof Error ? err.message : 'unknown error' });
+      results.push({
+        name: 'Claude Desktop',
+        ok: false,
+        error: err instanceof Error ? err.message : 'unknown error',
+      });
     }
   }
   if (target === 'claude-code' || target === 'all') {
     try {
       results.push({ name: 'Claude Code', ...(await installForClaudeCode()) });
     } catch (err) {
-      results.push({ name: 'Claude Code', ok: false, error: err instanceof Error ? err.message : 'unknown error' });
+      results.push({
+        name: 'Claude Code',
+        ok: false,
+        error: err instanceof Error ? err.message : 'unknown error',
+      });
     }
+  }
+
+  // A thrown installer error was being captured here and never printed, so a
+  // failed install exited 1 with nothing on stderr to say why. installForClaudeCode
+  // reports its own failures and sets no `error`, so this never doubles up.
+  for (const result of results) {
+    if (!result.ok && result.error) console.error(`[${result.name}] ${result.error}`);
   }
 
   const anyChanged = results.some((r) => r.changed);
@@ -628,7 +775,11 @@ async function runMcpStdio() {
     // entries that disappear between readdir and stat. The outer block lets
     // unexpected errors surface instead of being misclassified as staleness.
     const bundleStat = (() => {
-      try { return statSync(distMcp); } catch { return null; }
+      try {
+        return statSync(distMcp);
+      } catch {
+        return null;
+      }
     })();
     if (bundleStat) {
       // The MCP bundle pulls in `server/**`, modules from `src/lib/`
@@ -651,10 +802,18 @@ async function runMcpStdio() {
         const p = stack.pop();
         if (!p) continue;
         let entryStat;
-        try { entryStat = statSync(p); } catch { continue; }
+        try {
+          entryStat = statSync(p);
+        } catch {
+          continue;
+        }
         if (entryStat.isDirectory()) {
           let entries;
-          try { entries = readdirSync(p); } catch { continue; }
+          try {
+            entries = readdirSync(p);
+          } catch {
+            continue;
+          }
           for (const entry of entries) stack.push(join(p, entry));
         } else if (p.endsWith('.ts')) {
           // Skip test files — they don't contribute to the bundled output,
@@ -670,7 +829,7 @@ async function runMcpStdio() {
       if (stalePath) {
         throw new Error(
           `mdr mcp bundle is stale (${stalePath} is ${staleAgeSec}s newer than dist/mcp-stdio.js).\n` +
-          `Run \`npm run build\` (or \`npm run dev\` which rebuilds on save).`,
+            `Run \`npm run build\` (or \`npm run dev\` which rebuilds on save).`,
         );
       }
     }
@@ -722,6 +881,16 @@ async function main() {
     // detached-teardown race — and honors MD_REDLINE_BROWSER like every other path.
     const target = process.argv[3];
     if (target) await openInBrowser(target);
+    return;
+  }
+
+  if (process.argv[2] === '__first-launch') {
+    // Internal, undocumented seam, same idea as __open above: print which
+    // trust disclosure this invocation would print and exit, without booting a
+    // server. The answer is otherwise only observable as a line or two of text
+    // in the middle of a real startup, which a test cannot reach without
+    // spawning the whole app.
+    console.log(await trustDisclosureState());
     return;
   }
 
@@ -784,7 +953,9 @@ async function main() {
               `Warning: server refused access to ${targetPath} (HTTP ${grantRes.status}); it may open as access denied.`,
             );
           }
-        } catch { /* server will enforce its own checks */ }
+        } catch {
+          /* server will enforce its own checks */
+        }
       }
     }
 

@@ -1,14 +1,9 @@
-import { readFile, rename, open, stat, unlink } from 'fs/promises';
+import { readFile, rename } from 'fs/promises';
 import { readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
-import {
-  atomicWriteFile,
-  isTransientFsError,
-  retryTransient,
-  retryTransientSync,
-  sleep,
-} from './fs-retry';
+import { atomicWriteFile, retryTransient, retryTransientSync } from './fs-retry';
+import { acquireFileLock } from '../bin/file-lock.js';
 import {
   DOC_WIDTHS,
   PROSE_FONTS,
@@ -18,10 +13,6 @@ import {
 } from '../src/lib/settings';
 
 const PREFS_FILENAME = '.md-redline.json';
-const LOCK_SUFFIX = '.lock';
-const LOCK_STALE_MS = 30_000;
-const LOCK_MAX_ATTEMPTS = 60;
-const LOCK_RETRY_BASE_MS = 25;
 
 export interface RecentFile {
   path: string;
@@ -184,13 +175,33 @@ export interface PreferencesRead {
   unreadable: boolean;
 }
 
+/**
+ * Errno of the last reported read failure, per prefs path, or absent once a
+ * read succeeds again.
+ *
+ * GET /api/preferences reads the file on every request, and the client hydrates
+ * from several places on mount and polls every five minutes after that. A
+ * persistently unreadable file therefore repeated the same line several times
+ * per page load, forever, which buries the one occurrence that carried
+ * information. Reported once per distinct condition instead, and again when it
+ * changes or clears.
+ */
+const reportedReadFailures = new Map<string, string>();
+
 function emptyOnReadFailure(err: unknown, homeDir: string): PreferencesRead {
   const code = (err as NodeJS.ErrnoException).code;
   // ENOENT is the ordinary "no prefs yet" case; a SyntaxError has no code.
   const unreadable = !!code && code !== 'ENOENT';
-  if (unreadable) {
+  const path = prefsPath(homeDir);
+  if (!unreadable) {
+    // The file is gone, or it parsed badly having been read fine. Either way
+    // whatever was blocking reads no longer is, and a later recurrence is news
+    // again. Silent: neither case is worth a line of its own here.
+    reportedReadFailures.delete(path);
+  } else if (reportedReadFailures.get(path) !== code) {
+    reportedReadFailures.set(path, code as string);
     console.error(
-      `Could not read preferences at ${prefsPath(homeDir)} (${code}); ` +
+      `Could not read preferences at ${path} (${code}); ` +
         'continuing without saved settings for this session:',
       err,
     );
@@ -198,9 +209,23 @@ function emptyOnReadFailure(err: unknown, homeDir: string): PreferencesRead {
   return { prefs: {}, unreadable };
 }
 
+/** Close the loop on a reported failure, so recovery is as visible as onset. */
+function noteReadSucceeded(homeDir: string): void {
+  const path = prefsPath(homeDir);
+  if (reportedReadFailures.delete(path)) {
+    console.error(`Preferences at ${path} are readable again.`);
+  }
+}
+
+/** Only for tests, which share a module instance across cases. */
+export function resetReadFailureReportingForTests(): void {
+  reportedReadFailures.clear();
+}
+
 export async function readPreferencesResult(homeDir: string): Promise<PreferencesRead> {
   try {
     const raw = await retryTransient(() => readFile(prefsPath(homeDir), 'utf-8'));
+    noteReadSucceeded(homeDir);
     return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
   } catch (err) {
     return emptyOnReadFailure(err, homeDir);
@@ -210,6 +235,7 @@ export async function readPreferencesResult(homeDir: string): Promise<Preference
 export function readPreferencesSyncResult(homeDir: string): PreferencesRead {
   try {
     const raw = retryTransientSync(() => readFileSync(prefsPath(homeDir), 'utf-8'));
+    noteReadSucceeded(homeDir);
     return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
   } catch (err) {
     return emptyOnReadFailure(err, homeDir);
@@ -225,89 +251,33 @@ export function readPreferencesSync(homeDir: string): Preferences {
 }
 
 /**
- * Acquire a cross-process lock on the preferences file before performing a
- * read-modify-write. The in-process `writeLock` only serializes within a
- * single Node process; running two `mdr` instances against the same home
- * directory would otherwise race the read+write cycle and lose updates.
+ * Move a prefs file we cannot parse out of the way, so the write that follows
+ * does not land on top of it. These are the user's own settings, and after
+ * that write they are gone, so neither outcome may be silent: on success the
+ * log is how they find the copy, and on failure it is the only warning they
+ * will ever get that the bytes are about to be destroyed.
  *
- * Implementation: O_EXCL sentinel file. If the lock is older than
- * LOCK_STALE_MS we treat it as abandoned (the holder crashed) and steal it.
+ * The rename is retried, which off Windows is a single attempt anyway. What it
+ * must not do is throw: the caller cannot proceed with a file it cannot read,
+ * and refusing to write would leave the app unable to save a setting ever
+ * again until the user intervened by hand.
  */
-async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
-  const lockPath = `${filePath}${LOCK_SUFFIX}`;
-  for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
-    let fd;
-    try {
-      fd = await open(lockPath, 'wx');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EEXIST') {
-        // The lock file is created and removed on every write, which makes it
-        // the same scanner bait as the temp file. Back off on the transient
-        // codes instead of failing the whole write.
-        if (!isTransientFsError(err)) throw err;
-        await sleep(LOCK_RETRY_BASE_MS);
-        continue;
-      }
-      // Lock exists. If it's stale (holder crashed), steal it.
-      try {
-        const lockStat = await stat(lockPath);
-        if (Date.now() - lockStat.mtimeMs > LOCK_STALE_MS) {
-          try {
-            await unlink(lockPath);
-          } catch {
-            /* someone else just released it */
-          }
-          continue;
-        }
-      } catch {
-        // Lock vanished between EEXIST and stat — retry immediately.
-        continue;
-      }
-      // Backoff with a small random jitter to avoid thundering herd.
-      await sleep(LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS));
-      continue;
-    }
-
-    // The lock file exists and is ours from here. Anything that fails before
-    // we return the release closure has to remove it, or the next attempt
-    // deadlocks against our own orphan: it is far too young for the
-    // stale-steal branch above, so the loop burns every remaining attempt and
-    // then blocks all writers until LOCK_STALE_MS elapses.
-    let writeErr: unknown;
-    try {
-      await fd.writeFile(`${process.pid}`);
-    } catch (err) {
-      writeErr = err;
-    }
-    // Close before unlinking: Windows refuses to remove a file that still has
-    // an open handle, which would defeat the cleanup below. The pid is only a
-    // debugging aid (staleness is decided by mtime), so a failed close on the
-    // success path is not worth failing the write over.
-    await fd.close().catch(() => {});
-    if (writeErr) {
-      await unlink(lockPath).catch(() => {});
-      if (!isTransientFsError(writeErr)) throw writeErr;
-      await sleep(LOCK_RETRY_BASE_MS);
-      continue;
-    }
-
-    return async () => {
-      try {
-        await retryTransient(() => unlink(lockPath));
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
-        // An orphaned lock blocks every writer, in this process and any other
-        // mdr instance, until it ages out. Never silent.
-        console.error(
-          `Could not release the preferences lock at ${lockPath}; writes are ` +
-            `blocked until it ages out after ${LOCK_STALE_MS}ms:`,
-          err,
-        );
-      }
-    };
+async function quarantineCorruptPrefs(filePath: string, reason: string): Promise<void> {
+  const quarantinePath = corruptQuarantinePath(filePath);
+  try {
+    await retryTransient(() => rename(filePath, quarantinePath));
+    console.error(
+      `Preferences at ${filePath} were ${reason}. Moved the file to ` +
+        `${quarantinePath} and starting fresh.`,
+    );
+  } catch (err) {
+    console.error(
+      `Preferences at ${filePath} were ${reason} and could not be moved to ` +
+        `${quarantinePath}. The next write overwrites them and they cannot be ` +
+        'recovered afterwards:',
+      err,
+    );
   }
-  throw new Error(`Could not acquire preferences lock at ${lockPath}`);
 }
 
 /**
@@ -333,7 +303,7 @@ async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences
     const parsed = JSON.parse(raw);
     if (!isPlainObject(parsed)) {
       // Structurally wrong (array / null / scalar). Quarantine and start fresh.
-      await rename(filePath, corruptQuarantinePath(filePath)).catch(() => {});
+      await quarantineCorruptPrefs(filePath, 'not a JSON object');
       return {};
     }
     // Strip unknown keys / wrong-typed fields before merging. The cast is
@@ -342,7 +312,7 @@ async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences
     return sanitizePreferencesPatch(parsed) as Preferences;
   } catch {
     // Unparseable. Quarantine before the next write overwrites it.
-    await rename(filePath, corruptQuarantinePath(filePath)).catch(() => {});
+    await quarantineCorruptPrefs(filePath, 'not valid JSON');
     return {};
   }
 }

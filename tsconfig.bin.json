@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.bin.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode, matching tsconfig.node.json */
+    "moduleResolution": "bundler",
+    "noEmit": true,
+
+    /* The point of this project: bin/ is plain JS with no build step, so
+       without checkJs it is invisible to every static gate the repo has. The
+       filesystem primitives the CLI and the server share live here, and they
+       used to be strict-mode TypeScript. */
+    "allowJs": true,
+    "checkJs": true,
+
+    /* Baseline rather than the full `strict` of tsconfig.node.json. The
+       pre-existing modules here (ports, server-control, spawn-command,
+       version-compare) were written as untyped JS and predate this project;
+       demanding annotations on them would mean rewriting code this change has
+       no business touching. What IS caught everywhere is the class that
+       matters most for a file with no build step: undefined identifiers,
+       misspelled properties on known types, wrong arity, bad imports.
+
+       fs-atomic.js and file-lock.js carry JSDoc types, so they are checked as
+       thoroughly here as they were as TypeScript. */
+    "strict": false,
+    "noImplicitAny": false,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["bin/**/*.js"]
+}
