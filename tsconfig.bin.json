@@ -14,7 +14,13 @@
     /* The point of this project: bin/ is plain JS with no build step, so
        without checkJs it is invisible to every static gate the repo has. The
        filesystem primitives the CLI and the server share live here, and they
-       used to be strict-mode TypeScript. */
+       used to be strict-mode TypeScript.
+
+       The CLI body is `cli.js` rather than `md-redline` so that this include
+       can see it: an extensionless file cannot be picked up by any glob tsc
+       accepts, and `md-redline` is the published command name and so cannot
+       change. `bin/md-redline` is now a shim that imports `cli.js` and is
+       itself the only unchecked file left here. Keep it that way. */
     "allowJs": true,
     "checkJs": true,
 

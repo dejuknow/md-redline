@@ -10,7 +10,7 @@ Claude-specific skill routing and points here. Do not duplicate content between 
 - Local web app for inline review comments in markdown files
 - Frontend: React 19 + TypeScript + Tailwind CSS v4 + Vite 8
 - Backend: Hono server in `server/index.ts`
-- CLI entry: `bin/md-redline`, exposed as `mdr` and `md-redline`
+- CLI entry: `bin/md-redline`, exposed as `mdr` and `md-redline`; the body is `bin/cli.js`
 
 ## Architecture overview
 
@@ -19,7 +19,8 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 
 ### Directory layout
 
-- `bin/md-redline` — CLI entry point (`mdr` command). Starts server, opens browser, handles `mdr mcp install`.
+- `bin/md-redline` — published entry point (`mdr` command), a shim that imports `bin/cli.js`
+- `bin/cli.js` — the CLI itself. Starts server, opens browser, handles `mdr mcp install`.
 - `server/` — Hono app, routes, review session store, MCP stdio layer
 - `src/` — React SPA (Vite + TypeScript + Tailwind)
 - `src/lib/comment-parser.ts` — core parser for inline comment markers
@@ -73,7 +74,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the toolbar badge
-- `bin/md-redline`: auto-start CLI and browser opener
+- `bin/cli.js`: auto-start CLI and browser opener
 - `eval/runner.ts`: eval harness; default adapter is currently `claude-cli`
 
 ## Comment format
@@ -255,7 +256,7 @@ written wherever the user launched from and never persisted.
 One resolver per variable, imported by every reader: **more than one place reads
 the same variable, and the readers have to agree.** `vite.config.ts` resolves the
 API port to aim its dev proxy, `server/index.ts` resolves it to decide what to
-bind, `bin/md-redline` resolves it to seed the fallback scan that finds a running
+bind, `bin/cli.js` resolves it to seed the fallback scan that finds a running
 server, and `server/update-check.ts` resolves the home directory independently of
 `server/index.ts` (the update checker is constructed with no `homeDir` option, so
 that read is live in production).
@@ -271,7 +272,7 @@ consistent, and only because all three truncated it the same way; all three now
 reject it. Add a resolver and import it; never inline a second copy.
 
 The port resolvers live in `bin/ports.js`, not in `server/env.ts`, and that
-location is deliberate. `bin/md-redline` reads the API port too, to seed the
+location is deliberate. `bin/cli.js` reads the API port too, to seed the
 fallback scan that locates a running server when the port file is missing or
 stale, and it is a dependency-free CLI with no build step, so it can only import
 plain JavaScript. `bin/` is also what package.json ships next to `dist/`, so the
@@ -308,8 +309,11 @@ never saw it at all. A call to an undefined function survived both gates. The
 config is deliberately looser than `tsconfig.node.json` (no `strict`, no
 `noImplicitAny`) because the older modules here predate it and were written
 untyped; `fs-atomic.js` and `file-lock.js` carry JSDoc types so they are checked
-as thoroughly as they were when they were TypeScript. `bin/md-redline` itself is
-extensionless and so still invisible to `tsc`; its tests are the gate there.
+as thoroughly as they were when they were TypeScript. The CLI body is checked
+too, which is why it is `bin/cli.js` and not `bin/md-redline`: an extensionless
+file matches no glob `tsc` accepts, and that name is the published command and
+cannot change. What is left unchecked is the shim itself, which is why it does
+nothing but import.
 
 `MD_REDLINE_REGISTRY_URL` and `MD_REDLINE_BASE_URL` keep a plain `??` by choice:
 both are development or background-only, and a blank value fails visibly at the
@@ -318,7 +322,7 @@ first fetch rather than quietly doing the wrong thing. `NO_UPDATE_NOTIFIER` and
 value counts as set.
 
 Two further sets are deliberately outside the rule. `MD_REDLINE_INTERNAL_BROWSER_*` are
-set by `bin/md-redline` and expanded by the Windows `cmd` it spawns, never read
+set by `bin/cli.js` and expanded by the Windows `cmd` it spawns, never read
 through `process.env`, so a `process.env` grep will not find them: they are an
 argument-passing mechanism rather than configuration. `RELEASE_SKIP_CI_CHECK` and
 `RELEASE_SKIP_CLAUDE` are local to `scripts/release.mjs`.
@@ -326,7 +330,7 @@ argument-passing mechanism rather than configuration. `RELEASE_SKIP_CI_CHECK` an
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
 (`127.0.0.1`), default port 6373 ("MDR" on a phone keypad; overridable via
 `MD_REDLINE_PORT`), scanning up to 10 ports from there if taken. The Vite dev
-client uses 5188 (`MD_REDLINE_VITE_PORT`), same scan. The CLI (`bin/md-redline`)
+client uses 5188 (`MD_REDLINE_VITE_PORT`), same scan. The CLI (`bin/cli.js`)
 probes, kills, and opens browser URLs with `127.0.0.1`, never `localhost`:
 `localhost` resolves to `::1` first, so when another app holds the same port
 number on IPv6 (Next.js/Nest commonly squat 3000-3010), a localhost probe
@@ -366,7 +370,7 @@ gets home trust back for that session, silently, which is exactly what they opte
 out of. `unreadable` says so in its own words rather than welcoming them.
 
 **CLI stale-server upgrade**: on every plain `mdr` invocation,
-`ensureServerRunning()` in `bin/md-redline` asks the running server for
+`ensureServerRunning()` in `bin/cli.js` asks the running server for
 `GET /api/version` and compares it to the CLI's own version (read from the
 `package.json` next to the installed bin). On any mismatch it prints
 `Upgrading mdr <old> → <new>...`, gracefully shuts the old server down
@@ -1491,7 +1495,8 @@ code fails the build; run `npm run format` before pushing. The globs cover
 `src`, `server`, `e2e`, `eval`, `scripts`, `bin` and `demo` plus root-level
 config, for `.ts`, `.tsx`, `.js` and `.mjs`. Markdown is deliberately excluded
 because this file and the README are hand-wrapped, and `bin/md-redline` is
-excluded because it has no extension for Prettier to infer a parser from.
+excluded because it has no extension for Prettier to infer a parser from. That
+exclusion covers three lines of shim now that the CLI body is `bin/cli.js`.
 
 The repo-wide reformat that introduced this is listed in
 `.git-blame-ignore-revs`. GitHub honours that file automatically; locally,
