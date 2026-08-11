@@ -354,6 +354,7 @@ The eval harness tests whether AI agents correctly read, address, and remove inl
 
 ```text
 bin/md-redline             CLI entry point (invoked as `mdr` or `md-redline`)
+bin/cli.js                 CLI implementation behind that entry point
 server/index.ts            Hono server for file I/O, browsing, SSE, and local integrations
 src/App.tsx                Main application shell
 src/components/            Viewer, sidebar, raw view, diff view, TOC, explorer, settings, etc.
