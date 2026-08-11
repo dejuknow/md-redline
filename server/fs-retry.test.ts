@@ -1,5 +1,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmod, mkdtemp, rm, stat, writeFile, readFile, readdir } from 'fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdtemp,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+  readFile,
+  readdir,
+} from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -334,6 +344,32 @@ describe('atomicWriteFile', () => {
     await expect(atomicWriteFile(docPath, 'new\n')).rejects.toMatchObject({ code: 'EXDEV' });
     expect(fault.rename.attempts).toBe(1);
   });
+
+  // Creating a symlink on Windows needs Developer Mode or an elevated process,
+  // so the platform that cannot run this is also the one where the attack it
+  // describes does not arrive by this route.
+  it.skipIf(REAL_PLATFORM === 'win32')(
+    'replaces a symlink at the destination instead of writing through it',
+    async () => {
+      // The security half of the O_EXCL rename dance: a symlink planted at the
+      // path we are about to save is replaced by a regular file, and whatever
+      // it pointed at is untouched. Following it would let anything that can
+      // create a file in the directory redirect a save to a path of its
+      // choosing. The cost, recorded as a deliberate trade, is that a dotfiles
+      // symlink for a config file becomes a regular file until the next
+      // `chezmoi apply`.
+      const outside = join(testDir, 'outside.json');
+      await writeFile(outside, 'must not change\n');
+      const linkPath = join(testDir, 'linked.json');
+      await symlink(outside, linkPath);
+
+      await atomicWriteFile(linkPath, 'new\n');
+
+      expect(await readFile(outside, 'utf-8')).toBe('must not change\n');
+      expect(await readFile(linkPath, 'utf-8')).toBe('new\n');
+      expect((await lstat(linkPath)).isSymbolicLink()).toBe(false);
+    },
+  );
 });
 
 describe('off Windows', () => {
