@@ -1,5 +1,10 @@
 import { execSync } from 'child_process';
 
+/**
+ * @param {number} port
+ * @param {NodeJS.Platform} [platform]
+ * @returns {string | null} null when the port is not a usable port number
+ */
 export function buildKillCommand(port, platform = process.platform) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
   if (platform === 'win32') {
@@ -15,9 +20,20 @@ export function buildKillCommand(port, platform = process.platform) {
   return `lsof -iTCP@127.0.0.1:${port} -sTCP:LISTEN -t | xargs kill 2>/dev/null`;
 }
 
+/**
+ * @param {number} port
+ * @param {object} [options]
+ * @param {NodeJS.Platform} [options.platform]
+ * @param {(cmd: string, opts: object) => unknown} [options.exec] seam for the
+ *   tests, which must never actually kill anything
+ * @returns {boolean}
+ */
 export function killPort(
   port,
-  { platform = process.platform, exec = (cmd, opts) => execSync(cmd, opts) } = {},
+  {
+    platform = process.platform,
+    exec = (/** @type {string} */ cmd, /** @type {object} */ opts) => execSync(cmd, opts),
+  } = {},
 ) {
   const command = buildKillCommand(port, platform);
   if (!command) return false;
@@ -49,6 +65,13 @@ export function killPort(
   }
 }
 
+/**
+ * @param {number} port
+ * @param {object} [options]
+ * @param {typeof fetch} [options.fetchFn]
+ * @param {number} [options.timeoutMs]
+ * @returns {Promise<boolean>} true only when the port answers as mdr itself
+ */
 export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000 } = {}) {
   try {
     // 127.0.0.1, never `localhost`: the server binds IPv4 loopback only,
@@ -69,16 +92,31 @@ export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000 } =
   }
 }
 
+/**
+ * Ask the server to exit, then wait for it to stop answering.
+ *
+ * @param {number} port
+ * @param {object} [options] every collaborator is injectable because the tests
+ *   drive this against a fake clock and a fake server
+ * @param {typeof fetch} [options.fetchFn]
+ * @param {(port: number) => Promise<boolean>} [options.checkServerFn]
+ * @param {number} [options.requestTimeoutMs]
+ * @param {number} [options.deadlineMs]
+ * @param {number} [options.pollMs]
+ * @param {() => number} [options.now]
+ * @param {(ms: number) => Promise<unknown>} [options.delay]
+ * @returns {Promise<boolean>} true when the server stopped answering in time
+ */
 export async function gracefulShutdown(
   port,
   {
     fetchFn = fetch,
-    checkServerFn = (p) => checkServer(p, { fetchFn }),
+    checkServerFn = (/** @type {number} */ p) => checkServer(p, { fetchFn }),
     requestTimeoutMs = 2_000,
     deadlineMs = 3_000,
     pollMs = 250,
     now = () => Date.now(),
-    delay = (ms) => new Promise((r) => setTimeout(r, ms)),
+    delay = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms)),
   } = {},
 ) {
   // The server handler returns JSON then calls `setImmediate(process.exit)`,

@@ -58,11 +58,26 @@ const CONTENTION_FS_CODES = new Set(['EBUSY']);
 const WINDOWS_ONLY_TRANSIENT_FS_CODES = new Set(['EPERM', 'EACCES']);
 
 /**
+ * The errno carried by a caught value, or undefined when it has none.
+ *
+ * `catch` binds `unknown`, and almost every handler across `bin/` wants the
+ * same one thing out of it. Written inline that is the same unchecked cast
+ * repeated a dozen times over; the cast is the part worth having in exactly one
+ * place, where it can say what it is assuming.
+ *
+ * @param {unknown} err
+ * @returns {string | undefined}
+ */
+export function errorCode(err) {
+  return /** @type {NodeJS.ErrnoException | null | undefined} */ (err)?.code;
+}
+
+/**
  * @param {unknown} err
  * @returns {boolean}
  */
 export function isTransientFsError(err) {
-  const code = /** @type {NodeJS.ErrnoException} */ (err)?.code;
+  const code = errorCode(err);
   if (!code) return false;
   if (CONTENTION_FS_CODES.has(code)) return true;
   // Read per call rather than captured at module load, so the tests can
@@ -203,7 +218,7 @@ async function renameIntoPlace(tmpPath, path, content) {
       // that already landed. Confirm by content rather than reporting a save
       // that succeeded as failed, and never on the first attempt, where ENOENT
       // means the temp file genuinely never existed.
-      if (firstAttempt || err?.code !== 'ENOENT') throw err;
+      if (firstAttempt || errorCode(err) !== 'ENOENT') throw err;
       if ((await readFile(path, 'utf-8').catch(() => null)) !== content) throw err;
     }
   });

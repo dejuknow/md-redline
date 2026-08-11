@@ -22,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
 import { acquireFileLock, LOCK_MAX_WAIT_MS, LockContentionError } from './file-lock.js';
-import { atomicWriteFile, retryTransient } from './fs-atomic.js';
+import { atomicWriteFile, errorCode, retryTransient } from './fs-atomic.js';
 import { resolveHomeDir } from './home-dir.js';
 import { resolveApiPort } from './ports.js';
 
@@ -99,7 +99,7 @@ async function trustDisclosureState() {
   try {
     raw = await retryTransient(() => readFile(prefsPath, 'utf8'));
   } catch (err) {
-    return err.code === 'ENOENT' ? 'seeded' : 'unreadable';
+    return errorCode(err) === 'ENOENT' ? 'seeded' : 'unreadable';
   }
   try {
     const parsed = JSON.parse(raw);
@@ -110,6 +110,24 @@ async function trustDisclosureState() {
   }
 }
 
+/**
+ * A caught value's message, for error text the CLI is about to print.
+ *
+ * `catch` binds `unknown` and these strings go straight to the user, so a
+ * throw that is not an Error has to degrade to something readable instead of
+ * failing inside the handler that was reporting the first failure.
+ *
+ * @param {unknown} err
+ * @returns {string}
+ */
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * @param {string} inputPath
+ * @returns {string}
+ */
 function expandHomePath(inputPath) {
   if (inputPath === '~') return homedir();
   if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) {
@@ -118,6 +136,10 @@ function expandHomePath(inputPath) {
   return inputPath;
 }
 
+/**
+ * @param {string} arg
+ * @returns {Promise<{ file: string; dir: string }>}
+ */
 async function resolveTarget(arg) {
   if (!arg) return { file: '', dir: '' };
 
@@ -178,10 +200,20 @@ async function findClientPort() {
   return null;
 }
 
+/**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{ cwd?: string; detached?: boolean }} [options]
+ * @returns {Promise<import('child_process').ChildProcess>}
+ */
 function spawnDetached(command, args, options = {}) {
   return new Promise((resolveSpawn, rejectSpawn) => {
     const isWin = process.platform === 'win32';
@@ -227,6 +259,12 @@ function spawnDetached(command, args, options = {}) {
 const BROWSER_COMMAND_VAR = 'MD_REDLINE_INTERNAL_BROWSER_COMMAND';
 const BROWSER_URL_VAR = 'MD_REDLINE_INTERNAL_BROWSER_URL';
 
+/**
+ * @param {string} command
+ * @param {string} url
+ * @param {{ shellCommand?: boolean }} [options]
+ * @returns {Promise<import('child_process').ChildProcess>}
+ */
 function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
   return new Promise((resolveSpawn, rejectSpawn) => {
     const env = {
@@ -272,6 +310,10 @@ function spawnWindowsBrowser(command, url, { shellCommand = false } = {}) {
   });
 }
 
+/**
+ * @param {string} url
+ * @returns {Promise<import('child_process').ChildProcess>}
+ */
 function openWithWindowsShell(url) {
   return new Promise((resolveSpawn, rejectSpawn) => {
     // Keep the encoded URL out of cmd.exe's command string. cmd expands the
@@ -358,7 +400,7 @@ async function enableRestrictedMode() {
         console.error('Another mdr process is writing it. Try again in a moment.');
       }
     } else {
-      console.error(`Could not lock ${prefsPath} (${err.code}): ${err.message}`);
+      console.error(`Could not lock ${prefsPath} (${errorCode(err)}): ${errorMessage(err)}`);
       console.error('Refusing to write over a file that may hold your trust settings.');
     }
     process.exitCode = 1;
@@ -377,8 +419,8 @@ async function enableRestrictedMode() {
       process.exitCode = 1;
       return;
     } catch (err) {
-      if (err.code !== 'ENOENT') {
-        console.error(`Could not check ${prefsPath} (${err.code}).`);
+      if (errorCode(err) !== 'ENOENT') {
+        console.error(`Could not check ${prefsPath} (${errorCode(err)}).`);
         console.error('Refusing to write over a file that may hold your trust settings.');
         process.exitCode = 1;
         return;
@@ -391,7 +433,9 @@ async function enableRestrictedMode() {
       // Every other branch here exits 1 with an explanation. Letting this one
       // escape to main() printed a raw stack instead, with nothing to say
       // whether restricted mode had been applied.
-      console.error(`Could not write ${prefsPath} (${err.code ?? 'unknown'}): ${err.message}`);
+      console.error(
+        `Could not write ${prefsPath} (${errorCode(err) ?? 'unknown'}): ${errorMessage(err)}`,
+      );
       console.error('Restricted mode was NOT enabled.');
       process.exitCode = 1;
       return;
@@ -404,6 +448,16 @@ async function enableRestrictedMode() {
   console.log(`Wrote ${prefsPath}`);
 }
 
+/**
+ * What the running server reports about itself, once it has been checked.
+ * @typedef {{ version: string; latest: string | null; updateCheckPending: boolean }} ServerVersionInfo
+ */
+
+/**
+ * @param {number} port
+ * @returns {Promise<ServerVersionInfo | null>} null when the server cannot be
+ *   asked, or answers with something that is not a version
+ */
 async function getServerVersionInfo(port) {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/version`, {
@@ -430,6 +484,11 @@ async function getServerVersionInfo(port) {
   return null;
 }
 
+/**
+ * @param {number} port
+ * @param {ServerVersionInfo | null} initialInfo
+ * @returns {Promise<ServerVersionInfo | null>}
+ */
 async function waitForUpdateCheck(port, initialInfo) {
   let info = initialInfo;
   const deadline = Date.now() + UPDATE_CHECK_WAIT_MS;
@@ -536,6 +595,11 @@ async function ensureServerRunning() {
   return null;
 }
 
+/**
+ * @param {string} file
+ * @param {string} dir
+ * @returns {Promise<string>}
+ */
 async function buildUrl(file, dir) {
   const clientPort = await findClientPort();
   const serverPort = await findServerPort();
@@ -548,6 +612,10 @@ async function buildUrl(file, dir) {
   return baseUrl;
 }
 
+/**
+ * @param {string} url
+ * @returns {Promise<void>}
+ */
 async function openInBrowser(url) {
   // MD_REDLINE_BROWSER overrides the launcher with an explicit command that
   // receives the URL as its argument (e.g. a specific browser binary). Spawned
@@ -631,9 +699,9 @@ async function installForClaudeDesktop() {
     // Only a missing file may be treated as "start fresh". Every other read
     // failure has to abort, because writing a fresh config over a file we
     // could not read would delete every other MCP server in it.
-    if (err.code !== 'ENOENT') {
+    if (errorCode(err) !== 'ENOENT') {
       throw new Error(
-        `Cannot read ${configPath} (${err.code}): ${err.message}\n` +
+        `Cannot read ${configPath} (${errorCode(err)}): ${errorMessage(err)}\n` +
           'Fix the permissions and retry; refusing to overwrite a config that may hold other MCP servers.',
       );
     }
@@ -643,7 +711,7 @@ async function installForClaudeDesktop() {
       config = JSON.parse(existing);
     } catch (err) {
       throw new Error(
-        `Cannot parse ${configPath}: ${err.message}\nPlease fix the JSON syntax and retry.`,
+        `Cannot parse ${configPath}: ${errorMessage(err)}\nPlease fix the JSON syntax and retry.`,
       );
     }
   }
@@ -749,6 +817,12 @@ async function installForClaudeCode() {
   return { ok: true, changed: true };
 }
 
+/**
+ * @param {string} target one of 'all', 'claude-code', 'claude-desktop'. Typed
+ *   as a plain string because the caller derives it from argv and has already
+ *   rejected anything else.
+ * @returns {Promise<void>}
+ */
 async function installMcpConfig(target) {
   // `changed` and `error` are each set by only one of the two shapes pushed
   // here, and the reporting below reads both across every result.

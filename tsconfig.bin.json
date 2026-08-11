@@ -24,20 +24,24 @@
     "allowJs": true,
     "checkJs": true,
 
-    /* Baseline rather than the full `strict` of tsconfig.node.json. The
-       pre-existing modules here (ports, server-control, spawn-command,
-       version-compare) were written as untyped JS and predate this project;
-       demanding annotations on them would mean rewriting code this change has
-       no business touching. What IS caught everywhere is the class that
-       matters most for a file with no build step: undefined identifiers,
-       misspelled properties on known types, wrong arity, bad imports.
-
-       fs-atomic.js and file-lock.js carry JSDoc types, so they are checked as
-       thoroughly here as they were as TypeScript. */
-    "strict": false,
-    "noImplicitAny": false,
+    /* The same `strict` as tsconfig.node.json, so a JS file here is held to
+       what a TS file is held to in server/. This started looser because the
+       older modules predated the project and were written untyped, which meant
+       the directory that holds the CLI and every filesystem primitive it
+       shares with the server was the one place a caught error could be read
+       for a property it might not have. Annotating them was a day's work; the
+       gap it left was permanent. */
+    "strict": true,
+    "noImplicitAny": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["bin/**/*.js"]
+  /* Spelled out rather than a `bin/**` sweep, because a `.d.ts` in the include
+     list SHADOWS its `.js`: TypeScript drops the implementation from the
+     program and checks the declaration instead, silently un-checking
+     fs-atomic.js and file-lock.js, the two files here that most need it. The
+     hand-written declarations exist for the server, which imports these from a
+     project without allowJs, and they belong in that program rather than this
+     one. Verify with `tsc -p tsconfig.bin.json --listFiles` after editing. */
+  "include": ["bin/**/*.js", "bin/**/*.test.ts", "bin/cli-browser-stub.ts"]
 }

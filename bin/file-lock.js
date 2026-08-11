@@ -13,7 +13,13 @@ import { readFileSync, unlinkSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { constants as osConstants } from 'os';
 
-import { FS_RETRY_BUDGET_MS, isTransientFsError, retryTransient, sleep } from './fs-atomic.js';
+import {
+  errorCode,
+  FS_RETRY_BUDGET_MS,
+  isTransientFsError,
+  retryTransient,
+  sleep,
+} from './fs-atomic.js';
 
 export const LOCK_SUFFIX = '.lock';
 
@@ -212,7 +218,7 @@ export async function acquireFileLock(filePath) {
     try {
       fd = await open(lockPath, 'wx');
     } catch (err) {
-      const code = err?.code;
+      const code = errorCode(err);
       if (code !== 'EEXIST') {
         lastErr = err;
         // The lock file is created and removed on every write, which makes it
@@ -229,7 +235,7 @@ export async function acquireFileLock(filePath) {
       } catch (statErr) {
         // ENOENT means the lock vanished between the EEXIST and the stat, so
         // the path is free right now and there is nothing to wait for.
-        if (statErr?.code === 'ENOENT') continue;
+        if (errorCode(statErr) === 'ENOENT') continue;
         // Anything else is a condition that does NOT clear on its own at this
         // speed: a dangling symlink at the lock path (open reports EEXIST
         // while stat follows the link and fails), an unreadable directory, or
@@ -252,7 +258,7 @@ export async function acquireFileLock(filePath) {
           await unlink(lockPath);
         } catch (unlinkErr) {
           // ENOENT is the benign race: someone else released it first.
-          if (unlinkErr?.code !== 'ENOENT') {
+          if (errorCode(unlinkErr) !== 'ENOENT') {
             // We cannot remove an abandoned lock, so the recovery path this
             // branch exists for will not fire. Back off rather than spinning,
             // and keep the errno so the caller can say what is actually wrong.
@@ -305,7 +311,7 @@ export async function acquireFileLock(filePath) {
       } catch (err) {
         // Already gone: released twice, or stolen and released by whoever took
         // it. Either way there is nothing here to remove.
-        if (err?.code === 'ENOENT') return;
+        if (errorCode(err) === 'ENOENT') return;
         // A read that will not succeed proves nothing about who holds the lock,
         // and unlinking on that evidence is exactly the failure this check
         // exists to prevent. Leaving it costs one stale window and then clears
@@ -336,7 +342,7 @@ export async function acquireFileLock(filePath) {
       try {
         await retryTransient(() => unlink(lockPath));
       } catch (err) {
-        if (err?.code === 'ENOENT') return;
+        if (errorCode(err) === 'ENOENT') return;
         // An orphaned lock blocks every writer, in this process and any other
         // mdr instance, until it ages out. Never silent.
         console.error(

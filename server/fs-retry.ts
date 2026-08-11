@@ -9,6 +9,7 @@
  */
 export {
   atomicWriteFile,
+  errorCode,
   FS_MAX_ATTEMPTS,
   FS_RETRY_BASE_MS,
   FS_RETRY_BUDGET_MS,

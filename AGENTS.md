@@ -52,7 +52,9 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
   0644. The retry gate is per-errno, NOT per-platform: EBUSY is contention everywhere (SMB, NFS,
   and the FUSE/FileProvider mounts behind Dropbox, Google Drive and iCloud all return it), while
   EPERM/EACCES are retried only on `win32`, because on POSIX they mean a permanent permission
-  condition. `server/fs-retry.ts` re-exports it for server-side importers
+  condition. It also exports `errorCode`, the one place the unchecked cast from a caught
+  `unknown` to an errno-bearing error is written down, which is what every `catch` in `bin/`
+  reads a `.code` through. `server/fs-retry.ts` re-exports it for server-side importers
 - `bin/file-lock.js`: `acquireFileLock`, the O_EXCL cross-process lock every writer of
   `.md-redline.json` takes around a read-modify-write. Shared so `mdr --restrict` and the server
   cannot interleave; its attempt budget derives from `FS_RETRY_BUDGET_MS`. Exhausting that budget
@@ -310,14 +312,21 @@ deliberately, which is what keeps the window small.
 It has no build step, so before those existed eslint matched none of it and
 exited 0 having checked nothing, which reads exactly like passing, and `tsc`
 never saw it at all. A call to an undefined function survived both gates. The
-config is deliberately looser than `tsconfig.node.json` (no `strict`, no
-`noImplicitAny`) because the older modules here predate it and were written
-untyped; `fs-atomic.js` and `file-lock.js` carry JSDoc types so they are checked
-as thoroughly as they were when they were TypeScript. The CLI body is checked
-too, which is why it is `bin/cli.js` and not `bin/md-redline`: an extensionless
-file matches no glob `tsc` accepts, and that name is the published command and
-cannot change. What is left unchecked is the shim itself, which is why it does
-nothing but import.
+config now runs the same `strict` as `tsconfig.node.json`, so a JS file here is
+held to what a TS file is held to in `server/`; types are carried in JSDoc,
+since there is no build step to strip anything. The CLI body is checked too,
+which is why it is `bin/cli.js` and not `bin/md-redline`: an extensionless file
+matches no glob `tsc` accepts, and that name is the published command and cannot
+change. What is left unchecked is the shim itself, which is why it does nothing
+but import.
+
+The `include` list names `bin/**/*.js`, `bin/**/*.test.ts` and the browser stub
+one at a time, and must stay that way. A `.d.ts` caught by a wider glob SHADOWS
+its `.js`: TypeScript drops the implementation from the program and checks the
+declaration instead, which silently stops checking `fs-atomic.js` and
+`file-lock.js`. The declarations are there for the server, which imports these
+from a project without `allowJs`. After editing that list, confirm what is
+actually in the program with `tsc -p tsconfig.bin.json --listFiles`.
 
 `MD_REDLINE_REGISTRY_URL` and `MD_REDLINE_BASE_URL` keep a plain `??` by choice:
 both are development or background-only, and a blank value fails visibly at the

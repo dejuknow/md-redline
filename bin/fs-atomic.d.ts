@@ -1,6 +1,7 @@
 export const FS_MAX_ATTEMPTS: number;
 export const FS_RETRY_BASE_MS: number;
 export const FS_RETRY_BUDGET_MS: number;
+export function errorCode(err: unknown): string | undefined;
 export function isTransientFsError(err: unknown): boolean;
 export function sleep(ms: number): Promise<void>;
 export function retryTransient<T>(op: () => Promise<T>): Promise<T>;
