@@ -1,5 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -8,6 +18,7 @@ import {
   isPathInsideRoot,
   normalizeHostname,
   removePortFileIfOwned,
+  writePortFile,
   type CreateAppOptions,
 } from './index';
 import { addReply, parseComments } from '../src/lib/comment-parser';
@@ -4335,5 +4346,49 @@ describe('removePortFileIfOwned', () => {
     expect(() =>
       removePortFileIfOwned(join(tmpdir(), 'md-redline-portfile-nonexistent'), 6373),
     ).not.toThrow();
+  });
+});
+
+describe('writePortFile', () => {
+  it('records the port in the form removePortFileIfOwned recognizes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'md-redline-portfile-'));
+    const portFile = join(dir, 'md-redline.port');
+
+    expect(await writePortFile(portFile, 6373)).toBe(true);
+    expect(await readFile(portFile, 'utf8')).toBe('6373');
+    // The two halves have to agree on the format or a server never cleans up
+    // after itself.
+    removePortFileIfOwned(portFile, 6373);
+    await expect(readFile(portFile, 'utf8')).rejects.toThrow();
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('replaces a stale file left by an unclean exit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'md-redline-portfile-'));
+    const portFile = join(dir, 'md-redline.port');
+    await writeFile(portFile, '6374');
+
+    expect(await writePortFile(portFile, 6373)).toBe(true);
+    expect(await readFile(portFile, 'utf8')).toBe('6373');
+    // No temp file may survive in tmpdir, where nothing ever cleans it up.
+    expect((await readdir(dir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reports failure instead of throwing, so a boot is never lost to it', async () => {
+    // The port file is a hint the CLI can do without: it falls back to
+    // scanning the port range. Rejecting here used to reach process.exit(1)
+    // and stop a server that was already listening.
+    const portFile = join(tmpdir(), 'md-redline-portfile-no-such-dir', 'md-redline.port');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await writePortFile(portFile, 6373)).toBe(false);
+      expect(String(logged.mock.calls[0][0])).toContain('Could not record the port');
+    } finally {
+      logged.mockRestore();
+    }
   });
 });

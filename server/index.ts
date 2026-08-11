@@ -1536,6 +1536,34 @@ export function removePortFileIfOwned(portFile: string, port: number): void {
   }
 }
 
+/**
+ * Record the listening port for the CLI's fast-path lookup.
+ *
+ * Best effort by design. The file is a hint: when it is missing or stale the
+ * CLI scans the port range instead and finds the server anyway. It used to be
+ * written with an unretried O_EXCL open whose only error path was the boot
+ * handler's `process.exit(1)`, which turned one bounced syscall in
+ * `os.tmpdir()` — among the most heavily scanned directories on Windows — into
+ * a server that never starts, before the user reaches a document at all.
+ *
+ * atomicWriteFile brings the retry and keeps the symlink safety the O_EXCL was
+ * there for: the temp file is created with O_EXCL and the rename replaces
+ * whatever sits at the destination rather than writing through it.
+ */
+export async function writePortFile(portFile: string, port: number): Promise<boolean> {
+  try {
+    await atomicWriteFile(portFile, String(port));
+    return true;
+  } catch (err) {
+    console.error(
+      `Could not record the port at ${portFile}; ` +
+        'the CLI will fall back to scanning for this server:',
+      err,
+    );
+    return false;
+  }
+}
+
 function tryListen(appFetch: typeof app.fetch, port: number): Promise<number> {
   return new Promise((res, rej) => {
     const server = serve({ fetch: appFetch, port, hostname: '127.0.0.1' }, () => res(port));
@@ -1561,23 +1589,7 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
 if (isMainModule) {
   findAvailablePort(app.fetch)
     .then(async (port) => {
-      // Write port file safely: use O_EXCL to prevent symlink clobber attacks.
-      // If the file already exists (previous unclean exit), unlink it first
-      // to avoid following a symlink that may have replaced the stale file.
-      try {
-        const fd = await open(PORT_FILE, 'wx');
-        await fd.writeFile(String(port));
-        await fd.close();
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
-          unlinkSync(PORT_FILE);
-          const fd = await open(PORT_FILE, 'wx');
-          await fd.writeFile(String(port));
-          await fd.close();
-        } else {
-          throw e;
-        }
-      }
+      await writePortFile(PORT_FILE, port);
       if (updatesEnabled) void updateChecker.start();
       console.log(`md-redline server running on http://127.0.0.1:${port}`);
       const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
