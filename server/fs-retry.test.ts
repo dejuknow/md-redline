@@ -305,19 +305,27 @@ describe('atomicWriteFile', () => {
     expect(await readFile(docPath, 'utf-8')).toBe('old\n');
   });
 
-  it('keeps the permissions the destination already had', async () => {
-    // A temp file is created at 0600-and-umask, so without carrying the mode
-    // over, the rename RELAXES anything the user or another tool tightened.
-    // Claude Desktop's MCP config is the file that makes this matter: it holds
-    // every other server's env block, and those carry API tokens.
-    await writeFile(docPath, 'old\n', { mode: 0o600 });
-    await chmod(docPath, 0o600);
+  // REAL_PLATFORM, not process.platform: the suite pins win32 in beforeAll, and
+  // this has to key off the machine actually running. Windows has no POSIX mode
+  // bits (chmod toggles a read-only flag and stat reports 0o666), so there is
+  // nothing to preserve and nothing to assert. inheritMode copies whatever the
+  // destination reports, which makes it a no-op there rather than a bug.
+  it.skipIf(REAL_PLATFORM === 'win32')(
+    'keeps the permissions the destination already had',
+    async () => {
+      // A temp file is created at 0600-and-umask, so without carrying the mode
+      // over, the rename RELAXES anything the user or another tool tightened.
+      // Claude Desktop's MCP config is the file that makes this matter: it
+      // holds every other server's env block, and those carry API tokens.
+      await writeFile(docPath, 'old\n', { mode: 0o600 });
+      await chmod(docPath, 0o600);
 
-    await atomicWriteFile(docPath, 'new\n');
+      await atomicWriteFile(docPath, 'new\n');
 
-    expect((await stat(docPath)).mode & 0o777).toBe(0o600);
-    expect(await readFile(docPath, 'utf-8')).toBe('new\n');
-  });
+      expect((await stat(docPath)).mode & 0o777).toBe(0o600);
+      expect(await readFile(docPath, 'utf-8')).toBe('new\n');
+    },
+  );
 
   it('does not retry a permanent rename failure', async () => {
     fault.rename.failuresLeft = 1;
