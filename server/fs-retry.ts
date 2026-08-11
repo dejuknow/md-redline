@@ -1,4 +1,4 @@
-import { open, rename, unlink } from 'fs/promises';
+import { open, readFile, rename, unlink } from 'fs/promises';
 import { randomBytes } from 'crypto';
 
 // Windows bounces filesystem calls with these codes while another handle is
@@ -77,16 +77,53 @@ export function retryTransientSync<T>(op: () => T): T {
  * than left in the user's folder, where it would show up in Explorer and in
  * `git status`.
  */
+async function writeTempFile(tmpPath: string, content: string): Promise<void> {
+  const fd = await open(tmpPath, 'wx');
+  let failure: unknown;
+  try {
+    await fd.writeFile(content, 'utf-8');
+  } catch (err) {
+    failure = err;
+  } finally {
+    try {
+      await fd.close();
+    } catch (closeErr) {
+      // close surfaces deferred write errors, so a failure here means the temp
+      // file is not trustworthy either way. It must not REPLACE an earlier
+      // error though: the write's own code is what decides whether this is
+      // worth retrying, and a close error can carry a different one.
+      failure ??= closeErr;
+    }
+  }
+  if (failure) throw failure;
+}
+
+async function renameIntoPlace(tmpPath: string, path: string, content: string): Promise<void> {
+  let attempted = false;
+  await retryTransient(async () => {
+    const firstAttempt = !attempted;
+    attempted = true;
+    try {
+      await rename(tmpPath, path);
+    } catch (err) {
+      // rename is not idempotent, and retrying re-probes a temp file whose
+      // fate may have changed: an attempt that reported failure can still have
+      // moved the file, and a sync client can consume the temp file between
+      // attempts. Both leave a later attempt failing with ENOENT for a write
+      // that already landed. Confirm by content rather than reporting a save
+      // that succeeded as failed, and never on the first attempt, where ENOENT
+      // means the temp file genuinely never existed.
+      if (firstAttempt || (err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      if ((await readFile(path, 'utf-8').catch(() => null)) !== content) throw err;
+    }
+  });
+}
+
 export async function atomicWriteFile(path: string, content: string): Promise<void> {
   const tmpPath = `${path}.${randomBytes(6).toString('hex')}.tmp`;
   try {
-    const fd = await open(tmpPath, 'wx');
-    try {
-      await fd.writeFile(content, 'utf-8');
-    } finally {
-      await fd.close();
-    }
-    await retryTransient(() => rename(tmpPath, path));
+    await writeTempFile(tmpPath, content);
+    await renameIntoPlace(tmpPath, path, content);
   } catch (err) {
     await unlink(tmpPath).catch(() => {});
     throw err;

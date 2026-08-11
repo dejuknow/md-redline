@@ -5,7 +5,9 @@ import { tmpdir } from 'os';
 import {
   addTrustedRoot,
   readPreferences,
+  readPreferencesResult,
   readPreferencesSync,
+  readPreferencesSyncResult,
   sanitizePreferencesPatch,
   writePreferences,
 } from './preferences';
@@ -20,6 +22,8 @@ const fault = vi.hoisted(() => ({
   rename: { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 },
   open: { suffix: '', failuresLeft: 0, code: 'EPERM' },
   read: { failuresLeft: 0, code: 'EPERM', attempts: 0 },
+  lockWrite: { failuresLeft: 0, code: 'EBUSY' },
+  unlink: { failuresLeft: 0, code: 'EBUSY' },
 }));
 
 function faultError(code: string, detail: string): NodeJS.ErrnoException {
@@ -46,7 +50,27 @@ vi.mock('fs/promises', async (importOriginal) => {
         fault.open.failuresLeft -= 1;
         throw faultError(fault.open.code, `open '${path}'`);
       }
-      return actual.open(path, flags);
+      const handle = await actual.open(path, flags);
+      if (!path.endsWith('.lock')) return handle;
+      // Fault the lock file's pid write, which happens after O_EXCL has already
+      // created the file. Only writeFile and close are used on that handle.
+      return {
+        writeFile: async (content: string) => {
+          if (fault.lockWrite.failuresLeft > 0) {
+            fault.lockWrite.failuresLeft -= 1;
+            throw faultError(fault.lockWrite.code, `write '${path}'`);
+          }
+          return handle.writeFile(content);
+        },
+        close: () => handle.close(),
+      };
+    },
+    unlink: async (path: string) => {
+      if (fault.unlink.failuresLeft > 0 && path.endsWith('.lock')) {
+        fault.unlink.failuresLeft -= 1;
+        throw faultError(fault.unlink.code, `unlink '${path}'`);
+      }
+      return actual.unlink(path);
     },
     readFile: async (path: string, encoding: BufferEncoding) => {
       if (!path.endsWith('.md-redline.json')) return actual.readFile(path, encoding);
@@ -95,6 +119,8 @@ beforeEach(async () => {
   fault.rename = { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 };
   fault.open = { suffix: '', failuresLeft: 0, code: 'EPERM' };
   fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
+  fault.lockWrite = { failuresLeft: 0, code: 'EBUSY' };
+  fault.unlink = { failuresLeft: 0, code: 'EBUSY' };
   // Clean up the prefs file and any quarantined / lock siblings between tests
   const entries = await readdir(testDir).catch(() => [] as string[]);
   for (const entry of entries) {
@@ -409,6 +435,47 @@ describe('transient filesystem failures (Windows)', () => {
     expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
   });
 
+  it('does not orphan the lock when initializing it bounces', async () => {
+    // O_EXCL already created the file at this point. Leaving it behind makes
+    // the next attempt collide with an orphan far too young to look stale, so
+    // the loop burns all 60 attempts and then blocks every writer for 30s.
+    fault.lockWrite.failuresLeft = 2;
+
+    await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+      author: 'Alice',
+    });
+    expect((await readdir(testDir)).some((e) => e.endsWith('.lock'))).toBe(false);
+  });
+
+  it('does not wedge later writes when releasing the lock bounces', async () => {
+    fault.unlink.failuresLeft = 2;
+
+    await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+      author: 'Alice',
+    });
+    expect((await readdir(testDir)).some((e) => e.endsWith('.lock'))).toBe(false);
+    // The next write must not collide with an orphan left by the last one.
+    await expect(writePreferences(testDir, { theme: 'dark' })).resolves.toEqual({
+      author: 'Alice',
+      theme: 'dark',
+    });
+  });
+
+  it('logs rather than silently orphaning a lock it cannot release', async () => {
+    fault.unlink = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EBUSY' };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await writePreferences(testDir, { author: 'Alice' });
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(String(logged.mock.calls[0][0])).toContain('Could not release the preferences lock');
+    } finally {
+      logged.mockRestore();
+      fault.unlink = { failuresLeft: 0, code: 'EBUSY' };
+      await rm(join(testDir, '.md-redline.json.lock'), { force: true }).catch(() => {});
+    }
+  });
+
   it('retries a transient read inside the locked read-modify-write', async () => {
     // A bounced read here used to abort the whole write, which is how the
     // trustedRoots migration got dropped on Windows.
@@ -468,6 +535,37 @@ describe('transient read failures', () => {
     } finally {
       logged.mockRestore();
     }
+  });
+
+  it('flags an unreadable file so callers do not persist state derived from {}', async () => {
+    // {} is indistinguishable from "no prefs yet", and a caller that writes
+    // derived state back with a plain patch overwrites the keys it could not
+    // see. This flag is the only thing separating the two cases.
+    await writeFile(
+      join(testDir, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: ['/vault'] }),
+    );
+    fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferencesResult(testDir)).toEqual({ prefs: {}, unreadable: true });
+      expect(readPreferencesSyncResult(testDir)).toEqual({ prefs: {}, unreadable: true });
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('does not flag an absent file, which is the ordinary first run', async () => {
+    expect(await readPreferencesResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+    expect(readPreferencesSyncResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+  });
+
+  it('does not flag a corrupt file, whose bytes the write path quarantines', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), '{ not json');
+
+    expect(await readPreferencesResult(testDir)).toEqual({ prefs: {}, unreadable: false });
+    expect(readPreferencesSyncResult(testDir)).toEqual({ prefs: {}, unreadable: false });
   });
 
   it('stays silent for a corrupt file, which the write path quarantines', async () => {

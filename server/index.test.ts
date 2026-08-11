@@ -12,6 +12,28 @@ import {
 } from './index';
 import { addReply, parseComments } from '../src/lib/comment-parser';
 
+// Fails ONLY the synchronous boot read of the prefs file, leaving the async
+// read-modify-write path working. That asymmetry is the real shape of the bug:
+// a scanner holding the file for a few milliseconds at startup, gone by the
+// time the derived state is written back. Armed per test, off by default.
+const syncReadFault = vi.hoisted(() => ({ failuresLeft: 0, code: 'EPERM' }));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    readFileSync: (path: string, encoding: BufferEncoding) => {
+      if (syncReadFault.failuresLeft > 0 && String(path).endsWith('.md-redline.json')) {
+        syncReadFault.failuresLeft -= 1;
+        const err: NodeJS.ErrnoException = new Error(`${syncReadFault.code}: simulated`);
+        err.code = syncReadFault.code;
+        throw err;
+      }
+      return actual.readFileSync(path, encoding);
+    },
+  };
+});
+
 type AppInstance = ReturnType<typeof createApp>;
 
 let app: AppInstance;
@@ -1887,6 +1909,39 @@ describe('persisted trustedRoots hydration', () => {
     const raw2 = await readFile(join(realHome, '.md-redline.json'), 'utf-8');
     const parsed2 = JSON.parse(raw2);
     expect(parsed2.trustedRoots).toEqual([]);
+
+    await rm(realHome, { recursive: true, force: true });
+  });
+
+  it('never overwrites trustedRoots derived from a prefs file it could not read', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-unreadable-'));
+    const realHome = await realpath(localHome);
+    const prefsFile = join(realHome, '.md-redline.json');
+    const granted = ['/vault-a', '/vault-b'];
+    await writeFile(prefsFile, JSON.stringify({ author: 'Dennis', trustedRoots: granted }));
+    // An unreadable file looks exactly like "trustedRoots was never written",
+    // which sends startup down the first-launch seed. Persisting that replaces
+    // every folder the user granted with just the home directory. The file
+    // stays writable throughout, so nothing but the guard prevents the write.
+    syncReadFault.failuresLeft = Number.MAX_SAFE_INTEGER;
+
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      createApp({
+        cwd: cwdRoot,
+        homeDir: realHome,
+        platformName: 'linux',
+        defaultTrustHome: true,
+      });
+      await new Promise((r) => setTimeout(r, 300));
+    } finally {
+      logged.mockRestore();
+      syncReadFault.failuresLeft = 0;
+    }
+
+    const parsed = JSON.parse(await readFile(prefsFile, 'utf-8'));
+    expect(parsed.trustedRoots).toEqual(granted);
+    expect(parsed.author).toBe('Dennis');
 
     await rm(realHome, { recursive: true, force: true });
   });

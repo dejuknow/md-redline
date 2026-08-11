@@ -167,48 +167,61 @@ function corruptQuarantinePath(filePath: string): string {
   return `${filePath}.corrupt-${stamp}-${rand}`;
 }
 
-/**
- * Both readers fall back to {} so a missing or corrupt file cannot stop the
- * app booting. The distinction that matters is WHY: a file that is absent is
- * the normal first run, while a file that exists and could not be read means
- * the caller silently loses the user's trusted roots and re-prompts for a
- * folder they already granted. That case gets a log line.
- *
- * Falling back to {} cannot clobber the file: writePreferences re-reads under
- * the lock and merges against what is actually on disk.
- */
-function emptyOnReadFailure(err: unknown, homeDir: string): Preferences {
+export interface PreferencesRead {
+  prefs: Preferences;
+  /**
+   * True when a prefs file exists but could not be read. The {} fallback is
+   * indistinguishable from "no prefs yet", and that ambiguity is destructive:
+   * a caller that derives state from {} and writes it back with a plain patch
+   * overwrites the very keys it could not see, because writePreferences
+   * merges shallowly and a key present in the patch always beats the
+   * under-lock re-read. Callers that persist derived state MUST check this
+   * and skip the write. Consumers that only read can ignore it.
+   *
+   * A corrupt (unparseable) file does not set this: the write path quarantines
+   * it, so the original bytes survive and starting fresh is correct.
+   */
+  unreadable: boolean;
+}
+
+function emptyOnReadFailure(err: unknown, homeDir: string): PreferencesRead {
   const code = (err as NodeJS.ErrnoException).code;
-  // ENOENT is the ordinary "no prefs yet" case; a SyntaxError (no code) is
-  // handled by the write path, which quarantines the file before overwriting.
-  if (code && code !== 'ENOENT') {
+  // ENOENT is the ordinary "no prefs yet" case; a SyntaxError has no code.
+  const unreadable = !!code && code !== 'ENOENT';
+  if (unreadable) {
     console.error(
       `Could not read preferences at ${prefsPath(homeDir)} (${code}); ` +
         'continuing without saved settings for this session:',
       err,
     );
   }
-  return {};
+  return { prefs: {}, unreadable };
+}
+
+export async function readPreferencesResult(homeDir: string): Promise<PreferencesRead> {
+  try {
+    const raw = await retryTransient(() => readFile(prefsPath(homeDir), 'utf-8'));
+    return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
+  } catch (err) {
+    return emptyOnReadFailure(err, homeDir);
+  }
+}
+
+export function readPreferencesSyncResult(homeDir: string): PreferencesRead {
+  try {
+    const raw = retryTransientSync(() => readFileSync(prefsPath(homeDir), 'utf-8'));
+    return { prefs: sanitizePreferencesPatch(JSON.parse(raw)) as Preferences, unreadable: false };
+  } catch (err) {
+    return emptyOnReadFailure(err, homeDir);
+  }
 }
 
 export async function readPreferences(homeDir: string): Promise<Preferences> {
-  try {
-    const raw = await retryTransient(() => readFile(prefsPath(homeDir), 'utf-8'));
-    const parsed = JSON.parse(raw);
-    return sanitizePreferencesPatch(parsed) as Preferences;
-  } catch (err) {
-    return emptyOnReadFailure(err, homeDir);
-  }
+  return (await readPreferencesResult(homeDir)).prefs;
 }
 
 export function readPreferencesSync(homeDir: string): Preferences {
-  try {
-    const raw = retryTransientSync(() => readFileSync(prefsPath(homeDir), 'utf-8'));
-    const parsed = JSON.parse(raw);
-    return sanitizePreferencesPatch(parsed) as Preferences;
-  } catch (err) {
-    return emptyOnReadFailure(err, homeDir);
-  }
+  return readPreferencesSyncResult(homeDir).prefs;
 }
 
 /**
@@ -223,20 +236,9 @@ export function readPreferencesSync(homeDir: string): Preferences {
 async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
   const lockPath = `${filePath}${LOCK_SUFFIX}`;
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
+    let fd;
     try {
-      const fd = await open(lockPath, 'wx');
-      try {
-        await fd.writeFile(`${process.pid}`);
-      } finally {
-        await fd.close();
-      }
-      return async () => {
-        try {
-          await unlink(lockPath);
-        } catch {
-          /* lock already released */
-        }
-      };
+      fd = await open(lockPath, 'wx');
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') {
@@ -264,7 +266,46 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
       }
       // Backoff with a small random jitter to avoid thundering herd.
       await sleep(LOCK_RETRY_BASE_MS + Math.floor(Math.random() * LOCK_RETRY_BASE_MS));
+      continue;
     }
+
+    // The lock file exists and is ours from here. Anything that fails before
+    // we return the release closure has to remove it, or the next attempt
+    // deadlocks against our own orphan: it is far too young for the
+    // stale-steal branch above, so the loop burns every remaining attempt and
+    // then blocks all writers until LOCK_STALE_MS elapses.
+    let writeErr: unknown;
+    try {
+      await fd.writeFile(`${process.pid}`);
+    } catch (err) {
+      writeErr = err;
+    }
+    // Close before unlinking: Windows refuses to remove a file that still has
+    // an open handle, which would defeat the cleanup below. The pid is only a
+    // debugging aid (staleness is decided by mtime), so a failed close on the
+    // success path is not worth failing the write over.
+    await fd.close().catch(() => {});
+    if (writeErr) {
+      await unlink(lockPath).catch(() => {});
+      if (!isTransientFsError(writeErr)) throw writeErr;
+      await sleep(LOCK_RETRY_BASE_MS);
+      continue;
+    }
+
+    return async () => {
+      try {
+        await retryTransient(() => unlink(lockPath));
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+        // An orphaned lock blocks every writer, in this process and any other
+        // mdr instance, until it ages out. Never silent.
+        console.error(
+          `Could not release the preferences lock at ${lockPath}; writes are ` +
+            `blocked until it ages out after ${LOCK_STALE_MS}ms:`,
+          err,
+        );
+      }
+    };
   }
   throw new Error(`Could not acquire preferences lock at ${lockPath}`);
 }

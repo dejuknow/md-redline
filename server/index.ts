@@ -13,7 +13,7 @@ import { createRequire } from 'module';
 import {
   addTrustedRoot,
   readPreferences,
-  readPreferencesSync,
+  readPreferencesSyncResult,
   writePreferences,
 } from './preferences';
 // Note for every caller below: atomicWriteFile intentionally does NOT update
@@ -337,7 +337,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
   // Hydrate allowedRoots from persisted trustedRoots in preferences. This
   // restores folders the user previously consented to via /api/pick-file
   // across server restarts. Stale entries are pruned from disk.
-  const persistedPrefs = readPreferencesSync(homeDir);
+  const { prefs: persistedPrefs, unreadable: prefsUnreadable } = readPreferencesSyncResult(homeDir);
   let persistedRoots = persistedPrefs.trustedRoots;
   let migratedFromRecent = false;
 
@@ -405,7 +405,15 @@ export function createAppFull(options: CreateAppOptions = {}) {
   const prunedSomething =
     survivingRoots.length !== persistedRoots.length ||
     survivingRoots.some((p, i) => p !== persistedRoots[i]);
-  if (migratedFromRecent || prunedSomething) {
+  // Never persist roots derived from a prefs file we could not read. An
+  // unreadable file looks exactly like "trustedRoots was never written", which
+  // sends us down the first-launch seed above; writing that back replaces
+  // every folder the user had granted with just the home directory. The seed
+  // still applies in memory so the app stays usable for this session, it just
+  // does not become the new truth on disk.
+  if (prefsUnreadable) {
+    console.error('Not persisting derived trustedRoots: preferences were unreadable at startup.');
+  } else if (migratedFromRecent || prunedSomething) {
     void writePreferences(homeDir, { trustedRoots: survivingRoots }).catch((err) => {
       console.error('Failed to persist trustedRoots:', err);
     });
