@@ -765,7 +765,13 @@ on `--theme-bg-inset`), never the crimson accent:
   (the case that matters most, since no toast fires there), and an explicit
   reload. None of them mark anything while a tab's first fetch is still in
   flight, since with no prior content to diff against the file's whole reply
-  history would look new. Activating a comment marks its replies read, in
+  history would look new. Stamping a reply changes the content, so both SSE
+  paths write it back through `scheduleBackfillWrite`, one debounce timer per
+  path. That write is not a save and must not behave like one: it waits 2s so an
+  agent can finish a batch, and it goes out as a direct fetch rather than
+  through the save queue, which reports a 409 as a failed save. Here a 409 is
+  the ordinary outcome, because the agent writes again in the meantime and the
+  next event re-triggers the backfill. Activating a comment marks its replies read, in
   either density. Only anchored density surfaces the unread state, because
   it is the only one that hides reply text; List density renders every reply
   in full but does not clear the marks by itself, so a reply read there stays
