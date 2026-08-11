@@ -2522,6 +2522,34 @@ describe('insertComment inside fenced code blocks', () => {
       expect(parseComments(result).comments).toHaveLength(1);
     });
 
+    it('does not nest inside an UNCLOSED fence', () => {
+      // The container the scanner could not see. It pushes a range only on
+      // finding a CLOSING fence, so a fence with none protected nothing and the
+      // marker went into the user's code as
+      // `const secret = <!-- @comment{...} -->computeToken()`. Every renderer
+      // reads an unclosed fence as running to the end of the document.
+      const raw = '# T\n\nIntro.\n\n```js\nconst secret = computeToken();\nrun(secret);\n';
+      const result = insertComment(raw, 'computeToken', 'why?');
+
+      expect(result.slice(result.indexOf('```js'))).not.toContain('@comment');
+      expect(parseComments(result).comments).toHaveLength(1);
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('still READS a marker written after an unclosed fence', () => {
+      // The asymmetry, pinned. Placement treats an unclosed fence as running to
+      // EOF; detection deliberately does not, and must not: teaching it would
+      // make every marker below such a fence disappear from documents that
+      // already contain them. Protecting more than detection sees is the safe
+      // direction, because it can only push a marker OUT into text detection
+      // does read.
+      const existing =
+        '# T\n\n```js\ncode();\n\n<!-- @comment{"id":"e1","anchor":"After","text":"n","author":"A"} -->After\n';
+
+      expect(parseComments(existing).comments).toHaveLength(1);
+      expect(parseComments(existing).comments[0].id).toBe('e1');
+    });
+
     it('does not let a fence line inside frontmatter mis-pair the real fences', () => {
       // `  ```" in a YAML block scalar used to open a range that the real
       // ```js line closed. Everything between them counted as code and the

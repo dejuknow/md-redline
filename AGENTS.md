@@ -117,9 +117,17 @@ highlighting, orphan detection, and agent handoff are unaffected.
 The ranges are computed with regexes, and each container's scan excludes the
 others (a fence line inside frontmatter is YAML, a `<!--` inside a fence is
 sample text). Do not add a fifth exclusion: four rounds of that have already
-happened and the fourth cost a silently lost comment. #30 replaces the
-computation with ranges derived from the parse, and the next container bug to
-land here is the trigger to do it.
+happened and the fourth cost a silently lost comment. #30 tracks replacing the
+computation with ranges derived from the parse.
+
+**Placement alone treats an unclosed fence as running to end of document**
+(`getCodeBlockRanges`'s `unclosedRunsToEof`), because that is how every renderer
+reads one, and without it a marker went into the user's code. Detection is
+deliberately NOT told: teaching it would make every marker below such a fence
+vanish from documents that already contain them. The asymmetry only runs one
+way on purpose. Insertion protecting more than detection sees can only push a
+marker further out, into text detection does read; the reverse, a container
+insertion knows about and detection does not, is what silently loses comments.
 
 ## API endpoints
 
