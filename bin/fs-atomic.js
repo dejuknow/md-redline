@@ -233,7 +233,9 @@ async function renameIntoPlace(tmpPath, path, content) {
  * module does not own, Claude Desktop's MCP config, because it holds every
  * other server's `env` block and those routinely carry API tokens.
  *
- * Best effort in both directions. No destination yet (the ordinary create) and
+ * Best effort in both directions, but not blind: the stat is retried like every
+ * other call here, so a transient bounce cannot masquerade as "no destination"
+ * and quietly relax the mode. No destination yet (the ordinary create) and
  * there is nothing to copy; a chmod that fails leaves the default, which is
  * never more permissive than what a fresh file would have got anyway, and is
  * not worth failing an otherwise good save over.
@@ -243,12 +245,31 @@ async function renameIntoPlace(tmpPath, path, content) {
  * @returns {Promise<void>}
  */
 async function inheritMode(tmpPath, path) {
+  let existing;
   try {
-    const existing = await stat(path);
-    await chmod(tmpPath, existing.mode & 0o7777);
-  } catch {
-    /* no destination, or a filesystem without modes (Windows) */
+    // Retried like every other syscall here. It was the one exception, and a
+    // bare catch cannot tell "there is no destination" from "a scanner bounced
+    // this call": both skipped the chmod, so a contended save silently RELAXED
+    // the mode it was supposed to carry over. EBUSY on the network and
+    // cloud-sync mounts this module documents is the case that matters, and it
+    // is precisely where a save is most likely to bounce.
+    existing = await retryTransient(() => stat(path));
+  } catch (err) {
+    // ENOENT is the ordinary create, with no destination to inherit from.
+    // Anything else survived the retries, so the mode genuinely cannot be read;
+    // there is still nothing better to do than leave the default, which is
+    // never more permissive than a fresh file would have got.
+    if (errorCode(err) !== 'ENOENT') {
+      console.warn(
+        `[md-redline] could not read the existing mode of ${path} ` +
+          `(${errorCode(err) ?? 'unknown'}); the file keeps default permissions`,
+      );
+    }
+    return;
   }
+  // Best effort: a chmod that fails leaves the default, which is not worth
+  // failing an otherwise good save over.
+  await chmod(tmpPath, existing.mode & 0o7777).catch(() => {});
 }
 
 /**

@@ -301,55 +301,64 @@ export async function acquireFileLock(filePath) {
     installCleanupHandlers();
 
     return async () => {
-      // Before the unlink, not after: whichever of the two paths gets there
-      // first, the other must not try the same removal again.
-      forgetHeldLock(lockPath);
-
-      let holder;
+      // `forgetHeldLock` is deliberately in a finally, not at the top. Dropping
+      // it first empties `heldLocks`, which uninstalls the signal and exit
+      // handlers, and everything below is async: a Ctrl-C anywhere in that
+      // window finds no handler left and strands the lock for LOCK_STALE_MS.
+      // That is the exact failure this module exists to prevent, moved from
+      // acquire to release. Holding it to the end costs nothing, because both
+      // paths check the token before removing anything and treat a missing
+      // file as done, so whichever gets there second finds no work.
       try {
-        holder = await retryTransient(() => readFile(lockPath, 'utf-8'));
-      } catch (err) {
-        // Already gone: released twice, or stolen and released by whoever took
-        // it. Either way there is nothing here to remove.
-        if (errorCode(err) === 'ENOENT') return;
-        // A read that will not succeed proves nothing about who holds the lock,
-        // and unlinking on that evidence is exactly the failure this check
-        // exists to prevent. Leaving it costs one stale window and then clears
-        // on its own; guessing wrong costs mutual exclusion.
-        console.error(
-          `Could not read the lock at ${lockPath} to confirm it is still ` +
-            `ours, so it was left in place; writes are blocked until it ages ` +
-            `out after ${LOCK_STALE_MS}ms:`,
-          err,
-        );
-        return;
-      }
+        let holder;
+        try {
+          holder = await retryTransient(() => readFile(lockPath, 'utf-8'));
+        } catch (err) {
+          // Already gone: released twice, or stolen and released by whoever
+          // took it. Either way there is nothing here to remove.
+          if (errorCode(err) === 'ENOENT') return;
+          // A read that will not succeed proves nothing about who holds the
+          // lock, and unlinking on that evidence is exactly the failure this
+          // check exists to prevent. Leaving it costs one stale window and then
+          // clears on its own; guessing wrong costs mutual exclusion.
+          console.error(
+            `Could not read the lock at ${lockPath} to confirm it is still ` +
+              `ours, so it was left in place; writes are blocked until it ages ` +
+              `out after ${LOCK_STALE_MS}ms:`,
+            err,
+          );
+          return;
+        }
 
-      if (holder !== token) {
-        // Our lock aged past LOCK_STALE_MS while we held it and another writer
-        // took it as abandoned. The write we just finished was NOT serialized
-        // against theirs, and unlinking this would hand a third writer the same
-        // window. Say so: a file that comes back different needs an explanation
-        // somewhere, and this is the only place that has one.
-        console.error(
-          `The lock at ${lockPath} was taken over by another writer while we ` +
-            `held it (ours was idle past ${LOCK_STALE_MS}ms), so this write ` +
-            `was not serialized against theirs. Leaving their lock in place.`,
-        );
-        return;
-      }
+        if (holder !== token) {
+          // Our lock aged past LOCK_STALE_MS while we held it and another
+          // writer took it as abandoned. The write we just finished was NOT
+          // serialized against theirs, and unlinking this would hand a third
+          // writer the same window. Say so: a file that comes back different
+          // needs an explanation somewhere, and this is the only place that has
+          // one.
+          console.error(
+            `The lock at ${lockPath} was taken over by another writer while we ` +
+              `held it (ours was idle past ${LOCK_STALE_MS}ms), so this write ` +
+              `was not serialized against theirs. Leaving their lock in place.`,
+          );
+          return;
+        }
 
-      try {
-        await retryTransient(() => unlink(lockPath));
-      } catch (err) {
-        if (errorCode(err) === 'ENOENT') return;
-        // An orphaned lock blocks every writer, in this process and any other
-        // mdr instance, until it ages out. Never silent.
-        console.error(
-          `Could not release the lock at ${lockPath}; writes are ` +
-            `blocked until it ages out after ${LOCK_STALE_MS}ms:`,
-          err,
-        );
+        try {
+          await retryTransient(() => unlink(lockPath));
+        } catch (err) {
+          if (errorCode(err) === 'ENOENT') return;
+          // An orphaned lock blocks every writer, in this process and any other
+          // mdr instance, until it ages out. Never silent.
+          console.error(
+            `Could not release the lock at ${lockPath}; writes are ` +
+              `blocked until it ages out after ${LOCK_STALE_MS}ms:`,
+            err,
+          );
+        }
+      } finally {
+        forgetHeldLock(lockPath);
       }
     };
   }

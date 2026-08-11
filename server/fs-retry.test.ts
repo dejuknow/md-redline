@@ -38,6 +38,7 @@ const fault = vi.hoisted(() => ({
   // what makes the cleanup assertions non-vacuous.
   write: { failuresLeft: 0, code: 'ENOSPC' },
   close: { failuresLeft: 0, code: 'EIO' },
+  stat: { failuresLeft: 0, code: 'EBUSY', attempts: 0 },
 }));
 
 function faultError(code: string, detail: string): NodeJS.ErrnoException {
@@ -61,6 +62,15 @@ vi.mock('fs/promises', async (importOriginal) => {
         throw faultError(fault.rename.code, `rename '${from}'`);
       }
       return actual.rename(from, to);
+    },
+    stat: async (path: string) => {
+      if (fault.stat.failuresLeft > 0 && !path.endsWith('.tmp')) {
+        fault.stat.failuresLeft -= 1;
+        fault.stat.attempts += 1;
+        throw faultError(fault.stat.code, `stat '${path}'`);
+      }
+      fault.stat.attempts += 1;
+      return actual.stat(path);
     },
     open: async (path: string, flags: string) => {
       if (path.endsWith('.tmp')) fault.open.attempts += 1;
@@ -126,6 +136,7 @@ beforeEach(async () => {
   fault.open = { failuresLeft: 0, code: 'ENOSPC', attempts: 0 };
   fault.write = { failuresLeft: 0, code: 'ENOSPC' };
   fault.close = { failuresLeft: 0, code: 'EIO' };
+  fault.stat = { failuresLeft: 0, code: 'EBUSY', attempts: 0 };
   for (const entry of await readdir(testDir).catch(() => [] as string[])) {
     await rm(join(testDir, entry), { force: true }).catch(() => {});
   }
@@ -329,6 +340,27 @@ describe('atomicWriteFile', () => {
       // holds every other server's env block, and those carry API tokens.
       await writeFile(docPath, 'old\n', { mode: 0o600 });
       await chmod(docPath, 0o600);
+
+      await atomicWriteFile(docPath, 'new\n');
+
+      expect((await stat(docPath)).mode & 0o777).toBe(0o600);
+      expect(await readFile(docPath, 'utf-8')).toBe('new\n');
+    },
+  );
+
+  it.skipIf(REAL_PLATFORM === 'win32')(
+    'keeps the destination mode through a bounced mode read',
+    async () => {
+      // The mode read was the one syscall here that was not retried, and its
+      // bare catch could not tell a scanner bouncing the call from there being
+      // no destination at all. Both skipped the chmod, so a contended save
+      // silently relaxed 0600 to the temp file's default. EBUSY on a network or
+      // cloud-sync mount is exactly where a save bounces, and
+      // claude_desktop_config.json, which holds other servers' API tokens, goes
+      // out through this path.
+      await writeFile(docPath, 'old\n', { mode: 0o600 });
+      await chmod(docPath, 0o600);
+      fault.stat.failuresLeft = 2;
 
       await atomicWriteFile(docPath, 'new\n');
 
