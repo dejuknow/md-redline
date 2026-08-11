@@ -9,7 +9,7 @@
  * the cross-process lock the two are supposed to share is taken on two
  * different paths.
  *
- * Types live in `home-dir.d.ts`. `server/env.ts` re-exports this.
+ * Types come from the JSDoc below. `server/env.ts` re-exports this.
  */
 
 import { homedir } from 'os';

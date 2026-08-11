@@ -8,7 +8,7 @@
  * two that drift: the CLI writes the user's prefs file and Claude Desktop's
  * MCP config, both of which the server or another tool may also be writing.
  *
- * Types live in `fs-atomic.d.ts`. The tests live in `server/fs-retry.test.ts`,
+ * Types come from the JSDoc below. The tests live in `server/fs-retry.test.ts`,
  * not beside this file: `server/fs-retry.ts` is a re-export with no logic of
  * its own, so those cover this module directly, and a second suite here would
  * be duplicate surface rather than new coverage. `file-lock.js` is the opposite
