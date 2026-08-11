@@ -216,6 +216,36 @@ export function readPreferencesSync(homeDir: string): Preferences {
 }
 
 /**
+ * Move a prefs file we cannot parse out of the way, so the write that follows
+ * does not land on top of it. These are the user's own settings, and after
+ * that write they are gone, so neither outcome may be silent: on success the
+ * log is how they find the copy, and on failure it is the only warning they
+ * will ever get that the bytes are about to be destroyed.
+ *
+ * The rename is retried, which off Windows is a single attempt anyway. What it
+ * must not do is throw: the caller cannot proceed with a file it cannot read,
+ * and refusing to write would leave the app unable to save a setting ever
+ * again until the user intervened by hand.
+ */
+async function quarantineCorruptPrefs(filePath: string, reason: string): Promise<void> {
+  const quarantinePath = corruptQuarantinePath(filePath);
+  try {
+    await retryTransient(() => rename(filePath, quarantinePath));
+    console.error(
+      `Preferences at ${filePath} were ${reason}. Moved the file to ` +
+        `${quarantinePath} and starting fresh.`,
+    );
+  } catch (err) {
+    console.error(
+      `Preferences at ${filePath} were ${reason} and could not be moved to ` +
+        `${quarantinePath}. The next write overwrites them and they cannot be ` +
+        'recovered afterwards:',
+      err,
+    );
+  }
+}
+
+/**
  * Read the prefs file and parse it. If the file exists but is unparseable,
  * MOVE it to a quarantine path before returning {}, so the next write does
  * not silently overwrite a file the user might want to recover. The
@@ -238,7 +268,7 @@ async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences
     const parsed = JSON.parse(raw);
     if (!isPlainObject(parsed)) {
       // Structurally wrong (array / null / scalar). Quarantine and start fresh.
-      await rename(filePath, corruptQuarantinePath(filePath)).catch(() => {});
+      await quarantineCorruptPrefs(filePath, 'not a JSON object');
       return {};
     }
     // Strip unknown keys / wrong-typed fields before merging. The cast is
@@ -247,7 +277,7 @@ async function readAndQuarantineIfCorrupt(filePath: string): Promise<Preferences
     return sanitizePreferencesPatch(parsed) as Preferences;
   } catch {
     // Unparseable. Quarantine before the next write overwrites it.
-    await rename(filePath, corruptQuarantinePath(filePath)).catch(() => {});
+    await quarantineCorruptPrefs(filePath, 'not valid JSON');
     return {};
   }
 }

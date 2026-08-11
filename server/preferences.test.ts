@@ -319,6 +319,19 @@ describe('addTrustedRoot', () => {
 });
 
 describe('corrupted prefs quarantine', () => {
+  /**
+   * Quarantining always logs now, so tests that trigger it capture stderr.
+   * Messages are recorded as they arrive rather than read off `mock.calls`
+   * afterwards, because mockRestore() clears that history.
+   */
+  function captureErrors(): { messages: string[]; restore: () => void } {
+    const messages: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      messages.push(String(args[0]));
+    });
+    return { messages, restore: () => spy.mockRestore() };
+  }
+
   it('moves an unparseable prefs file aside instead of overwriting it', async () => {
     // Seed a corrupt file directly
     const prefsFile = join(testDir, '.md-redline.json');
@@ -326,7 +339,18 @@ describe('corrupted prefs quarantine', () => {
 
     // The next write must NOT silently obliterate the corrupt content. The
     // implementation moves the corrupt file to a `.corrupt-<ts>` sibling.
-    await writePreferences(testDir, { author: 'Recovered' });
+    const logs = captureErrors();
+    try {
+      await writePreferences(testDir, { author: 'Recovered' });
+    } finally {
+      logs.restore();
+    }
+
+    // Silence is what makes settings appear to vanish on their own: the log is
+    // how the user learns the copy exists and where it is.
+    const moved = logs.messages.find((m) => m.includes('Moved the file to'));
+    expect(moved).toContain('not valid JSON');
+    expect(moved).toContain('.md-redline.json.corrupt-');
 
     const entries = await readdir(testDir);
     const quarantined = entries.find(
@@ -347,7 +371,13 @@ describe('corrupted prefs quarantine', () => {
     const prefsFile = join(testDir, '.md-redline.json');
     await writeFile(prefsFile, '["not", "an", "object"]');
 
-    await writePreferences(testDir, { theme: 'dark' });
+    const logs = captureErrors();
+    try {
+      await writePreferences(testDir, { theme: 'dark' });
+    } finally {
+      logs.restore();
+    }
+    expect(logs.messages.some((m) => m.includes('not a JSON object'))).toBe(true);
 
     const entries = await readdir(testDir);
     expect(
@@ -356,6 +386,60 @@ describe('corrupted prefs quarantine', () => {
 
     const fresh = await readPreferences(testDir);
     expect(fresh).toEqual({ theme: 'dark' });
+  });
+
+  it('warns that the bytes are about to be lost when the move fails', async () => {
+    // The failure path is the one that matters: the write proceeds over the
+    // original either way, so this log is the user's only warning that their
+    // settings are being destroyed rather than set aside.
+    await writeFile(join(testDir, '.md-redline.json'), '{ this is not json');
+    // Scoped to the prefs path, so atomicWriteFile's own `.tmp` rename still
+    // works and the write below actually lands.
+    fault.rename = {
+      suffix: '.md-redline.json',
+      failuresLeft: Number.MAX_SAFE_INTEGER,
+      code: 'EPERM',
+      attempts: 0,
+    };
+
+    const logs = captureErrors();
+    try {
+      await expect(writePreferences(testDir, { author: 'Alice' })).resolves.toEqual({
+        author: 'Alice',
+      });
+    } finally {
+      logs.restore();
+    }
+
+    const warning = logs.messages.find((m) => m.includes('could not be moved to'));
+    expect(warning).toContain('cannot be recovered');
+    // Retried, not attempted once: a bounced rename on Windows is exactly the
+    // case where a second try saves the file.
+    expect(fault.rename.attempts).toBe(5);
+  });
+
+  it('keeps saving settings after a failed quarantine', async () => {
+    // Refusing to write would be the safer-looking choice and the wrong one:
+    // it would leave the app unable to persist a single setting until the
+    // user cleaned up by hand.
+    await writeFile(join(testDir, '.md-redline.json'), '{ this is not json');
+    fault.rename = {
+      suffix: '.md-redline.json',
+      failuresLeft: Number.MAX_SAFE_INTEGER,
+      code: 'EPERM',
+      attempts: 0,
+    };
+
+    const logs = captureErrors();
+    try {
+      await writePreferences(testDir, { author: 'Alice' });
+      fault.rename.failuresLeft = Number.MAX_SAFE_INTEGER;
+      await writePreferences(testDir, { theme: 'dark' });
+    } finally {
+      logs.restore();
+    }
+
+    expect(await readPreferences(testDir)).toEqual({ author: 'Alice', theme: 'dark' });
   });
 
   it('does not quarantine a healthy prefs file', async () => {
