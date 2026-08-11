@@ -43,6 +43,10 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `server/routes/review-sessions.ts`: HTTP routes for review session endpoints
 - `server/mcp-stdio/`: MCP stdio server (handler, client, server, types, validate)
 - `server/update-check.ts`: daily npm registry check for a newer published version, cached via preferences
+- `server/fs-retry.ts`: `atomicWriteFile` (temp + rename, temp removed on failure) and the
+  transient-error retry both the document save paths and preferences write through. Windows
+  bounces filesystem calls with EPERM/EACCES/EBUSY while a scanner or indexer holds a handle;
+  every write of a user-visible file should go through `atomicWriteFile` rather than a bare rename
 - `bin/version-compare.js`: strict x.y.z version compare shared by the server's update checker and the CLI
 - `src/lib/comment-parser.ts`: parse, insert, edit, delete, reply, resolve, anchor updates
 - `src/markdown/pipeline.ts`: markdown -> sanitized HTML pipeline

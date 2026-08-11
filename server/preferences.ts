@@ -3,6 +3,13 @@ import { readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 import {
+  atomicWriteFile,
+  isTransientFsError,
+  retryTransient,
+  retryTransientSync,
+  sleep,
+} from './fs-retry';
+import {
   DOC_WIDTHS,
   PROSE_FONTS,
   PROSE_SIZES,
@@ -15,12 +22,6 @@ const LOCK_SUFFIX = '.lock';
 const LOCK_STALE_MS = 30_000;
 const LOCK_MAX_ATTEMPTS = 60;
 const LOCK_RETRY_BASE_MS = 25;
-// Windows bounces filesystem calls with these codes while another handle is
-// open on the path. 5 attempts spread over 100ms of linear backoff
-// (10+20+30+40) clear the scanner window without stalling a real failure.
-const FS_MAX_ATTEMPTS = 5;
-const FS_RETRY_BASE_MS = 10;
-const TRANSIENT_FS_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
 
 export interface RecentFile {
   path: string;
@@ -166,55 +167,48 @@ function corruptQuarantinePath(filePath: string): string {
   return `${filePath}.corrupt-${stamp}-${rand}`;
 }
 
+/**
+ * Both readers fall back to {} so a missing or corrupt file cannot stop the
+ * app booting. The distinction that matters is WHY: a file that is absent is
+ * the normal first run, while a file that exists and could not be read means
+ * the caller silently loses the user's trusted roots and re-prompts for a
+ * folder they already granted. That case gets a log line.
+ *
+ * Falling back to {} cannot clobber the file: writePreferences re-reads under
+ * the lock and merges against what is actually on disk.
+ */
+function emptyOnReadFailure(err: unknown, homeDir: string): Preferences {
+  const code = (err as NodeJS.ErrnoException).code;
+  // ENOENT is the ordinary "no prefs yet" case; a SyntaxError (no code) is
+  // handled by the write path, which quarantines the file before overwriting.
+  if (code && code !== 'ENOENT') {
+    console.error(
+      `Could not read preferences at ${prefsPath(homeDir)} (${code}); ` +
+        'continuing without saved settings for this session:',
+      err,
+    );
+  }
+  return {};
+}
+
 export async function readPreferences(homeDir: string): Promise<Preferences> {
   try {
-    const raw = await readFile(prefsPath(homeDir), 'utf-8');
+    const raw = await retryTransient(() => readFile(prefsPath(homeDir), 'utf-8'));
     const parsed = JSON.parse(raw);
     return sanitizePreferencesPatch(parsed) as Preferences;
-  } catch {
-    return {};
+  } catch (err) {
+    return emptyOnReadFailure(err, homeDir);
   }
 }
 
 export function readPreferencesSync(homeDir: string): Preferences {
   try {
-    const raw = readFileSync(prefsPath(homeDir), 'utf-8');
+    const raw = retryTransientSync(() => readFileSync(prefsPath(homeDir), 'utf-8'));
     const parsed = JSON.parse(raw);
     return sanitizePreferencesPatch(parsed) as Preferences;
-  } catch {
-    return {};
+  } catch (err) {
+    return emptyOnReadFailure(err, homeDir);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
-}
-
-/**
- * Run a filesystem call, retrying the transient failures Windows reports while
- * a virus scanner, the search indexer, or a sync client holds a handle on a
- * path for a few milliseconds. Those surface as EPERM/EACCES/EBUSY and clear
- * on their own; every other code (EXDEV, ENOSPC, ENOENT) is a real failure and
- * rethrows on the first attempt.
- *
- * POSIX reports the same codes for permanent conditions instead (an unwritable
- * directory, a sticky bit, a macOS immutable flag, a denied Files-and-Folders
- * grant), so the loop is not free there. FS_MAX_ATTEMPTS caps what a
- * hopeless call wastes at 100ms.
- */
-async function retryTransient<T>(op: () => Promise<T>): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= FS_MAX_ATTEMPTS; attempt++) {
-    try {
-      return await op();
-    } catch (err) {
-      lastErr = err;
-      const code = (err as NodeJS.ErrnoException).code;
-      if (!code || !TRANSIENT_FS_CODES.has(code)) throw err;
-      if (attempt < FS_MAX_ATTEMPTS) await sleep(FS_RETRY_BASE_MS * attempt);
-    }
-  }
-  throw lastErr;
 }
 
 /**
@@ -249,7 +243,7 @@ async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
         // The lock file is created and removed on every write, which makes it
         // the same scanner bait as the temp file. Back off on the transient
         // codes instead of failing the whole write.
-        if (!code || !TRANSIENT_FS_CODES.has(code)) throw err;
+        if (!isTransientFsError(err)) throw err;
         await sleep(LOCK_RETRY_BASE_MS);
         continue;
       }
@@ -338,22 +332,7 @@ async function writeLocked(
     // call sites that forward HTTP request bodies.
     const patch = sanitizePreferencesPatch(rawPatch);
     const merged = { ...existing, ...patch };
-    const tmpPath = `${filePath}.${randomBytes(6).toString('hex')}.tmp`;
-    try {
-      const fd = await open(tmpPath, 'wx');
-      try {
-        await fd.writeFile(JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-      } finally {
-        await fd.close();
-      }
-      await retryTransient(() => rename(tmpPath, filePath));
-    } catch (err) {
-      // However the write failed, the temp file is unusable. Leaving it behind
-      // litters the user's home directory with one file per failed write, and
-      // prefs are written on every settings toggle and file open.
-      await unlink(tmpPath).catch(() => {});
-      throw err;
-    }
+    await atomicWriteFile(filePath, JSON.stringify(merged, null, 2) + '\n');
     return merged;
   } finally {
     await releaseLock();

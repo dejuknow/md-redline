@@ -19,6 +19,7 @@ import { DEFAULT_SETTINGS, type AppSettings as ClientAppSettings } from '../src/
 const fault = vi.hoisted(() => ({
   rename: { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 },
   open: { suffix: '', failuresLeft: 0, code: 'EPERM' },
+  read: { failuresLeft: 0, code: 'EPERM', attempts: 0 },
 }));
 
 function faultError(code: string, detail: string): NodeJS.ErrnoException {
@@ -47,6 +48,31 @@ vi.mock('fs/promises', async (importOriginal) => {
       }
       return actual.open(path, flags);
     },
+    readFile: async (path: string, encoding: BufferEncoding) => {
+      if (!path.endsWith('.md-redline.json')) return actual.readFile(path, encoding);
+      fault.read.attempts += 1;
+      if (fault.read.failuresLeft > 0) {
+        fault.read.failuresLeft -= 1;
+        throw faultError(fault.read.code, `read '${path}'`);
+      }
+      return actual.readFile(path, encoding);
+    },
+  };
+});
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    readFileSync: (path: string, encoding: BufferEncoding) => {
+      if (!path.endsWith('.md-redline.json')) return actual.readFileSync(path, encoding);
+      fault.read.attempts += 1;
+      if (fault.read.failuresLeft > 0) {
+        fault.read.failuresLeft -= 1;
+        throw faultError(fault.read.code, `read '${path}'`);
+      }
+      return actual.readFileSync(path, encoding);
+    },
   };
 });
 
@@ -68,6 +94,7 @@ afterAll(async () => {
 beforeEach(async () => {
   fault.rename = { suffix: '.tmp', failuresLeft: 0, code: 'EPERM', attempts: 0 };
   fault.open = { suffix: '', failuresLeft: 0, code: 'EPERM' };
+  fault.read = { failuresLeft: 0, code: 'EPERM', attempts: 0 };
   // Clean up the prefs file and any quarantined / lock siblings between tests
   const entries = await readdir(testDir).catch(() => [] as string[]);
   for (const entry of entries) {
@@ -380,6 +407,79 @@ describe('transient filesystem failures (Windows)', () => {
     const entries = await readdir(testDir);
     expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
     expect(entries.some((e) => e.endsWith('.lock'))).toBe(false);
+  });
+
+  it('retries a transient read inside the locked read-modify-write', async () => {
+    // A bounced read here used to abort the whole write, which is how the
+    // trustedRoots migration got dropped on Windows.
+    await writePreferences(testDir, { author: 'Alice' });
+    fault.read.failuresLeft = 2;
+
+    await expect(writePreferences(testDir, { theme: 'dark' })).resolves.toEqual({
+      author: 'Alice',
+      theme: 'dark',
+    });
+  });
+});
+
+describe('transient read failures', () => {
+  it('readPreferences retries and returns the file', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ author: 'Alice' }));
+    fault.read.failuresLeft = 3;
+
+    expect(await readPreferences(testDir)).toEqual({ author: 'Alice' });
+    expect(fault.read.attempts).toBe(4);
+  });
+
+  it('readPreferencesSync retries and returns the file', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify({ theme: 'dark' }));
+    fault.read.failuresLeft = 3;
+
+    expect(readPreferencesSync(testDir)).toEqual({ theme: 'dark' });
+    expect(fault.read.attempts).toBe(4);
+  });
+
+  it('falls back to {} and logs when the file exists but cannot be read', async () => {
+    // Losing saved trustedRoots re-prompts the user for a folder they already
+    // granted, so it must not happen silently.
+    await writeFile(
+      join(testDir, '.md-redline.json'),
+      JSON.stringify({ trustedRoots: ['/vault'] }),
+    );
+    fault.read = { failuresLeft: Number.MAX_SAFE_INTEGER, code: 'EPERM', attempts: 0 };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferences(testDir)).toEqual({});
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(String(logged.mock.calls[0][0])).toContain('Could not read preferences');
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('stays silent when there is simply no prefs file yet', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferences(testDir)).toEqual({});
+      expect(readPreferencesSync(testDir)).toEqual({});
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('stays silent for a corrupt file, which the write path quarantines', async () => {
+    await writeFile(join(testDir, '.md-redline.json'), '{ not json');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(await readPreferences(testDir)).toEqual({});
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
   });
 });
 
