@@ -743,10 +743,23 @@ and each is easy to leave out. `setPointerCapture` on the handle keeps the drag
 alive once the pointer leaves it; `touch-action: none` in `.drag-handle` stops
 the browser claiming the gesture for scrolling before the page sees a move; and
 `pointercancel` ends a drag the system took away, which touch fires and a mouse
-effectively never does. Every ending (released, cancelled, Escape, unmounted)
-runs one `detach`, because four copies of the teardown is how the fifth one gets
-forgotten. The drag also records the `pointerId` that began it and ignores every
-other, so a second finger cannot move an anchor.
+effectively never does. Every ending runs one `detach`, because four
+copies of the teardown is how the fifth one gets forgotten, and there are five:
+released, cancelled, Escape, unmounted, and capture lost. That last one is not
+`pointercancel`. Removing the captured element fires `lostpointercapture`
+instead and pointer events keep arriving at the document, so deleting or
+resolving the comment mid-drag, or switching to the raw or diff view, left the
+drag live and committed an anchor edit for something that was gone.
+
+A second finger cannot start a competing drag: the handle refuses a
+non-`isPrimary` pointer and the hook refuses to begin while one is in flight.
+Either alone is enough today, which is why `e2e/touch-drag-handles.spec.ts`
+asserts the behaviour rather than either mechanism. The `pointerId` recorded at
+the start filters moves for a drag already running; on its own it never stopped
+a second one beginning. Moves are coalesced to one per frame, because each runs
+two text walks, an `innerHTML` serialize, an unwrap-and-rewrap of the whole
+prose subtree and a forced layout, and touch delivers them faster than the
+display.
 
 `e2e/touch-drag-handles.spec.ts` drives this through CDP
 `Input.dispatchTouchEvent`, not dispatched DOM events: #33 established that
