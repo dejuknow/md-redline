@@ -421,6 +421,59 @@ test.describe('File watcher - external changes', () => {
       .toBe(true);
   });
 
+  test('closing a tab inside the debounce cancels its backfill write', async ({ page }) => {
+    // The backfill waits 2s, and a tab can close inside that window. The timer
+    // lives in App while every close path lives in useTabs, so nothing cancels
+    // it: it fired and PUT pre-close content, with a pre-close expectedMtime,
+    // for a file the reader had already put away.
+    await openFixture(page);
+    // List density renders reply text, which is the signal that the SSE landed.
+    await switchToListDensity(page);
+    await page.waitForTimeout(1500);
+
+    const stampedAt = () =>
+      readFileSync(FIXTURE, 'utf-8').match(/"id":"close-r1"[^}]*"timestamp":"([^"]+)"/)?.[1] ??
+      null;
+
+    writeFileSync(
+      FIXTURE,
+      FIXTURE_ORIGINAL.replace(
+        'valid credentials',
+        `<!-- @comment${JSON.stringify({
+          id: 'close-c1',
+          anchor: 'valid credentials',
+          text: 'How are creds validated?',
+          author: 'Dennis',
+          timestamp: '2025-01-01T00:00:00.000Z',
+          replies: [{ id: 'close-r1', text: 'JWT bearer.', author: 'Agent CLI' }],
+        })} -->valid credentials`,
+      ),
+    );
+
+    // Long enough for the event to land and the write to be scheduled (the
+    // server debounces its watch by 150ms), short enough that the 2s backfill
+    // debounce has not elapsed. Asserting nothing is on disk yet is what keeps
+    // this honest: had the write already happened there would be nothing left
+    // to cancel and this would pass for the wrong reason.
+    await page.waitForTimeout(700);
+    expect(stampedAt()).toBeNull();
+
+    // Close through the tab's own X. Three buttons carry this filename (the
+    // explorer entry, the tab, the X), so a name-based `.first()` reaches the
+    // explorer and closes nothing, which is how this test first passed for the
+    // wrong reason. The tab strip emptying is the signal that it really closed.
+    await page.locator('button.group.rounded-t-md').first().hover();
+    await page
+      .getByRole('button', { name: /test-doc\.md/ })
+      .nth(2)
+      .click();
+    await expect(page.locator('button.group.rounded-t-md')).toHaveCount(0, { timeout: 5_000 });
+
+    // Well past the debounce: nothing may reach disk for a closed tab.
+    await page.waitForTimeout(3500);
+    expect(stampedAt()).toBeNull();
+  });
+
   test('a background tab backfills on the same debounce as the active tab', async ({ page }) => {
     // The two watchers shared the code that stamps arriving replies but not the
     // write that persists it. The active tab waits 2s and writes with a direct

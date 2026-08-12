@@ -335,6 +335,39 @@ describe('an interrupt while the lock is held', () => {
     await stealer();
   });
 
+  itPosix('keeps handling signals until the lock is actually gone', async () => {
+    // The window between "release started" and "lock file removed". Forgetting
+    // the lock at the top of release empties the held set, which uninstalls
+    // every handler, while the read and unlink that follow are async. A Ctrl-C
+    // in there found nothing installed and stranded the lock for the full stale
+    // window, which is the failure this module exists to prevent, arriving
+    // through release instead of through acquire.
+    const source = `
+      import { acquireFileLock } from ${JSON.stringify(lockModule)};
+      import { chmod } from 'fs/promises';
+      const release = await acquireFileLock(${JSON.stringify(target)});
+      // Make the unlink fail so the release stays open, and report what a
+      // signal arriving right now would find.
+      await chmod(${JSON.stringify(dir)}, 0o500);
+      const pending = release();
+      await new Promise((r) => setImmediate(r));
+      console.log(JSON.stringify({
+        sigint: process.listenerCount('SIGINT'),
+        exit: process.listenerCount('exit'),
+      }));
+      await chmod(${JSON.stringify(dir)}, 0o700);
+      await pending.catch(() => {});
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+    await new Promise((resolvePromise) => child.once('close', resolvePromise));
+
+    expect(JSON.parse(stdout)).toEqual({ sigint: 1, exit: 1 });
+  });
+
   itPosix('stops handling signals once the lock is released', async () => {
     // Cleanup that outlives the lock changes how the process dies for reasons
     // unrelated to the lock, and a listener nothing removes is a leak in a

@@ -645,6 +645,13 @@ export default function App() {
         path,
         setTimeout(async () => {
           backfillTimersRef.current.delete(path);
+          // The tab can close inside the debounce, and closing does not cancel
+          // this: the timer lives here while every close path lives in useTabs,
+          // and there are five of them, which is the shape that loses one.
+          // Checking here instead covers all five and any later addition. What
+          // it prevents is a PUT of pre-close content, with a pre-close
+          // expectedMtime, for a file the reader has already put away.
+          if (!getTabSnapshot(path)) return;
           try {
             const res = await fetch('/api/file', {
               method: 'PUT',
@@ -667,7 +674,7 @@ export default function App() {
         }, BACKFILL_WRITE_DELAY_MS),
       );
     },
-    [updateTab],
+    [getTabSnapshot, updateTab],
   );
   const handleCopyDocument = useCallback(() => {
     const clean = rawMarkdownRef.current.replace(createCommentMarkerRegex(), '');
