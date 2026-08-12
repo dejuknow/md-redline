@@ -3,11 +3,13 @@ import { spawn } from 'child_process';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -119,6 +121,38 @@ describe('mdr --restrict', () => {
     expect(readFileSync(join(home, PREFS), 'utf8')).toBe(saved);
     expect(readdirSync(home).filter((e) => e.endsWith('.lock') || e.endsWith('.tmp'))).toEqual([]);
   });
+
+  // Symlinks need a privilege on Windows that CI does not grant, and this is
+  // the only way found to fail the stat WITHOUT also failing the lock one
+  // syscall earlier: the lock is a different path, so it is unaffected.
+  it.skipIf(process.platform === 'win32')(
+    'refuses when the prefs file cannot be checked at all',
+    async () => {
+      // The branch below the "already exists" one: a stat that fails for any
+      // reason other than ENOENT. Absent this guard, an unreadable prefs file
+      // reads as an absent prefs file, and `--restrict` overwrites the trust
+      // settings it exists to protect with an empty list. Nothing covered it,
+      // and the sibling test above says so about itself.
+      //
+      // A symlink pointing at itself is the reachable version. `stat` follows
+      // it, gives up, and reports ELOOP, which is permanent, so `retryTransient`
+      // rethrows on the first attempt.
+      const home = makeHome();
+      symlinkSync(PREFS, join(home, PREFS));
+
+      const result = await runCli(['--restrict'], home);
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('Could not check');
+      expect(result.stderr).toContain('ELOOP');
+      expect(result.stderr).toContain('Refusing to write over a file');
+      // Untouched, and still a symlink: nothing wrote through it or replaced it.
+      expect(lstatSync(join(home, PREFS)).isSymbolicLink()).toBe(true);
+      expect(readdirSync(home).filter((e) => e.endsWith('.lock') || e.endsWith('.tmp'))).toEqual(
+        [],
+      );
+    },
+  );
 
   it.skipIf(!canDenyRead)('refuses when the home directory is unwritable', async () => {
     // Named for what it actually reaches. An unreadable home fails at the
