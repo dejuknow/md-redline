@@ -18,6 +18,52 @@ describe('validateReviewInput', () => {
     expect(res.ok).toBe(true);
   });
 
+  it('accepts sessionId in place of filePaths', () => {
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value).toMatchObject({ sessionId: 'rev_1' });
+      expect(res.value).not.toHaveProperty('filePaths');
+    }
+  });
+
+  it('accepts a comment whose filePath is unknown when attaching by sessionId', () => {
+    // With no filePaths to cross-check against, session membership is the
+    // server's call (it rejects paths outside session.filePaths).
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      comments: [{ filePath: '/tmp/anything.md', anchor: 'hi', text: 't' }],
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rejects sessionId and filePaths together', () => {
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      filePaths: ['/tmp/a.md'],
+      replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/either filePaths or sessionId/);
+  });
+
+  it('rejects input with neither filePaths nor sessionId', () => {
+    const res = validateReviewInput({
+      comments: [{ filePath: '/tmp/a.md', anchor: 'hi', text: 't' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/filePaths/);
+  });
+
+  it('still requires comments or replies when attaching by sessionId', () => {
+    const res = validateReviewInput({ sessionId: 'rev_1' });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/comments or replies/);
+  });
+
   it('rejects when both comments and replies are empty', () => {
     const res = validateReviewInput({ filePaths: ['/tmp/a.md'] });
     expect(res.ok).toBe(false);

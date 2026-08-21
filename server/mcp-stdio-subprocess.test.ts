@@ -187,6 +187,49 @@ async function waitFor(
     }
   }, 15_000);
 
+  it('advertises mdr_review with an optional sessionId and no required filePaths', async () => {
+    // The reported symptom was read straight off this inventory: mdr_review
+    // exposed no way to name a session, so every reply batch minted one.
+    const child = spawn('node', [BIN, 'mcp'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_ENV: 'test' },
+    });
+
+    const stdoutRef = { current: '' };
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutRef.current += chunk.toString('utf8');
+    });
+
+    try {
+      child.stdin.write(
+        rpcRequest(1, 'initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '0' },
+        }),
+      );
+      await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 1), 5_000);
+      child.stdin.write(rpcRequest(2, 'tools/list'));
+
+      const afterList = await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 2), 5_000);
+      const toolsResp = afterList.find((r) => r.id === 2);
+      const tools = (
+        toolsResp?.result as {
+          tools: Array<{
+            name: string;
+            inputSchema: { properties: Record<string, unknown>; required?: string[] };
+          }>;
+        }
+      ).tools;
+      const review = tools.find((t) => t.name === 'mdr_review');
+      expect(review).toBeDefined();
+      expect(Object.keys(review!.inputSchema.properties)).toContain('sessionId');
+      expect(review!.inputSchema.required ?? []).not.toContain('filePaths');
+    } finally {
+      child.kill();
+    }
+  }, 15_000);
+
   it('dispatches mdr_review to handleReviewToolCall', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],

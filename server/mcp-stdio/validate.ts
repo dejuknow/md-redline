@@ -81,24 +81,46 @@ export function validateRequestReviewInput(raw: unknown): ValidationResult<Reque
   };
 }
 
+/**
+ * Validate a raw mdr_review argument object. Accepts either:
+ *   - { filePaths, enableResolve? } to create-or-attach an agent-origin session
+ *   - { sessionId } to post into a session that already exists
+ *
+ * In the filePaths form, every comment/reply filePath must appear in
+ * filePaths. In the sessionId form there is no such list to check against,
+ * and the server enforces the stronger condition anyway: it rejects any path
+ * outside the named session's own filePaths.
+ */
 export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput> {
   if (typeof raw !== 'object' || raw === null) {
     return { ok: false, error: 'input must be an object' };
   }
   const obj = raw as {
     filePaths?: unknown;
+    sessionId?: unknown;
     comments?: unknown;
     replies?: unknown;
     enableResolve?: unknown;
   };
 
-  if (!Array.isArray(obj.filePaths) || obj.filePaths.length === 0) {
-    return { ok: false, error: 'filePaths must be a non-empty array' };
+  const hasSessionId = typeof obj.sessionId === 'string' && obj.sessionId.length > 0;
+  const hasFilePaths = Array.isArray(obj.filePaths) && obj.filePaths.length > 0;
+  if (hasSessionId && hasFilePaths) {
+    return { ok: false, error: 'provide either filePaths or sessionId, not both' };
   }
-  if (obj.filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
-    return { ok: false, error: 'filePaths must contain non-empty strings' };
+
+  // `filePathsSet` scopes the per-item filePath check below. Empty in
+  // sessionId mode, where the check is skipped entirely.
+  let filePathsSet: Set<string> | null = null;
+  if (!hasSessionId) {
+    if (!Array.isArray(obj.filePaths) || obj.filePaths.length === 0) {
+      return { ok: false, error: 'filePaths must be a non-empty array' };
+    }
+    if (obj.filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
+      return { ok: false, error: 'filePaths must contain non-empty strings' };
+    }
+    filePathsSet = new Set(obj.filePaths as string[]);
   }
-  const filePathsSet = new Set(obj.filePaths as string[]);
 
   const hasComments = Array.isArray(obj.comments) && obj.comments.length > 0;
   const hasReplies = Array.isArray(obj.replies) && obj.replies.length > 0;
@@ -119,7 +141,7 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
       if (!c.anchor || !c.text || !c.filePath) {
         return { ok: false, error: `comments[${i}]: filePath, anchor, text must be non-empty` };
       }
-      if (!filePathsSet.has(c.filePath as string)) {
+      if (filePathsSet !== null && !filePathsSet.has(c.filePath as string)) {
         return { ok: false, error: `comments[${i}].filePath not in filePaths` };
       }
       if (c.author !== undefined && typeof c.author !== 'string') {
@@ -155,7 +177,7 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
       if (!r.commentId || !r.text || !r.filePath) {
         return { ok: false, error: `replies[${i}]: fields must be non-empty` };
       }
-      if (!filePathsSet.has(r.filePath as string)) {
+      if (filePathsSet !== null && !filePathsSet.has(r.filePath as string)) {
         return { ok: false, error: `replies[${i}].filePath not in filePaths` };
       }
       if (r.author !== undefined && typeof r.author !== 'string') {
@@ -166,12 +188,19 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
     }
   }
 
+  const payload = {
+    comments: hasComments ? (obj.comments as ReviewInput['comments']) : undefined,
+    replies: hasReplies ? (obj.replies as ReviewInput['replies']) : undefined,
+  };
+
+  if (hasSessionId) {
+    return { ok: true, value: { ...payload, sessionId: obj.sessionId as string } };
+  }
   return {
     ok: true,
     value: {
+      ...payload,
       filePaths: obj.filePaths as string[],
-      comments: hasComments ? (obj.comments as ReviewInput['comments']) : undefined,
-      replies: hasReplies ? (obj.replies as ReviewInput['replies']) : undefined,
       enableResolve: obj.enableResolve === true ? true : undefined,
     },
   };

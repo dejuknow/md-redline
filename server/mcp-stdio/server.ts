@@ -150,16 +150,30 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'spans, the renderer will fall back to label/stripped matching.\n\n' +
           'Include `author` on each comment/reply identifying yourself (e.g. ' +
           "'Claude', 'Codex', 'Gemini'). This appears in the mdr UI so the user " +
-          'knows which agent left the feedback.',
+          'knows which agent left the feedback.\n\n' +
+          'To reply inside a review the user already has open — the session from an ' +
+          'mdr_request_review handoff, or one this tool returned earlier — pass ' +
+          '`sessionId` instead of `filePaths`. The batch lands in that session and no ' +
+          'second tab or banner appears. Use it whenever you are replying as you work ' +
+          'rather than posting a fresh review; the filePaths form always opens its own ' +
+          'session.',
         inputSchema: {
           type: 'object',
-          required: ['filePaths'],
           properties: {
             filePaths: {
               type: 'array',
               minItems: 1,
               items: { type: 'string' },
-              description: 'Absolute paths to markdown files to review.',
+              description:
+                'Absolute paths to markdown files to review. Opens a new session. ' +
+                'Omit when passing sessionId.',
+            },
+            sessionId: {
+              type: 'string',
+              description:
+                'Post into this existing session instead of opening a new one. ' +
+                'Accepts the sessionId of an active mdr_request_review handoff or of a ' +
+                'previous mdr_review call. Mutually exclusive with filePaths.',
             },
             comments: {
               type: 'array',
