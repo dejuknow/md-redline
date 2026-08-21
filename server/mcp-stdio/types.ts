@@ -97,8 +97,7 @@ export interface PostReviewArgs {
   // expectsReply removed — always fire-and-forget
 }
 
-export interface ReviewInput {
-  filePaths: string[];
+interface ReviewPayload {
   comments?: Array<{
     filePath: string;
     anchor: string;
@@ -108,8 +107,26 @@ export interface ReviewInput {
     contextAfter?: string;
   }>;
   replies?: Array<{ filePath: string; commentId: string; text: string; author?: string }>;
-  enableResolve?: boolean;
 }
+
+/**
+ * Two ways to name the session a batch lands in, mutually exclusive:
+ *
+ *   { filePaths }  create-or-attach an agent-origin session for those files.
+ *   { sessionId }  post into a session that already exists — including the
+ *                  user-origin session an `mdr_request_review` handoff opened,
+ *                  which the filePaths form can never reach because dedupe
+ *                  filters on origin. Without this, replying to a review the
+ *                  user is reading costs them a second session, tab, and banner.
+ *
+ * `enableResolve` belongs only to the creating form; an existing session's
+ * resolve mode was fixed when it was created.
+ */
+export type ReviewInput = ReviewPayload &
+  (
+    | { filePaths: string[]; enableResolve?: boolean; sessionId?: never }
+    | { sessionId: string; filePaths?: never; enableResolve?: never }
+  );
 
 export interface WaitInput {
   sessionId: string;
