@@ -696,4 +696,3 @@ export async function handleReviewToolCall(
   // 4. Return immediately — nudge agent to call mdr_wait
   return postReviewBatch(session.sessionId, input, ctx, input.filePaths.join(', '));
 }
-
