@@ -103,16 +103,47 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
     enableResolve?: unknown;
   };
 
-  const hasSessionId = typeof obj.sessionId === 'string' && obj.sessionId.length > 0;
-  const hasFilePaths = Array.isArray(obj.filePaths) && obj.filePaths.length > 0;
-  if (hasSessionId && hasFilePaths) {
+  // Presence selects the form, NOT validity. Deciding on validity lets a
+  // malformed sessionId fall through to the create form, which mints exactly
+  // the duplicate session this parameter exists to prevent -- silently, and
+  // only when filePaths happens to be supplied too.
+  // `undefined` is the only absence: it is what an omitted JSON key and an
+  // explicitly-undefined JS property both produce. `null` is a value the
+  // caller chose to send, so it lands in the invalid-sessionId branch below
+  // rather than quietly selecting the create form.
+  const hasSessionId = obj.sessionId !== undefined;
+  if (hasSessionId && (typeof obj.sessionId !== 'string' || obj.sessionId.length === 0)) {
+    return { ok: false, error: 'sessionId must be a non-empty string' };
+  }
+  // Presence again, not non-emptiness: `filePaths: []` beside a sessionId is
+  // still a caller asking for both forms at once.
+  if (hasSessionId && obj.filePaths !== undefined) {
     return { ok: false, error: 'provide either filePaths or sessionId, not both' };
   }
+  // Rejected rather than dropped, for the same reason filePaths is: an
+  // existing session keeps the resolve mode it was created with, so honouring
+  // the flag is impossible and ignoring it silently misleads the caller.
+  if (hasSessionId && obj.enableResolve !== undefined) {
+    return {
+      ok: false,
+      error:
+        'enableResolve applies to the filePaths form only; an existing session ' +
+        'keeps the resolve mode it was created with',
+    };
+  }
 
-  // `filePathsSet` scopes the per-item filePath check below. Empty in
+  // `filePathsSet` scopes the per-item filePath check below. Null in
   // sessionId mode, where the check is skipped entirely.
   let filePathsSet: Set<string> | null = null;
   if (!hasSessionId) {
+    if (obj.filePaths === undefined) {
+      return {
+        ok: false,
+        error:
+          'provide filePaths to open a session, or sessionId to post into one ' +
+          'that already exists',
+      };
+    }
     if (!Array.isArray(obj.filePaths) || obj.filePaths.length === 0) {
       return { ok: false, error: 'filePaths must be a non-empty array' };
     }

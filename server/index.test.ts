@@ -2652,7 +2652,7 @@ describe('mdr_review attaching to an existing session (end to end)', () => {
   it('leaves the user session the only open one', async () => {
     const { testApp, reviewSessions, filePath, sessionId } = await seedUserReview();
 
-    await handleReviewToolCall(
+    const result = await handleReviewToolCall(
       {
         sessionId,
         replies: [{ filePath, commentId: 'cmt_seed', text: 'ack', author: 'Claude' }],
@@ -2663,6 +2663,12 @@ describe('mdr_review attaching to an existing session (end to end)', () => {
         baseUrl: 'http://localhost:5188',
       },
     );
+
+    // Without this the session assertion below passes just as happily on a
+    // post that never landed: postReviewBatch reports failure by returning
+    // isError, not by throwing, so a 400 or 404 would leave one open session
+    // and a green test.
+    expect(result.isError).toBeFalsy();
 
     // The defect this fixes: a second session on the same file, which is what
     // put a duplicate tab and a stacked banner row in front of the user.

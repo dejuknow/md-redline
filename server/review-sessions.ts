@@ -832,7 +832,15 @@ export class ReviewSessionStore {
     // Treat an agent POST as a heartbeat so subsequent batched calls keep
     // finding this session via findOpenSession even if the browser tab is
     // backgrounded and Chrome throttles its setInterval-based heartbeats.
-    s.lastHeartbeatAt = now;
+    //
+    // Agent-origin ONLY. That dedupe is an agent-origin concern, and
+    // user-origin sessions have no second disconnect detector to fall back on:
+    // gcSilentAgentSessions skips them outright, so sweepStale's heartbeat
+    // timeout is the sole path to browser_disconnected. Refreshing it here
+    // would let an agent replying in-thread hold a closed tab's session open
+    // for as long as it keeps posting, and the user's mdr_request_review poll
+    // would never learn the review is dead.
+    if (s.origin === 'agent') s.lastHeartbeatAt = now;
   }
 
   /**

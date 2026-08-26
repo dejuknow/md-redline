@@ -89,8 +89,9 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'answer would meaningfully change your edit.\n\n' +
           'Only one mdr_ask can be pending per session at a time. If this returns ' +
           '"a previous mdr_ask is still pending", post a reply to the prior question ' +
-          'via mdr_review (with a `replies:` payload targeting that commentId) — that ' +
-          'resolves the pending ask in-place — and then retry mdr_ask with your new questions.',
+          'via mdr_review — pass this same `sessionId` plus a `replies:` payload ' +
+          'targeting that commentId, which resolves the pending ask in-place without ' +
+          'opening a second session — and then retry mdr_ask with your new questions.',
         inputSchema: {
           type: 'object',
           required: ['sessionId', 'questions'],
