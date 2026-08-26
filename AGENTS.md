@@ -531,12 +531,20 @@ replying in-thread as work lands. Path validation is the server's: `/agent-comme
 resolves every path and rejects any outside the named session's `filePaths`, which
 is stricter than the client-side `filePaths[]` membership check.
 
+Do NOT follow a `sessionId`-form post with `mdr_wait` unless you opened that
+session with `mdr_review` yourself. `mdr_wait` long-polls `/agent-wait`, which
+409s on user-origin sessions, so calling it on an `mdr_request_review` handoff
+errors. The result text says which continuation applies; for a handoff it is
+`mdr_request_review` with the same sessionId.
+
 **`mdr_wait`** — `{ sessionId }`. Blocks (90s re-poll cycle via `/agent-wait`)
 until the user clicks End review. Returns "done, re-read the file(s)" on End
 review, a reason-specific message on other terminal paths (cancelled, tab closed,
 agent_silent GC, finished), `pending` when the agent should re-poll, and a
 graceful "session unknown, server may have restarted" result on 404. The two-tool
-flow is always: `mdr_review` (post) → `mdr_wait` (block).
+flow `mdr_review` (post) → `mdr_wait` (block) applies to the `filePaths` form only.
+A `sessionId`-form post into a session you did not open does not get a `mdr_wait`;
+see the caveat under `mdr_review` above.
 
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.

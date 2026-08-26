@@ -589,6 +589,7 @@ async function postReviewBatch(
   input: ReviewInput,
   ctx: ToolCallContext,
   fileList: string,
+  nextStep: string,
 ): Promise<ToolCallResult> {
   let postResult: PostReviewResult;
   try {
@@ -618,8 +619,7 @@ async function postReviewBatch(
           `mdr_review: posted ${postResult.commentsWritten} comment(s) and ` +
           `${postResult.repliesWritten} reply(ies) to ${fileList}. ` +
           `Session ID: ${sessionId}. ` +
-          `When you have finished posting all feedback, call mdr_wait with ` +
-          `sessionId "${sessionId}" to block until the user has engaged.`,
+          nextStep,
       },
     ],
   };
@@ -654,7 +654,23 @@ export async function handleReviewToolCall(
   // stricter than the grantAccess roots check the creating form does here.
   if (input.sessionId !== undefined) {
     const fileList = batchFilePaths(input).join(', ');
-    return postReviewBatch(input.sessionId, input, ctx, fileList);
+    // The caller named the session, so only the caller knows where it came
+    // from, and this form cannot tell: /agent-comments returns no origin.
+    // Do NOT assume mdr_wait applies. It rejects user-origin sessions with a
+    // 409 (`/agent-wait only applies to agent-origin sessions`), which is
+    // exactly the mdr_request_review handoff this form exists to serve, so a
+    // blanket nudge would send the flagship case straight into an error.
+    return postReviewBatch(
+      input.sessionId,
+      input,
+      ctx,
+      fileList,
+      `If you opened this session with mdr_review, call mdr_wait with ` +
+        `sessionId "${input.sessionId}" when you have finished posting. If it ` +
+        `came from an mdr_request_review handoff, do NOT call mdr_wait; it ` +
+        `rejects user-origin sessions. Continue with mdr_request_review and ` +
+        `that sessionId instead.`,
+    );
   }
 
   // 1. Grant access
@@ -694,5 +710,12 @@ export async function handleReviewToolCall(
 
   // 3. Post review (always fire-and-forget — no waitForAsk)
   // 4. Return immediately — nudge agent to call mdr_wait
-  return postReviewBatch(session.sessionId, input, ctx, input.filePaths.join(', '));
+  return postReviewBatch(
+    session.sessionId,
+    input,
+    ctx,
+    input.filePaths.join(', '),
+    `When you have finished posting all feedback, call mdr_wait with ` +
+      `sessionId "${session.sessionId}" to block until the user has engaged.`,
+  );
 }

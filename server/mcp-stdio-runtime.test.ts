@@ -716,6 +716,34 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
     expect(result.content[0].text).toContain('/abs/b.md');
   });
 
+  it('does not tell the agent to call mdr_wait on a session it did not open', async () => {
+    // mdr_wait long-polls /agent-wait, which 409s on user-origin sessions.
+    // The mdr_request_review handoff this form exists to serve IS user-origin,
+    // so the creating form's nudge would send the flagship case into an error.
+    const client = makeReviewClient({
+      postReview: vi.fn().mockResolvedValue({ commentsWritten: 0, repliesWritten: 1 }),
+    });
+
+    const result = await handleReviewToolCall(
+      {
+        sessionId: 'rev_user_1',
+        replies: [{ filePath: '/abs/a.md', commentId: 'cmt_1', text: 'ack' }],
+      },
+      {
+        client,
+        openInBrowser: vi.fn().mockResolvedValue(undefined),
+        baseUrl: 'http://localhost:5188',
+      },
+    );
+
+    const text = result.content[0].text;
+    // The creating form's unconditional instruction must not appear verbatim.
+    expect(text).not.toContain('When you have finished posting all feedback, call mdr_wait');
+    // The user-origin continuation has to be named, since this form cannot
+    // tell which kind of session it was handed.
+    expect(text).toContain('mdr_request_review');
+  });
+
   it('surfaces a post failure when attaching by sessionId', async () => {
     const client = makeReviewClient({
       postReview: vi.fn().mockRejectedValue(new Error('session not found or already finished')),

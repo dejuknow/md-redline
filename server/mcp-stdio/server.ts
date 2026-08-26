@@ -136,9 +136,11 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         name: 'mdr_review',
         description:
           'Review markdown files in md-redline (mdr) and leave inline feedback. ' +
-          'Returns IMMEDIATELY after posting (never blocks). The returned `sessionId` ' +
-          'MUST be passed to mdr_wait afterward to block until the user clicks Done — ' +
-          'this is a two-tool flow: mdr_review (post) → mdr_wait (block). Skipping ' +
+          'Returns IMMEDIATELY after posting (never blocks). In the `filePaths` form ' +
+          'the returned `sessionId` MUST be passed to mdr_wait afterward to block until ' +
+          'the user clicks Done — that is a two-tool flow: mdr_review (post) → mdr_wait ' +
+          '(block). This does NOT apply to the `sessionId` form below, which posts into ' +
+          'a session you did not open; mdr_wait rejects user-origin sessions. Skipping ' +
           "mdr_wait leaves a banner on the user's screen until they click Done; you " +
           'will not see their replies or edits before continuing, and any user feedback ' +
           'will be invisible to you for this turn.\n\n' +
