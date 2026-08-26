@@ -89,8 +89,9 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'answer would meaningfully change your edit.\n\n' +
           'Only one mdr_ask can be pending per session at a time. If this returns ' +
           '"a previous mdr_ask is still pending", post a reply to the prior question ' +
-          'via mdr_review (with a `replies:` payload targeting that commentId) — that ' +
-          'resolves the pending ask in-place — and then retry mdr_ask with your new questions.',
+          'via mdr_review — pass this same `sessionId` plus a `replies:` payload ' +
+          'targeting that commentId, which resolves the pending ask in-place without ' +
+          'opening a second session — and then retry mdr_ask with your new questions.',
         inputSchema: {
           type: 'object',
           required: ['sessionId', 'questions'],
@@ -136,9 +137,11 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
         name: 'mdr_review',
         description:
           'Review markdown files in md-redline (mdr) and leave inline feedback. ' +
-          'Returns IMMEDIATELY after posting (never blocks). The returned `sessionId` ' +
-          'MUST be passed to mdr_wait afterward to block until the user clicks Done — ' +
-          'this is a two-tool flow: mdr_review (post) → mdr_wait (block). Skipping ' +
+          'Returns IMMEDIATELY after posting (never blocks). In the `filePaths` form ' +
+          'the returned `sessionId` MUST be passed to mdr_wait afterward to block until ' +
+          'the user clicks Done — that is a two-tool flow: mdr_review (post) → mdr_wait ' +
+          '(block). This does NOT apply to the `sessionId` form below, which posts into ' +
+          'a session you did not open; mdr_wait rejects user-origin sessions. Skipping ' +
           "mdr_wait leaves a banner on the user's screen until they click Done; you " +
           'will not see their replies or edits before continuing, and any user feedback ' +
           'will be invisible to you for this turn.\n\n' +
@@ -150,16 +153,30 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
           'spans, the renderer will fall back to label/stripped matching.\n\n' +
           'Include `author` on each comment/reply identifying yourself (e.g. ' +
           "'Claude', 'Codex', 'Gemini'). This appears in the mdr UI so the user " +
-          'knows which agent left the feedback.',
+          'knows which agent left the feedback.\n\n' +
+          'To reply inside a review the user already has open — the session from an ' +
+          'mdr_request_review handoff, or one this tool returned earlier — pass ' +
+          '`sessionId` instead of `filePaths`. The batch lands in that session and no ' +
+          'second tab or banner appears. Use it whenever you are replying as you work ' +
+          'rather than posting a fresh review; the filePaths form always opens its own ' +
+          'session.',
         inputSchema: {
           type: 'object',
-          required: ['filePaths'],
           properties: {
             filePaths: {
               type: 'array',
               minItems: 1,
               items: { type: 'string' },
-              description: 'Absolute paths to markdown files to review.',
+              description:
+                'Absolute paths to markdown files to review. Opens a new session. ' +
+                'Omit when passing sessionId.',
+            },
+            sessionId: {
+              type: 'string',
+              description:
+                'Post into this existing session instead of opening a new one. ' +
+                'Accepts the sessionId of an active mdr_request_review handoff or of a ' +
+                'previous mdr_review call. Mutually exclusive with filePaths.',
             },
             comments: {
               type: 'array',

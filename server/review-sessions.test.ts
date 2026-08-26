@@ -192,6 +192,32 @@ describe('ReviewSessionStore', () => {
     expect(store.getSession(session.id)?.status).toBe('aborted');
   });
 
+  it('agent posts do not keep a user-origin session alive past the heartbeat timeout', async () => {
+    store.startSweep(10_000);
+
+    const session = store.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'user',
+    });
+    store.beginWaitPark(session.id);
+    const waiter = store.waitForSession(session.id);
+
+    // The tab is closed, so no browser heartbeats arrive. The agent keeps
+    // replying in-thread, which mdr_review's sessionId form makes possible in
+    // a loop for the first time. An agent post must not stand in for the
+    // browser here: gcSilentAgentSessions skips user-origin sessions, so this
+    // sweep is the only thing that can ever notice the reader is gone.
+    for (let i = 0; i < 3; i++) {
+      vi.advanceTimersByTime(10 * 60_000);
+      store.recordAgentComments(session.id, 1);
+    }
+    vi.advanceTimersByTime(60_000);
+
+    const result = await waiter;
+    expect(result).toEqual({ status: 'aborted', reason: 'browser_disconnected' });
+  });
+
   it('sweep does not touch done or already-aborted sessions', () => {
     store.startSweep(10_000);
     const a = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });

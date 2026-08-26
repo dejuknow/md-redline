@@ -21,7 +21,8 @@ import {
   writePortFile,
   type CreateAppOptions,
 } from './index';
-import { addReply, parseComments } from '../src/lib/comment-parser';
+import { addReply, insertComment, parseComments } from '../src/lib/comment-parser';
+import { handleReviewToolCall } from './mcp-stdio/handler';
 
 // Fails ONLY the synchronous boot read of the prefs file, leaving the async
 // read-modify-write path working. That asymmetry is the real shape of the bug:
@@ -2558,6 +2559,147 @@ async function buildTestApp(options: { allowedRoots: string[] }) {
   });
   return { app: testApp, reviewSessions: testReviewSessions };
 }
+
+describe('mdr_review attaching to an existing session (end to end)', () => {
+  /**
+   * A client that speaks to the real Hono app instead of the network. The
+   * handler, the route, the session store, and the on-disk markers are all
+   * the production code; only the transport is swapped, so what these tests
+   * assert is behaviour rather than which methods a mock saw.
+   */
+  function clientOver(testApp: {
+    request: (path: string, init?: RequestInit) => Response | Promise<Response>;
+  }) {
+    const post = async (path: string, body: unknown) => {
+      const res = await testApp.request(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      if (!res.ok) throw new Error(String(json.error ?? `HTTP ${res.status}`));
+      return json;
+    };
+    return {
+      grantAccess: async () => {},
+      createSession: async (input: { filePaths: string[]; origin?: string }) =>
+        (await post('/api/review-sessions', input)) as unknown as {
+          sessionId: string;
+          url: string;
+        },
+      postReview: async (sessionId: string, args: unknown) =>
+        (await post(`/api/review-sessions/${sessionId}/agent-comments`, {
+          mode: 'review',
+          ...(args as object),
+        })) as unknown as { commentsWritten: number; repliesWritten: number },
+    } as unknown as Parameters<typeof handleReviewToolCall>[1]['client'];
+  }
+
+  async function seedUserReview() {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-attach-')));
+    const filePath = join(tmp, 'spec.md');
+    const seeded = insertComment(
+      '# Title\n\nThe rate limit is 100 req/min today.\n',
+      'rate limit is 100 req/min',
+      'Is this per-tenant?',
+      'Seth',
+      undefined,
+      undefined,
+      undefined,
+      'cmt_seed',
+    );
+    await writeFile(filePath, seeded, 'utf8');
+
+    const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    // origin:'user' is what mdr_request_review opens — the session mdr_review
+    // could not previously reach, because createSession's dedupe filters on
+    // origin and would have minted a second, agent-origin one.
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'user' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    return { testApp, reviewSessions, filePath, sessionId };
+  }
+
+  it("appends the agent's reply to the user's own comment thread", async () => {
+    const { testApp, filePath, sessionId } = await seedUserReview();
+
+    const result = await handleReviewToolCall(
+      {
+        sessionId,
+        replies: [
+          { filePath, commentId: 'cmt_seed', text: 'Per-tenant. Fixed in §4.', author: 'Claude' },
+        ],
+      },
+      {
+        client: clientOver(testApp),
+        openInBrowser: async () => {
+          throw new Error('must not open a browser tab when attaching to a session');
+        },
+        baseUrl: 'http://localhost:5188',
+      },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const parsed = parseComments(await readFile(filePath, 'utf8'));
+    const thread = parsed.comments.find((c) => c.id === 'cmt_seed');
+    expect(thread?.replies?.map((r) => r.text)).toEqual(['Per-tenant. Fixed in §4.']);
+    expect(thread?.replies?.[0].author).toBe('Claude');
+  });
+
+  it('leaves the user session the only open one', async () => {
+    const { testApp, reviewSessions, filePath, sessionId } = await seedUserReview();
+
+    const result = await handleReviewToolCall(
+      {
+        sessionId,
+        replies: [{ filePath, commentId: 'cmt_seed', text: 'ack', author: 'Claude' }],
+      },
+      {
+        client: clientOver(testApp),
+        openInBrowser: async () => {},
+        baseUrl: 'http://localhost:5188',
+      },
+    );
+
+    // Without this the session assertion below passes just as happily on a
+    // post that never landed: postReviewBatch reports failure by returning
+    // isError, not by throwing, so a 400 or 404 would leave one open session
+    // and a green test.
+    expect(result.isError).toBeFalsy();
+
+    // The defect this fixes: a second session on the same file, which is what
+    // put a duplicate tab and a stacked banner row in front of the user.
+    const open = reviewSessions.listOpenSessions();
+    expect(open.map((s) => s.id)).toEqual([sessionId]);
+    expect(open[0].origin).toBe('user');
+  });
+
+  it('rejects a reply aimed at a file outside the session', async () => {
+    const { testApp, filePath, sessionId } = await seedUserReview();
+    const outsider = join(filePath, '..', 'other.md');
+    await writeFile(outsider, '# Other\n', 'utf8');
+
+    const result = await handleReviewToolCall(
+      {
+        sessionId,
+        replies: [{ filePath: outsider, commentId: 'cmt_seed', text: 'ack', author: 'Claude' }],
+      },
+      {
+        client: clientOver(testApp),
+        openInBrowser: async () => {},
+        baseUrl: 'http://localhost:5188',
+      },
+    );
+
+    // Dropping the client-side filePaths membership check does not widen what
+    // an agent can write to: the session's own path list still bounds it.
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/not part of this session/);
+  });
+});
 
 describe('POST /api/review-sessions/:id/agent-comments', () => {
   it('inserts agent markers into the file and returns askId', async () => {

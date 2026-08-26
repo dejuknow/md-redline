@@ -18,6 +18,96 @@ describe('validateReviewInput', () => {
     expect(res.ok).toBe(true);
   });
 
+  it('accepts sessionId in place of filePaths', () => {
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value).toMatchObject({ sessionId: 'rev_1' });
+      expect(res.value).not.toHaveProperty('filePaths');
+    }
+  });
+
+  it('accepts a comment whose filePath is unknown when attaching by sessionId', () => {
+    // With no filePaths to cross-check against, session membership is the
+    // server's call (it rejects paths outside session.filePaths).
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      comments: [{ filePath: '/tmp/anything.md', anchor: 'hi', text: 't' }],
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rejects sessionId and filePaths together', () => {
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      filePaths: ['/tmp/a.md'],
+      replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/either filePaths or sessionId/);
+  });
+
+  it('rejects input with neither filePaths nor sessionId', () => {
+    const res = validateReviewInput({
+      comments: [{ filePath: '/tmp/a.md', anchor: 'hi', text: 't' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/filePaths/);
+  });
+
+  it('still requires comments or replies when attaching by sessionId', () => {
+    const res = validateReviewInput({ sessionId: 'rev_1' });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/comments or replies/);
+  });
+
+  it('rejects a malformed sessionId instead of falling through to the create form', () => {
+    // The dangerous shape: an agent whose sessionId came back empty, passing
+    // filePaths alongside it. Selecting the form on validity rather than
+    // presence made this mint the very duplicate session sessionId prevents.
+    for (const bad of ['', 123, null as unknown, {} as unknown]) {
+      const res = validateReviewInput({
+        sessionId: bad,
+        filePaths: ['/tmp/a.md'],
+        replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+      });
+      expect(res.ok, `sessionId ${JSON.stringify(bad)} should be rejected`).toBe(false);
+    }
+  });
+
+  it('rejects an empty filePaths array alongside sessionId', () => {
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      filePaths: [],
+      replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/either filePaths or sessionId/);
+  });
+
+  it('rejects enableResolve alongside sessionId rather than dropping it', () => {
+    // An existing session keeps the mode it was created with, so silently
+    // discarding the flag would tell the caller nothing went wrong.
+    const res = validateReviewInput({
+      sessionId: 'rev_1',
+      enableResolve: true,
+      replies: [{ filePath: '/tmp/a.md', commentId: 'cmt_1', text: 'r' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/enableResolve/);
+  });
+
+  it('names both forms when neither filePaths nor sessionId is given', () => {
+    const res = validateReviewInput({
+      comments: [{ filePath: '/tmp/a.md', anchor: 'hi', text: 't' }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/sessionId/);
+  });
+
   it('rejects when both comments and replies are empty', () => {
     const res = validateReviewInput({ filePaths: ['/tmp/a.md'] });
     expect(res.ok).toBe(false);

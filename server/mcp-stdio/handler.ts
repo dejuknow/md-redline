@@ -574,12 +574,70 @@ export async function handleWaitToolCall(
   };
 }
 
+/** Distinct file paths a batch touches, in first-mentioned order. */
+function batchFilePaths(input: ReviewInput): string[] {
+  const seen = new Set<string>();
+  for (const item of [...(input.comments ?? []), ...(input.replies ?? [])]) {
+    seen.add(item.filePath);
+  }
+  return [...seen];
+}
+
+/** The shared tail of both mdr_review forms: post the batch, summarize it. */
+async function postReviewBatch(
+  sessionId: string,
+  input: ReviewInput,
+  ctx: ToolCallContext,
+  fileList: string,
+  nextStep: string,
+): Promise<ToolCallResult> {
+  let postResult: PostReviewResult;
+  try {
+    postResult = await ctx.client.postReview(sessionId, {
+      comments: input.comments,
+      replies: input.replies,
+    });
+  } catch (err) {
+    const e = err as Error & { failedComments?: number[]; failedReplies?: number[] };
+    const detailParts: string[] = [];
+    if (e.failedComments?.length)
+      detailParts.push(`failedComments: ${JSON.stringify(e.failedComments)}`);
+    if (e.failedReplies?.length)
+      detailParts.push(`failedReplies: ${JSON.stringify(e.failedReplies)}`);
+    const detail = detailParts.length > 0 ? ` ${detailParts.join('; ')}` : '';
+    return {
+      isError: true,
+      content: [{ type: 'text', text: `mdr_review: ${e.message}${detail}` }],
+    };
+  }
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `mdr_review: posted ${postResult.commentsWritten} comment(s) and ` +
+          `${postResult.repliesWritten} reply(ies) to ${fileList}. ` +
+          `Session ID: ${sessionId}. ` +
+          nextStep,
+      },
+    ],
+  };
+}
+
 /**
  * Handler for the mdr_review tool. The agent calls this to post comments (and
  * optionally replies) to a file and immediately returns. The agent should then
  * call mdr_wait to block until the user has finished engaging.
  *
- * Flow:
+ * Two forms. With `sessionId`, post into a session that already exists and
+ * return it unchanged — no grantAccess, no createSession, no browser tab. This
+ * is the only way to reach the user-origin session an `mdr_request_review`
+ * handoff opened: createSession's dedupe filters on origin, so the filePaths
+ * form below always mints a second session for a file the user is already
+ * reading, costing them a duplicate tab and a stacked banner row.
+ *
+ * With `filePaths`:
  *   1. grantAccess for every file path.
  *   2. createSession with origin='agent'.
  *   3. openInBrowser (non-fatal).
@@ -590,6 +648,31 @@ export async function handleReviewToolCall(
   input: ReviewInput,
   ctx: ToolCallContext,
 ): Promise<ToolCallResult> {
+  // Attach form: the session exists, so skip creation entirely. Access and
+  // session membership are the server's call — it resolves every path and
+  // rejects any that is not in the named session's own filePaths, which is
+  // stricter than the grantAccess roots check the creating form does here.
+  if (input.sessionId !== undefined) {
+    const fileList = batchFilePaths(input).join(', ');
+    // The caller named the session, so only the caller knows where it came
+    // from, and this form cannot tell: /agent-comments returns no origin.
+    // Do NOT assume mdr_wait applies. It rejects user-origin sessions with a
+    // 409 (`/agent-wait only applies to agent-origin sessions`), which is
+    // exactly the mdr_request_review handoff this form exists to serve, so a
+    // blanket nudge would send the flagship case straight into an error.
+    return postReviewBatch(
+      input.sessionId,
+      input,
+      ctx,
+      fileList,
+      `If you opened this session with mdr_review, call mdr_wait with ` +
+        `sessionId "${input.sessionId}" when you have finished posting. If it ` +
+        `came from an mdr_request_review handoff, do NOT call mdr_wait; it ` +
+        `rejects user-origin sessions. Continue with mdr_request_review and ` +
+        `that sessionId instead.`,
+    );
+  }
+
   // 1. Grant access
   await ctx.client.grantAccess(input.filePaths);
 
@@ -626,39 +709,13 @@ export async function handleReviewToolCall(
   ctx.sendProgress?.(`mdr: opening review at ${fullUrl}`);
 
   // 3. Post review (always fire-and-forget — no waitForAsk)
-  let postResult: PostReviewResult;
-  try {
-    postResult = await ctx.client.postReview(session.sessionId, {
-      comments: input.comments,
-      replies: input.replies,
-    });
-  } catch (err) {
-    const e = err as Error & { failedComments?: number[]; failedReplies?: number[] };
-    const detailParts: string[] = [];
-    if (e.failedComments?.length)
-      detailParts.push(`failedComments: ${JSON.stringify(e.failedComments)}`);
-    if (e.failedReplies?.length)
-      detailParts.push(`failedReplies: ${JSON.stringify(e.failedReplies)}`);
-    const detail = detailParts.length > 0 ? ` ${detailParts.join('; ')}` : '';
-    return {
-      isError: true,
-      content: [{ type: 'text', text: `mdr_review: ${e.message}${detail}` }],
-    };
-  }
-
   // 4. Return immediately — nudge agent to call mdr_wait
-  const fileList = input.filePaths.join(', ');
-  return {
-    content: [
-      {
-        type: 'text',
-        text:
-          `mdr_review: posted ${postResult.commentsWritten} comment(s) and ` +
-          `${postResult.repliesWritten} reply(ies) to ${fileList}. ` +
-          `Session ID: ${session.sessionId}. ` +
-          `When you have finished posting all feedback, call mdr_wait with ` +
-          `sessionId "${session.sessionId}" to block until the user has engaged.`,
-      },
-    ],
-  };
+  return postReviewBatch(
+    session.sessionId,
+    input,
+    ctx,
+    input.filePaths.join(', '),
+    `When you have finished posting all feedback, call mdr_wait with ` +
+      `sessionId "${session.sessionId}" to block until the user has engaged.`,
+  );
 }

@@ -488,9 +488,12 @@ Only one ask can be pending per session at a time.
 
 ```ts
 {
-  filePaths: string[]            // required; absolute paths, length >= 1
+  // Exactly one of these two names the target session:
+  filePaths?: string[]           // absolute paths, length >= 1; opens a new session
+  sessionId?: string             // post into a session that already exists
+
   comments?: Array<{             // new top-level comments
-    filePath: string             // must appear in filePaths[]
+    filePath: string             // must appear in filePaths[] (filePaths form)
     anchor: string               // exact text in the file
     text: string                 // the feedback
     author?: string              // agent name shown in the UI
@@ -507,19 +510,41 @@ Only one ask can be pending per session at a time.
 }
 ```
 
-At least one of `comments[]` or `replies[]` must be non-empty. The tool opens the
-browser at the session URL (`origin: 'agent'`), writes the markers, and returns
-IMMEDIATELY (fire-and-forget). The result instructs the agent to call `mdr_wait`
-with the returned sessionId. Partial-anchor failures are surfaced as
-`failedComments[]` / `failedReplies[]`, and a failed multi-file batch rolls back
-the markers it already wrote.
+At least one of `comments[]` or `replies[]` must be non-empty. Passing both
+`filePaths` and `sessionId` is rejected, as is passing neither.
+
+In the `filePaths` form the tool opens the browser at the session URL
+(`origin: 'agent'`), writes the markers, and returns IMMEDIATELY
+(fire-and-forget). The result instructs the agent to call `mdr_wait` with the
+returned sessionId. Partial-anchor failures are surfaced as `failedComments[]` /
+`failedReplies[]`, and a failed multi-file batch rolls back the markers it
+already wrote.
+
+In the `sessionId` form the batch is posted into the named session and that
+sessionId is returned unchanged — no `grantAccess`, no `createSession`, no
+browser tab. This is the only way to reach the user-origin session an
+`mdr_request_review` handoff opened: `findOpenSession` filters dedupe on origin
+(agent- and user-origin sessions have incompatible terminal-state semantics), so
+the `filePaths` form always mints a second session for a file the user is already
+reading, costing a duplicate tab and a second banner row. Use `sessionId` for
+replying in-thread as work lands. Path validation is the server's: `/agent-comments`
+resolves every path and rejects any outside the named session's `filePaths`, which
+is stricter than the client-side `filePaths[]` membership check.
+
+Do NOT follow a `sessionId`-form post with `mdr_wait` unless you opened that
+session with `mdr_review` yourself. `mdr_wait` long-polls `/agent-wait`, which
+409s on user-origin sessions, so calling it on an `mdr_request_review` handoff
+errors. The result text says which continuation applies; for a handoff it is
+`mdr_request_review` with the same sessionId.
 
 **`mdr_wait`** — `{ sessionId }`. Blocks (90s re-poll cycle via `/agent-wait`)
 until the user clicks End review. Returns "done, re-read the file(s)" on End
 review, a reason-specific message on other terminal paths (cancelled, tab closed,
 agent_silent GC, finished), `pending` when the agent should re-poll, and a
 graceful "session unknown, server may have restarted" result on 404. The two-tool
-flow is always: `mdr_review` (post) → `mdr_wait` (block).
+flow `mdr_review` (post) → `mdr_wait` (block) applies to the `filePaths` form only.
+A `sessionId`-form post into a session you did not open does not get a `mdr_wait`;
+see the caveat under `mdr_review` above.
 
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.
