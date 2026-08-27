@@ -756,7 +756,7 @@ export interface InsertCommentExtras {
   agentInitiated?: boolean;
   /** When true, the marker represents an mdr_ask question; the UI surfaces it
    *  as a pending agent question (toast + palette entry). When false/omitted,
-   *  the marker is a fire-and-forget mdr_review comment with no toast. */
+   *  the marker is a fire-and-forget mdr_comment comment with no toast. */
   expectsReply?: boolean;
   sessionId?: string;
 }
@@ -1161,7 +1161,7 @@ export function addReply(
  *
  * Any reply (from user or agent) marks the question as answered, so this
  * also clears `expectsReply` on the target marker — same semantic as
- * `addReply`. Without this, an agent-self-reply via mdr_review would leave
+ * `addReply`. Without this, an agent-self-reply via mdr_comment would leave
  * the marker carrying expectsReply:true forever.
  */
 export function appendReply(

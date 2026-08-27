@@ -96,7 +96,7 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
 - `replies` — threaded discussion array
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
-- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_review`).
+- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`).
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
 - `sessionId` — links an agent-initiated marker to a review session for reply routing.
 - Strip all `<!-- @comment{...} -->` markers to get clean content
@@ -164,7 +164,7 @@ and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
-- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `origin` defaults to `'user'`; the `mdr_review` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
+- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
 - `GET /api/review-sessions` — list open sessions
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent
@@ -483,7 +483,7 @@ Answered markers keep the question and the reply as a thread; unanswered markers
 are preserved with `expectsReply` cleared (a record of "asked, no answer").
 Only one ask can be pending per session at a time.
 
-**`mdr_review`** — Agent-initiated review; the reverse direction of
+**`mdr_comment`** — Agent-initiated review; the reverse direction of
 `mdr_request_review`. The agent calls it with:
 
 ```ts
@@ -532,16 +532,23 @@ resolves every path and rejects any outside the named session's `filePaths`, whi
 is stricter than the client-side `filePaths[]` membership check.
 
 Do NOT follow a `sessionId`-form post with `mdr_wait` unless you opened that
-session with `mdr_review` yourself. `mdr_wait` long-polls `/agent-wait`, which
+session with `mdr_comment` yourself. `mdr_wait` long-polls `/agent-wait`, which
 409s on user-origin sessions, so calling it on an `mdr_request_review` handoff
 errors. The result text says which continuation applies; for a handoff it is
 `mdr_request_review` with the same sessionId.
 
-**Picking between `mdr_review` and `mdr_request_review`.** The two are named
-from opposite points of view: `mdr_review` is the agent reviewing,
+**`mdr_review` was renamed to `mdr_comment`.** The old name is still accepted
+on a `tools/call` so a saved prompt or pinned agent config keeps working, but it
+is NOT advertised in `tools/list`. The name was the last thing competing for "I
+want to review X in mdr": it is a closer lexical match for that sentence than
+`mdr_request_review` is, and a client that weights names over descriptions would
+keep picking it however the descriptions were worded.
+
+**Picking between `mdr_comment` and `mdr_request_review`.** The two are named
+from opposite points of view: `mdr_comment` is the agent reviewing,
 `mdr_request_review` is the human reviewing. "I want to review spec.md in mdr"
 therefore names the wrong one lexically, and the failure is not quiet, since
-`mdr_review` writes markers into a file the user only meant to read. Both
+`mdr_comment` writes markers into a file the user only meant to read. Both
 descriptions carry the disambiguation, and `mdr_request_review` claims those
 phrasings in its first sentence. Keep that split intact when editing either.
 
@@ -550,9 +557,9 @@ until the user clicks End review. Returns "done, re-read the file(s)" on End
 review, a reason-specific message on other terminal paths (cancelled, tab closed,
 agent_silent GC, finished), `pending` when the agent should re-poll, and a
 graceful "session unknown, server may have restarted" result on 404. The two-tool
-flow `mdr_review` (post) → `mdr_wait` (block) applies to the `filePaths` form only.
+flow `mdr_comment` (post) → `mdr_wait` (block) applies to the `filePaths` form only.
 A `sessionId`-form post into a session you did not open does not get a `mdr_wait`;
-see the caveat under `mdr_review` above.
+see the caveat under `mdr_comment` above.
 
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.

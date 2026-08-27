@@ -128,7 +128,7 @@ export function useReviewSession() {
 /**
  * Find the session that should drive UX for `filePath`. When multiple
  * sessions overlap on the same file (e.g. a user-origin session created
- * earlier and an agent-origin session opened by an `mdr_review` call),
+ * earlier and an agent-origin session opened by an `mdr_comment` call),
  * prefer agent-origin first — the agent banner and ask UI take priority
  * over the user's own review flow. Within a tier, prefer the most-recently
  * created session so a freshly opened review wins over a stale one.

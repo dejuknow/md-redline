@@ -87,7 +87,7 @@ export const MDR_TOOLS = [
       'answer would meaningfully change your edit.\n\n' +
       'Only one mdr_ask can be pending per session at a time. If this returns ' +
       '"a previous mdr_ask is still pending", post a reply to the prior question ' +
-      'via mdr_review — pass this same `sessionId` plus a `replies:` payload ' +
+      'via mdr_comment — pass this same `sessionId` plus a `replies:` payload ' +
       'targeting that commentId, which resolves the pending ask in-place without ' +
       'opening a second session — and then retry mdr_ask with your new questions.',
     inputSchema: {
@@ -97,7 +97,7 @@ export const MDR_TOOLS = [
         sessionId: {
           type: 'string',
           description:
-            'Session ID from a previous mdr_review call, or the sessionId of an ' +
+            'Session ID from a previous mdr_comment call, or the sessionId of an ' +
             'active mdr_request_review handoff. Both work: asking a clarifying ' +
             'question about a comment the user left during their own review is ' +
             'the primary use case.',
@@ -132,9 +132,9 @@ export const MDR_TOOLS = [
     },
   },
   {
-    name: 'mdr_review',
+    name: 'mdr_comment',
     description:
-      'Post YOUR OWN review comments into markdown files for the user to read. ' +
+      'Post YOUR OWN comments into markdown files for the user to read. ' +
       'Use this when the user asks YOU to review a doc and leave feedback on it.\n\n' +
       'If instead the user wants to review a doc THEMSELVES and have you address ' +
       'what they write ("I want to review X in mdr", "let me review X", "open X ' +
@@ -144,7 +144,7 @@ export const MDR_TOOLS = [
       'is the opposite of what they asked for.\n\n' +
       'Returns IMMEDIATELY after posting (never blocks). In the `filePaths` form ' +
       'the returned `sessionId` MUST be passed to mdr_wait afterward to block until ' +
-      'the user clicks Done — that is a two-tool flow: mdr_review (post) → mdr_wait ' +
+      'the user clicks Done — that is a two-tool flow: mdr_comment (post) → mdr_wait ' +
       '(block). This does NOT apply to the `sessionId` form below, which posts into ' +
       'a session you did not open; mdr_wait rejects user-origin sessions. Skipping ' +
       "mdr_wait leaves a banner on the user's screen until they click Done; you " +
@@ -180,7 +180,7 @@ export const MDR_TOOLS = [
           description:
             'Post into this existing session instead of opening a new one. ' +
             'Accepts the sessionId of an active mdr_request_review handoff or of a ' +
-            'previous mdr_review call. Mutually exclusive with filePaths.',
+            'previous mdr_comment call. Mutually exclusive with filePaths.',
         },
         comments: {
           type: 'array',
@@ -229,8 +229,8 @@ export const MDR_TOOLS = [
   {
     name: 'mdr_wait',
     description:
-      'Block until the user has finished engaging with an mdr_review session. ' +
-      'Call this once after you have posted all your feedback batches via mdr_review. ' +
+      'Block until the user has finished engaging with an mdr_comment session. ' +
+      'Call this once after you have posted all your feedback batches via mdr_comment. ' +
       'Returns when the user clicks Done in the mdr UI. ' +
       'If the wait times out (90s), returns {status:"pending"} — call mdr_wait again ' +
       'with the same sessionId to keep waiting. ' +
@@ -242,7 +242,7 @@ export const MDR_TOOLS = [
       properties: {
         sessionId: {
           type: 'string',
-          description: 'Session ID returned by mdr_review.',
+          description: 'Session ID returned by mdr_comment.',
         },
       },
     },
@@ -311,7 +311,16 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
       return result as CallToolResult;
     }
 
-    if (request.params.name === 'mdr_review') {
+    // `mdr_review` is the old name, accepted but not advertised. A saved
+    // prompt or a pinned agent config naming it still works; nothing in
+    // tools/list offers it, so it cannot compete with mdr_request_review for
+    // "I want to review X in mdr", which is why the tool was renamed.
+    //
+    // The result text says `mdr_comment:` either way, deliberately. It names
+    // the tool that ran, and a caller reaching it through the old name is
+    // running this one; seeing the canonical name is the only migration hint
+    // a client on a stale config ever gets.
+    if (request.params.name === 'mdr_comment' || request.params.name === 'mdr_review') {
       const validation = validateReviewInput(request.params.arguments);
       if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
       const result = await handleReviewToolCall(validation.value, {

@@ -181,7 +181,7 @@ describe('parseComments — agent-initiated fields', () => {
     expect(comments[0].sessionId).toBe('rev_xyz');
   });
 
-  it('agentInitiated without expectsReply (fire-and-forget mdr_review) parses correctly', () => {
+  it('agentInitiated without expectsReply (fire-and-forget mdr_comment) parses correctly', () => {
     const raw =
       'Some text <!-- @comment{"id":"abc","anchor":"Some text","text":"fyi","author":"Claude","timestamp":"2026-04-26T00:00:00.000Z","agentInitiated":true,"sessionId":"rev_xyz"} -->Some text continues.';
     const { comments } = parseComments(raw);

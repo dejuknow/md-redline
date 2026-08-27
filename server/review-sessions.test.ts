@@ -204,7 +204,7 @@ describe('ReviewSessionStore', () => {
     const waiter = store.waitForSession(session.id);
 
     // The tab is closed, so no browser heartbeats arrive. The agent keeps
-    // replying in-thread, which mdr_review's sessionId form makes possible in
+    // replying in-thread, which mdr_comment's sessionId form makes possible in
     // a loop for the first time. An agent post must not stand in for the
     // browser here: gcSilentAgentSessions skips user-origin sessions, so this
     // sweep is the only thing that can ever notice the reader is gone.
@@ -691,7 +691,7 @@ describe('ReviewSessionStore', () => {
 
     it('dedupe-reused agent session stays protected on later silent usage', () => {
       // Reproduces the dedupe edge: agent A creates a session and posts a
-      // batch (agentCommentCount > 0). A second mdr_review call from the
+      // batch (agentCommentCount > 0). A second mdr_comment call from the
       // same agent dedupes onto this session via findOpenSession. The agent
       // crashes or hangs on the second usage without posting. The session
       // must remain open — the previously-posted batch already represents
@@ -741,7 +741,7 @@ describe('ReviewSessionStore', () => {
     });
 
     it('does not match across origins (user → agent)', () => {
-      // An agent calling mdr_review for files the user is already reviewing
+      // An agent calling mdr_comment for files the user is already reviewing
       // must get a fresh session, not the user's. The two flows have
       // incompatible terminal-state semantics (setSessionDone vs finish/abort);
       // sharing one deadlocks the agent's mdr_wait.

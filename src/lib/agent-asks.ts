@@ -2,11 +2,11 @@ import { getEffectiveStatus, type MdComment } from '../types';
 
 /**
  * Return the agent comments that represent a PENDING question (mdr_ask) the
- * user has not yet replied to. Fire-and-forget mdr_review comments are
+ * user has not yet replied to. Fire-and-forget mdr_comment comments are
  * excluded — they're not questions to answer, just informational markers.
  *
  * The discriminators are:
- *   - `expectsReply === true` distinguishes mdr_ask from mdr_review.
+ *   - `expectsReply === true` distinguishes mdr_ask from mdr_comment.
  *   - An empty/absent `replies` array distinguishes "still waiting on user"
  *     from "user already replied." Once the user types a reply via the
  *     sidebar, that reply lands in the marker's replies array on disk; the

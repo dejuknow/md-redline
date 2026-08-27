@@ -97,7 +97,7 @@ Add this server entry to your client's MCP config file:
 
 Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
 
-After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_review`, `mdr_ask`, and `mdr_wait`.
+After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_comment`, `mdr_ask`, and `mdr_wait`. (`mdr_comment` was called `mdr_review` before 0.9; the old name still works if you have it saved in a prompt, but agents are no longer offered it.)
 
 ## Review workflow
 
@@ -124,7 +124,7 @@ The reverse direction, for docs the agent did not just write: your own draft, a 
 
 > "Use mdr to review prd.md and leave comments."
 
-The agent calls `mdr_review`. Its findings land as inline comments anchored to the exact text, and the browser opens so you can read them as they arrive. The agent then waits (via `mdr_wait`) while you work through the feedback: reply on any card, edit the doc, delete comments you disagree with. When you are done, click **End review** in the banner. That click is the signal for the agent to re-read the file and pick up your replies and edits, so the session stays open until you press it. The agent is not stuck; it is listening.
+The agent calls `mdr_comment`. Its findings land as inline comments anchored to the exact text, and the browser opens so you can read them as they arrive. The agent then waits (via `mdr_wait`) while you work through the feedback: reply on any card, edit the doc, delete comments you disagree with. When you are done, click **End review** in the banner. That click is the signal for the agent to re-read the file and pick up your replies and edits, so the session stays open until you press it. The agent is not stuck; it is listening.
 
 https://github.com/user-attachments/assets/41339401-6096-40de-abbf-e93ef7ffd2c2
 

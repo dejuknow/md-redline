@@ -144,13 +144,13 @@ async function waitFor(
       ).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(['mdr_ask', 'mdr_request_review', 'mdr_review', 'mdr_wait']);
+      expect(names).toEqual(['mdr_ask', 'mdr_comment', 'mdr_request_review', 'mdr_wait']);
     } finally {
       child.kill();
     }
   }, 15_000);
 
-  it('lists mdr_review in tools list', async () => {
+  it('lists mdr_comment in tools list', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, NODE_ENV: 'test' },
@@ -181,14 +181,14 @@ async function waitFor(
         `tools/list response missing; raw stdout:\n${stdoutRef.current}`,
       ).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
-      expect(tools.find((t) => t.name === 'mdr_review')).toBeDefined();
+      expect(tools.find((t) => t.name === 'mdr_comment')).toBeDefined();
     } finally {
       child.kill();
     }
   }, 15_000);
 
-  it('advertises mdr_review with an optional sessionId and no required filePaths', async () => {
-    // The reported symptom was read straight off this inventory: mdr_review
+  it('advertises mdr_comment with an optional sessionId and no required filePaths', async () => {
+    // The reported symptom was read straight off this inventory: mdr_comment
     // exposed no way to name a session, so every reply batch minted one.
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -221,7 +221,7 @@ async function waitFor(
           }>;
         }
       ).tools;
-      const review = tools.find((t) => t.name === 'mdr_review');
+      const review = tools.find((t) => t.name === 'mdr_comment');
       expect(review).toBeDefined();
       expect(Object.keys(review!.inputSchema.properties)).toContain('sessionId');
       expect(review!.inputSchema.required ?? []).not.toContain('filePaths');
@@ -230,7 +230,62 @@ async function waitFor(
     }
   }, 15_000);
 
-  it('dispatches mdr_review to handleReviewToolCall', async () => {
+  it('dispatches mdr_comment to handleReviewToolCall', async () => {
+    const child = spawn('node', [BIN, 'mcp'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_ENV: 'test' },
+    });
+
+    const stdoutRef = { current: '' };
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutRef.current += chunk.toString('utf8');
+    });
+
+    try {
+      child.stdin.write(
+        rpcRequest(1, 'initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '0' },
+        }),
+      );
+
+      await waitFor(stdoutRef, (parsed) => parsed.some((r) => r.id === 1), 5_000);
+
+      child.stdin.write(
+        rpcRequest(2, 'tools/call', {
+          name: 'mdr_comment',
+          arguments: {
+            filePaths: ['/tmp/test-fixture.md'],
+            comments: [{ filePath: '/tmp/test-fixture.md', anchor: 'hello', text: 'feedback' }],
+            waitForResponse: false,
+          },
+        }),
+      );
+
+      const afterCall = await waitFor(
+        stdoutRef,
+        (parsed) => parsed.some((r) => r.id === 2),
+        10_000,
+      );
+      const callResp = afterCall.find((r) => r.id === 2);
+      expect(
+        callResp,
+        `tools/call response missing; raw stdout:\n${stdoutRef.current}`,
+      ).toBeDefined();
+      // Either a result or an error is acceptable — the key thing is the tool was dispatched
+      // (not "Unknown tool: mdr_comment"). If there's an error, it should not be about unknown tool.
+      if (callResp?.error) {
+        expect(callResp.error.message).not.toMatch(/Unknown tool/);
+      } else {
+        expect(callResp?.result).toBeDefined();
+      }
+    } finally {
+      child.kill();
+    }
+  }, 15_000);
+
+  it('still dispatches the old mdr_review name, which is unadvertised but accepted', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, NODE_ENV: 'test' },
@@ -273,8 +328,10 @@ async function waitFor(
         callResp,
         `tools/call response missing; raw stdout:\n${stdoutRef.current}`,
       ).toBeDefined();
-      // Either a result or an error is acceptable — the key thing is the tool was dispatched
-      // (not "Unknown tool: mdr_review"). If there's an error, it should not be about unknown tool.
+      // A saved prompt or a pinned agent config naming the old tool has to
+      // keep working: the rename is about what tools/list offers, not about
+      // breaking callers. Either a result or an error is acceptable — the key thing is the tool was dispatched
+      // (not "Unknown tool: mdr_comment"). If there's an error, it should not be about unknown tool.
       if (callResp?.error) {
         expect(callResp.error.message).not.toMatch(/Unknown tool/);
       } else {

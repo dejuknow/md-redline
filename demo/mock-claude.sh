@@ -186,8 +186,8 @@ agent_review_mode() {
   echo -e "    anchored to the relevant sections."
   echo ""
 
-  # Tool call: mdr_review posts the comments and returns immediately
-  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_review${RESET}${DIM}({\"filePaths\": [\"prd.md\"], \"comments\": [...4]})${RESET}"
+  # Tool call: mdr_comment posts the comments and returns immediately
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_comment${RESET}${DIM}({\"filePaths\": [\"prd.md\"], \"comments\": [...4]})${RESET}"
   sleep 0.4
   echo -e "    ${GREEN}✓${RESET} ${DIM}Posted 4 comments. Review open in md-redline.${RESET}"
   echo ""
@@ -206,7 +206,7 @@ agent_review_done_mode() {
   # Reproduce the tail of agent_review_mode so the clip reads as a
   # continuation — the CLI is still blocked on the mdr_wait tool call.
   echo ""
-  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_review${RESET}${DIM}({\"filePaths\": [\"prd.md\"], \"comments\": [...4]})${RESET}"
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_comment${RESET}${DIM}({\"filePaths\": [\"prd.md\"], \"comments\": [...4]})${RESET}"
   echo -e "    ${GREEN}✓${RESET} ${DIM}Posted 4 comments. Review open in md-redline.${RESET}"
   echo ""
   echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_wait${RESET}${DIM}({\"sessionId\": \"rev_7f3a\"})${RESET}"

@@ -1,10 +1,10 @@
 #!/usr/bin/env tsx
 /**
- * Simulate the mdr_review flow against a running mdr server.
+ * Simulate the mdr_comment flow against a running mdr server.
  *
  * This is a sibling to simulate-agent-ask.ts. Where that script exercises a
  * single anchored question with expectsReply=true, this one exercises the
- * full mdr_review surface: posting multiple synthetic review comments in
+ * full mdr_comment surface: posting multiple synthetic review comments in
  * fire-and-forget, wait, or release modes.
  *
  * Usage:

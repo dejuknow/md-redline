@@ -2520,7 +2520,7 @@ describe('review sessions API', () => {
   });
 
   it('does NOT dedupe across origins (agent must not attach to user session)', async () => {
-    // The user opens a review of a file. Then an agent calls mdr_review on
+    // The user opens a review of a file. Then an agent calls mdr_comment on
     // the same file. The agent must get a fresh agent-origin session — never
     // the user's — because the two have incompatible terminal-state contracts.
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-cross-origin-')));
@@ -2560,7 +2560,7 @@ async function buildTestApp(options: { allowedRoots: string[] }) {
   return { app: testApp, reviewSessions: testReviewSessions };
 }
 
-describe('mdr_review attaching to an existing session (end to end)', () => {
+describe('mdr_comment attaching to an existing session (end to end)', () => {
   /**
    * A client that speaks to the real Hono app instead of the network. The
    * handler, the route, the session store, and the on-disk markers are all
@@ -2611,7 +2611,7 @@ describe('mdr_review attaching to an existing session (end to end)', () => {
     await writeFile(filePath, seeded, 'utf8');
 
     const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
-    // origin:'user' is what mdr_request_review opens — the session mdr_review
+    // origin:'user' is what mdr_request_review opens — the session mdr_comment
     // could not previously reach, because createSession's dedupe filters on
     // origin and would have minted a second, agent-origin one.
     const create = await testApp.request('/api/review-sessions', {
@@ -3533,9 +3533,9 @@ describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
   });
 });
 
-describe('mdr_review reply resolves a pending mdr_ask + cleans markers', () => {
+describe('mdr_comment reply resolves a pending mdr_ask + cleans markers', () => {
   it('replied markers are removed; unreplied are preserved with expectsReply cleared', async () => {
-    // The agent posts mdr_ask with 2 questions, then posts mdr_review with
+    // The agent posts mdr_ask with 2 questions, then posts mdr_comment with
     // a `replies:[]` that targets only ONE of those commentIds. The route
     // should: (a) resolve the in-memory ask waiter with the matching reply,
     // (b) remove the marker for the replied question, (c) preserve the
@@ -3571,7 +3571,7 @@ describe('mdr_review reply resolves a pending mdr_ask + cleans markers', () => {
     // Park the ask waiter so we can observe its resolution.
     const waiter = reviewSessions.waitForAsk(askId)!;
 
-    // Now post mdr_review with a reply to ONLY q1.
+    // Now post mdr_comment with a reply to ONLY q1.
     const review = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3649,7 +3649,7 @@ describe('agentCommentCount rollback when addAsk fails', () => {
 describe('rollback restores expectsReply when appendReply cleared it', () => {
   it('restores expectsReply on a previously-pending ask marker after batch rollback', async () => {
     // Scenario: agent posts mdr_ask (commentId X has expectsReply:true).
-    // Agent then posts mdr_review with replies:[{commentId:X}] AND a comment
+    // Agent then posts mdr_comment with replies:[{commentId:X}] AND a comment
     // with an anchor that does NOT match — triggering rollback. The reply
     // that landed clears expectsReply on X; rollback must restore it so the
     // pending question keeps surfacing in the ask UI.
@@ -3681,7 +3681,7 @@ describe('rollback restores expectsReply when appendReply cleared it', () => {
     expect(askedMatch).not.toBeNull();
     const askCommentId = askedMatch![1];
 
-    // Now post mdr_review with a reply targeting that ask AND a comment
+    // Now post mdr_comment with a reply targeting that ask AND a comment
     // whose anchor doesn't exist — forces rollback.
     const review = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
