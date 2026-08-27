@@ -120,6 +120,30 @@ describe('CommentsRail - a card is hidden until its height is measured', () => {
     expect(cardEl(container, 'c1')?.style.visibility).toBe('hidden');
   });
 
+  it('hides a measured card whose anchor has not painted yet', () => {
+    // The case that shipped three broken fixes: height arrives from the
+    // ResizeObserver before the highlight mark paints, so the card is measured
+    // but unanchored, and resolveCollisions has stacked it from 0.
+    const { container } = renderRail({
+      layout: layout({
+        measuredIds: new Set(['c1', 'c2']),
+        anchorTops: new Map(),
+      }),
+      missingAnchors: new Set<string>(),
+    });
+    expect(cardEl(container, 'c1')?.style.visibility).toBe('hidden');
+  });
+
+  it('shows a genuine orphan straight away, without waiting on paint', () => {
+    // detectMissingAnchors reads the document text, so a comment whose anchor
+    // is really gone is known immediately and must not be held back.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set(['c1']),
+    });
+    expect(cardEl(container, 'c1')?.style.visibility).toBe('');
+  });
+
   it('shows it once measured', () => {
     const { container } = renderRail({
       layout: layout({ measuredIds: new Set(['c1', 'c2']) }),

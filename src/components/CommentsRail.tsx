@@ -455,7 +455,18 @@ function AnchoredCards({
         const top = layout.tops.get(comment.id);
         if (top === undefined) return null;
         const active = comment.id === activeCommentId;
-        const placed = layout.measuredIds.has(comment.id);
+        // Safe to show once BOTH questions are answered: the height is
+        // measured, and the anchor is either resolved or known to be missing.
+        // A comment whose mark has not painted yet has neither, and
+        // resolveCollisions reads that as an orphan and stacks it from 0, so
+        // showing it puts a card at the top of the rail that then jumps to its
+        // anchor. `missingAnchors` comes from detectMissingAnchors over the
+        // document TEXT, so a real orphan is known at once and never waits on
+        // paint. Deriving this from tick ordering instead produced three wrong
+        // fixes in a row.
+        const placed =
+          layout.measuredIds.has(comment.id) &&
+          (layout.anchorTops.has(comment.id) || missingAnchors.has(comment.id));
         return (
           <div
             key={comment.id}

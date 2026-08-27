@@ -10,9 +10,13 @@ export interface MarginLayout {
    * Cards whose height has actually been measured. Everything else is placed
    * against a 120px estimate, which is shorter than a real card, so an
    * unmeasured card is positioned where it overlaps its neighbour and jumps
-   * clear once the observer fires. Callers keep those hidden until they land:
-   * a frame of nothing reads better than a frame of two cards on top of each
-   * other followed by a 150ms slide.
+   * clear once the observer fires.
+   *
+   * Necessary but not sufficient for showing a card: a comment whose anchor has
+   * not painted yet has no `anchorTops` entry, which resolveCollisions reads as
+   * an orphan and stacks from 0. Pair this with `anchorTops` and the caller's
+   * own missing-anchor set, which comes from the document text rather than from
+   * paint timing.
    */
   measuredIds: ReadonlySet<string>;
   anchorTops: Map<string, number>;
@@ -37,11 +41,6 @@ export function useMarginLayout(
   paintTick: number,
 ): MarginLayout {
   const [anchorTops, setAnchorTops] = useState<Map<string, number>>(new Map());
-  // The paint tick the anchor pass below last COMPLETED at. Gating a reveal on
-  // the tick itself is one render too early: the tick changes, this memo runs
-  // against the previous anchorTops, and the card is revealed at the orphan
-  // position for exactly one frame before the effect corrects it.
-  const [anchorPassTick, setAnchorPassTick] = useState(-1);
   const [heights, setHeights] = useState<Map<string, number>>(new Map());
   const cardNodes = useRef(new Map<string, HTMLDivElement>());
   const heightObserver = useRef<ResizeObserver | null>(null);
@@ -70,7 +69,6 @@ export function useMarginLayout(
       }
       return next;
     });
-    setAnchorPassTick(paintTick);
   }, [active, pageRef, comments, paintTick, remeasureTick]);
 
   // Mermaid stabilization and image loads can shift prose height after the
@@ -143,26 +141,6 @@ export function useMarginLayout(
     };
   }, []);
 
-  // A comment that has just arrived has no anchorTop, because its highlight
-  // mark has not painted yet. resolveCollisions reads a missing anchorTop as
-  // an orphan and stacks orphans from 0, so the card is placed at the TOP of
-  // the rail and then jumps to its anchor once the mark paints. With
-  // `transition: top` on the card that jump is a slide down the full height of
-  // the document, straight over its neighbours, fading in on the way.
-  //
-  // The card is safe to show once the anchor question is SETTLED: it either has
-  // an anchorTop, or a paint pass has run since it appeared and still produced
-  // none, which makes it a genuine orphan rather than one still being painted.
-  // The tick always advances, since MarkdownViewer fires it at the end of every
-  // highlight pass whether or not anything matched.
-  const appearedAtTick = useRef(new Map<string, number>());
-  useEffect(() => {
-    const seen = appearedAtTick.current;
-    const live = new Set(comments.map((c) => c.id));
-    for (const id of comments.map((c) => c.id)) if (!seen.has(id)) seen.set(id, paintTick);
-    for (const id of [...seen.keys()]) if (!live.has(id)) seen.delete(id);
-  }, [comments, paintTick]);
-
   const { tops, orphanIds, layerHeight, measuredIds } = useMemo(() => {
     const entries: MarginEntry[] = comments.map((c) => ({
       id: c.id,
@@ -176,17 +154,14 @@ export function useMarginLayout(
       const top = resolved.get(e.id);
       if (top !== undefined) bottom = Math.max(bottom, top + e.height);
     }
-    // Settled means a pass has actually RUN since the comment appeared and
-    // still found no anchor, which makes it a real orphan. Comparing against
-    // the live tick instead would reveal it in the render between the tick
-    // advancing and the pass producing its result.
-    const anchorSettled = (id: string) =>
-      anchorTops.has(id) || (appearedAtTick.current.get(id) ?? Infinity) < anchorPassTick;
-    const measured = new Set(
-      entries.filter((e) => heights.has(e.id) && anchorSettled(e.id)).map((e) => e.id),
-    );
+    // Height only. Whether a card is safe to SHOW also depends on its anchor
+    // being resolved, but that question is answered deterministically by
+    // detectMissingAnchors, which reads the document text rather than waiting
+    // on paint, so the caller settles it instead of this hook guessing from
+    // tick ordering. Three attempts at guessing produced three wrong answers.
+    const measured = new Set(entries.filter((e) => heights.has(e.id)).map((e) => e.id));
     return { tops: resolved, orphanIds: orphans, layerHeight: bottom + 24, measuredIds: measured };
-  }, [comments, anchorTops, heights, activeCommentId, paintTick, anchorPassTick]);
+  }, [comments, anchorTops, heights, activeCommentId]);
 
   return { active, tops, anchorTops, orphanIds, registerCardRef, layerHeight, measuredIds };
 }
