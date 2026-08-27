@@ -575,8 +575,9 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                         Enable resolve workflow
                       </h3>
                       <p className="text-xs text-content-muted mt-0.5">
-                        Adds resolve and reopen actions for reviewing with humans. Leave off when
-                        working with AI agents.
+                        Comments carry an open or resolved state, and an agent marks each one it
+                        addresses instead of deleting the marker. Turn this off to have addressed
+                        comments removed from the file instead.
                       </p>
                     </div>
                     <button

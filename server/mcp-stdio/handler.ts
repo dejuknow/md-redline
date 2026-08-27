@@ -679,7 +679,9 @@ export async function handleReviewToolCall(
   // 2. Create agent-origin session
   const session = await ctx.client.createSession({
     filePaths: input.filePaths,
-    enableResolve: input.enableResolve ?? false,
+    // Undefined stays undefined: the server resolves it from the reader's
+    // saved preference. `?? false` here made that inheritance unreachable.
+    enableResolve: input.enableResolve,
     origin: 'agent',
   });
 

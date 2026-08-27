@@ -95,11 +95,21 @@ const LEGACY_TEMPLATE_TEXTS = new Map<string, string>([
   ],
 ]);
 
+/**
+ * Whether a review tracks per-comment open/resolved state.
+ *
+ * Shared with the server, which uses it as the fallback when an agent opens a
+ * session without saying which mode it wants. Two independent defaults is how
+ * a reader ended up looking at a resolve-mode sidebar while the agent had been
+ * handed remove-mode instructions.
+ */
+export const DEFAULT_ENABLE_RESOLVE = true;
+
 export const DEFAULT_SETTINGS: AppSettings = {
   templates: DEFAULT_TEMPLATES,
   commentMaxLength: 1000,
   showTemplatesByDefault: true,
-  enableResolve: false,
+  enableResolve: DEFAULT_ENABLE_RESOLVE,
   quickComment: false,
   mermaidFullscreenPanelCollapsed: false,
   proseFont: 'serif',

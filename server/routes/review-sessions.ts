@@ -120,6 +120,14 @@ export async function deliverInlineAskReplies(opts: {
  */
 export interface ReviewSessionRoutesDeps {
   resolveAndValidate: (path: string) => Promise<string>;
+  /**
+   * Resolve mode for a session whose creator did not specify one. Reads the
+   * reader's saved preference, so the mode the agent is instructed in matches
+   * the mode the reader is looking at. They used to be independent: the UI
+   * could show Open/Resolved while the agent had been told to delete every
+   * marker it addressed, which destroyed any comment that was a question.
+   */
+  getDefaultEnableResolve: () => Promise<boolean>;
   readFileText: (resolvedPath: string) => Promise<string>;
   writeFileText: (resolvedPath: string, content: string) => Promise<void>;
   /**
@@ -160,7 +168,13 @@ export function registerReviewSessionRoutes(
   reviewSessions: ReviewSessionStore,
   deps: ReviewSessionRoutesDeps,
 ): void {
-  const { resolveAndValidate, readFileText, transformFile, notifyFileChanged } = deps;
+  const {
+    resolveAndValidate,
+    readFileText,
+    transformFile,
+    notifyFileChanged,
+    getDefaultEnableResolve,
+  } = deps;
 
   /**
    * Clear the on-disk `expectsReply` flag on the given questions' markers,
@@ -283,7 +297,8 @@ export function registerReviewSessionRoutes(
 
     const session = reviewSessions.createSession({
       filePaths: resolved,
-      enableResolve: enableResolve === true,
+      enableResolve:
+        typeof enableResolve === 'boolean' ? enableResolve : await getDefaultEnableResolve(),
       origin,
       clientId,
     });

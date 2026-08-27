@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseSettings, DEFAULT_SETTINGS, DEFAULT_TEMPLATES } from './settings';
+import {
+  parseSettings,
+  DEFAULT_SETTINGS,
+  DEFAULT_TEMPLATES,
+  DEFAULT_ENABLE_RESOLVE,
+} from './settings';
 
 describe('parseSettings', () => {
   it('returns defaults for null', () => {
@@ -29,7 +34,7 @@ describe('parseSettings', () => {
   });
 
   it('falls back to default when enableResolve is not a boolean', () => {
-    expect(parseSettings({ enableResolve: 'yes' }).enableResolve).toBe(false);
+    expect(parseSettings({ enableResolve: 'yes' }).enableResolve).toBe(DEFAULT_ENABLE_RESOLVE);
   });
 
   it('preserves valid quickComment value', () => {
@@ -80,7 +85,9 @@ describe('parseSettings', () => {
       showTemplatesByDefault: false,
     };
     const result = parseSettings(input);
-    expect(result.enableResolve).toBe(false);
+    // An install predating this field adopts the current default rather than
+    // being pinned to whatever it happened to be when they upgraded.
+    expect(result.enableResolve).toBe(DEFAULT_ENABLE_RESOLVE);
     expect(result.quickComment).toBe(false);
     expect(result.commentMaxLength).toBe(1000);
     expect(result.showTemplatesByDefault).toBe(false);
@@ -189,5 +196,19 @@ describe('parseSettings proseSize', () => {
   it('accepts valid values', () => {
     expect(parseSettings({ proseSize: 'small' }).proseSize).toBe('small');
     expect(parseSettings({ proseSize: 'large' }).proseSize).toBe('large');
+  });
+});
+
+describe('enableResolve default', () => {
+  it('defaults to resolve mode', () => {
+    // Pinned deliberately: the server reads the same constant as its fallback
+    // when an agent opens a session without naming a mode, so a change here
+    // silently changes what agents are instructed to do.
+    expect(DEFAULT_ENABLE_RESOLVE).toBe(true);
+    expect(parseSettings({}).enableResolve).toBe(true);
+  });
+
+  it('still honours an explicit false', () => {
+    expect(parseSettings({ enableResolve: false }).enableResolve).toBe(false);
   });
 });
