@@ -6,6 +6,7 @@ import { score } from './scorer.js';
 import { getFormat } from './formats/index.js';
 import { claudeCli } from './agents/claude-cli.js';
 import { claudeCliResolve } from './agents/claude-cli-resolve.js';
+import { claudeCliRemove } from './agents/claude-cli-remove.js';
 import type { AgentAdapter, EvalCase, ExpectedCriteria, ScoringResult } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,7 @@ const RESULTS_DIR = join(__dirname, 'results');
 const agents: Record<string, AgentAdapter> = {
   'claude-cli': claudeCli,
   'claude-cli-resolve': claudeCliResolve,
+  'claude-cli-remove': claudeCliRemove,
 };
 
 async function discoverCases(filter?: string): Promise<EvalCase[]> {

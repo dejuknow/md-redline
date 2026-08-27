@@ -5,10 +5,31 @@ export interface EvalCase {
   expectedPath: string;
 }
 
+/**
+ * What should become of one comment's marker once the agent has addressed it.
+ *
+ *   removed   the marker is gone from the file
+ *   resolved  the marker survives, carries a reply, and is marked resolved
+ *   answered  the marker survives carrying a reply, with no status required
+ *
+ * `answered` is the disposition a QUESTION gets. A comment that only wanted an
+ * answer keeps its marker in both modes, because the reply is the answer and
+ * deleting the marker deletes it. Without this the scorer could only express
+ * the per-case rule, so a remove-mode fixture had to expect every addressed
+ * marker gone and would mark correct question-handling as a failure.
+ */
+export type MarkerDisposition = 'removed' | 'resolved' | 'answered';
+
 export interface CommentExpectation {
   id: string;
   /** What the agent should do with this comment */
   expectedAction: 'address' | 'skip';
+  /**
+   * Overrides the case's `markerMode` for this comment. Defaults to `removed`
+   * in remove mode and `resolved` in resolve mode, which is what every
+   * pre-existing fixture means.
+   */
+  expectedMarker?: MarkerDisposition;
   /** Content assertions near the anchor after the agent acts */
   contentHints?: {
     shouldContain?: string[];
