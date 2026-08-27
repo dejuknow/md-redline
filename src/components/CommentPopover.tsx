@@ -8,6 +8,8 @@ interface Props {
   pageRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   sent: boolean;
+  /** See CommentCard's `answered`. */
+  answered?: boolean;
   anchorMissing: boolean;
   onReply: (commentId: string, text: string) => void;
   onResolve?: (id: string) => void;
@@ -27,7 +29,15 @@ const WIDTH = 320;
  * in App.tsx. Closes on Escape, an outside click, the rail becoming
  * available, or the active file changing.
  */
-export function CommentPopover({ comment, pageRef, onClose, sent, anchorMissing, ...cb }: Props) {
+export function CommentPopover({
+  comment,
+  pageRef,
+  onClose,
+  sent,
+  answered,
+  anchorMissing,
+  ...cb
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
@@ -102,6 +112,7 @@ export function CommentPopover({ comment, pageRef, onClose, sent, anchorMissing,
         active
         anchorMissing={anchorMissing}
         sent={sent}
+        answered={answered}
         onSelect={() => {}}
         onReply={cb.onReply}
         onResolve={cb.onResolve}
