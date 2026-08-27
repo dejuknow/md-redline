@@ -571,6 +571,14 @@ export default function App() {
   const rawViewRef = useRef<RawViewHandle>(null);
   const renderedDiffRef = useRef<RenderedDiffViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Selection is scoped to the prose column, NOT to containerRef. containerRef
+  // is the scroll container, and CommentsRail mounts inside it, so resolving a
+  // selection against it treats the comment sidebar as part of the document:
+  // dragging across a comment card opened a composer anchored to sidebar text,
+  // and contextAfter for a selection near the end of the document ran on into
+  // rail text. useDragHandles already measures against the viewer's own
+  // container for the same reason.
+  const proseRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
@@ -690,7 +698,7 @@ export default function App() {
   }, []);
 
   const { selection, commentSelection, isPending, clearSelection, lockSelection } = useSelection(
-    containerRef as RefObject<HTMLElement | null>,
+    proseRef as RefObject<HTMLElement | null>,
   );
   const requestCommentFocus = useCallback(
     (commentId: string, origin: CommentFocusOrigin = 'jump') =>
@@ -3074,6 +3082,8 @@ export default function App() {
                           }}
                         >
                           <div
+                            ref={proseRef}
+                            data-prose-column
                             className="motion-safe:transition-[width] motion-safe:duration-150"
                             style={{ marginLeft: PAD_L, width: geometry.colWidth }}
                           >
