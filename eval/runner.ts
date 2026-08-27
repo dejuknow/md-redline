@@ -8,6 +8,7 @@ import { claudeCli } from './agents/claude-cli.js';
 import { claudeCliResolve } from './agents/claude-cli-resolve.js';
 import { claudeCliRemove } from './agents/claude-cli-remove.js';
 import type { AgentAdapter, EvalCase, ExpectedCriteria, ScoringResult } from './types.js';
+import { decideSkip } from './case-selection.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(__dirname, 'fixtures');
@@ -210,9 +211,8 @@ async function main() {
     // A case that declares an agent requirement is scored only under that
     // agent. Scoring it anyway would report a confident number for a run that
     // could not have produced the behavior the case exists to measure.
-    const required: string | undefined = JSON.parse(
-      await readFile(evalCase.expectedPath, 'utf-8'),
-    ).requiresAgent;
+    const expectedRaw = JSON.parse(await readFile(evalCase.expectedPath, 'utf-8'));
+    const required: string | undefined = expectedRaw.requiresAgent;
     // A typo here would otherwise skip the case under every agent forever,
     // leaving only a log line behind — the quietest way to lose a fixture.
     if (required && !agents[required]) {
@@ -221,9 +221,17 @@ async function main() {
       );
       process.exit(1);
     }
-    if (required && required !== agentName) {
-      skipped.push(`${evalCase.name} (needs agent "${required}")`);
-      console.log(`Skipping: ${evalCase.name} — needs agent "${required}", running "${agentName}"`);
+
+    const decision = decideSkip({
+      caseName: evalCase.name,
+      caseMode: expectedRaw.markerMode,
+      requiresAgent: required,
+      agentName,
+      agentMode: agent.markerMode,
+    });
+    if (decision.skip) {
+      skipped.push(decision.message);
+      console.log(`Skipping: ${decision.message}`);
       continue;
     }
 

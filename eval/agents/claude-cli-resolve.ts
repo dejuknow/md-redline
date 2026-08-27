@@ -20,6 +20,7 @@ import type { AgentAdapter } from '../types.js';
  */
 export const claudeCliResolve: AgentAdapter = {
   name: 'claude-cli-resolve',
+  markerMode: 'resolve',
 
   async run(inputPath: string, casePrompt: string): Promise<string> {
     const tempDir = await mkdtemp(join(tmpdir(), 'md-eval-resolve-'));
