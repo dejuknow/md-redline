@@ -1,0 +1,22 @@
+{
+  "markerMode": "resolve",
+  "totalComments": 1,
+  "actionableComments": 1,
+  "comments": [
+    {
+      "id": "eval-20-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": [
+          "middleware",
+          "403"
+        ],
+        "shouldNotContain": [
+          "Permission checks happen at the API layer. Unauthorized requests are rejected."
+        ]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": []
+}
