@@ -16,13 +16,18 @@
 // local iteration or an offline emergency. Real releases never set this.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
 import { evaluateCiRuns } from './ci-status.mjs';
+import {
+  evaluateEvalFreshness,
+  parseRunDirName,
+  SHIPPED_PROMPT_AGENTS,
+} from './eval-freshness.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -179,6 +184,82 @@ function verifyCiGreen() {
     );
   }
   console.log(`  ✓ ${result.message} (${shortSha})`);
+}
+
+/**
+ * Files whose CONTENT is an instruction an agent follows. A defect in one is
+ * not a type error or a failing assertion; it is prose that reads fine and
+ * behaves wrong, so nothing in the CI matrix can see it.
+ */
+const AGENT_FACING_FILES = ['src/lib/agent-prompts.ts', 'server/mcp-stdio/server.ts'];
+
+/**
+ * Gate the release on the eval harness having been run against the current
+ * agent-facing text.
+ *
+ * CI cannot do this. It runs `eval:dry`, which validates fixture structure and
+ * makes no model calls, so a prompt whose numbered steps contradict each other
+ * goes green on the full matrix. That is not hypothetical: a change telling the
+ * agent to reply to every comment, paired with a rule that kept the marker when
+ * a comment "only needed a reply", made that condition always true. Every
+ * marker was kept, the deletion-request fixture fell from 100% to 60%, and it
+ * shipped past three adversarial reviews and a green matrix. One model run
+ * found it.
+ *
+ * Release is the right place for the check rather than per-PR CI: eval costs
+ * real model calls and its scores move between runs, so it would block PRs at
+ * random, but a release is deliberate and a human reads the number.
+ *
+ * What this does NOT verify: which prompt a run actually exercised. It compares
+ * a run's timestamp against the last commit touching the watched files, so a
+ * deliberate control run against a reverted prompt satisfies it. That is a real
+ * workflow, since comparing before and after is how you tell a regression from
+ * a pre-existing gap, so re-run against HEAD before releasing. Closing the hole
+ * properly means the runner recording a fingerprint of the prompt it built, and
+ * the gate comparing that instead of a clock.
+ *
+ * Uncommitted edits to a watched file cannot slip past: preflight() already
+ * refuses to release from a dirty tree, so the last commit time is the content.
+ */
+function verifyEvalFresh() {
+  if (process.env.RELEASE_SKIP_EVAL_CHECK === '1') {
+    console.log('\n→ Skipping eval gate (RELEASE_SKIP_EVAL_CHECK=1)');
+    console.warn('  ! Publishing without confirming the eval ran against the current prompt.');
+    return;
+  }
+
+  console.log('\n→ Verifying eval was run against the current agent-facing text');
+
+  const watched = AGENT_FACING_FILES.map((path) => {
+    let out = '';
+    try {
+      out = run('git', ['log', '-1', '--format=%ct', '--', path], { capture: true }).trim();
+    } catch {
+      out = '';
+    }
+    return { path, changedAt: out === '' ? null : Number(out) };
+  });
+
+  const resultsDir = join(PROJECT_ROOT, 'eval', 'results');
+  let runs = [];
+  if (existsSync(resultsDir)) {
+    runs = readdirSync(resultsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => parseRunDirName(d.name))
+      .filter(Boolean);
+  }
+
+  const result = evaluateEvalFreshness(watched, runs);
+  if (!result.ok) {
+    throw new Error(
+      `Eval gate failed: ${result.message}\n` +
+        `Run it for each shipped-prompt agent, e.g.\n` +
+        SHIPPED_PROMPT_AGENTS.map((a) => `  npm run eval -- --agent ${a}`).join('\n') +
+        `\nRead the per-case scores, not just the average; a single dimension can drop while the total still looks healthy.\n` +
+        `If you are genuinely unable to run it, set RELEASE_SKIP_EVAL_CHECK=1 to bypass (not recommended).`,
+    );
+  }
+  console.log(`  ✓ ${result.message}`);
 }
 
 function readPackageVersion() {
@@ -411,6 +492,7 @@ async function main() {
   preflight();
   runLocalUnitTests();
   verifyCiGreen();
+  verifyEvalFresh();
 
   const currentVersion = readPackageVersion();
   const nextVersion = computeNextVersion(type);

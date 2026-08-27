@@ -1619,6 +1619,32 @@ From `src/lib/agent-prompts.ts`:
   comment, which remove mode used to instruct, destroys the question and
   records no answer.
 
+### Changing agent-facing text
+
+`src/lib/agent-prompts.ts` and the tool descriptions in
+`server/mcp-stdio/server.ts` are instructions an agent follows, not code. A
+defect in one is prose that reads fine and behaves wrong, so neither types nor
+assertions can see it: a unit test can only confirm the string contains a
+substring, and it did while a contradiction between two numbered steps made an
+agent keep every marker.
+
+Run the eval harness against a change to either, for both shipped-prompt
+agents, and read the per-case scores rather than the average:
+
+```bash
+npm run eval -- --agent claude-cli-remove
+npm run eval -- --agent claude-cli-resolve
+```
+
+When a case scores below 100%, run the same case against the previous wording
+before assuming you caused it. Several fixtures have pre-existing gaps, and the
+difference between "I broke this" and "this was already here" is one control
+run. `scripts/release.mjs` refuses to publish when the newest run for either
+agent predates the last change to these files.
+
+Playwright covers the other half: `e2e/handoff.spec.ts` asserts the prompt's
+wording verbatim, so a reword breaks it and `npm test` alone will not tell you.
+
 ## Development
 
 Prerequisite: Node 20 or newer.
