@@ -37,6 +37,11 @@ export function useMarginLayout(
   paintTick: number,
 ): MarginLayout {
   const [anchorTops, setAnchorTops] = useState<Map<string, number>>(new Map());
+  // The paint tick the anchor pass below last COMPLETED at. Gating a reveal on
+  // the tick itself is one render too early: the tick changes, this memo runs
+  // against the previous anchorTops, and the card is revealed at the orphan
+  // position for exactly one frame before the effect corrects it.
+  const [anchorPassTick, setAnchorPassTick] = useState(-1);
   const [heights, setHeights] = useState<Map<string, number>>(new Map());
   const cardNodes = useRef(new Map<string, HTMLDivElement>());
   const heightObserver = useRef<ResizeObserver | null>(null);
@@ -65,6 +70,7 @@ export function useMarginLayout(
       }
       return next;
     });
+    setAnchorPassTick(paintTick);
   }, [active, pageRef, comments, paintTick, remeasureTick]);
 
   // Mermaid stabilization and image loads can shift prose height after the
@@ -170,13 +176,17 @@ export function useMarginLayout(
       const top = resolved.get(e.id);
       if (top !== undefined) bottom = Math.max(bottom, top + e.height);
     }
+    // Settled means a pass has actually RUN since the comment appeared and
+    // still found no anchor, which makes it a real orphan. Comparing against
+    // the live tick instead would reveal it in the render between the tick
+    // advancing and the pass producing its result.
     const anchorSettled = (id: string) =>
-      anchorTops.has(id) || (appearedAtTick.current.get(id) ?? paintTick) < paintTick;
+      anchorTops.has(id) || (appearedAtTick.current.get(id) ?? Infinity) < anchorPassTick;
     const measured = new Set(
       entries.filter((e) => heights.has(e.id) && anchorSettled(e.id)).map((e) => e.id),
     );
     return { tops: resolved, orphanIds: orphans, layerHeight: bottom + 24, measuredIds: measured };
-  }, [comments, anchorTops, heights, activeCommentId, paintTick]);
+  }, [comments, anchorTops, heights, activeCommentId, paintTick, anchorPassTick]);
 
   return { active, tops, anchorTops, orphanIds, registerCardRef, layerHeight, measuredIds };
 }
