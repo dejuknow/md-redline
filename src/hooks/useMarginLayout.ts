@@ -137,6 +137,26 @@ export function useMarginLayout(
     };
   }, []);
 
+  // A comment that has just arrived has no anchorTop, because its highlight
+  // mark has not painted yet. resolveCollisions reads a missing anchorTop as
+  // an orphan and stacks orphans from 0, so the card is placed at the TOP of
+  // the rail and then jumps to its anchor once the mark paints. With
+  // `transition: top` on the card that jump is a slide down the full height of
+  // the document, straight over its neighbours, fading in on the way.
+  //
+  // The card is safe to show once the anchor question is SETTLED: it either has
+  // an anchorTop, or a paint pass has run since it appeared and still produced
+  // none, which makes it a genuine orphan rather than one still being painted.
+  // The tick always advances, since MarkdownViewer fires it at the end of every
+  // highlight pass whether or not anything matched.
+  const appearedAtTick = useRef(new Map<string, number>());
+  useEffect(() => {
+    const seen = appearedAtTick.current;
+    const live = new Set(comments.map((c) => c.id));
+    for (const id of comments.map((c) => c.id)) if (!seen.has(id)) seen.set(id, paintTick);
+    for (const id of [...seen.keys()]) if (!live.has(id)) seen.delete(id);
+  }, [comments, paintTick]);
+
   const { tops, orphanIds, layerHeight, measuredIds } = useMemo(() => {
     const entries: MarginEntry[] = comments.map((c) => ({
       id: c.id,
@@ -150,9 +170,13 @@ export function useMarginLayout(
       const top = resolved.get(e.id);
       if (top !== undefined) bottom = Math.max(bottom, top + e.height);
     }
-    const measured = new Set(entries.filter((e) => heights.has(e.id)).map((e) => e.id));
+    const anchorSettled = (id: string) =>
+      anchorTops.has(id) || (appearedAtTick.current.get(id) ?? paintTick) < paintTick;
+    const measured = new Set(
+      entries.filter((e) => heights.has(e.id) && anchorSettled(e.id)).map((e) => e.id),
+    );
     return { tops: resolved, orphanIds: orphans, layerHeight: bottom + 24, measuredIds: measured };
-  }, [comments, anchorTops, heights, activeCommentId]);
+  }, [comments, anchorTops, heights, activeCommentId, paintTick]);
 
   return { active, tops, anchorTops, orphanIds, registerCardRef, layerHeight, measuredIds };
 }
