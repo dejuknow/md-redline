@@ -41,6 +41,9 @@ function layout(overrides: Partial<MarginLayout> = {}): MarginLayout {
       ['c2', 0],
     ]),
     anchorTops: new Map([['c1', 100]]),
+    // Both measured by default: the hidden-until-placed path is exercised by
+    // its own cases rather than silently applying to every other test here.
+    measuredIds: new Set(['c1', 'c2']),
     orphanIds: ['c2'],
     registerCardRef: vi.fn(),
     layerHeight: 400,
@@ -99,6 +102,48 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+describe('CommentsRail - a card is hidden until its height is measured', () => {
+  // An unmeasured card is positioned against useMarginLayout's 120px estimate,
+  // which is shorter than a real card, so it lands on top of its neighbour and
+  // then slides clear once the ResizeObserver fires. Showing it during that
+  // pass is what made a second agent comment appear to shove the first one.
+  function cardEl(container: HTMLElement, id: string) {
+    return container.querySelector<HTMLElement>(`[data-margin-card-id="${id}"]`);
+  }
+
+  it('hides a card that has no measured height yet', () => {
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c2']) }),
+    });
+    expect(cardEl(container, 'c1')?.style.visibility).toBe('hidden');
+  });
+
+  it('shows it once measured', () => {
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']) }),
+    });
+    expect(cardEl(container, 'c1')?.style.visibility).toBe('');
+  });
+
+  it('withholds the position transition while unmeasured, so the correction does not animate', () => {
+    // margin-note-pos carries `transition: top 150ms`. Applied before the
+    // corrected top arrives, it turns a silent reposition into a visible slide.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c2']) }),
+    });
+    expect(cardEl(container, 'c1')?.className).not.toContain('margin-note-pos');
+    expect(cardEl(container, 'c1')?.className).not.toContain('margin-note-enter');
+  });
+
+  it('applies both once placed, so the fade plays where the card lands', () => {
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']) }),
+    });
+    expect(cardEl(container, 'c1')?.className).toContain('margin-note-pos');
+    expect(cardEl(container, 'c1')?.className).toContain('margin-note-enter');
+  });
 });
 
 describe('RailDensityControl', () => {

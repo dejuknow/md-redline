@@ -455,6 +455,7 @@ function AnchoredCards({
         const top = layout.tops.get(comment.id);
         if (top === undefined) return null;
         const active = comment.id === activeCommentId;
+        const placed = layout.measuredIds.has(comment.id);
         return (
           <div
             key={comment.id}
@@ -462,10 +463,17 @@ function AnchoredCards({
             ref={getCardRef(comment.id)}
             onMouseEnter={() => setHoveredId(comment.id)}
             onMouseLeave={() => setHoveredId((prev) => (prev === comment.id ? null : prev))}
-            className={`margin-note-enter margin-note-pos absolute left-0 right-0 bg-surface-raised border rounded-lg shadow-sm ${
+            // Hidden until measured. An unmeasured card is placed against a
+            // 120px estimate, which is shorter than a real one, so it lands on
+            // top of its neighbour and then slides clear. `visibility` keeps it
+            // measurable while unpainted, and withholding margin-note-pos means
+            // the correction is not animated: the transition and the corrected
+            // top arrive in the same commit, so there is no prior value to
+            // animate from. The fade then plays on reveal, in the right place.
+            className={`${placed ? 'margin-note-enter margin-note-pos ' : ''}absolute left-0 right-0 bg-surface-raised border rounded-lg shadow-sm ${
               active ? 'border-primary-border shadow-md' : 'border-border'
             }`}
-            style={{ top }}
+            style={{ top, visibility: placed ? undefined : 'hidden' }}
           >
             <ThreadCard
               thread={comment}
