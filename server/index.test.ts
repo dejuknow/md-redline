@@ -22,6 +22,7 @@ import {
   type CreateAppOptions,
 } from './index';
 import { addReply, insertComment, parseComments } from '../src/lib/comment-parser';
+import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { handleReviewToolCall } from './mcp-stdio/handler';
 
 // Fails ONLY the synchronous boot read of the prefs file, leaving the async
@@ -2548,6 +2549,103 @@ describe('review sessions API', () => {
     };
     expect(agentId).not.toBe(userId);
     expect(origin).toBe('agent');
+  });
+});
+
+describe("a session inherits the reader's resolve mode", () => {
+  // The two used to be independent: the sidebar could show Open/Resolved
+  // while the agent had been handed remove-mode instructions telling it to
+  // delete every marker it addressed. That destroyed any comment that was a
+  // question, because the marker was the only place the question lived.
+  async function appWithPreference(enableResolve: boolean | undefined) {
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-prefs-')));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'mdr-docs-')));
+    const filePath = join(root, 'spec.md');
+    await writeFile(filePath, '# Spec\n\nSome prose.\n', 'utf8');
+    if (enableResolve !== undefined) {
+      await writeFile(
+        join(home, '.md-redline.json'),
+        JSON.stringify({ settings: { enableResolve } }),
+        'utf8',
+      );
+    }
+    const { app } = createAppFull({ cwd: root, homeDir: home, platformName: 'linux' });
+    return { app, filePath };
+  }
+
+  async function openSession(
+    app: { request: (p: string, i?: RequestInit) => Response | Promise<Response> },
+    filePath: string,
+    body: Record<string, unknown> = {},
+  ) {
+    const res = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], ...body }),
+    });
+    const { sessionId } = (await res.json()) as { sessionId: string };
+    const got = await app.request(`/api/review-sessions/${sessionId}`);
+    return (await got.json()) as { enableResolve: boolean };
+  }
+
+  it('uses resolve mode when the reader has it on', async () => {
+    const { app, filePath } = await appWithPreference(true);
+    expect((await openSession(app, filePath)).enableResolve).toBe(true);
+  });
+
+  it('uses remove mode when the reader has it off', async () => {
+    const { app, filePath } = await appWithPreference(false);
+    expect((await openSession(app, filePath)).enableResolve).toBe(false);
+  });
+
+  it('falls back to the shipped default when no preference is saved', async () => {
+    const { app, filePath } = await appWithPreference(undefined);
+    expect((await openSession(app, filePath)).enableResolve).toBe(DEFAULT_ENABLE_RESOLVE);
+  });
+
+  it('reaches the session through the real MCP path, not just the route', async () => {
+    // The route-level tests above pass a body with no enableResolve, which no
+    // real caller ever sends: validateRequestReviewInput and
+    // handleReviewToolCall both used to coerce an omitted flag to false first,
+    // so the inheritance branch was unreachable in production while its own
+    // tests passed. This drives the tool handler against the real app.
+    const { app, filePath } = await appWithPreference(true);
+    const post = async (path: string, body: unknown) => {
+      const res = await app.request(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      if (!res.ok) throw new Error(String(json.error ?? `HTTP ${res.status}`));
+      return json;
+    };
+    const client = {
+      grantAccess: async () => {},
+      createSession: async (input: unknown) => post('/api/review-sessions', input),
+      postReview: async (sessionId: string, args: unknown) =>
+        post(`/api/review-sessions/${sessionId}/agent-comments`, {
+          mode: 'review',
+          ...(args as object),
+        }),
+    } as unknown as Parameters<typeof handleReviewToolCall>[1]['client'];
+
+    const result = await handleReviewToolCall(
+      { filePaths: [filePath], comments: [{ filePath, anchor: 'Some prose', text: 'why?' }] },
+      { client, openInBrowser: async () => {}, baseUrl: 'http://localhost:5188' },
+    );
+    expect(result.isError).toBeFalsy();
+
+    const sessionId = /Session ID: (\S+?)\./.exec(result.content[0].text)?.[1];
+    expect(sessionId).toBeTruthy();
+    const got = await app.request(`/api/review-sessions/${sessionId}`);
+    expect(((await got.json()) as { enableResolve: boolean }).enableResolve).toBe(true);
+  });
+
+  it('still lets an agent name the mode explicitly', async () => {
+    const { app, filePath } = await appWithPreference(true);
+    const session = await openSession(app, filePath, { enableResolve: false });
+    expect(session.enableResolve).toBe(false);
   });
 });
 

@@ -25,6 +25,7 @@ import { atomicWriteFile } from './fs-retry';
 import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
+import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
 import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
@@ -650,6 +651,19 @@ export function createAppFull(options: CreateAppOptions = {}) {
 
   registerReviewSessionRoutes(app, reviewSessions, {
     resolveAndValidate,
+    // The reader's saved setting, so an agent that does not name a mode is
+    // instructed in the one the reader is actually looking at. Falls back to
+    // the shipped default if preferences cannot be read; a session still has
+    // to open.
+    getDefaultEnableResolve: async () => {
+      try {
+        const prefs = await readPreferences(homeDir);
+        const configured = prefs.settings?.enableResolve;
+        return typeof configured === 'boolean' ? configured : DEFAULT_ENABLE_RESOLVE;
+      } catch {
+        return DEFAULT_ENABLE_RESOLVE;
+      }
+    },
     // Combined read-modify-write under the per-file lock. `transform` may
     // return null to signal "no write needed" (apply detected a failure
     // condition the caller will handle). If `transform` throws (e.g. parser

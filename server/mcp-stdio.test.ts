@@ -2,16 +2,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { validateRequestReviewInput, validateAskInput, createMdrClient } from './mcp-stdio';
 
 describe('mcp-stdio: validateRequestReviewInput', () => {
-  it('accepts filePaths for a new session', () => {
+  it('accepts filePaths for a new session, leaving the mode unspecified', () => {
+    // `undefined`, NOT false. The server cannot distinguish an explicit false
+    // from an omitted field, so collapsing them here meant a session could
+    // never inherit the reader's saved resolve mode, and an agent handed
+    // remove-mode instructions deleted question comments outright.
     const result = validateRequestReviewInput({ filePaths: ['/tmp/a.md', '/tmp/b.md'] });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual({
         mode: 'new',
         filePaths: ['/tmp/a.md', '/tmp/b.md'],
-        enableResolve: false,
+        enableResolve: undefined,
       });
     }
+  });
+
+  it.each([true, false])('carries an explicit enableResolve through (%s)', (flag) => {
+    const result = validateRequestReviewInput({ filePaths: ['/tmp/a.md'], enableResolve: flag });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toMatchObject({ enableResolve: flag });
   });
 
   it('preserves enableResolve when true', () => {

@@ -164,7 +164,7 @@ and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
-- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `origin` defaults to `'user'`; the `mdr_review` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
+- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_review` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
 - `GET /api/review-sessions` — list open sessions
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent
