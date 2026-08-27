@@ -12,6 +12,8 @@ export interface ThreadCardProps {
   anchorMissing?: boolean;
   /** Whether this comment has already been sent to the reviewing agent. */
   sent?: boolean;
+  /** Whether an agent has replied to it. See CommentCard's `answered`. */
+  answered?: boolean;
   /** Optional externally-managed editor state. When omitted, ThreadCard manages editor state internally. */
   editor?: SidebarCommentEditorState;
   onRequestCommentEdit?: (commentId: string) => void;
@@ -52,6 +54,7 @@ export function ThreadCard({
   divRef,
   anchorMissing,
   sent,
+  answered,
   editor: externalEditor,
   onRequestCommentEdit: externalRequestCommentEdit,
   onRequestReplyCompose: externalRequestReplyCompose,
@@ -111,6 +114,7 @@ export function ThreadCard({
         isActive={active}
         anchorMissing={anchorMissing}
         sent={sent}
+        answered={answered}
         onActivate={onSelect}
         onResolve={onResolve}
         onUnresolve={onUnresolve}

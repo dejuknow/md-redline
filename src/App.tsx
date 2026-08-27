@@ -29,6 +29,7 @@ import type { SelectionInfo } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentPopover } from './components/CommentPopover';
+import { computeAnsweredCommentIds } from './lib/answered-comments';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
@@ -570,6 +571,14 @@ export default function App() {
   const rawViewRef = useRef<RawViewHandle>(null);
   const renderedDiffRef = useRef<RenderedDiffViewHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Selection is scoped to the prose column, NOT to containerRef. containerRef
+  // is the scroll container, and CommentsRail mounts inside it, so resolving a
+  // selection against it treats the comment sidebar as part of the document:
+  // dragging across a comment card opened a composer anchored to sidebar text,
+  // and contextAfter for a selection near the end of the document ran on into
+  // rail text. useDragHandles already measures against the viewer's own
+  // container for the same reason.
+  const proseRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
 
   // Ref to avoid rawMarkdown in callback dependencies (stabilizes function identities).
@@ -689,7 +698,7 @@ export default function App() {
   }, []);
 
   const { selection, commentSelection, isPending, clearSelection, lockSelection } = useSelection(
-    containerRef as RefObject<HTMLElement | null>,
+    proseRef as RefObject<HTMLElement | null>,
   );
   const requestCommentFocus = useCallback(
     (commentId: string, origin: CommentFocusOrigin = 'jump') =>
@@ -1522,6 +1531,8 @@ export default function App() {
     applyExternalContent(path, priorContent, content, mtime, {
       priorLoaded: priorContent.length > 0,
     }).content;
+
+  const answeredCommentIds = useMemo(() => computeAnsweredCommentIds(comments), [comments]);
 
   const unreadReplyIds = useMemo(
     () => new Set(activeFilePath ? (unreadByPath[activeFilePath] ?? []) : []),
@@ -3071,6 +3082,8 @@ export default function App() {
                           }}
                         >
                           <div
+                            ref={proseRef}
+                            data-prose-column
                             className="motion-safe:transition-[width] motion-safe:duration-150"
                             style={{ marginLeft: PAD_L, width: geometry.colWidth }}
                           >
@@ -3154,6 +3167,7 @@ export default function App() {
                               activeCommentId={activeCommentId}
                               missingAnchors={missingAnchors}
                               sentCommentIds={sentCommentIds}
+                              answeredCommentIds={answeredCommentIds}
                               onActivate={handleSidebarActivate}
                               onReply={handleReply}
                               onResolve={settings.enableResolve ? handleResolve : undefined}
@@ -3186,6 +3200,7 @@ export default function App() {
                                   pageRef={pageRef as RefObject<HTMLElement | null>}
                                   onClose={() => setPopoverCommentId(null)}
                                   sent={sentCommentIds.includes(c.id)}
+                                  answered={answeredCommentIds.has(c.id)}
                                   anchorMissing={missingAnchors.has(c.id)}
                                   onReply={handleReply}
                                   onResolve={settings.enableResolve ? handleResolve : undefined}
@@ -3273,6 +3288,7 @@ export default function App() {
           requestedFocus={drawerOpen ? requestedCommentFocus : null}
           onFocusHandled={() => setRequestedCommentFocus(null)}
           sentCommentIds={sentCommentIds}
+          answeredCommentIds={answeredCommentIds}
         />
 
         {/* Command palette */}

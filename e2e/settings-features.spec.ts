@@ -4,7 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
-import { resetTestAppState } from './helpers/test-state';
+import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -108,6 +108,21 @@ async function toggleSetting(page: Page, settingName: string) {
 // ---------------------------------------------------------------------------
 
 test.describe('Resolve workflow toggle', () => {
+  test('ships on by default, with no preference saved', async ({ page }) => {
+    // The rest of this suite pins enableResolve:false in resetTestAppState so
+    // a change to the shipped default cannot silently invert specs written
+    // against remove mode. That leaves the default itself uncovered, which is
+    // what this asserts: clear preferences entirely and boot cold.
+    clearPersistedPreferences();
+    await page.goto('/');
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Default mode comment');
+
+    const card = getCard(page, 'Default mode comment');
+    await card.hover();
+    await expect(card.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
+  });
+
   test('resolve/reopen actions appear when resolve workflow is enabled', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Resolve test comment');

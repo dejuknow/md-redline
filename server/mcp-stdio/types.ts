@@ -5,7 +5,10 @@
  */
 
 export type RequestReviewInput =
-  | { mode: 'new'; filePaths: string[]; enableResolve: boolean }
+  // Optional on purpose: `undefined` means "the caller did not say", which the
+  // server resolves from the reader's saved preference. Coercing it to a
+  // boolean here made that inheritance unreachable.
+  | { mode: 'new'; filePaths: string[]; enableResolve?: boolean }
   | { mode: 'continue'; sessionId: string };
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -33,7 +36,12 @@ export type WaitResult =
 
 export interface CreateSessionInput {
   filePaths: string[];
-  enableResolve: boolean;
+  /**
+   * Omit to let the server resolve it from the reader's saved preference.
+   * JSON.stringify drops an undefined key, so the field simply does not reach
+   * the wire, which is what the route reads as "not specified".
+   */
+  enableResolve?: boolean;
   /** Origin of the session. Defaults to 'user' on the server when omitted. */
   origin?: 'user' | 'agent';
   /**

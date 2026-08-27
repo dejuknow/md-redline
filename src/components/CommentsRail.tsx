@@ -23,6 +23,7 @@ interface CommentsRailProps {
   activeCommentId: string | null;
   missingAnchors: Set<string>;
   sentCommentIds: string[];
+  answeredCommentIds?: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onReply: (commentId: string, text: string) => void;
   onResolve?: (id: string) => void;
@@ -110,6 +111,7 @@ export function CommentsRail(props: CommentsRailProps) {
               requestedFocus={props.requestedFocus}
               onFocusHandled={props.onFocusHandled}
               sentCommentIds={props.sentCommentIds}
+              answeredCommentIds={props.answeredCommentIds}
               selectionText={props.selectionText}
               selectionOffset={props.selectionOffset}
               onReanchorToSelection={props.onReanchorToSelection}
@@ -323,6 +325,7 @@ function AnchoredCards({
   activeCommentId,
   missingAnchors,
   sentCommentIds,
+  answeredCommentIds,
   onActivate,
   onReply,
   onResolve,
@@ -473,6 +476,7 @@ function AnchoredCards({
                 layout.orphanIds.includes(comment.id) || missingAnchors.has(comment.id)
               }
               sent={sentCommentIds.includes(comment.id)}
+              answered={answeredCommentIds?.has(comment.id) ?? false}
               onReanchorToSelection={onReanchorToSelection}
               onSelect={onActivate}
               onReply={onReply}

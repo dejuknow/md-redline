@@ -76,13 +76,16 @@ export function validateRequestReviewInput(raw: unknown): ValidationResult<Reque
     value: {
       mode: 'new',
       filePaths: obj.filePaths as string[],
-      enableResolve: obj.enableResolve === true,
+      // Preserve absence. `=== true` collapsed "not specified" into false,
+      // which the server could not tell apart from an explicit false, so a
+      // session never inherited the reader's mode.
+      enableResolve: typeof obj.enableResolve === 'boolean' ? obj.enableResolve : undefined,
     },
   };
 }
 
 /**
- * Validate a raw mdr_review argument object. Accepts either:
+ * Validate a raw mdr_comment argument object. Accepts either:
  *   - { filePaths, enableResolve? } to create-or-attach an agent-origin session
  *   - { sessionId } to post into a session that already exists
  *

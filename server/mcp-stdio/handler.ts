@@ -349,7 +349,7 @@ export async function handleAskToolCall(
   }
 
   // The MCP cancel signal means "the agent gave up waiting" — not "destroy
-  // the session." mdr_ask and mdr_review share a long-lived session, so
+  // the session." mdr_ask and mdr_comment share a long-lived session, so
   // tearing it down on cancel would also discard the user's pending comments
   // in the browser. Release JUST this ask (resolves the waiter with
   // no_reply/released); the session lives on for any pending mdr_wait /
@@ -583,7 +583,7 @@ function batchFilePaths(input: ReviewInput): string[] {
   return [...seen];
 }
 
-/** The shared tail of both mdr_review forms: post the batch, summarize it. */
+/** The shared tail of both mdr_comment forms: post the batch, summarize it. */
 async function postReviewBatch(
   sessionId: string,
   input: ReviewInput,
@@ -607,7 +607,7 @@ async function postReviewBatch(
     const detail = detailParts.length > 0 ? ` ${detailParts.join('; ')}` : '';
     return {
       isError: true,
-      content: [{ type: 'text', text: `mdr_review: ${e.message}${detail}` }],
+      content: [{ type: 'text', text: `mdr_comment: ${e.message}${detail}` }],
     };
   }
 
@@ -616,7 +616,7 @@ async function postReviewBatch(
       {
         type: 'text',
         text:
-          `mdr_review: posted ${postResult.commentsWritten} comment(s) and ` +
+          `mdr_comment: posted ${postResult.commentsWritten} comment(s) and ` +
           `${postResult.repliesWritten} reply(ies) to ${fileList}. ` +
           `Session ID: ${sessionId}. ` +
           nextStep,
@@ -626,7 +626,7 @@ async function postReviewBatch(
 }
 
 /**
- * Handler for the mdr_review tool. The agent calls this to post comments (and
+ * Handler for the mdr_comment tool. The agent calls this to post comments (and
  * optionally replies) to a file and immediately returns. The agent should then
  * call mdr_wait to block until the user has finished engaging.
  *
@@ -665,7 +665,7 @@ export async function handleReviewToolCall(
       input,
       ctx,
       fileList,
-      `If you opened this session with mdr_review, call mdr_wait with ` +
+      `If you opened this session with mdr_comment, call mdr_wait with ` +
         `sessionId "${input.sessionId}" when you have finished posting. If it ` +
         `came from an mdr_request_review handoff, do NOT call mdr_wait; it ` +
         `rejects user-origin sessions. Continue with mdr_request_review and ` +
@@ -679,7 +679,9 @@ export async function handleReviewToolCall(
   // 2. Create agent-origin session
   const session = await ctx.client.createSession({
     filePaths: input.filePaths,
-    enableResolve: input.enableResolve ?? false,
+    // Undefined stays undefined: the server resolves it from the reader's
+    // saved preference. `?? false` here made that inheritance unreachable.
+    enableResolve: input.enableResolve,
     origin: 'agent',
   });
 
@@ -695,7 +697,7 @@ export async function handleReviewToolCall(
         {
           type: 'text',
           text:
-            `mdr_review: server returned a ${session.origin}-origin session, but mdr_review ` +
+            `mdr_comment: server returned a ${session.origin}-origin session, but mdr_comment ` +
             `requires agent-origin. This is a server bug — file an issue.`,
         },
       ],

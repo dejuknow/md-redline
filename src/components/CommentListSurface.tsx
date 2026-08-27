@@ -40,6 +40,7 @@ interface Props {
   requestedFocus?: SidebarCommentFocusRequest | null;
   onFocusHandled?: () => void;
   sentCommentIds?: string[];
+  answeredCommentIds?: ReadonlySet<string>;
   selectionText?: string | null;
   selectionOffset?: number | null;
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
@@ -95,6 +96,7 @@ export function CommentListSurface({
   requestedFocus,
   onFocusHandled,
   sentCommentIds,
+  answeredCommentIds,
   selectionText,
   selectionOffset,
   onReanchorToSelection,
@@ -247,6 +249,23 @@ export function CommentListSurface({
   const resolvedCount = resolveEnabled
     ? comments.filter((c) => getEffectiveStatus(c) === 'resolved').length
     : 0;
+  // Remove mode has no resolved state, so a comment that survived a round
+  // carrying an agent's reply is the only "this one is done" signal there is.
+  // Without a count the reader has to open every card to find them.
+  // Counted in both modes, and excluding resolved comments, which are already
+  // finished. Resolve mode buckets an answered-but-open question under "open",
+  // where it is indistinguishable from one nobody has addressed.
+  // The resolved exclusion is gated on resolveEnabled exactly as the card's is
+  // (CommentCard's `isResolved`). Without the gate, a file resolved in someone
+  // else's resolve-mode session and then opened by a reader in remove mode
+  // shows the pill on the card while the footer silently skips it, so the
+  // total reads lower than the number of pills on screen.
+  const answeredCount = answeredCommentIds
+    ? comments.filter(
+        (c) =>
+          answeredCommentIds.has(c.id) && !(resolveEnabled && getEffectiveStatus(c) === 'resolved'),
+      ).length
+    : 0;
 
   // Filter and search
   const filtered = comments.filter((c) => {
@@ -378,6 +397,7 @@ export function CommentListSurface({
                 selectionOffset={selectionOffset ?? null}
                 onReanchorToSelection={onReanchorToSelection}
                 sent={sentCommentIds?.includes(comment.id) ?? false}
+                answered={answeredCommentIds?.has(comment.id) ?? false}
                 onSelect={onActivate}
                 onResolve={resolveEnabled ? onResolve : undefined}
                 onUnresolve={resolveEnabled ? onUnresolve : undefined}
@@ -417,6 +437,7 @@ export function CommentListSurface({
             anchorMissing={missingAnchors.has(comment.id)}
             onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
+            answered={answeredCommentIds?.has(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
             onUnresolve={resolveEnabled ? onUnresolve : undefined}
@@ -461,6 +482,7 @@ export function CommentListSurface({
             anchorMissing={missingAnchors.has(comment.id)}
             onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
+            answered={answeredCommentIds?.has(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
             onUnresolve={resolveEnabled ? onUnresolve : undefined}
@@ -493,11 +515,15 @@ export function CommentListSurface({
           <span className="text-xs text-content-secondary whitespace-nowrap">
             {resolveEnabled ? (
               <>
-                {openCount} open {'\u00b7'} {resolvedCount} resolved
+                {openCount} open
+                {answeredCount > 0 && <> ({answeredCount} answered)</>}
+                {' \u00b7 '}
+                {resolvedCount} resolved
               </>
             ) : (
               <>
                 {comments.length} comment{comments.length !== 1 ? 's' : ''}
+                {answeredCount > 0 && <> ({answeredCount} answered)</>}
               </>
             )}
           </span>

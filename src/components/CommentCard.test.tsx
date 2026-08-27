@@ -84,6 +84,111 @@ function renderCard(
   return render(createElement(CommentCard, { ...defaults, ...props }), { wrapper: AllProviders });
 }
 
+describe('CommentCard - answered indicator', () => {
+  const answeredComment = {
+    ...baseComment,
+    replies: [
+      { id: 'r1', text: 'Per-tenant, yes.', author: 'Claude', timestamp: new Date().toISOString() },
+    ],
+  };
+
+  it('marks a comment an agent has replied to', async () => {
+    renderCard({ comment: answeredComment, answered: true });
+    expect(await screen.findByText('Answered')).toBeTruthy();
+  });
+
+  it('says nothing when no agent has replied', () => {
+    renderCard({ comment: baseComment, answered: false });
+    expect(screen.queryByText('Answered')).toBeNull();
+  });
+
+  it('agrees with the footer on a resolved comment in remove mode', async () => {
+    // The card gates on resolveEnabled && status === 'resolved'; the footer
+    // count gates the same way. They used to differ, so a file resolved in
+    // someone else's resolve-mode session and reopened in remove mode showed
+    // the pill here while the footer skipped it, and the total read lower than
+    // the pills on screen.
+    // enableResolve is set explicitly, not inherited. The shipped default is
+    // resolve mode, so omitting it here would quietly run this "remove mode"
+    // case in the other one and assert nothing.
+    renderCard(
+      { comment: { ...answeredComment, status: 'resolved' }, answered: true },
+      { enableResolve: false },
+    );
+    expect(await screen.findByText('Answered')).toBeTruthy();
+  });
+
+  it('stands in for the Sent pill rather than stacking beside it', async () => {
+    // Three badges on a 280px margin card squeeze the anchor quote down to a
+    // word or two, and a comment cannot be answered without having been sent.
+    renderCard({ comment: answeredComment, answered: true, sent: true });
+    expect(await screen.findByText('Answered')).toBeTruthy();
+    expect(screen.queryByText('Sent')).toBeNull();
+  });
+
+  it('still shows Sent on a comment nobody has answered', () => {
+    renderCard({ comment: baseComment, answered: false, sent: true });
+    expect(screen.queryByText('Sent')).toBeTruthy();
+  });
+
+  it('still marks an answered question in resolve mode, beside Open', async () => {
+    // Resolve mode reports per-comment state for an EDIT, which ends
+    // resolved. A question is told to stay open, so without the pill an
+    // answered question shows "Open" and reads as untouched -- the same gap
+    // the pill exists for in the other mode.
+    renderCard({ comment: answeredComment, answered: true }, { enableResolve: true });
+    await waitFor(() => expect(screen.queryByText('Open')).toBeTruthy());
+    expect(screen.queryByText('Answered')).toBeTruthy();
+  });
+
+  it('says nothing on a resolved comment, which is already finished', async () => {
+    renderCard(
+      { comment: { ...answeredComment, status: 'resolved' }, answered: true },
+      { enableResolve: true },
+    );
+    await waitFor(() => expect(screen.queryByText('Resolved')).toBeTruthy());
+    expect(screen.queryByText('Answered')).toBeNull();
+  });
+});
+
+describe('CommentCard - sent dimming', () => {
+  // `sent` marks a comment already handed to the agent. Dimming it at rest
+  // says so; dimming it while the user is working in it says nothing useful
+  // and reads as disabled, which is what the whole sidebar looked like after
+  // every Send. `isResolved` already gets this right by living inside the
+  // isActive ternary, so this is the same rule applied to the sibling flag.
+  it('dims a sent comment at rest', () => {
+    const { container } = renderCard({ sent: true, isActive: false });
+    expect((container.firstChild as HTMLElement).className).toContain('opacity-50');
+  });
+
+  it('does not dim a sent comment while it is active', () => {
+    const { container } = renderCard({ sent: true, isActive: true });
+    expect((container.firstChild as HTMLElement).className).not.toContain('opacity-50');
+  });
+
+  it('leaves an unsent comment undimmed either way', () => {
+    const atRest = renderCard({ sent: false, isActive: false });
+    expect((atRest.container.firstChild as HTMLElement).className).not.toContain('opacity-50');
+    const active = renderCard({ sent: false, isActive: true });
+    expect((active.container.firstChild as HTMLElement).className).not.toContain('opacity-50');
+  });
+
+  it('never stacks two opacity classes on a sent, resolved card', async () => {
+    // opacity-50 and opacity-60 on one element is settled by Tailwind's
+    // stylesheet order, not by position in the string, so which one wins is
+    // invisible from the call site. Resolved owns the dimming here.
+    // isResolved needs enableResolve, since that is what turns the status on.
+    const { container } = renderCard(
+      { sent: true, isActive: false, comment: { ...baseComment, status: 'resolved' } },
+      { enableResolve: true },
+    );
+    const card = () => (container.firstChild as HTMLElement).className;
+    await waitFor(() => expect(card()).toContain('opacity-60'));
+    expect(card()).not.toContain('opacity-50');
+  });
+});
+
 describe('CommentCard — agent-initiated comment', () => {
   it('does not render "Awaiting your reply" banner', () => {
     renderCard();

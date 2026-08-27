@@ -120,6 +120,14 @@ export async function deliverInlineAskReplies(opts: {
  */
 export interface ReviewSessionRoutesDeps {
   resolveAndValidate: (path: string) => Promise<string>;
+  /**
+   * Resolve mode for a session whose creator did not specify one. Reads the
+   * reader's saved preference, so the mode the agent is instructed in matches
+   * the mode the reader is looking at. They used to be independent: the UI
+   * could show Open/Resolved while the agent had been told to delete every
+   * marker it addressed, which destroyed any comment that was a question.
+   */
+  getDefaultEnableResolve: () => Promise<boolean>;
   readFileText: (resolvedPath: string) => Promise<string>;
   writeFileText: (resolvedPath: string, content: string) => Promise<void>;
   /**
@@ -160,7 +168,13 @@ export function registerReviewSessionRoutes(
   reviewSessions: ReviewSessionStore,
   deps: ReviewSessionRoutesDeps,
 ): void {
-  const { resolveAndValidate, readFileText, transformFile, notifyFileChanged } = deps;
+  const {
+    resolveAndValidate,
+    readFileText,
+    transformFile,
+    notifyFileChanged,
+    getDefaultEnableResolve,
+  } = deps;
 
   /**
    * Clear the on-disk `expectsReply` flag on the given questions' markers,
@@ -283,7 +297,8 @@ export function registerReviewSessionRoutes(
 
     const session = reviewSessions.createSession({
       filePaths: resolved,
-      enableResolve: enableResolve === true,
+      enableResolve:
+        typeof enableResolve === 'boolean' ? enableResolve : await getDefaultEnableResolve(),
       origin,
       clientId,
     });
@@ -465,7 +480,7 @@ export function registerReviewSessionRoutes(
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
 
-    // The mdr_ask and mdr_review tools share this endpoint but have different
+    // The mdr_ask and mdr_comment tools share this endpoint but have different
     // contracts: ask blocks for a user reply via addAsk, review is always
     // fire-and-forget. The mode is driven by an explicit `mode` field
     // ('ask' | 'review') sent by the MCP client (see server/mcp-stdio/client.ts).
@@ -552,7 +567,7 @@ export function registerReviewSessionRoutes(
     // Reject the contradictory combination of "ask request" + expectsReply:false,
     // whether the ask mode is explicit OR inferred from shape. mdr_ask's contract
     // is "block until the user replies"; opting out of the reply turns it into a
-    // fire-and-forget review, which is what mdr_review is for. The combination
+    // fire-and-forget review, which is what mdr_comment is for. The combination
     // was previously silently downgraded; surface it as an explicit error so
     // callers don't get a confusing no-op.
     if (isAskRequest && body.expectsReply === false) {
@@ -837,7 +852,7 @@ export function registerReviewSessionRoutes(
               q.contextAfter,
               undefined,
               q.commentId,
-              // expectsReply distinguishes mdr_ask (true) from mdr_review
+              // expectsReply distinguishes mdr_ask (true) from mdr_comment
               // (false). The UI uses this to gate the "agent has a question"
               // toast and the "Jump to next agent question" palette entry.
               { agentInitiated: true, expectsReply: expectsReply, sessionId: id },
@@ -977,7 +992,7 @@ export function registerReviewSessionRoutes(
           });
           if (updated !== null && updated !== original) notifyFileChanged(filePath);
         } catch (err) {
-          console.warn(`[review-session] mdr_review ask-cleanup failed for ${filePath}:`, err);
+          console.warn(`[review-session] mdr_comment ask-cleanup failed for ${filePath}:`, err);
         }
       }
     }

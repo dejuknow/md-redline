@@ -21,6 +21,12 @@ interface Props {
   isActive: boolean;
   anchorMissing?: boolean;
   sent?: boolean;
+  /** Carries a reply from someone other than whoever raised it, i.e. it has
+   *  been answered. Surfaced in BOTH resolve modes, on any comment that is not
+   *  resolved. Resolve mode reports per-comment state for an EDIT, which ends
+   *  resolved, but a question is told to stay open, so an answered question
+   *  shows "Open" and reads as untouched without this. See `showAnswered`. */
+  answered?: boolean;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
@@ -103,6 +109,7 @@ export const CommentCard = memo(function CommentCard({
   isActive,
   anchorMissing,
   sent,
+  answered,
   onActivate,
   onResolve,
   onUnresolve,
@@ -129,6 +136,12 @@ export const CommentCard = memo(function CommentCard({
   const resolveEnabled = settings.enableResolve;
   const status = getEffectiveStatus(comment);
   const isResolved = resolveEnabled && status === 'resolved';
+  // Shown in BOTH modes, and gated on resolution rather than on the mode.
+  // Resolve mode reports per-comment state for an EDIT, which ends resolved,
+  // but a question is told to stay open, so an answered question shows "Open"
+  // and looks exactly like one nobody has touched. That is the same gap the
+  // pill exists for. A resolved comment needs no such hint: it is finished.
+  const showAnswered = Boolean(answered) && !isResolved;
   const commentTimeAgo = timeAgo(comment.timestamp);
   const [editText, setEditText] = useState(comment.text);
   const [replyText, setReplyText] = useState('');
@@ -325,7 +338,7 @@ export const CommentCard = memo(function CommentCard({
           : isResolved
             ? 'border-border bg-surface-secondary opacity-60'
             : 'border-border-subtle bg-surface hover:border-content-faint hover:shadow-sm'
-      }${sent ? ' opacity-50' : ''}`}
+      }${sent && !isActive && !isResolved ? ' opacity-50' : ''}`}
       onClick={() => onActivate(comment.id)}
       onContextMenu={(e) => {
         if (onCtxMenu) {
@@ -348,12 +361,26 @@ export const CommentCard = memo(function CommentCard({
           &ldquo;{comment.recoveredAnchor ?? comment.anchor}&rdquo;
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {sent && (
+          {sent && !showAnswered && (
             <span
               className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-primary-bg-strong text-primary-text"
               title="This comment has been sent to the reviewing agent"
             >
               Sent
+            </span>
+          )}
+          {/* Stands in for "Sent": a comment cannot be answered without having
+              been handed over, so the pair is redundant and dropping one keeps
+              the anchor quote readable on a 280px margin card. It trades one
+              badge for one, though, and does not cap the row: resolve mode
+              renders the Open/Resolved pill unconditionally, so Answered +
+              Changed + Open still reaches three. */}
+          {showAnswered && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-success-bg text-success-text"
+              title="An agent has replied to this comment"
+            >
+              Answered
             </span>
           )}
           {anchorBadge && (

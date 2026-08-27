@@ -96,7 +96,7 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
 - `replies` — threaded discussion array
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
-- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_review`).
+- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`).
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
 - `sessionId` — links an agent-initiated marker to a review session for reply routing.
 - Strip all `<!-- @comment{...} -->` markers to get clean content
@@ -164,7 +164,7 @@ and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
-- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `origin` defaults to `'user'`; the `mdr_review` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
+- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
 - `GET /api/review-sessions` — list open sessions
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent
@@ -483,7 +483,7 @@ Answered markers keep the question and the reply as a thread; unanswered markers
 are preserved with `expectsReply` cleared (a record of "asked, no answer").
 Only one ask can be pending per session at a time.
 
-**`mdr_review`** — Agent-initiated review; the reverse direction of
+**`mdr_comment`** — Agent-initiated review; the reverse direction of
 `mdr_request_review`. The agent calls it with:
 
 ```ts
@@ -532,19 +532,34 @@ resolves every path and rejects any outside the named session's `filePaths`, whi
 is stricter than the client-side `filePaths[]` membership check.
 
 Do NOT follow a `sessionId`-form post with `mdr_wait` unless you opened that
-session with `mdr_review` yourself. `mdr_wait` long-polls `/agent-wait`, which
+session with `mdr_comment` yourself. `mdr_wait` long-polls `/agent-wait`, which
 409s on user-origin sessions, so calling it on an `mdr_request_review` handoff
 errors. The result text says which continuation applies; for a handoff it is
 `mdr_request_review` with the same sessionId.
+
+**`mdr_review` was renamed to `mdr_comment`.** The old name is still accepted
+on a `tools/call` so a saved prompt or pinned agent config keeps working, but it
+is NOT advertised in `tools/list`. The name was the last thing competing for "I
+want to review X in mdr": it is a closer lexical match for that sentence than
+`mdr_request_review` is, and a client that weights names over descriptions would
+keep picking it however the descriptions were worded.
+
+**Picking between `mdr_comment` and `mdr_request_review`.** The two are named
+from opposite points of view: `mdr_comment` is the agent reviewing,
+`mdr_request_review` is the human reviewing. "I want to review spec.md in mdr"
+therefore names the wrong one lexically, and the failure is not quiet, since
+`mdr_comment` writes markers into a file the user only meant to read. Both
+descriptions carry the disambiguation, and `mdr_request_review` claims those
+phrasings in its first sentence. Keep that split intact when editing either.
 
 **`mdr_wait`** — `{ sessionId }`. Blocks (90s re-poll cycle via `/agent-wait`)
 until the user clicks End review. Returns "done, re-read the file(s)" on End
 review, a reason-specific message on other terminal paths (cancelled, tab closed,
 agent_silent GC, finished), `pending` when the agent should re-poll, and a
 graceful "session unknown, server may have restarted" result on 404. The two-tool
-flow `mdr_review` (post) → `mdr_wait` (block) applies to the `filePaths` form only.
+flow `mdr_comment` (post) → `mdr_wait` (block) applies to the `filePaths` form only.
 A `sessionId`-form post into a session you did not open does not get a `mdr_wait`;
-see the caveat under `mdr_review` above.
+see the caveat under `mdr_comment` above.
 
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.
@@ -1594,6 +1609,13 @@ From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
 
+  Both `enableResolve` modes distinguish a comment that wanted a **document
+  edit** from one that only wanted an **answer**. The agent always adds a reply;
+  only the edit case disposes of the marker (removed in remove mode, resolved in
+  resolve mode). A question keeps its marker in both modes, so the answer has
+  somewhere to live. Removing the marker for every addressed comment, which
+  remove mode used to instruct, destroys the question and records no answer.
+
 ## Development
 
 Prerequisite: Node 20 or newer.
@@ -1656,7 +1678,9 @@ the "no content changes" empty state, and the diff-reference/handoff plumbing.
 - Results are written to `eval/results/<timestamp>_<agent>_<format>/`.
 - Scoring weights: parsing 20% (markers handled per `markerMode`?), execution 40% (content changes address feedback?), integrity 20% (valid markdown, no malformed markers?), anchorIntegrity 20% (do surviving anchors still resolve?).
 - `expected.json` takes an optional `markerMode`: `remove` (default, the original contract, marker deleted once addressed) or `resolve` (marker stays, gains a reply, gets `status: resolved`). Anchor drift only shows up under `resolve`, since a deleted marker takes its anchor with it.
-- Agents: `claude-cli` (default, hand-written preamble, remove mode) and `claude-cli-resolve`, which drives the agent with the **shipped** `buildAddressCommentsPrompt` output in resolve mode. Use the latter to keep the real hand-off wording under test, so a regression in it shows up as a score drop rather than in someone's review session.
+- Agents: `claude-cli` (default, hand-written preamble, remove mode), plus `claude-cli-resolve` and `claude-cli-remove`, which drive the agent with the **shipped** `buildAddressCommentsPrompt` output in their respective modes. Prefer the shipped-prompt pair: they keep the real hand-off wording under test, so a regression in it shows up as a score drop rather than in someone's review session. `claude-cli`'s preamble is a frozen copy of the old contract ("the final file contains no comment markers") and is deliberately left that way as a baseline; it does not track the shipped prompt, which is how a defect in the remove-mode wording once reached a user unnoticed.
+- Marker expectations: `markerMode` sets a case-wide default (`remove` or `resolve`), and a comment may override it with `expectedMarker`: `removed`, `resolved`, or `answered`. `answered` is for a QUESTION — the marker survives carrying a reply, with no status required — which is what lets a remove-mode fixture assert that a question was answered rather than deleted. See `eval/fixtures/17-question-comment`.
+- Limit worth knowing before writing a question fixture: `contentHints` and `contentAssertions` run against `cleanMarkdown`, which strips markers entirely, so reply text is never in the string they see. No content assertion can check WHAT an agent answered, only the `parsing` dimension can check THAT it answered. A `shouldContain` naming prose next to a question therefore guards against the agent rewriting the document it was only asked about; it says nothing about the answer. Since parsing carries a weight of 0.2 and is averaged across a case's comments, an agent that ignores one question in a two-comment file still scores around 0.9 overall: read the per-comment `details` lines, not just the number.
 - `anchorIntegrity` scores each surviving marker: 1 for an anchor that still resolves, 0.5 where only position recovery saved it (the agent rewrote the anchored text without updating the marker), 0 for a detached anchor. Resolved comments are included. Half credit is deliberate: recovery is the app's safety net, not the agent doing its job.
 - `16-restructuring-rewrite` is the regression case for that failure — raw notes with anchors quoting them verbatim, and comments that can only be addressed by rewriting those quotes into decisions.
 

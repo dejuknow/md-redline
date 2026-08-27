@@ -44,14 +44,14 @@ export interface MdComment {
   recoveredAnchor?: string;
   /**
    * True when this marker was inserted by ANY agent tool (mdr_ask or
-   * fire-and-forget mdr_review). Drives sidebar section + card styling.
+   * fire-and-forget mdr_comment). Drives sidebar section + card styling.
    * Use `expectsReply` to distinguish "agent question I need to answer"
    * from "agent comment posted for context".
    */
   agentInitiated?: boolean;
   /**
    * True when the agent is actively blocking on a reply from the user
-   * (mdr_ask). False/absent for fire-and-forget mdr_review comments. The
+   * (mdr_ask). False/absent for fire-and-forget mdr_comment comments. The
    * UI uses this to gate the "agent has a question" toast / palette entry
    * — without the field, fire-and-forget reviews would falsely surface as
    * pending questions.

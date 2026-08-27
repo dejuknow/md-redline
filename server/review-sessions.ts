@@ -24,7 +24,7 @@ const HEARTBEAT_TIMEOUT_MS = 30 * 60_000;
  * sessions always pass, even when Chrome throttles background tabs to ~1
  * heartbeat per minute) and well below HEARTBEAT_TIMEOUT_MS. Set high
  * enough to accommodate agents that batch their work across multiple
- * `mdr_review` tool calls separated by minutes of LLM thinking time.
+ * `mdr_comment` tool calls separated by minutes of LLM thinking time.
  */
 const FIND_OPEN_FRESHNESS_MS = 5 * 60_000;
 

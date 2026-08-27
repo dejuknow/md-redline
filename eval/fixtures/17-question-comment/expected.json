@@ -1,0 +1,27 @@
+{
+  "markerMode": "remove",
+  "requiresAgent": "claude-cli-remove",
+  "totalComments": 2,
+  "actionableComments": 2,
+  "comments": [
+    {
+      "id": "eval-17-c1",
+      "expectedAction": "address",
+      "expectedMarker": "answered",
+      "contentHints": {
+        "shouldContain": ["100 requests per minute"]
+      }
+    },
+    {
+      "id": "eval-17-c2",
+      "expectedAction": "address",
+      "expectedMarker": "removed",
+      "contentHints": {
+        "shouldContain": ["429"],
+        "shouldNotContain": ["Requests over the limit are dropped."]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": []
+}

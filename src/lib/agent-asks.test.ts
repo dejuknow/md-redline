@@ -70,9 +70,9 @@ describe('selectAgentAsks', () => {
     expect(result.map((c) => c.id)).toEqual(['still_pending']);
   });
 
-  it('excludes fire-and-forget mdr_review comments (agentInitiated but expectsReply false/absent)', () => {
+  it('excludes fire-and-forget mdr_comment comments (agentInitiated but expectsReply false/absent)', () => {
     // Regression guard: before the expectsReply discriminator was added,
-    // both mdr_ask and mdr_review markers carried agentInitiated:true and
+    // both mdr_ask and mdr_comment markers carried agentInitiated:true and
     // both fired the "agent has a question" toast. Only mdr_ask should now.
     const comments = [
       mk({ id: 'review_1', agentInitiated: true, sessionId: 'rev_a', author: 'Claude' }),

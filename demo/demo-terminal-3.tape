@@ -1,5 +1,5 @@
 # demo-terminal-3.tape — Flow-2 scene 1: user asks the agent to review a PRD,
-# agent posts comments via mdr_review and blocks on mdr_wait.
+# agent posts comments via mdr_comment and blocks on mdr_wait.
 
 Output demo/clips/05-terminal-review-prompt.mp4
 
@@ -26,7 +26,7 @@ Type "Use mdr to review prd.md and leave comments."
 Sleep 750ms
 Enter
 
-# Agent prints the mdr_review + mdr_wait tool calls, ending on the waiting
+# Agent prints the mdr_comment + mdr_wait tool calls, ending on the waiting
 # state. Tail hold matches the clip-01 rule: the CLI->MDR cut needs >=1.5s
 # on the final waiting line.
 Sleep 2.6s

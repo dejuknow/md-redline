@@ -8,7 +8,7 @@ should not re-record them manually with a screen recorder. One
   Clips 01-04 from `demo-terminal-1/2.tape` + the "record browser
   clips" test in `demo.spec.ts`.
 - `demo/output/demo-review.mp4` (flow 2, ~19s): the agent reviews your
-  doc via `mdr_review`/`mdr_wait`, you reply on a card, then click End
+  doc via `mdr_comment`/`mdr_wait`, you reply on a card, then click End
   review. Clips 05-07 from `demo-terminal-3/4.tape` + the "record
   agent-review browser clip" test. Fixture: `fixtures/prd-sample.md`.
 

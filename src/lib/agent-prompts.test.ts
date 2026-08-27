@@ -123,3 +123,71 @@ describe('buildAddressCommentsPrompt — mdr_ask hint', () => {
     expect(prompt.toLowerCase()).toMatch(/anchored.*question/);
   });
 });
+
+describe('buildAddressCommentsPrompt - answering versus editing', () => {
+  // A comment can ask for an edit or ask a question. Non-resolve mode used to
+  // instruct removal of the marker for every comment addressed, and gave no
+  // reply step at all, so a question had two possible outcomes: deleted with
+  // no answer recorded, or left untouched with no answer recorded. Real
+  // reviews lost their questions this way.
+  it('gives non-resolve mode a reply step, not only resolve mode', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 1]]),
+      enableResolve: false,
+    });
+    expect(prompt).toContain('add a reply to the `replies` array');
+  });
+
+  it('tells non-resolve mode to keep the marker when a comment only needed an answer', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 1]]),
+      enableResolve: false,
+    });
+    expect(prompt).toContain('leave the marker in place so I can read your answer');
+  });
+
+  it('no longer tells non-resolve mode to remove the marker unconditionally', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/spec.md'],
+      commentCounts: new Map([['/tmp/spec.md', 1]]),
+      enableResolve: false,
+    });
+    // The old wording. Removal is now scoped to comments that required an edit.
+    expect(prompt).not.toContain('After addressing a comment, remove the entire');
+    expect(prompt).toContain('required a document edit, remove the entire');
+  });
+
+  it.each([true, false])(
+    'tells the agent to skip a comment it already answered (resolve=%s)',
+    (enableResolve) => {
+      // A question's marker now survives, and remove mode has no durable
+      // "answered" state, so a later review session re-sends it: a new session
+      // starts with an empty sentCommentIds and the marker is still in the
+      // file. Without this the agent answers the same question twice and
+      // stacks a duplicate reply.
+      const prompt = buildAddressCommentsPrompt({
+        filePaths: ['/tmp/spec.md'],
+        commentCounts: new Map([['/tmp/spec.md', 1]]),
+        enableResolve,
+      });
+      expect(prompt).toContain('already carries a reply authored by you');
+      expect(prompt).toContain('do not reply again');
+    },
+  );
+
+  it.each([true, false])(
+    'scopes marker disposal to edit-type comments in both modes (resolve=%s)',
+    (enableResolve) => {
+      const prompt = buildAddressCommentsPrompt({
+        filePaths: ['/tmp/spec.md'],
+        commentCounts: new Map([['/tmp/spec.md', 1]]),
+        enableResolve,
+      });
+      expect(prompt).toContain('required a document edit');
+      expect(prompt).toContain('only needed a reply');
+      expect(prompt).toContain('add a reply to the `replies` array');
+    },
+  );
+});

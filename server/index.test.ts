@@ -22,6 +22,7 @@ import {
   type CreateAppOptions,
 } from './index';
 import { addReply, insertComment, parseComments } from '../src/lib/comment-parser';
+import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { handleReviewToolCall } from './mcp-stdio/handler';
 
 // Fails ONLY the synchronous boot read of the prefs file, leaving the async
@@ -2520,7 +2521,7 @@ describe('review sessions API', () => {
   });
 
   it('does NOT dedupe across origins (agent must not attach to user session)', async () => {
-    // The user opens a review of a file. Then an agent calls mdr_review on
+    // The user opens a review of a file. Then an agent calls mdr_comment on
     // the same file. The agent must get a fresh agent-origin session — never
     // the user's — because the two have incompatible terminal-state contracts.
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-cross-origin-')));
@@ -2551,6 +2552,103 @@ describe('review sessions API', () => {
   });
 });
 
+describe("a session inherits the reader's resolve mode", () => {
+  // The two used to be independent: the sidebar could show Open/Resolved
+  // while the agent had been handed remove-mode instructions telling it to
+  // delete every marker it addressed. That destroyed any comment that was a
+  // question, because the marker was the only place the question lived.
+  async function appWithPreference(enableResolve: boolean | undefined) {
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-prefs-')));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'mdr-docs-')));
+    const filePath = join(root, 'spec.md');
+    await writeFile(filePath, '# Spec\n\nSome prose.\n', 'utf8');
+    if (enableResolve !== undefined) {
+      await writeFile(
+        join(home, '.md-redline.json'),
+        JSON.stringify({ settings: { enableResolve } }),
+        'utf8',
+      );
+    }
+    const { app } = createAppFull({ cwd: root, homeDir: home, platformName: 'linux' });
+    return { app, filePath };
+  }
+
+  async function openSession(
+    app: { request: (p: string, i?: RequestInit) => Response | Promise<Response> },
+    filePath: string,
+    body: Record<string, unknown> = {},
+  ) {
+    const res = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], ...body }),
+    });
+    const { sessionId } = (await res.json()) as { sessionId: string };
+    const got = await app.request(`/api/review-sessions/${sessionId}`);
+    return (await got.json()) as { enableResolve: boolean };
+  }
+
+  it('uses resolve mode when the reader has it on', async () => {
+    const { app, filePath } = await appWithPreference(true);
+    expect((await openSession(app, filePath)).enableResolve).toBe(true);
+  });
+
+  it('uses remove mode when the reader has it off', async () => {
+    const { app, filePath } = await appWithPreference(false);
+    expect((await openSession(app, filePath)).enableResolve).toBe(false);
+  });
+
+  it('falls back to the shipped default when no preference is saved', async () => {
+    const { app, filePath } = await appWithPreference(undefined);
+    expect((await openSession(app, filePath)).enableResolve).toBe(DEFAULT_ENABLE_RESOLVE);
+  });
+
+  it('reaches the session through the real MCP path, not just the route', async () => {
+    // The route-level tests above pass a body with no enableResolve, which no
+    // real caller ever sends: validateRequestReviewInput and
+    // handleReviewToolCall both used to coerce an omitted flag to false first,
+    // so the inheritance branch was unreachable in production while its own
+    // tests passed. This drives the tool handler against the real app.
+    const { app, filePath } = await appWithPreference(true);
+    const post = async (path: string, body: unknown) => {
+      const res = await app.request(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      if (!res.ok) throw new Error(String(json.error ?? `HTTP ${res.status}`));
+      return json;
+    };
+    const client = {
+      grantAccess: async () => {},
+      createSession: async (input: unknown) => post('/api/review-sessions', input),
+      postReview: async (sessionId: string, args: unknown) =>
+        post(`/api/review-sessions/${sessionId}/agent-comments`, {
+          mode: 'review',
+          ...(args as object),
+        }),
+    } as unknown as Parameters<typeof handleReviewToolCall>[1]['client'];
+
+    const result = await handleReviewToolCall(
+      { filePaths: [filePath], comments: [{ filePath, anchor: 'Some prose', text: 'why?' }] },
+      { client, openInBrowser: async () => {}, baseUrl: 'http://localhost:5188' },
+    );
+    expect(result.isError).toBeFalsy();
+
+    const sessionId = /Session ID: (\S+?)\./.exec(result.content[0].text)?.[1];
+    expect(sessionId).toBeTruthy();
+    const got = await app.request(`/api/review-sessions/${sessionId}`);
+    expect(((await got.json()) as { enableResolve: boolean }).enableResolve).toBe(true);
+  });
+
+  it('still lets an agent name the mode explicitly', async () => {
+    const { app, filePath } = await appWithPreference(true);
+    const session = await openSession(app, filePath, { enableResolve: false });
+    expect(session.enableResolve).toBe(false);
+  });
+});
+
 async function buildTestApp(options: { allowedRoots: string[] }) {
   const { app: testApp, reviewSessions: testReviewSessions } = createAppFull({
     cwd: options.allowedRoots[0],
@@ -2560,7 +2658,7 @@ async function buildTestApp(options: { allowedRoots: string[] }) {
   return { app: testApp, reviewSessions: testReviewSessions };
 }
 
-describe('mdr_review attaching to an existing session (end to end)', () => {
+describe('mdr_comment attaching to an existing session (end to end)', () => {
   /**
    * A client that speaks to the real Hono app instead of the network. The
    * handler, the route, the session store, and the on-disk markers are all
@@ -2611,7 +2709,7 @@ describe('mdr_review attaching to an existing session (end to end)', () => {
     await writeFile(filePath, seeded, 'utf8');
 
     const { app: testApp, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
-    // origin:'user' is what mdr_request_review opens — the session mdr_review
+    // origin:'user' is what mdr_request_review opens — the session mdr_comment
     // could not previously reach, because createSession's dedupe filters on
     // origin and would have minted a second, agent-origin one.
     const create = await testApp.request('/api/review-sessions', {
@@ -3533,9 +3631,9 @@ describe('POST /api/review-sessions/:id/asks/:askId/release', () => {
   });
 });
 
-describe('mdr_review reply resolves a pending mdr_ask + cleans markers', () => {
+describe('mdr_comment reply resolves a pending mdr_ask + cleans markers', () => {
   it('replied markers are removed; unreplied are preserved with expectsReply cleared', async () => {
-    // The agent posts mdr_ask with 2 questions, then posts mdr_review with
+    // The agent posts mdr_ask with 2 questions, then posts mdr_comment with
     // a `replies:[]` that targets only ONE of those commentIds. The route
     // should: (a) resolve the in-memory ask waiter with the matching reply,
     // (b) remove the marker for the replied question, (c) preserve the
@@ -3571,7 +3669,7 @@ describe('mdr_review reply resolves a pending mdr_ask + cleans markers', () => {
     // Park the ask waiter so we can observe its resolution.
     const waiter = reviewSessions.waitForAsk(askId)!;
 
-    // Now post mdr_review with a reply to ONLY q1.
+    // Now post mdr_comment with a reply to ONLY q1.
     const review = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3649,7 +3747,7 @@ describe('agentCommentCount rollback when addAsk fails', () => {
 describe('rollback restores expectsReply when appendReply cleared it', () => {
   it('restores expectsReply on a previously-pending ask marker after batch rollback', async () => {
     // Scenario: agent posts mdr_ask (commentId X has expectsReply:true).
-    // Agent then posts mdr_review with replies:[{commentId:X}] AND a comment
+    // Agent then posts mdr_comment with replies:[{commentId:X}] AND a comment
     // with an anchor that does NOT match — triggering rollback. The reply
     // that landed clears expectsReply on X; rollback must restore it so the
     // pending question keeps surfacing in the ask UI.
@@ -3681,7 +3779,7 @@ describe('rollback restores expectsReply when appendReply cleared it', () => {
     expect(askedMatch).not.toBeNull();
     const askCommentId = askedMatch![1];
 
-    // Now post mdr_review with a reply targeting that ask AND a comment
+    // Now post mdr_comment with a reply targeting that ask AND a comment
     // whose anchor doesn't exist — forces rollback.
     const review = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
       method: 'POST',
