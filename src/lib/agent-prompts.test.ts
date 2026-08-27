@@ -145,7 +145,7 @@ describe('buildAddressCommentsPrompt - answering versus editing', () => {
       commentCounts: new Map([['/tmp/spec.md', 1]]),
       enableResolve: false,
     });
-    expect(prompt).toContain('leave the marker in place so I can read your answer');
+    expect(prompt).toContain('leave the marker in place so I can read that answer');
   });
 
   it('no longer tells non-resolve mode to remove the marker unconditionally', () => {
@@ -156,7 +156,7 @@ describe('buildAddressCommentsPrompt - answering versus editing', () => {
     });
     // The old wording. Removal is now scoped to comments that required an edit.
     expect(prompt).not.toContain('After addressing a comment, remove the entire');
-    expect(prompt).toContain('required a document edit, remove the entire');
+    expect(prompt).toContain('changed the document, remove the entire');
   });
 
   it.each([true, false])(
@@ -185,8 +185,12 @@ describe('buildAddressCommentsPrompt - answering versus editing', () => {
         commentCounts: new Map([['/tmp/spec.md', 1]]),
         enableResolve,
       });
-      expect(prompt).toContain('required a document edit');
-      expect(prompt).toContain('only needed a reply');
+      // Keyed on the document, never on whether a reply was written. Every
+      // comment gets a reply now, so "only needed a reply" stopped
+      // distinguishing anything and every marker was kept.
+      expect(prompt).toContain('changed the document');
+      expect(prompt).toContain('If the document did not change');
+      expect(prompt).not.toContain('only needed a reply');
       expect(prompt).toContain('add a reply to the `replies` array');
     },
   );
