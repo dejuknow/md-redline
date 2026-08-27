@@ -537,6 +537,14 @@ session with `mdr_review` yourself. `mdr_wait` long-polls `/agent-wait`, which
 errors. The result text says which continuation applies; for a handoff it is
 `mdr_request_review` with the same sessionId.
 
+**Picking between `mdr_review` and `mdr_request_review`.** The two are named
+from opposite points of view: `mdr_review` is the agent reviewing,
+`mdr_request_review` is the human reviewing. "I want to review spec.md in mdr"
+therefore names the wrong one lexically, and the failure is not quiet, since
+`mdr_review` writes markers into a file the user only meant to read. Both
+descriptions carry the disambiguation, and `mdr_request_review` claims those
+phrasings in its first sentence. Keep that split intact when editing either.
+
 **`mdr_wait`** — `{ sessionId }`. Blocks (90s re-poll cycle via `/agent-wait`)
 until the user clicks End review. Returns "done, re-read the file(s)" on End
 review, a reason-specific message on other terminal paths (cancelled, tab closed,
