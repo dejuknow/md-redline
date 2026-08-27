@@ -193,7 +193,13 @@ test.describe('Resolve-mode hand-off', () => {
     expect(clipboard).not.toContain('remove the entire');
   });
 
-  test('default mode prompt does not include reply instruction', async ({ page, context }) => {
+  test('remove-mode prompt asks for a reply and scopes removal to edits', async ({
+    page,
+    context,
+  }) => {
+    // This used to assert remove mode had NO reply instruction, which is what
+    // let an agent delete a comment that only asked a question: the marker was
+    // the question's only home, and nothing told the agent to answer first.
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openFixture(page);
     await addComment(page, 'authentication system', 'Needs more detail');
@@ -202,8 +208,11 @@ test.describe('Resolve-mode hand-off', () => {
     await page.getByTestId('handoff-button').click();
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboard).toContain('remove the entire');
-    expect(clipboard).not.toContain('"author":"<your tool name>"');
+    expect(clipboard).toContain('"author":"<your tool name>"');
+    expect(clipboard).toContain('required a document edit, remove the entire');
+    expect(clipboard).toContain('leave the marker in place so I can read your answer');
+    // Removal is no longer unconditional.
+    expect(clipboard).not.toContain('After addressing a comment, remove the entire');
   });
 });
 

@@ -1594,6 +1594,13 @@ From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
 
+  Both `enableResolve` modes distinguish a comment that wanted a **document
+  edit** from one that only wanted an **answer**. The agent always adds a reply;
+  only the edit case disposes of the marker (removed in remove mode, resolved in
+  resolve mode). A question keeps its marker in both modes, so the answer has
+  somewhere to live. Removing the marker for every addressed comment, which
+  remove mode used to instruct, destroys the question and records no answer.
+
 ## Development
 
 Prerequisite: Node 20 or newer.

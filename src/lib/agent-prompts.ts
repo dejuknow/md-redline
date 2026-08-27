@@ -17,9 +17,24 @@ export function buildAddressCommentsPrompt({
     ? `Address ONLY the comments with the following IDs: ${commentIds.map((id) => `\`${id}\``).join(', ')}. Leave any other comment markers in the file untouched.`
     : null;
 
+  // Both modes distinguish "I edited the document" from "I answered a
+  // question". Only the first is finished by clearing the marker; the second
+  // has to leave the thread standing, or the answer has nowhere to live.
+  // Without that split, non-resolve mode instructed an agent to remove the
+  // marker for every comment it addressed, which silently destroyed any
+  // comment that was a question and recorded no answer anywhere.
   const afterAction = enableResolve
     ? 'After addressing a comment that required a document edit, resolve it by setting `"status":"resolved"` and `"resolved":true` in the marker JSON. If a comment only needed a reply (e.g. answering a question), leave it open.'
-    : 'After addressing a comment, remove the entire `<!-- @comment{...} -->` marker from the file';
+    : 'After addressing a comment that required a document edit, remove the entire `<!-- @comment{...} -->` marker from the file. If a comment only needed a reply (e.g. answering a question), leave the marker in place so I can read your answer.';
+
+  // Shared by both modes. The reply is where an answer lives, and in
+  // non-resolve mode it is the only place it can live, since the marker for
+  // an edit-type comment is about to be removed.
+  const replyStep =
+    'For every comment you address, add a reply to the `replies` array: ' +
+    '`"replies":[{"id":"<unique-id>","text":"your answer or description of the change","author":"<your tool name>"}]` ' +
+    '(append to any existing replies). Do NOT include a `timestamp` field in your reply; ' +
+    'md-redline will fill it in automatically when it reads your edit.';
 
   const isSingle = filePaths.length === 1;
   const fileRef = isSingle ? filePaths[0] : 'the files listed below';
@@ -66,15 +81,10 @@ You MUST edit the files at the exact paths listed above. Do NOT copy them to a d
 ## What to do
 ${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
 1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${commentIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
-2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question
-${
-  enableResolve
-    ? `3. For every comment you address, add a reply to the \`replies\` array: \`"replies":[{"id":"<unique-id>","text":"your answer or description of the change","author":"<your tool name>"}]\` (append to any existing replies). Do NOT include a \`timestamp\` field in your reply; md-redline will fill it in automatically when it reads your edit.
+2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. If a comment already carries a reply authored by you, it was answered in an earlier round: leave it exactly as it is and do not reply again.
+3. ${replyStep}
 4. ${afterAction}
-5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it`
-    : `3. ${afterAction}
-4. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it`
-}
+5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it
 
 ## Asking me a question
 
@@ -84,6 +94,6 @@ If a comment is ambiguous, or you encounter a planning fork while editing where 
 
 After you are done, give me a brief summary:
 - How many comments you addressed${isSingle ? '' : ' (grouped by file)'}
-- For each one, whether you resolved it (document edit) or left it open (question/discussion)${enableResolve ? '' : ' or removed the marker'}
+- For each one, whether you ${enableResolve ? 'resolved it' : 'removed its marker'} (document edit) or left it open with a reply (question/discussion)
 - Any comments you left in place and why`;
 }
