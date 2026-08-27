@@ -34,8 +34,18 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_BEFORE = resolve(__dirname, 'fixtures/sample-before.md');
 const FIXTURE_PRD = resolve(__dirname, 'fixtures/prd-sample.md');
-const DEMO_FILE = resolve(__dirname, '..', 'demo-sample.md');
-const REVIEW_DEMO_FILE = resolve(__dirname, '..', 'demo-prd.md');
+// The explorer renders the directory the open file lives in, so a demo file
+// written to the repo root put the maintainer's whole working tree on screen:
+// BACKLOG.md and src-tauri/ are deliberately kept out of the public repo, and
+// both were legible in a video linked from the README. These live in a fixture
+// workspace instead, named to match the `~/dev/myapp` prompt in the terminal
+// clips. Its committed contents are what stops the pane looking empty.
+const DEMO_WORKSPACE = resolve(__dirname, 'fixtures/myapp');
+// Named for its contents (a User Authentication Spec), not for the pipeline.
+// It sits beside prd.md in the explorer, and a file called "demo-sample"
+// announces the whole thing is staged.
+const DEMO_FILE = resolve(DEMO_WORKSPACE, 'auth-spec.md');
+const REVIEW_DEMO_FILE = resolve(DEMO_WORKSPACE, 'prd.md');
 const FRAMES_DIR = resolve(__dirname, 'frames');
 const WALLPAPER = resolve(__dirname, 'assets/background.png');
 // Product shots (npm run demo:shots): deterministic UI stills, regenerated and
