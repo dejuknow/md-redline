@@ -678,3 +678,83 @@ describe('scorer', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// A question's marker has to survive carrying its answer
+// ---------------------------------------------------------------------------
+
+describe('answered disposition (a question inside a remove-mode case)', () => {
+  const QUESTION = {
+    id: 'c1',
+    expectedAction: 'address' as const,
+    expectedMarker: 'answered' as const,
+  };
+
+  it('credits a marker kept with a reply', () => {
+    const input = `Text ${makeMarker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const output = `Text ${makeMarker({
+      id: 'c1',
+      anchor: 'hello',
+      replies: [{ id: 'r1', text: 'Per tenant.', author: 'Claude' }],
+    })}hello world`;
+    const result = score('answered', input, output, makeExpected({ comments: [QUESTION] }));
+    expect(result.scores.parsing).toBe(1.0);
+  });
+
+  it('gives no credit when the marker was deleted', () => {
+    // This is the defect that reached a user: the question was removed along
+    // with its marker and no answer was recorded anywhere. Under the old
+    // per-case rule this output scored a perfect 1.0.
+    const input = `Text ${makeMarker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const output = 'Text hello world';
+    const result = score('deleted', input, output, makeExpected({ comments: [QUESTION] }));
+    expect(result.scores.parsing).toBe(0);
+    expect(result.details.join(' ')).toMatch(/should have been answered/);
+  });
+
+  it('gives no credit when the marker was kept but never answered', () => {
+    const input = `Text ${makeMarker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const output = `Text ${makeMarker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const result = score('unanswered', input, output, makeExpected({ comments: [QUESTION] }));
+    expect(result.scores.parsing).toBe(0);
+    expect(result.details.join(' ')).toMatch(/never answered/);
+  });
+
+  it('scores an edit and a question in one remove-mode case independently', () => {
+    const input =
+      `A ${makeMarker({ id: 'c1', anchor: 'alpha' })}alpha ` +
+      `B ${makeMarker({ id: 'c2', anchor: 'beta' })}beta`;
+    // c1 is the question and keeps its marker; c2 was an edit and loses it.
+    const output = `A ${makeMarker({
+      id: 'c1',
+      anchor: 'alpha',
+      replies: [{ id: 'r1', text: 'Per tenant.', author: 'Claude' }],
+    })}alpha B beta rewritten`;
+    const result = score(
+      'mixed',
+      input,
+      output,
+      makeExpected({
+        totalComments: 2,
+        actionableComments: 2,
+        comments: [QUESTION, { id: 'c2', expectedAction: 'address' }],
+      }),
+    );
+    expect(result.scores.parsing).toBe(1.0);
+  });
+
+  it('scores anchor integrity against a question whose marker was deleted', () => {
+    // The survivor case proves nothing: `survivors` is read off the actual
+    // output, so a marker that is really there lands in the denominator
+    // whatever the expectation said. The deletion case is what exercises
+    // expectedSurvivorIds. Under the old per-case rule a remove-mode case
+    // expected no survivors, so deleting the marker emptied the denominator
+    // and anchorIntegrity reported n/a -- the worst outcome, taking the
+    // anchor with it, was the one this dimension could not punish.
+    const input = `Text ${makeMarker({ id: 'c1', anchor: 'hello' })}hello world`;
+    const output = 'Text hello world';
+    const result = score('deleted-anchor', input, output, makeExpected({ comments: [QUESTION] }));
+    expect(result.scores.anchorIntegrity).not.toBeNull();
+    expect(result.scores.anchorIntegrity).toBe(0);
+  });
+});

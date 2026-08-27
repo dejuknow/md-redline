@@ -1,6 +1,13 @@
 import { parseComments, detectMissingAnchors } from '../src/lib/comment-parser.js';
 import { getEffectiveStatus } from '../src/types.js';
-import type { ExpectedCriteria, ScoringResult, DimensionScores } from './types.js';
+import type {
+  ExpectedCriteria,
+  ScoringResult,
+  DimensionScores,
+  CommentExpectation,
+  MarkerMode,
+  MarkerDisposition,
+} from './types.js';
 
 // Regex with capture group for JSON parsing — different from the shared COMMENT_MARKER_RE
 const COMMENT_MARKER_RE = /<!-- @comment(\{.*?\}) -->/gs;
@@ -11,6 +18,15 @@ const WEIGHTS: Record<keyof DimensionScores, number> = {
   integrity: 0.2,
   anchorIntegrity: 0.2,
 };
+
+/**
+ * The disposition a comment's marker should end in. The case-level markerMode
+ * sets the default; a comment can override it, which is how a question inside
+ * a remove-mode case expects to keep its marker.
+ */
+function dispositionFor(exp: CommentExpectation, markerMode: MarkerMode): MarkerDisposition {
+  return exp.expectedMarker ?? (markerMode === 'remove' ? 'removed' : 'resolved');
+}
 
 export function score(
   caseName: string,
@@ -46,7 +62,8 @@ export function score(
     let correct = 0;
     for (const exp of actionable) {
       const survivor = outputById.get(exp.id);
-      if (markerMode === 'remove') {
+      const disposition = dispositionFor(exp, markerMode);
+      if (disposition === 'removed') {
         if (!survivor) {
           correct++;
           details.push(`parsing: ${exp.id} — marker correctly removed`);
@@ -55,13 +72,24 @@ export function score(
         }
         continue;
       }
-      // resolve mode: the marker stays, gains a reply, and is marked resolved
       if (!survivor) {
-        details.push(`parsing: ${exp.id} — marker was deleted but should have been resolved`);
+        details.push(`parsing: ${exp.id} — marker was deleted but should have been ${disposition}`);
+        continue;
+      }
+      const hasReply = (survivor.replies?.length ?? 0) > 0;
+      if (disposition === 'answered') {
+        // A question. The reply IS the answer, so the marker has to survive
+        // carrying it; no status is required, since both modes leave a
+        // question open.
+        if (hasReply) {
+          correct++;
+          details.push(`parsing: ${exp.id} — question answered, marker kept`);
+        } else {
+          details.push(`parsing: ${exp.id} — marker kept but the question was never answered`);
+        }
         continue;
       }
       const isResolved = getEffectiveStatus(survivor) === 'resolved';
-      const hasReply = (survivor.replies?.length ?? 0) > 0;
       if (isResolved && hasReply) {
         correct++;
         details.push(`parsing: ${exp.id} — marker resolved with a reply`);
@@ -185,10 +213,13 @@ export function score(
   // scored as detached rather than dropped from the denominator. Otherwise the
   // worst possible anchor outcome — delete every marker, taking every anchor
   // with it — is the one outcome this dimension cannot punish.
-  const expectedSurvivorIds =
-    (expected.markerMode ?? 'remove') === 'resolve'
-      ? expected.comments.filter((c) => c.expectedAction === 'address').map((c) => c.id)
-      : [];
+  const expectedSurvivorIds = expected.comments
+    .filter(
+      (c) =>
+        c.expectedAction === 'address' &&
+        dispositionFor(c, expected.markerMode ?? 'remove') !== 'removed',
+    )
+    .map((c) => c.id);
   const missingSurvivors = expectedSurvivorIds.filter((id) => !outputById.has(id));
   const denominator = survivors.length + missingSurvivors.length;
 
