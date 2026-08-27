@@ -84,6 +84,44 @@ function renderCard(
   return render(createElement(CommentCard, { ...defaults, ...props }), { wrapper: AllProviders });
 }
 
+describe('CommentCard - sent dimming', () => {
+  // `sent` marks a comment already handed to the agent. Dimming it at rest
+  // says so; dimming it while the user is working in it says nothing useful
+  // and reads as disabled, which is what the whole sidebar looked like after
+  // every Send. `isResolved` already gets this right by living inside the
+  // isActive ternary, so this is the same rule applied to the sibling flag.
+  it('dims a sent comment at rest', () => {
+    const { container } = renderCard({ sent: true, isActive: false });
+    expect((container.firstChild as HTMLElement).className).toContain('opacity-50');
+  });
+
+  it('does not dim a sent comment while it is active', () => {
+    const { container } = renderCard({ sent: true, isActive: true });
+    expect((container.firstChild as HTMLElement).className).not.toContain('opacity-50');
+  });
+
+  it('leaves an unsent comment undimmed either way', () => {
+    const atRest = renderCard({ sent: false, isActive: false });
+    expect((atRest.container.firstChild as HTMLElement).className).not.toContain('opacity-50');
+    const active = renderCard({ sent: false, isActive: true });
+    expect((active.container.firstChild as HTMLElement).className).not.toContain('opacity-50');
+  });
+
+  it('never stacks two opacity classes on a sent, resolved card', async () => {
+    // opacity-50 and opacity-60 on one element is settled by Tailwind's
+    // stylesheet order, not by position in the string, so which one wins is
+    // invisible from the call site. Resolved owns the dimming here.
+    // isResolved needs enableResolve, since that is what turns the status on.
+    const { container } = renderCard(
+      { sent: true, isActive: false, comment: { ...baseComment, status: 'resolved' } },
+      { enableResolve: true },
+    );
+    const card = () => (container.firstChild as HTMLElement).className;
+    await waitFor(() => expect(card()).toContain('opacity-60'));
+    expect(card()).not.toContain('opacity-50');
+  });
+});
+
 describe('CommentCard — agent-initiated comment', () => {
   it('does not render "Awaiting your reply" banner', () => {
     renderCard();

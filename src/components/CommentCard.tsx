@@ -325,7 +325,7 @@ export const CommentCard = memo(function CommentCard({
           : isResolved
             ? 'border-border bg-surface-secondary opacity-60'
             : 'border-border-subtle bg-surface hover:border-content-faint hover:shadow-sm'
-      }${sent ? ' opacity-50' : ''}`}
+      }${sent && !isActive && !isResolved ? ' opacity-50' : ''}`}
       onClick={() => onActivate(comment.id)}
       onContextMenu={(e) => {
         if (onCtxMenu) {
