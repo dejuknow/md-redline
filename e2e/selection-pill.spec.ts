@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { addComment } from './helpers/comments';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -64,6 +65,42 @@ async function selectText(page: Page, text: string) {
       }
     }
     throw new Error(`Text "${targetText}" not found in rendered markdown`);
+  }, text);
+}
+
+// Selects text that lives outside the prose column, which is what the comment
+// sidebar is. Mirrors selectText above except for where it looks.
+async function selectOutsideProse(page: Page, text: string) {
+  await page.evaluate((targetText) => {
+    const prose = document.querySelector('[data-prose-column]');
+    // Fail loudly rather than silently widening to the whole page. Without the
+    // marker there is nothing to exclude, so this helper would search the
+    // document too and quietly stop testing what its name says it tests.
+    if (!prose) throw new Error('[data-prose-column] is missing: selection is no longer scoped');
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      if (node.parentElement && prose.contains(node.parentElement)) continue;
+      const idx = node.textContent?.indexOf(targetText) ?? -1;
+      if (idx >= 0) {
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + targetText.length);
+        const sel = window.getSelection()!;
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const rect = range.getBoundingClientRect();
+        node.parentElement?.dispatchEvent(
+          new MouseEvent('mouseup', {
+            bubbles: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }),
+        );
+        return;
+      }
+    }
+    throw new Error(`Text "${targetText}" not found outside the prose column`);
   }, text);
 }
 
@@ -129,5 +166,18 @@ test.describe('Selection pill', () => {
     await expect(textarea).toBeVisible();
     await expect(textarea).not.toHaveValue('');
     expect(label.length).toBeGreaterThan(0);
+  });
+
+  test('selecting a comment card in the sidebar does not open a composer', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Is this per tenant?');
+
+    // The card is chrome, not document. Before selection was scoped to the
+    // prose column it lived inside the element selections resolved against,
+    // so dragging across a comment offered to anchor a new comment to the
+    // old one's text.
+    await selectOutsideProse(page, 'Is this per tenant?');
+
+    await expect(page.locator('[data-comment-form]')).toHaveCount(0);
   });
 });
