@@ -23,9 +23,16 @@ export function buildAddressCommentsPrompt({
   // Without that split, non-resolve mode instructed an agent to remove the
   // marker for every comment it addressed, which silently destroyed any
   // comment that was a question and recorded no answer anywhere.
+  //
+  // The test is whether the DOCUMENT CHANGED, never whether a reply was
+  // written. An earlier wording said to keep the marker when a comment "only
+  // needed a reply", which stopped distinguishing anything the moment the
+  // reply step above became unconditional: every comment gets a reply now, so
+  // an agent reading that kept every marker. Measured on the deletion-request
+  // eval fixture, which went from 100% to 60% until this was reworded.
   const afterAction = enableResolve
-    ? 'After addressing a comment that required a document edit, resolve it by setting `"status":"resolved"` and `"resolved":true` in the marker JSON. If a comment only needed a reply (e.g. answering a question), leave it open.'
-    : 'After addressing a comment that required a document edit, remove the entire `<!-- @comment{...} -->` marker from the file. If a comment only needed a reply (e.g. answering a question), leave the marker in place so I can read your answer.';
+    ? 'If addressing the comment changed the document, resolve it by setting `"status":"resolved"` and `"resolved":true` in the marker JSON. If the document did not change, because the comment asked a question and your reply is the answer, leave it open.'
+    : 'If addressing the comment changed the document, remove the entire `<!-- @comment{...} -->` marker from the file. If the document did not change, because the comment asked a question and your reply is the answer, leave the marker in place so I can read that answer.';
 
   // Shared by both modes. The reply is where an answer lives, and in
   // non-resolve mode it is the only place it can live, since the marker for

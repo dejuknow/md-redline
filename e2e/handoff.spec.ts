@@ -209,8 +209,12 @@ test.describe('Resolve-mode hand-off', () => {
 
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboard).toContain('"author":"<your tool name>"');
-    expect(clipboard).toContain('required a document edit, remove the entire');
-    expect(clipboard).toContain('leave the marker in place so I can read your answer');
+    expect(clipboard).toContain('changed the document, remove the entire');
+    expect(clipboard).toContain('leave the marker in place so I can read that answer');
+    // Keyed on the document, never on the reply. Every comment gets a reply
+    // now, so wording it as "only needed a reply" stopped distinguishing
+    // anything and an agent kept every marker.
+    expect(clipboard).not.toContain('only needed a reply');
     // Removal is no longer unconditional.
     expect(clipboard).not.toContain('After addressing a comment, remove the entire');
   });
