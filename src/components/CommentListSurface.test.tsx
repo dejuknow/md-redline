@@ -203,3 +203,52 @@ describe('focus request against an active search', () => {
     );
   });
 });
+
+describe('CommentListSurface - answered count', () => {
+  // This file's beforeEach turns resolve mode ON for every test, so a
+  // remove-mode case has to say so before rendering or it silently measures
+  // the wrong mode.
+  function renderRemoveMode(props: Parameters<typeof renderSurface>[0]) {
+    fetchPreferences.mockResolvedValue({ settings: { enableResolve: false } });
+    return renderSurface(props);
+  }
+
+  it('reports how many comments an agent has answered, in remove mode', async () => {
+    // Remove mode's footer is otherwise a flat total, so a review with
+    // surviving question markers gives the reader no sense of progress.
+    renderRemoveMode({ answeredCommentIds: new Set(['still-open']) });
+    const footer = await screen.findByText(/2 comments/);
+    expect(footer.textContent).toMatch(/1 answered/);
+  });
+
+  it('says nothing when none are answered', async () => {
+    renderRemoveMode({ answeredCommentIds: new Set<string>() });
+    const footer = await screen.findByText(/2 comments/);
+    expect(footer.textContent).not.toMatch(/answered/);
+  });
+
+  it('counts a resolved-in-data comment in remove mode, matching the card', async () => {
+    // RESOLVED_COMMENT carries status:'resolved' in its data. In remove mode
+    // that status means nothing, and the card shows the pill, so the footer
+    // has to count it. Gating the exclusion on the status alone made the two
+    // disagree about the same comment.
+    renderRemoveMode({ answeredCommentIds: new Set(['settled']) });
+    const footer = await screen.findByText(/2 comments/);
+    expect(footer.textContent).toMatch(/1 answered/);
+  });
+
+  it('counts answered questions in resolve mode too', async () => {
+    // Resolve mode buckets an answered-but-open question under "open", so the
+    // count is the only thing separating it from one nobody has addressed.
+    renderSurface({ answeredCommentIds: new Set(['still-open']) });
+    const footer = await screen.findByText(/1 open/);
+    expect(footer.textContent).toMatch(/1 answered/);
+  });
+
+  it('does not count a resolved comment as answered', async () => {
+    // Already finished; the extra number would only add noise.
+    renderSurface({ answeredCommentIds: new Set(['settled']) });
+    const footer = await screen.findByText(/1 open/);
+    expect(footer.textContent).not.toMatch(/answered/);
+  });
+});

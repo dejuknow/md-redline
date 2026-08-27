@@ -29,6 +29,7 @@ import type { SelectionInfo } from './types';
 import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentPopover } from './components/CommentPopover';
+import { computeAnsweredCommentIds } from './lib/answered-comments';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
@@ -1522,6 +1523,8 @@ export default function App() {
     applyExternalContent(path, priorContent, content, mtime, {
       priorLoaded: priorContent.length > 0,
     }).content;
+
+  const answeredCommentIds = useMemo(() => computeAnsweredCommentIds(comments), [comments]);
 
   const unreadReplyIds = useMemo(
     () => new Set(activeFilePath ? (unreadByPath[activeFilePath] ?? []) : []),
@@ -3154,6 +3157,7 @@ export default function App() {
                               activeCommentId={activeCommentId}
                               missingAnchors={missingAnchors}
                               sentCommentIds={sentCommentIds}
+                              answeredCommentIds={answeredCommentIds}
                               onActivate={handleSidebarActivate}
                               onReply={handleReply}
                               onResolve={settings.enableResolve ? handleResolve : undefined}
@@ -3186,6 +3190,7 @@ export default function App() {
                                   pageRef={pageRef as RefObject<HTMLElement | null>}
                                   onClose={() => setPopoverCommentId(null)}
                                   sent={sentCommentIds.includes(c.id)}
+                                  answered={answeredCommentIds.has(c.id)}
                                   anchorMissing={missingAnchors.has(c.id)}
                                   onReply={handleReply}
                                   onResolve={settings.enableResolve ? handleResolve : undefined}
@@ -3273,6 +3278,7 @@ export default function App() {
           requestedFocus={drawerOpen ? requestedCommentFocus : null}
           onFocusHandled={() => setRequestedCommentFocus(null)}
           sentCommentIds={sentCommentIds}
+          answeredCommentIds={answeredCommentIds}
         />
 
         {/* Command palette */}
