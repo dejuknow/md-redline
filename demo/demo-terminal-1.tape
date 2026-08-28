@@ -24,7 +24,7 @@ Sleep 400ms
 # Scene 1: User types the spec generation prompt. Kept short enough that it
 # fits on one line at Width 1440 / FontSize 28 so continuation doesn't need
 # a hanging indent (terminals don't do that automatically).
-Type "Write a spec for user auth (email, OAuth, magic links) to sample.md."
+Type "Write a spec for user auth (email, OAuth, magic links)."
 Sleep 750ms
 Enter
 
@@ -32,9 +32,13 @@ Enter
 Sleep 1.2s
 
 # Scene 3: User requests review in mdr
-Type "Let me review sample.md in mdr before you continue."
+Type "Let me review the spec in mdr before you continue."
 Sleep 750ms
 Enter
 
 # Beat showing "I'll open that in mdr for your review." + the waiting state.
-Sleep 1.5s
+# Trailing dwell: this clip cuts to a browser clip, so it holds on its
+# final frame long enough to read before the switch. Standing rule for
+# these recordings: >= 4s. Anything shorter and the state a viewer is
+# meant to absorb is gone before they have parsed it.
+Sleep 4s

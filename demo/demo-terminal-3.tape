@@ -29,4 +29,8 @@ Enter
 # Agent prints the mdr_comment + mdr_wait tool calls, ending on the waiting
 # state. Tail hold matches the clip-01 rule: the CLI->MDR cut needs >=1.5s
 # on the final waiting line.
-Sleep 2.6s
+# Trailing dwell: this clip cuts to a browser clip, so it holds on its
+# final frame long enough to read before the switch. Standing rule for
+# these recordings: >= 4s. Anything shorter and the state a viewer is
+# meant to absorb is gone before they have parsed it.
+Sleep 5s

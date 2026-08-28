@@ -58,7 +58,7 @@ prompt_mode() {
   echo ""
 
   # Tool call: Write file
-  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Write${RESET}${DIM}(sample.md)${RESET}"
+  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Write${RESET}${DIM}(auth-spec.md)${RESET}"
   echo ""
   echo -e "    ${DIM}# User Authentication Spec${RESET}" | stream
   echo -e "    ${DIM}${RESET}" | stream
@@ -75,7 +75,7 @@ prompt_mode() {
   echo -e "    ${DIM}Password reset via email with expiring tokens (valid 1 hour).${RESET}" | stream
   echo -e "    ${DIM}...${RESET}" | stream
   echo ""
-  echo -e "  ${GREEN}✓${RESET} ${DIM}Wrote sample.md (67 lines)${RESET}"
+  echo -e "  ${GREEN}✓${RESET} ${DIM}Wrote auth-spec.md (67 lines)${RESET}"
   echo ""
   hr 76
   echo ""
@@ -91,7 +91,7 @@ prompt_mode() {
   echo ""
 
   # Tool call: mdr_request_review
-  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_request_review${RESET}${DIM}({\"filePaths\": [\"sample.md\"]})${RESET}"
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_request_review${RESET}${DIM}({\"filePaths\": [\"auth-spec.md\"]})${RESET}"
   echo -e "    ${DIM}⎿ Waiting for review in md-redline...${RESET}"
   echo ""
 
@@ -105,7 +105,7 @@ review_mode() {
   echo ""
   echo -e "  ${BOLD}⏺${RESET} I'll open that in mdr for your review."
   echo ""
-  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_request_review${RESET}${DIM}({\"filePaths\": [\"sample.md\"]})${RESET}"
+  echo -e "  ${MAGENTA}⏺${RESET} ${BOLD}mdr_request_review${RESET}${DIM}({\"filePaths\": [\"auth-spec.md\"]})${RESET}"
   echo -e "    ${DIM}⎿ Waiting for review in md-redline...${RESET}"
   # Longer pause at the clip start — the CLI has just come back on screen
   # after the transition, so give viewers a beat to register the state
@@ -129,11 +129,11 @@ review_mode() {
   sleep 0.08
 
   echo ""
-  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Edit${RESET}${DIM}(sample.md)${RESET}"
+  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Edit${RESET}${DIM}(auth-spec.md)${RESET}"
   echo -e "    ${DIM}  ${RED}- Minimum 8 characters${RESET}"
   echo -e "    ${DIM}  ${GREEN}+ Minimum 12 characters${RESET}"
   echo ""
-  echo -e "  ${GREEN}✓${RESET} ${DIM}Updated sample.md${RESET}"
+  echo -e "  ${GREEN}✓${RESET} ${DIM}Updated auth-spec.md${RESET}"
   sleep 0.1
 
   echo ""
@@ -143,13 +143,13 @@ review_mode() {
   sleep 0.08
 
   echo ""
-  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Edit${RESET}${DIM}(sample.md)${RESET}"
+  echo -e "  ${YELLOW}⏺${RESET} ${BOLD}Edit${RESET}${DIM}(auth-spec.md)${RESET}"
   echo -e "    ${DIM}  ${RED}- Password reset via email with expiring tokens (valid 1 hour).${RESET}"
   echo -e "    ${DIM}  ${GREEN}+ Password reset via email with expiring tokens (valid 24 hours).${RESET}"
   echo -e "    ${DIM}  ${GREEN}+${RESET}"
   echo -e "    ${DIM}  ${GREEN}+ Industry standard for password reset tokens is 24 hours...${RESET}"
   echo ""
-  echo -e "  ${GREEN}✓${RESET} ${DIM}Updated sample.md${RESET}"
+  echo -e "  ${GREEN}✓${RESET} ${DIM}Updated auth-spec.md${RESET}"
   echo ""
   hr 76
   echo ""

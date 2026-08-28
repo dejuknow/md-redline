@@ -22,4 +22,8 @@ Show
 # "Review received", streams the agent's edits, then prints "Both comments
 # addressed..." + the ❯ prompt. Hold long enough after the final message
 # that viewers can read it before the cut back to mdr.
-Sleep 3.3s
+# Trailing dwell: this clip cuts to a browser clip, so it holds on its
+# final frame long enough to read before the switch. Standing rule for
+# these recordings: >= 4s. Anything shorter and the state a viewer is
+# meant to absorb is gone before they have parsed it.
+Sleep 6s
