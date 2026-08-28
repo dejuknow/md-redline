@@ -13,6 +13,16 @@ export function sanitizeRenderedMarkdown(html: string): string {
     ADD_TAGS: ['mark'],
     // DOMPurify's default allowlist has rel but not target, so without this
     // the target="_blank" the pipeline puts on external links gets stripped.
-    ADD_ATTR: ['target', 'data-comment-ids', 'data-mdr-local-md', 'data-mdr-fragment'],
+    ADD_ATTR: [
+      'target',
+      'data-comment-ids',
+      'data-mdr-local-md',
+      'data-mdr-fragment',
+      // Blocks carry the markdown offsets they came from, which Copy as
+      // Markdown slices by. Listed rather than left to DOMPurify's
+      // ALLOW_DATA_ATTR default, so the allowlist states the dependency.
+      'data-src-start',
+      'data-src-end',
+    ],
   });
 }

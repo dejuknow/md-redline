@@ -512,6 +512,36 @@ test.describe('Context menu on a text selection', () => {
     await expect(menu).toBeVisible();
   });
 
+  test('Copy as Markdown hands back the document source for a whole block', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    // A whole paragraph: the boundaries line up with a block, so this is the
+    // file's own bytes rather than a reconstruction.
+    await page.evaluate(() => {
+      const p = [...document.querySelectorAll('.prose p')].find((el) =>
+        el.textContent?.includes('valid credentials'),
+      )!;
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+    const menu = page.locator('.context-menu-enter');
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+    await menu.getByText('Copy as Markdown', { exact: true }).click();
+
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 5000 })
+      .toBe(
+        'The authentication system supports email and password login. Users must provide valid credentials to access the application. The system validates all inputs before processing.',
+      );
+  });
+
   test('Copy in the selection menu puts the selected text on the clipboard', async ({
     page,
     context,

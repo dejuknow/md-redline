@@ -32,6 +32,8 @@ export interface UseContextMenuItemsParams {
   selectionRef: RefObject<SelectionInfo | null>;
   /** Commit and lock a selection the menu captured when it opened. */
   adoptSelection: (info: SelectionInfo) => void;
+  /** Put the selection on the clipboard as the document's markdown. */
+  copySelectionAsMarkdown: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
   triggerEdit: (id: string) => void;
   triggerReply: (id: string) => void;
@@ -88,6 +90,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     ensureCommentSurface,
     selectionRef,
     adoptSelection,
+    copySelectionAsMarkdown,
     setAutoExpandForm,
     triggerEdit,
     triggerReply,
@@ -229,6 +232,10 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
               copySelectionToClipboard(sel);
             },
           },
+          {
+            label: 'Copy as Markdown',
+            onClick: copySelectionAsMarkdown,
+          },
         ];
 
         setCtxMenuItems(items);
@@ -244,6 +251,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       handleUnresolve,
       handleDelete,
       adoptSelection,
+      copySelectionAsMarkdown,
       ensureCommentSurface,
       triggerEdit,
       triggerReply,
