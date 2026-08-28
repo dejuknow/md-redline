@@ -67,6 +67,29 @@ describe('resolveSelection', () => {
     expect(resolveSelection(container)).toBeNull();
   });
 
+  it('clamps the start to real text when the first block has none', () => {
+    // getVisibleTextOffset walks text nodes and returns the container's total
+    // length when it never meets the node it was given, so clamping to
+    // (container, 0) in front of a childless first block reported the END of
+    // the document as the selection's offset.
+    document.body.innerHTML =
+      '<div id="page"><div id="root"><hr><p>Alpha beta gamma.</p></div><div id="after">tail</div></div>';
+    const container = document.getElementById('root')!;
+    const para = container.querySelector('p')!.firstChild!;
+    const outside = document.getElementById('after')!.firstChild!;
+
+    const range = document.createRange();
+    range.setStartBefore(container.firstChild!);
+    range.setEnd(outside, 4);
+
+    mockSelection({ text: 'Alpha beta gamma.tail', range });
+
+    const result = resolveSelection(container);
+    expect(result).not.toBeNull();
+    expect(result!.offset).toBe(0);
+    expect(para.textContent).toContain('Alpha');
+  });
+
   it('keeps the blank line between blocks that Selection.toString reports', () => {
     // Range.toString() collapses a block boundary to a single newline while
     // Selection.toString() reports the blank line. That string is the comment's

@@ -495,6 +495,13 @@ test.describe('Context menu on a text selection', () => {
     // wrapper above the prose, which used to throw the whole selection away:
     // native highlight painted, nothing committed, and the right-click that
     // followed reached the browser's menu.
+    // If the fixture ever grows past the viewport this release point lands ON
+    // text, and the test would keep passing while exercising an ordinary drag.
+    const proseBottom = await page.evaluate(
+      () => (document.querySelector('.prose') as HTMLElement).getBoundingClientRect().bottom,
+    );
+    expect(releaseY).toBeGreaterThan(proseBottom);
+
     await page.mouse.move(from.x, from.y);
     await page.mouse.down();
     await page.mouse.move(from.x + 200, releaseY, { steps: 12 });
