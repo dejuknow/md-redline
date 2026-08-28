@@ -67,6 +67,43 @@ describe('resolveSelection', () => {
     expect(resolveSelection(container)).toBeNull();
   });
 
+  it('resolves a drag that ends outside the container, clamped to it', () => {
+    // Releasing the mouse in the sheet's empty area leaves the range ending
+    // outside the prose, so its common ancestor is a layout wrapper ABOVE the
+    // container. Rejecting on containment threw the whole selection away: no
+    // pill, no painted mark, and a right-click that fell through to the
+    // browser's menu.
+    document.body.innerHTML =
+      '<div id="page"><div id="root">The quick brown fox jumps over the lazy dog</div><div id="after">trailing</div></div>';
+    const container = document.getElementById('root')!;
+    const textNode = container.firstChild!;
+    const outside = document.getElementById('after')!.firstChild!;
+
+    const range = document.createRange();
+    range.setStart(textNode, 4);
+    range.setEnd(outside, 8);
+
+    mockSelection({ text: 'quick brown fox jumps over the lazy dogtrailing', range });
+
+    const result = resolveSelection(container);
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe('quick brown fox jumps over the lazy dog');
+  });
+
+  it('returns null when the selection does not touch the container at all', () => {
+    document.body.innerHTML =
+      '<div id="page"><div id="root">inside text</div><div id="after">outside text</div></div>';
+    const container = document.getElementById('root')!;
+    const outside = document.getElementById('after')!.firstChild!;
+
+    const range = document.createRange();
+    range.setStart(outside, 0);
+    range.setEnd(outside, 7);
+
+    mockSelection({ text: 'outside', range });
+    expect(resolveSelection(container)).toBeNull();
+  });
+
   it('returns correct contextBefore and contextAfter for a mid-document selection', () => {
     const content = 'The quick brown fox jumps over the lazy dog and then some more text follows';
     document.body.innerHTML = `<div id="root">${content}</div>`;
