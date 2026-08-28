@@ -725,6 +725,107 @@ While a template prefill sits untouched in the full comment form, Escape
 clears the prefill and keeps the form open; a second Escape (or an Escape
 after typing) closes the form as usual.
 
+### Right-clicking a selection
+
+The viewer's own menu (Comment, Templates, Copy) opens from the painted mark,
+not from the native range. `handleContextMenu` in `MarkdownViewer` checks
+`SELECTION_MARK_SELECTOR` before it falls back to `window.getSelection()`,
+because the range is gone by then.
+
+The reason is worth stating precisely, because it decides which layer a fix
+belongs in: committing a selection re-runs the render layout effect, whose deps
+include `selectionText`, and that effect's first act is
+`container.innerHTML = sanitizeRenderedMarkdown(html)`. The whole subtree is
+replaced, so the native Range dies there, before `wrapText` paints any mark.
+Switching the highlight to the CSS Custom Highlight API to avoid wrapping text
+nodes would therefore change nothing: the range would still be destroyed by the
+rebuild above it. Testing the range alone is what left this menu unreachable
+from March until it was fixed; a reader got the browser's menu instead.
+
+Two things keep the selection alive long enough for the menu to act on it, and
+both are load-bearing:
+
+- `useSelection`'s `handleMouseUp` ignores **the platform's secondary click when
+  it lands on the selection's own mark** (`isSecondaryClick`: button 2, plus
+  macOS ctrl+click, which arrives with `button: 0`, so testing the button alone
+  misses the gesture most Mac users make. The middle button is deliberately not
+  included: it opens no menu, so it should clear like any other press). Otherwise the right-click's own mouseup resolves
+  the collapsed range, gets null, and clears the selection the menu was opened
+  on. This also makes the fix independent of event order, which matters because
+  Windows fires `contextmenu` after mouseup rather than before it. Sparing every
+  secondary press everywhere is wrong in the other direction: the selection then
+  outlives a right-click on unrelated text, its pill floats over that text, and
+  the next menu builds on the stale selection instead of what was pointed at.
+- The viewer's menu carries `data-preserve-selection` (the `preserveSelection`
+  prop, set on that instance only), so picking an item does not clear the
+  selection before the item's click handler runs. Two listeners have to respect
+  it, not one: `useSelection`'s mouseup, and `CommentForm`'s dismissal, which
+  with quick comment on is watching an already-open composer.
+- `Comment` commits the selection the menu captured, through `adoptSelection`,
+  rather than locking whatever is live at click time. Locking live state means
+  that if anything cleared the selection in between, `lockedRef` is set with
+  nothing committed and never released, and every later selection in the
+  document is silently ignored: the reader sees the menu stop appearing and has
+  no way to know Escape releases it. The explorer, tab and sidebar
+  menus deliberately do not: they have no items that act on the selection, and
+  sparing them would keep a stale selection alive through clicks that should end
+  it.
+
+`CommentForm`'s click-outside dismissal spares a press that lands on the
+selection's mark, or inside any surface carrying `data-preserve-selection`
+(the menu itself), for the same reason: with quick comment on, the composer is
+open the moment you select, and a press on your own selection would otherwise
+cancel it and take the selection with it. Tested by target rather than by
+button, because a touch long-press opens the same menu and its compatibility
+mousedown reports button 0, indistinguishable from a left-click. The check runs
+after the containment test, so a right-click anywhere else still dismisses an
+empty composer rather than leaving it floating.
+
+**Only one surface at a time.** The pill and this menu both carry Comment, and
+the menu used to open its template submenu straight over the pill's own
+template row, so `CommentForm` takes a `hidden` prop (App passes
+`viewerCtxMenu.isOpen`) and renders nothing while the menu is up. It covers the expanded
+composer too, hidden with `visibility` rather than by returning null: a
+discarded node comes back one line tall with no caret, because `useAutoResize`
+only runs on input and the focus effect only on expand. The browser blurs what
+it hides, so `CommentForm` puts focus back when the surface returns. Symmetrically, an open overlay closes every
+context menu (the effect in App keyed on `activeModal` and `drawerOpen`), so the
+palette, settings, the file opener and the comments drawer never render on top
+of a live menu. A tab switch closes it too: its items hold a `SelectionInfo`
+captured in the document being left.
+
+**The menu carries Comment and Copy, not templates.** It listed the same eight
+templates the pill does, which made one label mean two things: the pill's
+prefill the composer, the menu's posted immediately. Prefilling from the menu
+instead only moved the damage one step earlier, since it overwrites a draft
+already in the composer. Comment opens the composer, and the templates live
+there, one step further along a path the reader is already on.
+
+**A menu resolved from a live range carries that range's text** (`liveText` on
+`ViewerContextMenuInfo`), and the consumer refuses when it does not match the
+committed selection. While a selection is locked a fresh drag never reaches the
+app, so the two hold different text, and a menu built from the committed one
+would sit over one passage while every item acted on another.
+
+**Shift+right-click** returns before every branch, so the browser's own menu is
+never suppressed. That matches what the chord already means in Chrome on
+Windows and Linux, and it is the escape hatch to Inspect on a painted highlight.
+It is gated on `button === 2`: Shift+F10 is the standard keyboard chord for the
+context menu and arrives with `shiftKey` set and button 0, so testing `shiftKey`
+alone would lock keyboard users out of this menu entirely.
+
+`onContextMenu` returns whether it opened a menu, and the viewer calls
+`preventDefault` only when it did. The consumer refuses a mark whose comment is
+already gone, and a selection type it has no `SelectionInfo` for; suppressing
+the native menu for a menu that never appears would leave the reader with no
+menu at all, no Copy, no spellcheck, no Inspect, and nothing on screen saying
+why. Falling back to the browser's menu is the correct answer there.
+
+Precedence is unchanged: the comment-highlight branch runs first, so a selection
+that overlaps an existing anchor opens the comment menu (Edit / Reply / Delete),
+not the selection menu. A right-click on text with nothing selected also reaches
+the browser's menu, since neither branch matches.
+
 ### Copying a document selection
 The rendered view paints the pending selection as `mark.selection-highlight`
 (`MarkdownViewer.tsx`), which replaces the selected text nodes and collapses the

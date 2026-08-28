@@ -3,6 +3,7 @@ import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPrimaryModifierLabel } from '../lib/platform';
+import { SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
 
 interface Props {
   selection: SelectionInfo;
@@ -13,6 +14,14 @@ interface Props {
    * step the pending flow exists for. */
   isPending?: boolean;
   autoExpand?: boolean;
+  /**
+   * Hide while the viewer's context menu is open. Both surfaces carry Comment
+   * and the same templates, and the menu's submenu opens straight over the
+   * pill's own template row. Hidden with visibility rather than by unmounting
+   * or returning null, so the textarea keeps its size, its caret and its node:
+   * a draft comes back exactly as it was left.
+   */
+  hidden?: boolean;
   onSubmit: (
     anchor: string,
     text: string,
@@ -28,6 +37,7 @@ export function CommentForm({
   selection,
   isPending,
   autoExpand,
+  hidden = false,
   onSubmit,
   onCancel,
   onLock,
@@ -97,9 +107,21 @@ export function CommentForm({
   useEffect(() => {
     if (!isExpanded) return;
     const handler = (e: MouseEvent) => {
-      if (formRef.current && !formRef.current.contains(e.target as Node) && !text.trim()) {
-        onCancel();
-      }
+      const target = e.target as HTMLElement | null;
+      if (!formRef.current || formRef.current.contains(target) || text.trim()) return;
+      // A press on the text you selected is engagement, not dismissal: it is
+      // how the viewer's context menu is opened, and cancelling here would
+      // clear the selection that menu acts on. Tested by target rather than by
+      // button, because a touch long-press opens the same menu and its
+      // compatibility mousedown reports button 0, indistinguishable from a
+      // left-click. Presses anywhere else still dismiss, whatever the button.
+      if (target?.closest?.(SELECTION_MARK_SELECTOR)) return;
+      // Nor is a press inside a surface that exists to keep the selection
+      // alive. The viewer's context menu carries this attribute and its items
+      // act on the selection, so cancelling here would clear the selection out
+      // from under the item the reader is in the middle of clicking.
+      if (target?.closest?.('[data-preserve-selection]')) return;
+      onCancel();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -256,6 +278,16 @@ export function CommentForm({
     }
   };
 
+  // A browser blurs the focused element when an ancestor becomes invisible, so
+  // an expanded composer comes back caretless after the menu closes. Put focus
+  // where the reader left it.
+  const wasHiddenRef = useRef(hidden);
+  useEffect(() => {
+    const cameBack = wasHiddenRef.current && !hidden;
+    wasHiddenRef.current = hidden;
+    if (cameBack && isExpanded) inputRef.current?.focus();
+  }, [hidden, isExpanded]);
+
   const handleExpand = () => {
     onLock(); // Lock the selection so mouseup events don't clear it
     setIsExpanded(true);
@@ -284,11 +316,23 @@ export function CommentForm({
     setShowPillMenu((prev) => !prev);
   };
 
+  // Hidden with styles rather than by returning null. Returning null discards
+  // the DOM: the textarea comes back at its one-line default because
+  // useAutoResize only runs on input, the caret is gone because the focus
+  // effect only runs on expand, and formRef goes null so the click-outside
+  // dismissal silently stops working while the menu is up. `visibility` rather
+  // than `opacity`, so an invisible composer stays out of the tab order and out
+  // of the accessibility tree; the browser blurs what it hides, so the caret is
+  // put back by the effect above.
+  const surfaceStyle: React.CSSProperties = hidden
+    ? { ...style, visibility: 'hidden', pointerEvents: 'none' }
+    : style;
+
   if (!isExpanded) {
     const pillTemplates = TEMPLATES.slice(0, 2);
     const menuTemplates = TEMPLATES.slice(2);
     return (
-      <div ref={formRef} style={style} data-comment-form>
+      <div ref={formRef} style={surfaceStyle} aria-hidden={hidden || undefined} data-comment-form>
         {showPillMenu && menuTemplates.length > 0 && (
           <div
             data-pill-template-menu
@@ -390,7 +434,8 @@ export function CommentForm({
   return (
     <div
       ref={formRef}
-      style={style}
+      style={surfaceStyle}
+      aria-hidden={hidden || undefined}
       data-comment-form
       className="w-80 bg-surface-raised rounded-xl shadow-xl border border-border overflow-x-hidden overflow-y-auto"
     >

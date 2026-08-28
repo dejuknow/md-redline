@@ -20,12 +20,22 @@ import {
   getMermaidHighlightTheme,
   scheduleMermaidLayoutStabilization,
 } from '../lib/mermaid-highlights';
+import { SELECTION_MARK_CLASS, SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
+import { isSecondaryClick } from '../lib/platform';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
   type: 'selection' | 'highlight';
   /** Comment IDs (only for 'highlight' type) */
   commentIds?: string[];
+  /**
+   * The live native selection this was resolved from, when the menu came from
+   * a range rather than a painted mark. The consumer compares it with the
+   * committed selection: a drag made while the selection was locked leaves the
+   * two holding different text, and a menu built from the committed one would
+   * sit over one passage while acting on another.
+   */
+  liveText?: string;
   /** Screen coordinates for the menu */
   x: number;
   y: number;
@@ -40,7 +50,8 @@ interface Props {
   selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
   onLocalLinkClick?: (path: string, fragment?: string) => void;
-  onContextMenu?: (info: ViewerContextMenuInfo) => void;
+  /** Returns whether it opened a menu; the native one is suppressed only then. */
+  onContextMenu?: (info: ViewerContextMenuInfo) => boolean;
   enableResolve?: boolean;
   sentCommentIds?: string[];
   searchQuery?: string;
@@ -492,7 +503,7 @@ export const MarkdownViewer = memo(
           container,
           selectionText,
           (mark) => {
-            mark.className = 'selection-highlight';
+            mark.className = SELECTION_MARK_CLASS;
           },
           selectionOffset ?? undefined,
           undefined,
@@ -616,25 +627,48 @@ export const MarkdownViewer = memo(
 
     const handleContextMenu = (e: React.MouseEvent) => {
       if (!onCtxMenu) return;
+      // Shift plus the platform's secondary click asks for the browser's own
+      // menu, which is what the chord already means in Chrome on Windows and
+      // Linux. Gated on that click rather than on shiftKey alone, because
+      // Shift+F10 is the standard KEYBOARD chord for the context menu and
+      // arrives with shiftKey set and button 0: testing shiftKey by itself
+      // would lock keyboard users out of this menu entirely.
+      if (e.shiftKey && isSecondaryClick(e)) return;
 
       // Check if right-click is on a comment highlight
       const mark = markToAct(e.target as HTMLElement);
       if (mark?.dataset.commentIds) {
-        e.preventDefault();
         const ids = mark.dataset.commentIds.split(',');
-        onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY });
+        // preventDefault only if a menu actually opened: the consumer refuses a
+        // mark whose comment is gone, and eating the native menu for a menu
+        // that never appears leaves the reader with no menu at all.
+        if (onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
         return;
       }
 
-      // Check if there is a text selection within the container
+      // The viewer paints the committed selection as mark.selection-highlight,
+      // which replaces the selected text nodes and so collapses the browser's
+      // own range. By the time a right-click arrives there is no native
+      // selection left for the check below to find, which is why right-clicking
+      // one's own selection fell through to the browser's menu. The painted
+      // mark IS the selection, so recognize it directly.
+      if ((e.target as HTMLElement).closest(SELECTION_MARK_SELECTOR)) {
+        if (onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // A selection the viewer has not painted (nothing committed yet) still
+      // has a live native range, so keep testing for one.
       const sel = window.getSelection();
-      if (
-        sel &&
-        sel.toString().trim().length > 0 &&
-        containerRef.current?.contains(sel.anchorNode)
-      ) {
-        e.preventDefault();
-        onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY });
+      const liveText = sel?.toString().trim() ?? '';
+      if (sel && liveText.length > 0 && containerRef.current?.contains(sel.anchorNode)) {
+        if (onCtxMenu({ type: 'selection', liveText, x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
         return;
       }
     };

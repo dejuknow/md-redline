@@ -1,5 +1,5 @@
 import { useState, useCallback, type RefObject, type Dispatch, type SetStateAction } from 'react';
-import type { ContextMenuEntry, ContextMenuItem } from '../components/ContextMenu';
+import type { ContextMenuEntry } from '../components/ContextMenu';
 import type { ViewerContextMenuInfo, MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { ExplorerContextMenuInfo } from '../components/FileExplorer';
 import type { TabContextMenuInfo } from '../components/TabBar';
@@ -13,25 +13,12 @@ type ContextMenuInstance = {
   close: () => void;
 };
 
-interface CommentTemplate {
-  label: string;
-  text: string;
-}
-
 export interface UseContextMenuItemsParams {
   comments: MdComment[];
   enableResolve: boolean;
-  templates: CommentTemplate[];
   handleResolve: (id: string) => void;
   handleUnresolve: (id: string) => void;
   handleDelete: (id: string) => void;
-  handleAddComment: (
-    anchor: string,
-    text: string,
-    contextBefore?: string,
-    contextAfter?: string,
-    hintOffset?: number,
-  ) => void;
   setActiveCommentId: Dispatch<SetStateAction<string | null>>;
   /**
    * Opens whichever comment surface can currently show one (the rail when it
@@ -43,7 +30,8 @@ export interface UseContextMenuItemsParams {
    */
   ensureCommentSurface: (commentId?: string) => void;
   selectionRef: RefObject<SelectionInfo | null>;
-  lockSelection: () => void;
+  /** Commit and lock a selection the menu captured when it opened. */
+  adoptSelection: (info: SelectionInfo) => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
   triggerEdit: (id: string) => void;
   triggerReply: (id: string) => void;
@@ -93,15 +81,13 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
   const {
     comments,
     enableResolve,
-    templates,
     handleResolve,
     handleUnresolve,
     handleDelete,
-    handleAddComment,
     setActiveCommentId,
     ensureCommentSurface,
     selectionRef,
-    lockSelection,
+    adoptSelection,
     setAutoExpandForm,
     triggerEdit,
     triggerReply,
@@ -128,8 +114,14 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
   const [tabCtxMenuItems, setTabCtxMenuItems] = useState<ContextMenuEntry[]>([]);
   const [sidebarCtxMenuItems, setSidebarCtxMenuItems] = useState<ContextMenuEntry[]>([]);
 
+  /**
+   * Returns whether a menu was opened. The viewer suppresses the browser's own
+   * menu only when this says yes: a right-click that opens nothing and also
+   * eats the native menu is a dead gesture, with no Copy, no spellcheck and no
+   * Inspect, and nothing on screen to explain it.
+   */
   const handleViewerContextMenu = useCallback(
-    (info: ViewerContextMenuInfo) => {
+    (info: ViewerContextMenuInfo): boolean => {
       explorerCtxMenu.close();
       tabCtxMenu.close();
       sidebarCtxMenu.close();
@@ -137,7 +129,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       if (info.type === 'highlight' && info.commentIds?.length) {
         const commentId = info.commentIds[0];
         const comment = comments.find((c) => c.id === commentId);
-        if (!comment) return;
+        if (!comment) return false;
 
         const isResolved = enableResolve && getEffectiveStatus(comment) === 'resolved';
 
@@ -208,28 +200,27 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
 
         setCtxMenuItems(items);
         viewerCtxMenu.open(info.x, info.y);
+        return true;
       } else if (info.type === 'selection') {
         const sel = selectionRef.current;
-        if (!sel) return;
-
-        const templateItems: ContextMenuItem[] = templates.map((t) => ({
-          label: t.label,
-          onClick: () => {
-            handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter, sel.offset);
-          },
-        }));
+        if (!sel) return false;
+        // When the viewer resolved this from a live range rather than the
+        // painted mark, that range has to BE the committed selection. While a
+        // selection is locked a fresh drag never reaches the app, so the two
+        // hold different text and every item here would act on the wrong one.
+        if (info.liveText && info.liveText !== sel.text) return false;
 
         const items: ContextMenuEntry[] = [
           {
             label: 'Comment',
             onClick: () => {
-              lockSelection();
+              // The captured selection, not live state: the other items in this
+              // menu already act on `sel`, and locking whatever happens to be
+              // selected at click time is how a cleared selection wedged the
+              // lock and made the document unselectable.
+              adoptSelection(sel);
               setAutoExpandForm(true);
             },
-          },
-          {
-            label: 'Templates',
-            items: templateItems,
           },
           { type: 'divider' as const },
           {
@@ -242,17 +233,17 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
 
         setCtxMenuItems(items);
         viewerCtxMenu.open(info.x, info.y);
+        return true;
       }
+      return false;
     },
     [
       comments,
       enableResolve,
-      templates,
       handleResolve,
       handleUnresolve,
       handleDelete,
-      handleAddComment,
-      lockSelection,
+      adoptSelection,
       ensureCommentSurface,
       triggerEdit,
       triggerReply,
