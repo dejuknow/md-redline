@@ -31,6 +31,9 @@
   },
   "files": [
     "bin/",
+    "!bin/*.test.ts",
+    "!bin/cli-browser-stub.ts",
+    "!bin/test-windows.ps1",
     "dist/",
     "README.md",
     "LICENSE"
