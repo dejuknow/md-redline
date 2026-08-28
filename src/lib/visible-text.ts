@@ -71,6 +71,17 @@ export function getVisibleTextOffset(root: Node, targetNode: Node, offset: numbe
     if (node === resolvedNode) {
       return total + resolvedOffset;
     }
+    // A target that holds no text of its own (a horizontal rule, an image, an
+    // empty element) is never yielded by this walker, and falling out of the
+    // loop would report the whole container's length: the END of the document
+    // for a selection that starts at its beginning. The first text node after
+    // it in document order marks the same position.
+    if (
+      resolvedNode.nodeType !== Node.TEXT_NODE &&
+      resolvedNode.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+    ) {
+      return total;
+    }
     total += node.textContent?.length || 0;
   }
   return total;

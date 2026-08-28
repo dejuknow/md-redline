@@ -469,35 +469,39 @@ test.describe('Context menu on a text selection', () => {
 
   test('a drag released in the empty area below the text still commits', async ({ page }) => {
     await openFixture(page);
-    // Measure after the document has settled: openFixture waits for .prose to
-    // exist, and geometry read before layout finishes sends the drag somewhere
-    // else entirely.
     await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
       timeout: 10_000,
     });
-    await page.waitForTimeout(300);
-    const from = await page.evaluate(() => {
-      const p = document.querySelector('.prose p') as HTMLElement;
-      const r = document.createRange();
-      r.selectNodeContents(p);
-      const rect = r.getBoundingClientRect();
-      return { x: rect.left + 5, y: rect.top + rect.height / 2 };
-    });
-    // Below the last line, but inside the viewport: a drag past the bottom edge
-    // is a different gesture (autoscroll) and would not test this.
-    const releaseY = await page.evaluate(() => {
-      const bottom = (document.querySelector('.prose') as HTMLElement).getBoundingClientRect()
-        .bottom;
-      return Math.min(bottom + 60, window.innerHeight - 10);
-    });
 
-    // Letting go past the last line carries the range's end into a layout
-    // wrapper above the prose, which used to throw the whole selection away:
-    // native highlight painted, nothing committed, and the right-click that
-    // followed reached the browser's menu.
-    await page.mouse.move(from.x, from.y);
+    // Scroll to the end first. The empty area below the text only exists at the
+    // bottom of the document, and on a taller viewport-to-content ratio than
+    // this machine happens to have, "below the prose" is off screen entirely:
+    // the release would land back on text and this would pass while testing an
+    // ordinary drag.
+    await page.evaluate(() => {
+      const scroller = document.scrollingElement ?? document.documentElement;
+      scroller.scrollTop = scroller.scrollHeight;
+      const pane = document.querySelector('.doc-sheet')?.parentElement;
+      if (pane) pane.scrollTop = pane.scrollHeight;
+    });
+    await page.waitForTimeout(400);
+
+    const geom = await page.evaluate(() => {
+      const ps = [...document.querySelectorAll('.prose p')];
+      const last = ps[ps.length - 1].getBoundingClientRect();
+      return {
+        x: last.left + 5,
+        y: last.top + last.height / 2,
+        bottom: last.bottom,
+        viewport: window.innerHeight,
+      };
+    });
+    const releaseY = Math.min(geom.bottom + 60, geom.viewport - 10);
+    expect(releaseY).toBeGreaterThan(geom.bottom);
+
+    await page.mouse.move(geom.x, geom.y);
     await page.mouse.down();
-    await page.mouse.move(from.x + 200, releaseY, { steps: 12 });
+    await page.mouse.move(geom.x + 150, releaseY, { steps: 12 });
     await page.mouse.up();
 
     await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });

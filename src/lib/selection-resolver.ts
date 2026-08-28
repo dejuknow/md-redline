@@ -1,6 +1,10 @@
 import type { SelectionInfo } from '../types';
 import { buildRangeHtml } from './copy-selection-html';
-import { getVisibleTextContent, getVisibleTextOffset } from './visible-text';
+import {
+  collectVisibleTextNodes,
+  getVisibleTextContent,
+  getVisibleTextOffset,
+} from './visible-text';
 
 /**
  * The part of `range` that lies inside `containerEl`, or null if none of it
@@ -20,11 +24,24 @@ function clampToContainer(range: Range, containerEl: HTMLElement): Range | null 
   bounds.selectNodeContents(containerEl);
 
   const clamped = range.cloneRange();
-  if (clamped.compareBoundaryPoints(Range.START_TO_START, bounds) < 0) {
-    clamped.setStart(bounds.startContainer, bounds.startOffset);
+  const startsBefore = clamped.compareBoundaryPoints(Range.START_TO_START, bounds) < 0;
+  const endsAfter = clamped.compareBoundaryPoints(Range.END_TO_END, bounds) > 0;
+  // Clamp onto real text rather than onto the container's own boundary points.
+  // getVisibleTextOffset walks text nodes and returns the container's total
+  // length when it never meets the node it was handed, so a boundary resolving
+  // to a childless first block (a leading rule or image) reported the END of
+  // the document as this selection's offset, and anchor disambiguation then had
+  // the wrong hint entirely.
+  const texts = startsBefore || endsAfter ? collectVisibleTextNodes(containerEl) : [];
+  if (startsBefore) {
+    const first = texts[0];
+    if (first) clamped.setStart(first, 0);
+    else clamped.setStart(bounds.startContainer, bounds.startOffset);
   }
-  if (clamped.compareBoundaryPoints(Range.END_TO_END, bounds) > 0) {
-    clamped.setEnd(bounds.endContainer, bounds.endOffset);
+  if (endsAfter) {
+    const last = texts[texts.length - 1];
+    if (last) clamped.setEnd(last, last.textContent?.length ?? 0);
+    else clamped.setEnd(bounds.endContainer, bounds.endOffset);
   }
   // A selection entirely outside the container clamps to nothing, which is the
   // case the old containment check was right about.
@@ -38,7 +55,22 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
   const range = clampToContainer(sel.getRangeAt(0), containerEl);
   if (!range) return null;
 
-  const rawText = range.toString();
+  // `Selection.toString()` reports block boundaries, so two paragraphs come
+  // back separated by a blank line; `Range.toString()` runs them together.
+  // That string is the comment's stored anchor and the text/plain clipboard
+  // flavour, and in markdown a single newline is a soft break, so the blank
+  // line is the difference between pasting two paragraphs and pasting one.
+  //
+  // Prefer the selection's own string whenever the clamp only dropped empty
+  // layout space, which is the whitespace-release case it exists for. When the
+  // clamp removed actual content, the drag ran into another surface and the
+  // clamped text is the honest answer.
+  // Compared without whitespace, since the whole difference between the two is
+  // whitespace: same characters means the clamp dropped nothing that matters.
+  const squash = (t: string) => t.replace(/\s+/g, '');
+  const selectionText = sel.toString();
+  const clampedText = range.toString();
+  const rawText = squash(selectionText) === squash(clampedText) ? selectionText : clampedText;
   const text = rawText.trim();
   if (!text || text.length < 2) return null;
 
