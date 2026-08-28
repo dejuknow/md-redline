@@ -19,8 +19,27 @@ describe('parseRunDirName', () => {
     expect(parseRunDirName('2026-08-27T07-03-32_claude-cli-remove_current')).toMatchObject({
       agent: 'claude-cli-remove',
       format: 'current',
-      ranAt: T('2026-08-27T07:03:32'),
+      ranAt: T('2026-08-27T07:03:32Z'),
     });
+  });
+
+  it('reads the stamp as UTC whatever the machine timezone, because the runner writes UTC', () => {
+    // eval/runner.ts names the directory from toISOString(), which is UTC. A
+    // parse that read it as local time shifted every run by the machine's
+    // offset: on a UTC-7 machine a run 13 minutes BEFORE a prompt change
+    // looked 7 hours after it, and the gate passed.
+    const saved = process.env.TZ;
+    try {
+      for (const tz of ['America/Los_Angeles', 'Pacific/Kiritimati', 'UTC']) {
+        process.env.TZ = tz;
+        expect(parseRunDirName('2026-08-27T07-21-34_claude-cli-remove_current')?.ranAt).toBe(
+          Math.floor(Date.UTC(2026, 7, 27, 7, 21, 34) / 1000),
+        );
+      }
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
   });
 
   it('keeps hyphenated agent names intact', () => {
