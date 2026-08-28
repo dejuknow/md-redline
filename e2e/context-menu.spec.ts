@@ -379,7 +379,13 @@ test.describe('Context menu on a text selection', () => {
     expect(grown).toBeGreaterThan(60);
 
     const menu = page.locator('.context-menu-enter');
-    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+    // Dispatched rather than clicked: a draft this tall grows the composer over
+    // its own anchor, so a real click cannot reach the mark and the test would
+    // be measuring layout rather than the hide-and-restore it exists for.
+    await page
+      .locator('mark.selection-highlight')
+      .first()
+      .dispatchEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
     await expect(menu).toBeVisible();
     await menu.getByText('Copy', { exact: true }).click();
     await expect(menu).toHaveCount(0);
