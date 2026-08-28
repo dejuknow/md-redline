@@ -20,6 +20,7 @@ import {
   getMermaidHighlightTheme,
   scheduleMermaidLayoutStabilization,
 } from '../lib/mermaid-highlights';
+import { SELECTION_MARK_CLASS, SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
@@ -72,15 +73,6 @@ export interface TocHeading {
  * useDragHandles checks status, so this omission is the only thing enforcing
  * that.
  */
-/**
- * The class the viewer paints a committed selection with, and the selector for
- * finding it again. Right-click resolution reads the painted mark rather than
- * the native range, so the two have to agree; keeping one name is what makes
- * that true by construction.
- */
-const SELECTION_MARK_CLASS = 'selection-highlight';
-const SELECTION_MARK_SELECTOR = `mark.${SELECTION_MARK_CLASS}`;
-
 const COMMENT_MARK_SELECTOR =
   '.comment-highlight, .comment-highlight-sent, .comment-highlight-resolved, .mermaid-comment-highlight';
 
@@ -626,6 +618,12 @@ export const MarkdownViewer = memo(
 
     const handleContextMenu = (e: React.MouseEvent) => {
       if (!onCtxMenu) return;
+      // Shift+right-click asks for the browser's own menu, which is what the
+      // chord already means in Chrome on Windows and Linux. Gated on a real
+      // secondary button, because Shift+F10 is the standard KEYBOARD chord for
+      // the context menu: it arrives with shiftKey set and button 0, so testing
+      // shiftKey alone would lock keyboard users out of this menu entirely.
+      if (e.shiftKey && e.button === 2) return;
 
       // Check if right-click is on a comment highlight
       const mark = markToAct(e.target as HTMLElement);

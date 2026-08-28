@@ -32,9 +32,17 @@ interface Props {
   items: ContextMenuEntry[];
   position: { x: number; y: number };
   onClose: () => void;
+  /**
+   * Keep the document selection alive while this menu is used. Only the
+   * viewer's menu wants it: its items act on the selection, and the mouseup
+   * that picks one would otherwise resolve the collapsed range and clear it.
+   * The explorer, tab and sidebar menus have no such items, and sparing them
+   * would leave a stale selection alive through clicks that should end it.
+   */
+  preserveSelection?: boolean;
 }
 
-export function ContextMenu({ items, position, onClose }: Props) {
+export function ContextMenu({ items, position, onClose, preserveSelection = false }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState(position);
   const [openSubmenuIdx, setOpenSubmenuIdx] = useState<number | null>(null);
@@ -130,11 +138,7 @@ export function ContextMenu({ items, position, onClose }: Props) {
         className="fixed z-[200] min-w-[160px] max-w-[240px] py-1 bg-surface-raised rounded-lg shadow-xl border border-border context-menu-enter"
         style={{ left: adjustedPos.x, top: adjustedPos.y }}
         onContextMenu={(e) => e.preventDefault()}
-        /* Items opened on a selection act on it, and some read live state
-           rather than a captured copy. Without this the mouseup that picks an
-           item resolves a selection the viewer has already painted over, gets
-           null, and clears it before the item's click handler runs. */
-        data-preserve-selection
+        {...(preserveSelection ? { 'data-preserve-selection': '' } : {})}
       >
         {items.map((entry, idx) => {
           if (isDivider(entry)) {

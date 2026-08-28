@@ -3,7 +3,7 @@ import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
-import { resetTestAppState } from './helpers/test-state';
+import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -20,6 +20,9 @@ test.beforeEach(async ({ page }) => {
 test.afterAll(() => {
   writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL);
   writeFileSync(FIXTURE_2, FIXTURE_2_ORIGINAL);
+  // The quick-comment test persists a setting, and the prefs file is shared
+  // with every later spec (workers: 1). Six specs do not reset in beforeEach.
+  clearPersistedPreferences();
 });
 
 async function openFixture(page: Page, fixture: string = FIXTURE_1) {
@@ -199,6 +202,62 @@ test.describe('Context menu on a text selection', () => {
     expect(
       await page.evaluate(() => (window as unknown as { __prevented: boolean | null }).__prevented),
     ).toBe(false);
+  });
+
+  test('right-clicking away from the selection clears it, as any click does', async ({ page }) => {
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+
+    // Sparing every secondary button everywhere would leave this selection
+    // committed while its pill floats over unrelated text, and the next menu
+    // would build on it instead of on what the reader just pointed at.
+    await page.locator('.prose h1').first().click({ button: 'right' });
+
+    await expect(page.locator('mark.selection-highlight')).toHaveCount(0);
+    await expect(page.locator('[data-comment-form]')).toHaveCount(0);
+  });
+
+  test('Shift+right-click leaves the browser menu alone', async ({ page }) => {
+    await openFixture(page);
+    await page.evaluate(() => {
+      (window as unknown as { __prevented: boolean | null }).__prevented = null;
+      document.addEventListener('contextmenu', (e) => {
+        (window as unknown as { __prevented: boolean | null }).__prevented = e.defaultPrevented;
+      });
+    });
+    await selectText(page, 'valid credentials');
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+
+    await page
+      .locator('mark.selection-highlight')
+      .first()
+      .click({ button: 'right', modifiers: ['Shift'] });
+
+    await expect(page.locator('.context-menu-enter')).toHaveCount(0);
+    expect(
+      await page.evaluate(() => (window as unknown as { __prevented: boolean | null }).__prevented),
+    ).toBe(false);
+  });
+
+  test('Comment from the menu opens the composer and leaves selection usable after', async ({
+    page,
+  }) => {
+    // Quick comment on: the composer is already open when the menu is used, so
+    // the mousedown that picks an item is an outside press on an empty form.
+    await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await menu.getByText('Comment', { exact: true }).click();
+
+    await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible();
+
+    // And the next selection still works: a lock taken on a cleared selection
+    // is never released, so everything after it is silently ignored.
+    await page.keyboard.press('Escape');
+    const second = await openSelectionMenu(page, 'bcrypt');
+    await expect(second).toBeVisible();
   });
 
   test('Copy in the selection menu puts the selected text on the clipboard', async ({

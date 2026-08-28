@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { resolveSelection } from '../lib/selection-resolver';
+import { SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
 import type { SelectionInfo } from '../types';
 
 export function useSelection(containerRef: React.RefObject<HTMLElement | null>) {
@@ -52,6 +53,22 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
     setSelection(info);
   }, []);
 
+  /**
+   * Commit an already-resolved selection and lock it, because every caller is
+   * about to act on it. The context menu builds its items from a snapshot taken
+   * when the menu opened; locking live state instead means that if anything has
+   * cleared the selection in between, `lockedRef` is set with nothing committed
+   * and stays set, which silently ignores every later selection in the
+   * document. Delegates to commitSelection, so the two-writer rule above holds.
+   */
+  const adoptSelection = useCallback(
+    (info: SelectionInfo) => {
+      commitSelection(info);
+      lockedRef.current = true;
+    },
+    [commitSelection],
+  );
+
   const clearSelection = useCallback(() => {
     lockedRef.current = false;
     commitSelection(null);
@@ -100,14 +117,19 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
 
     const handleMouseUp = (e: MouseEvent) => {
       if (lastPointerType !== 'mouse') return;
-      // A secondary button never commits or clears a selection. Right-clicking
-      // your own selection opens the viewer's context menu, whose items act on
-      // that selection, and resolveSelection below would return null for it:
-      // the viewer has painted the selection as a mark, which collapses the
-      // native range. So this handler would destroy the selection the menu was
-      // opened on. It also decouples the fix from event ordering, since Windows
-      // fires contextmenu after mouseup rather than before it.
-      if (e.button !== 0) return;
+      // A secondary press ON the selection is spared, and only there. That
+      // gesture opens the viewer's context menu, whose items act on the
+      // selection, and resolveSelection below would return null for it: the
+      // viewer has painted the selection as a mark, which collapses the native
+      // range. So this handler would destroy the selection the menu was opened
+      // on. It also decouples that from event ordering, since Windows fires
+      // contextmenu after mouseup rather than before it.
+      //
+      // Anywhere else a secondary press clears like any other click. Sparing
+      // it everywhere leaves a stale selection committed with its pill floating
+      // over unrelated text, and the next menu builds on that stale selection
+      // rather than on what the reader pointed at.
+      if (e.button !== 0 && (e.target as HTMLElement)?.closest?.(SELECTION_MARK_SELECTOR)) return;
       if (lockedRef.current) return;
       if ((e.target as Element)?.closest?.('[data-comment-form]')) return;
       if ((e.target as Element)?.closest?.('[data-drag-handle]')) return;
@@ -199,6 +221,7 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
     isPending: !selection && pendingSelection !== null,
     clearSelection,
     lockSelection,
+    adoptSelection,
     commitPendingSelection,
   };
 }

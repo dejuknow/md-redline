@@ -37,9 +37,9 @@ function pointerDown(pointerType: string) {
  * primary button commits or clears a selection. Dispatching a bare Event here
  * left `button` undefined, which is not a state the browser can produce.
  */
-function mouseUp(button = 0) {
+function mouseUp(button = 0, target: EventTarget = document) {
   act(() => {
-    document.dispatchEvent(new MouseEvent('mouseup', { button }));
+    target.dispatchEvent(new MouseEvent('mouseup', { button, bubbles: true }));
   });
 }
 
@@ -73,7 +73,7 @@ describe('useSelection modality routing', () => {
     expect(hook().pendingSelection).toBeNull();
   });
 
-  it('leaves a committed selection alone on a secondary-button mouseup', () => {
+  it('leaves a committed selection alone when the secondary press lands on it', () => {
     pointerDown('mouse');
     mouseUp();
     expect(hook().selection).toEqual(INFO);
@@ -82,9 +82,27 @@ describe('useSelection modality routing', () => {
     // act on it. Resolving again here would find the collapsed native range,
     // return null, and clear the selection out from under the menu.
     mockResolve.mockReturnValue(null);
+    const painted = document.createElement('mark');
+    painted.className = 'selection-highlight';
+    document.body.appendChild(painted);
+    pointerDown('mouse');
+    mouseUp(2, painted);
+    expect(hook().selection).toEqual(INFO);
+    painted.remove();
+  });
+
+  it('clears a committed selection when a secondary press lands elsewhere', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // Sparing every secondary press would leave this selection committed while
+    // its pill floats over unrelated text, and the next context menu would
+    // build on it rather than on what the reader pointed at.
+    mockResolve.mockReturnValue(null);
     pointerDown('mouse');
     mouseUp(2);
-    expect(hook().selection).toEqual(INFO);
+    expect(hook().selection).toBeNull();
   });
 
   it('does not open on mouseup when the gesture was touch', () => {

@@ -697,9 +697,8 @@ export default function App() {
     );
   }, []);
 
-  const { selection, commentSelection, isPending, clearSelection, lockSelection } = useSelection(
-    proseRef as RefObject<HTMLElement | null>,
-  );
+  const { selection, commentSelection, isPending, clearSelection, lockSelection, adoptSelection } =
+    useSelection(proseRef as RefObject<HTMLElement | null>);
   const requestCommentFocus = useCallback(
     (commentId: string, origin: CommentFocusOrigin = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -1968,7 +1967,7 @@ export default function App() {
     setActiveCommentId,
     ensureCommentSurface,
     selectionRef: commentableSelectionRef,
-    lockSelection,
+    adoptSelection,
     setAutoExpandForm,
     triggerEdit,
     triggerReply,
@@ -3366,6 +3365,7 @@ export default function App() {
             items={ctxMenuItems}
             position={viewerCtxMenu.position}
             onClose={viewerCtxMenu.close}
+            preserveSelection
           />
         )}
         {explorerCtxMenu.isOpen && (

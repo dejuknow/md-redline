@@ -3,6 +3,7 @@ import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPrimaryModifierLabel } from '../lib/platform';
+import { SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
 
 interface Props {
   selection: SelectionInfo;
@@ -97,14 +98,21 @@ export function CommentForm({
   useEffect(() => {
     if (!isExpanded) return;
     const handler = (e: MouseEvent) => {
-      // Secondary buttons are not dismissals: a right-click on the selection
-      // opens the viewer's context menu, and cancelling here would clear the
-      // selection that menu acts on. Scoped to button 2 rather than "not
-      // primary" so a middle-click still dismisses as it always has.
-      if (e.button === 2) return;
-      if (formRef.current && !formRef.current.contains(e.target as Node) && !text.trim()) {
-        onCancel();
-      }
+      const target = e.target as HTMLElement | null;
+      if (!formRef.current || formRef.current.contains(target) || text.trim()) return;
+      // A press on the text you selected is engagement, not dismissal: it is
+      // how the viewer's context menu is opened, and cancelling here would
+      // clear the selection that menu acts on. Tested by target rather than by
+      // button, because a touch long-press opens the same menu and its
+      // compatibility mousedown reports button 0, indistinguishable from a
+      // left-click. Presses anywhere else still dismiss, whatever the button.
+      if (target?.closest?.(SELECTION_MARK_SELECTOR)) return;
+      // Nor is a press inside a surface that exists to keep the selection
+      // alive. The viewer's context menu carries this attribute and its items
+      // act on the selection, so cancelling here would clear the selection out
+      // from under the item the reader is in the middle of clicking.
+      if (target?.closest?.('[data-preserve-selection]')) return;
+      onCancel();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);

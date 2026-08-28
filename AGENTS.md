@@ -730,28 +730,60 @@ after typing) closes the form as usual.
 The viewer's own menu (Comment, Templates, Copy) opens from the painted mark,
 not from the native range. `handleContextMenu` in `MarkdownViewer` checks
 `SELECTION_MARK_SELECTOR` before it falls back to `window.getSelection()`,
-because the range is gone by then: painting `mark.selection-highlight` replaces
-the selected text nodes and collapses it. Testing the range alone is what left
-this menu unreachable from March until it was fixed; a reader got the browser's
-menu instead.
+because the range is gone by then.
+
+The reason is worth stating precisely, because it decides which layer a fix
+belongs in: committing a selection re-runs the render layout effect, whose deps
+include `selectionText`, and that effect's first act is
+`container.innerHTML = sanitizeRenderedMarkdown(html)`. The whole subtree is
+replaced, so the native Range dies there, before `wrapText` paints any mark.
+Switching the highlight to the CSS Custom Highlight API to avoid wrapping text
+nodes would therefore change nothing: the range would still be destroyed by the
+rebuild above it. Testing the range alone is what left this menu unreachable
+from March until it was fixed; a reader got the browser's menu instead.
 
 Two things keep the selection alive long enough for the menu to act on it, and
 both are load-bearing:
 
-- `useSelection`'s `handleMouseUp` ignores any non-primary button. Otherwise the
-  right-click's own mouseup resolves the collapsed range, gets null, and clears
-  the selection the menu was opened on. This also makes the fix independent of
-  event order, which matters because Windows fires `contextmenu` after mouseup
-  rather than before it.
-- The menu root carries `data-preserve-selection`, so picking an item does not
-  clear the selection before the item's click handler runs. `Copy` closes over
-  a captured `SelectionInfo` and would survive either way; `Comment` reads live
-  state and would not.
+- `useSelection`'s `handleMouseUp` ignores a non-primary button **that lands on
+  the selection's own mark**. Otherwise the right-click's own mouseup resolves
+  the collapsed range, gets null, and clears the selection the menu was opened
+  on. This also makes the fix independent of event order, which matters because
+  Windows fires `contextmenu` after mouseup rather than before it. Sparing every
+  secondary press everywhere is wrong in the other direction: the selection then
+  outlives a right-click on unrelated text, its pill floats over that text, and
+  the next menu builds on the stale selection instead of what was pointed at.
+- The viewer's menu carries `data-preserve-selection` (the `preserveSelection`
+  prop, set on that instance only), so picking an item does not clear the
+  selection before the item's click handler runs. Two listeners have to respect
+  it, not one: `useSelection`'s mouseup, and `CommentForm`'s dismissal, which
+  with quick comment on is watching an already-open composer.
+- `Comment` commits the selection the menu captured, through `adoptSelection`,
+  rather than locking whatever is live at click time. Locking live state means
+  that if anything cleared the selection in between, `lockedRef` is set with
+  nothing committed and never released, and every later selection in the
+  document is silently ignored: the reader sees the menu stop appearing and has
+  no way to know Escape releases it. The explorer, tab and sidebar
+  menus deliberately do not: they have no items that act on the selection, and
+  sparing them would keep a stale selection alive through clicks that should end
+  it.
 
-`CommentForm`'s click-outside dismissal ignores button 2 for the same reason: a
-right-click on your own selection is an outside mousedown, and with quick
-comment on it would otherwise cancel the composer and take the selection with
-it. Middle-click still dismisses.
+`CommentForm`'s click-outside dismissal spares a press that lands on the
+selection's mark, or inside any surface carrying `data-preserve-selection`
+(the menu itself), for the same reason: with quick comment on, the composer is
+open the moment you select, and a press on your own selection would otherwise
+cancel it and take the selection with it. Tested by target rather than by
+button, because a touch long-press opens the same menu and its compatibility
+mousedown reports button 0, indistinguishable from a left-click. The check runs
+after the containment test, so a right-click anywhere else still dismisses an
+empty composer rather than leaving it floating.
+
+**Shift+right-click** returns before every branch, so the browser's own menu is
+never suppressed. That matches what the chord already means in Chrome on
+Windows and Linux, and it is the escape hatch to Inspect on a painted highlight.
+It is gated on `button === 2`: Shift+F10 is the standard keyboard chord for the
+context menu and arrives with `shiftKey` set and button 0, so testing `shiftKey`
+alone would lock keyboard users out of this menu entirely.
 
 `onContextMenu` returns whether it opened a menu, and the viewer calls
 `preventDefault` only when it did. The consumer refuses a mark whose comment is

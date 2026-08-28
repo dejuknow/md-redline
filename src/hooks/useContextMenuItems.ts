@@ -43,7 +43,8 @@ export interface UseContextMenuItemsParams {
    */
   ensureCommentSurface: (commentId?: string) => void;
   selectionRef: RefObject<SelectionInfo | null>;
-  lockSelection: () => void;
+  /** Commit and lock a selection the menu captured when it opened. */
+  adoptSelection: (info: SelectionInfo) => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
   triggerEdit: (id: string) => void;
   triggerReply: (id: string) => void;
@@ -101,7 +102,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     setActiveCommentId,
     ensureCommentSurface,
     selectionRef,
-    lockSelection,
+    adoptSelection,
     setAutoExpandForm,
     triggerEdit,
     triggerReply,
@@ -230,7 +231,11 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           {
             label: 'Comment',
             onClick: () => {
-              lockSelection();
+              // The captured selection, not live state: the other items in this
+              // menu already act on `sel`, and locking whatever happens to be
+              // selected at click time is how a cleared selection wedged the
+              // lock and made the document unselectable.
+              adoptSelection(sel);
               setAutoExpandForm(true);
             },
           },
@@ -261,7 +266,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       handleUnresolve,
       handleDelete,
       handleAddComment,
-      lockSelection,
+      adoptSelection,
       ensureCommentSurface,
       triggerEdit,
       triggerReply,
