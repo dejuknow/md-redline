@@ -59,7 +59,9 @@ eval/results/
 demo/clips/
 demo/frames/
 demo/output/
-demo-sample.md
-demo-prd.md
+# Written into demo/fixtures/myapp/ at record time; the workspace itself is
+# committed so the demo's file explorer has plausible contents.
+demo/fixtures/myapp/auth-spec.md
+demo/fixtures/myapp/prd.md
 demo/review-frames/
 test-large-mermaid.md

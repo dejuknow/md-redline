@@ -6,6 +6,19 @@ import { measureAnchorTopsWithin } from '../lib/anchor-measure';
 export interface MarginLayout {
   active: boolean;
   tops: Map<string, number>;
+  /**
+   * Cards whose height has actually been measured. Everything else is placed
+   * against a 120px estimate, which is shorter than a real card, so an
+   * unmeasured card is positioned where it overlaps its neighbour and jumps
+   * clear once the observer fires.
+   *
+   * Necessary but not sufficient for showing a card: a comment whose anchor has
+   * not painted yet has no `anchorTops` entry, which resolveCollisions reads as
+   * an orphan and stacks from 0. Pair this with `anchorTops` and the caller's
+   * own missing-anchor set, which comes from the document text rather than from
+   * paint timing.
+   */
+  measuredIds: ReadonlySet<string>;
   anchorTops: Map<string, number>;
   orphanIds: string[];
   registerCardRef: (id: string, node: HTMLDivElement | null) => void;
@@ -128,7 +141,7 @@ export function useMarginLayout(
     };
   }, []);
 
-  const { tops, orphanIds, layerHeight } = useMemo(() => {
+  const { tops, orphanIds, layerHeight, measuredIds } = useMemo(() => {
     const entries: MarginEntry[] = comments.map((c) => ({
       id: c.id,
       anchorTop: anchorTops.get(c.id) ?? null,
@@ -141,8 +154,14 @@ export function useMarginLayout(
       const top = resolved.get(e.id);
       if (top !== undefined) bottom = Math.max(bottom, top + e.height);
     }
-    return { tops: resolved, orphanIds: orphans, layerHeight: bottom + 24 };
+    // Height only. Whether a card is safe to SHOW also depends on its anchor
+    // being resolved, but that question is answered deterministically by
+    // detectMissingAnchors, which reads the document text rather than waiting
+    // on paint, so the caller settles it instead of this hook guessing from
+    // tick ordering. Three attempts at guessing produced three wrong answers.
+    const measured = new Set(entries.filter((e) => heights.has(e.id)).map((e) => e.id));
+    return { tops: resolved, orphanIds: orphans, layerHeight: bottom + 24, measuredIds: measured };
   }, [comments, anchorTops, heights, activeCommentId]);
 
-  return { active, tops, anchorTops, orphanIds, registerCardRef, layerHeight };
+  return { active, tops, anchorTops, orphanIds, registerCardRef, layerHeight, measuredIds };
 }
