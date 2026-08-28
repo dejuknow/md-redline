@@ -78,6 +78,7 @@ import { useComments, type CommentFocusOrigin } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
+import { rangeFromPaintedSelection, resolveSelectionMarkdown } from './lib/copy-as-markdown';
 import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { ReviewBanner } from './components/ReviewBanner';
@@ -699,6 +700,24 @@ export default function App() {
 
   const { selection, commentSelection, isPending, clearSelection, lockSelection, adoptSelection } =
     useSelection(proseRef as RefObject<HTMLElement | null>);
+
+  // Mirrors cleanMarkdown for callbacks that must stay stable: the marker-free
+  // document is what a copy hands back, and it is what the block spans index.
+  const cleanMarkdownRef = useRef('');
+
+  // Copy as Markdown: the document's own source where the selection lines up
+  // with blocks, and markdown rebuilt from the rendered fragment where it does
+  // not. The scope is exact either way, so what lands on the clipboard is what
+  // was highlighted and nothing more.
+  const copySelectionAsMarkdown = useCallback(() => {
+    const container = proseRef.current;
+    if (!container) return;
+    const range = rangeFromPaintedSelection(container);
+    if (!range) return;
+    const resolved = resolveSelectionMarkdown(range, container, cleanMarkdownRef.current);
+    if (!resolved) return;
+    void navigator.clipboard.writeText(resolved.markdown).catch(() => {});
+  }, []);
   const requestCommentFocus = useCallback(
     (commentId: string, origin: CommentFocusOrigin = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -1968,6 +1987,7 @@ export default function App() {
   // normal case on an iPad with a keyboard attached.
   const commentableSelectionRef = useRef<SelectionInfo | null>(commentSelection);
   commentableSelectionRef.current = commentSelection;
+  cleanMarkdownRef.current = cleanMarkdown;
 
   // Context menu handlers
   const {
@@ -1989,6 +2009,7 @@ export default function App() {
     ensureCommentSurface,
     selectionRef: commentableSelectionRef,
     adoptSelection,
+    copySelectionAsMarkdown,
     setAutoExpandForm,
     triggerEdit,
     triggerReply,
@@ -2529,6 +2550,16 @@ export default function App() {
         onExecute: () => setConfirmDeleteAll(true),
       });
     }
+    if (commentSelection) {
+      cmds.push({
+        id: 'copy-selection-markdown',
+        // Named for its subject, unlike the menu's "Copy as Markdown": nothing
+        // sits under the cursor here, so the label has to say what it acts on.
+        label: 'Copy selection as markdown',
+        section: 'Selection',
+        onExecute: copySelectionAsMarkdown,
+      });
+    }
     if (commentCount > 0) {
       cmds.push({
         id: 'copy-agent-prompt',
@@ -2573,6 +2604,8 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
+    commentSelection,
+    copySelectionAsMarkdown,
     resolvedCommentCount,
     settings.enableResolve,
     handleBulkResolve,

@@ -826,6 +826,45 @@ that overlaps an existing anchor opens the comment menu (Edit / Reply / Delete),
 not the selection menu. A right-click on text with nothing selected also reaches
 the browser's menu, since neither branch matches.
 
+### Copy as Markdown
+
+The selection menu carries a second copy action that hands back markdown rather
+than prose, for pasting into an agent, an editor or another `.md` file. `Copy`
+is untouched: it still writes rendered text and the rich-text flavour, because
+which one is right depends on where you are pasting rather than on who you are,
+which is also why there is no setting.
+
+**The scope never changes.** Two paths, both returning exactly what was
+highlighted:
+
+- Boundaries flush with a block: the file's own bytes, sliced by the
+  `data-src-start` / `data-src-end` span the pipeline annotated that block with.
+  Byte-identical matters here beyond tidiness: an agent asked to rewrite a
+  passage has to find it in the file, and rebuilt markdown may not match.
+- Anything finer: markdown rebuilt from the rendered fragment through
+  `rehype-remark`, which keeps the words as selected and normalises only the
+  syntax (`_x_` may come back as `*x*`).
+
+Widening a ragged selection out to its enclosing block was considered and
+rejected. It hands back more text than was highlighted, and people paste into a
+composer and send without rereading.
+
+`resolveSelectionMarkdown` (`src/lib/copy-as-markdown.ts`) decides between them.
+Two details are load-bearing:
+
+- The Range comes from `rangeFromPaintedSelection`, rebuilt from the marks on
+  screen. The Range the reader dragged is long gone: committing a selection
+  re-runs the render effect, which replaces the container's innerHTML and takes
+  every live Range with it (see #86).
+- "Flush with a block" is asked with `comparePoint` against the block's first
+  and last NON-WHITESPACE text. Boundary comparison treats `(textNode, 0)` and
+  `(element, 0)` as different positions in jsdom, and counting the whitespace
+  between block tags made every flush selection of a list, quote, table or
+  fenced block look ragged, so they all silently fell back to a rebuild.
+
+The palette entry is called `Copy selection as markdown`, spelling out its
+subject because nothing sits under the cursor there.
+
 ### Copying a document selection
 The rendered view paints the pending selection as `mark.selection-highlight`
 (`MarkdownViewer.tsx`), which replaces the selected text nodes and collapses the

@@ -148,6 +148,39 @@ test.describe('Copy selection', () => {
     expect((await readCopied(page))!.plain).toContain('ends here.\n\nSecond paragraph');
   });
 
+  test('Copy as Markdown rebuilds a ragged selection, keeping its formatting and scope', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    await page.evaluate(() => {
+      const strong = [...document.querySelectorAll('.prose strong')].find((el) =>
+        el.textContent?.includes('bold text here'),
+      )!;
+      const after = strong.nextSibling!; // ' and '
+      const range = document.createRange();
+      range.setStart(strong.firstChild!, 5); // mid-way through 'bold text here'
+      range.setEnd(after, 5);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+    await page
+      .locator('.context-menu-enter')
+      .getByText('Copy as Markdown', { exact: true })
+      .click();
+
+    // Exactly the highlighted words, with the bold that survived the boundary,
+    // and nothing widened out to the enclosing block.
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 5000 })
+      .toBe('**text here** and');
+  });
+
   test('Quick comment focusing the composer with a collapsed caret still copies the document selection', async ({
     page,
   }) => {
