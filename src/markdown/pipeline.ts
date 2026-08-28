@@ -63,6 +63,70 @@ const sanitizeSchema = {
 };
 
 /**
+ * Block-level tags that carry their source span. Copying slices the source only
+ * when a selection's boundaries line up with one of these; anything finer is
+ * rebuilt from the rendered fragment instead, which needs no positions.
+ *
+ * Deliberately not every element. Annotating inline nodes too grew the rendered
+ * HTML of a 118KB document from 134KB to 209KB, and that string is assigned
+ * through innerHTML on every render of the layout effect. Blocks alone cost
+ * 158KB, a third of the increase, and cover what exact slicing is for: a
+ * paragraph, a heading, a list item, a fenced block, a table cell.
+ */
+const SOURCE_SPAN_TAGS = new Set([
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+  'pre',
+  'ul',
+  'ol',
+  'table',
+  'tr',
+  'td',
+  'th',
+  'dl',
+  'dt',
+  'dd',
+]);
+
+/**
+ * Record where each block came from in the source, as `data-src-start` and
+ * `data-src-end`.
+ *
+ * Runs AFTER `rehypeSanitize`, and that order is the security property: a
+ * document can write `<span data-src-start="0" data-src-end="99999">` in raw
+ * HTML, sanitize strips attributes it does not know, and only then does this
+ * write the real span. A document cannot forge a range that a copy would slice.
+ *
+ * Offsets index the string this pipeline was handed, which for the viewer is
+ * `cleanMarkdown`: the document with comment markers removed, and the string
+ * that belongs on a clipboard.
+ */
+function rehypeAnnotateSource() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element) => {
+      if (!SOURCE_SPAN_TAGS.has(node.tagName)) return;
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      // Elements the pipeline invents (the table scroll wrappers, the
+      // frontmatter box) have no source of their own and get nothing.
+      if (start == null || end == null) return;
+      node.properties = {
+        ...node.properties,
+        dataSrcStart: String(start),
+        dataSrcEnd: String(end),
+      };
+    });
+  };
+}
+
+/**
  * Wrap every <table> in a horizontal-scroll container so wide tables scroll
  * within their own box instead of being clipped by the sheet's `overflow: clip`
  * (which can't become `auto` without capturing the sticky rail header — see the
@@ -187,6 +251,7 @@ function buildProcessor(filePath?: string, allowFrontmatter = true) {
     .use(rehypeRaw)
     .use(rewriteLocalUrls, { filePath })
     .use(rehypeSanitize, sanitizeSchema)
+    .use(rehypeAnnotateSource)
     .use(rehypeWrapTables)
     .use(rehypeStringify);
 }

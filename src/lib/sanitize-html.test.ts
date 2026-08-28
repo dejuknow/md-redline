@@ -48,3 +48,15 @@ describe('sanitizeRenderedMarkdown on pipeline output', () => {
     expect(html).not.toContain('<script');
   });
 });
+
+describe('source position attributes', () => {
+  it('keeps data-src-start / data-src-end, which the copy path slices by', () => {
+    // The two allowlists have to stay in sync: an attribute the pipeline emits
+    // and DOMPurify strips disappears silently, and Copy as Markdown would
+    // quietly stop finding any source span at all.
+    const html = '<p data-src-start="12" data-src-end="34">text</p>';
+    const out = sanitizeRenderedMarkdown(html);
+    expect(out).toContain('data-src-start="12"');
+    expect(out).toContain('data-src-end="34"');
+  });
+});

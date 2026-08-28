@@ -1,11 +1,51 @@
 import { describe, it, expect } from 'vitest';
 import { renderMarkdown } from './pipeline';
 
+describe('renderMarkdown source positions', () => {
+  const attrs = (html: string, tag: string) => {
+    const m = new RegExp(`<${tag}[^>]*>`).exec(html);
+    return m ? m[0] : '';
+  };
+
+  it('annotates a block with the source span it came from', () => {
+    const md = 'The migration runs in **three phases** now.';
+    const html = renderMarkdown(md);
+    const p = attrs(html, 'p');
+    const span = /data-src-start="(\d+)" data-src-end="(\d+)"/.exec(p);
+    expect(span).not.toBeNull();
+    // The span is the markdown, delimiters included, not the rendered text.
+    expect(md.slice(Number(span![1]), Number(span![2]))).toBe(md);
+  });
+
+  it('leaves inline elements unannotated, which is what keeps the HTML small', () => {
+    const html = renderMarkdown('Some **bold** and a [link](https://example.com).');
+    expect(attrs(html, 'strong')).not.toContain('data-src-start');
+    expect(attrs(html, 'a')).not.toContain('data-src-start');
+    expect(attrs(html, 'p')).toContain('data-src-start');
+  });
+
+  it('annotates block elements so a whole paragraph can be sliced back', () => {
+    const md = '# Title\n\nFirst paragraph.\n\nSecond paragraph.';
+    const html = renderMarkdown(md);
+    const second = /<p[^>]*data-src-start="(\d+)" data-src-end="(\d+)"[^>]*>Second/.exec(html);
+    expect(second).not.toBeNull();
+    expect(md.slice(Number(second![1]), Number(second![2]))).toBe('Second paragraph.');
+  });
+
+  it('does not let a document forge its own positions', () => {
+    // The annotator runs after sanitize, so authored data-src-* is stripped
+    // first and then overwritten with the real span.
+    const md = 'Text with <span data-src-start="0" data-src-end="99999">raw html</span> in it.';
+    const html = renderMarkdown(md);
+    expect(html).not.toContain('data-src-end="99999"');
+  });
+});
+
 describe('renderMarkdown', () => {
   it('renders basic markdown (headings, paragraphs, bold, italic)', () => {
     const md = '# Hello\n\nThis is **bold** and *italic*.';
     const html = renderMarkdown(md);
-    expect(html).toContain('<h1>Hello</h1>');
+    expect(html).toMatch(/<h1[^>]*>Hello<\/h1>/);
     expect(html).toContain('<strong>bold</strong>');
     expect(html).toContain('<em>italic</em>');
   });
@@ -13,9 +53,9 @@ describe('renderMarkdown', () => {
   it('renders GFM tables correctly', () => {
     const md = '| A | B |\n| --- | --- |\n| 1 | 2 |';
     const html = renderMarkdown(md);
-    expect(html).toContain('<table>');
-    expect(html).toContain('<th>A</th>');
-    expect(html).toContain('<td>1</td>');
+    expect(html).toMatch(/<table[^>]*>/);
+    expect(html).toMatch(/<th[^>]*>A<\/th>/);
+    expect(html).toMatch(/<td[^>]*>1<\/td>/);
   });
 
   it('renders strikethrough correctly', () => {
@@ -66,7 +106,7 @@ describe('renderMarkdown', () => {
     expect(html).toContain('class="doc-frontmatter"');
     expect(html).toContain('title');
     expect(html).toContain('Someone');
-    expect(html).toContain('<h1>Content</h1>');
+    expect(html).toMatch(/<h1[^>]*>Content<\/h1>/);
   });
 
   it('renders TOML frontmatter too', () => {
@@ -189,7 +229,9 @@ describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {
   it('wraps a table in div.table-scroll > div.table-scroll__viewport > table', () => {
     const md = '| A | B |\n| --- | --- |\n| 1 | 2 |';
     const html = renderMarkdown(md);
-    expect(html).toContain('<div class="table-scroll"><div class="table-scroll__viewport"><table>');
+    expect(html).toMatch(
+      /<div class="table-scroll"><div class="table-scroll__viewport"><table[^>]*>/,
+    );
     expect(html).toContain('</table></div></div>');
   });
 
@@ -198,7 +240,7 @@ describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {
     const html = renderMarkdown(md);
     // Every table is wrapped exactly once (2 viewports for 2 tables).
     expect((html.match(/table-scroll__viewport/g) ?? []).length).toBe(2);
-    expect((html.match(/<table>/g) ?? []).length).toBe(2);
+    expect((html.match(/<table[^>]*>/g) ?? []).length).toBe(2);
     // The SKIP/index+1 visitor must not descend into a wrapper it just
     // inserted: a nested wrap would splice a second .table-scroll straight
     // inside a viewport.
@@ -208,8 +250,10 @@ describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {
   it('wraps a table nested inside a blockquote', () => {
     const md = '> | A |\n> | --- |\n> | 1 |';
     const html = renderMarkdown(md);
-    expect(html).toContain('<blockquote>');
-    expect(html).toContain('<div class="table-scroll"><div class="table-scroll__viewport"><table>');
+    expect(html).toMatch(/<blockquote[^>]*>/);
+    expect(html).toMatch(
+      /<div class="table-scroll"><div class="table-scroll__viewport"><table[^>]*>/,
+    );
   });
 
   it('leaves content without tables unwrapped', () => {
