@@ -21,12 +21,21 @@ import {
   scheduleMermaidLayoutStabilization,
 } from '../lib/mermaid-highlights';
 import { SELECTION_MARK_CLASS, SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
+import { isSecondaryClick } from '../lib/platform';
 
 export interface ViewerContextMenuInfo {
   /** 'selection' when user right-clicks on selected text; 'highlight' when on a comment mark */
   type: 'selection' | 'highlight';
   /** Comment IDs (only for 'highlight' type) */
   commentIds?: string[];
+  /**
+   * The live native selection this was resolved from, when the menu came from
+   * a range rather than a painted mark. The consumer compares it with the
+   * committed selection: a drag made while the selection was locked leaves the
+   * two holding different text, and a menu built from the committed one would
+   * sit over one passage while acting on another.
+   */
+  liveText?: string;
   /** Screen coordinates for the menu */
   x: number;
   y: number;
@@ -618,12 +627,13 @@ export const MarkdownViewer = memo(
 
     const handleContextMenu = (e: React.MouseEvent) => {
       if (!onCtxMenu) return;
-      // Shift+right-click asks for the browser's own menu, which is what the
-      // chord already means in Chrome on Windows and Linux. Gated on a real
-      // secondary button, because Shift+F10 is the standard KEYBOARD chord for
-      // the context menu: it arrives with shiftKey set and button 0, so testing
-      // shiftKey alone would lock keyboard users out of this menu entirely.
-      if (e.shiftKey && e.button === 2) return;
+      // Shift plus the platform's secondary click asks for the browser's own
+      // menu, which is what the chord already means in Chrome on Windows and
+      // Linux. Gated on that click rather than on shiftKey alone, because
+      // Shift+F10 is the standard KEYBOARD chord for the context menu and
+      // arrives with shiftKey set and button 0: testing shiftKey by itself
+      // would lock keyboard users out of this menu entirely.
+      if (e.shiftKey && isSecondaryClick(e)) return;
 
       // Check if right-click is on a comment highlight
       const mark = markToAct(e.target as HTMLElement);
@@ -654,12 +664,9 @@ export const MarkdownViewer = memo(
       // A selection the viewer has not painted (nothing committed yet) still
       // has a live native range, so keep testing for one.
       const sel = window.getSelection();
-      if (
-        sel &&
-        sel.toString().trim().length > 0 &&
-        containerRef.current?.contains(sel.anchorNode)
-      ) {
-        if (onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY })) {
+      const liveText = sel?.toString().trim() ?? '';
+      if (sel && liveText.length > 0 && containerRef.current?.contains(sel.anchorNode)) {
+        if (onCtxMenu({ type: 'selection', liveText, x: e.clientX, y: e.clientY })) {
           e.preventDefault();
         }
         return;

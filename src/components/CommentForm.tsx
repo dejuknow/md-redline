@@ -15,10 +15,11 @@ interface Props {
   isPending?: boolean;
   autoExpand?: boolean;
   /**
-   * Render nothing while the viewer's context menu is open. Both surfaces carry
-   * Comment and the same templates, and the menu's submenu opens straight over
-   * the pill's own template row. Hiding is not unmounting: state survives, so
-   * an expanded composer comes back with whatever was typed into it.
+   * Hide while the viewer's context menu is open. Both surfaces carry Comment
+   * and the same templates, and the menu's submenu opens straight over the
+   * pill's own template row. Hidden with visibility rather than by unmounting
+   * or returning null, so the textarea keeps its size, its caret and its node:
+   * a draft comes back exactly as it was left.
    */
   hidden?: boolean;
   onSubmit: (
@@ -277,6 +278,16 @@ export function CommentForm({
     }
   };
 
+  // A browser blurs the focused element when an ancestor becomes invisible, so
+  // an expanded composer comes back caretless after the menu closes. Put focus
+  // where the reader left it.
+  const wasHiddenRef = useRef(hidden);
+  useEffect(() => {
+    const cameBack = wasHiddenRef.current && !hidden;
+    wasHiddenRef.current = hidden;
+    if (cameBack && isExpanded) inputRef.current?.focus();
+  }, [hidden, isExpanded]);
+
   const handleExpand = () => {
     onLock(); // Lock the selection so mouseup events don't clear it
     setIsExpanded(true);
@@ -305,16 +316,23 @@ export function CommentForm({
     setShowPillMenu((prev) => !prev);
   };
 
-  // After every hook, and before either branch: rendering nothing is not
-  // unmounting, so an expanded composer keeps its draft while it is out of
-  // sight and comes back with it when the menu closes.
-  if (hidden) return null;
+  // Hidden with styles rather than by returning null. Returning null discards
+  // the DOM: the textarea comes back at its one-line default because
+  // useAutoResize only runs on input, the caret is gone because the focus
+  // effect only runs on expand, and formRef goes null so the click-outside
+  // dismissal silently stops working while the menu is up. `visibility` rather
+  // than `opacity`, so an invisible composer stays out of the tab order and out
+  // of the accessibility tree; the browser blurs what it hides, so the caret is
+  // put back by the effect above.
+  const surfaceStyle: React.CSSProperties = hidden
+    ? { ...style, visibility: 'hidden', pointerEvents: 'none' }
+    : style;
 
   if (!isExpanded) {
     const pillTemplates = TEMPLATES.slice(0, 2);
     const menuTemplates = TEMPLATES.slice(2);
     return (
-      <div ref={formRef} style={style} data-comment-form>
+      <div ref={formRef} style={surfaceStyle} aria-hidden={hidden || undefined} data-comment-form>
         {showPillMenu && menuTemplates.length > 0 && (
           <div
             data-pill-template-menu
@@ -416,7 +434,8 @@ export function CommentForm({
   return (
     <div
       ref={formRef}
-      style={style}
+      style={surfaceStyle}
+      aria-hidden={hidden || undefined}
       data-comment-form
       className="w-80 bg-surface-raised rounded-xl shadow-xl border border-border overflow-x-hidden overflow-y-auto"
     >

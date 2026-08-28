@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { resolveSelection } from '../lib/selection-resolver';
 import { SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
+import { isSecondaryClick } from '../lib/platform';
 import type { SelectionInfo } from '../types';
 
 export function useSelection(containerRef: React.RefObject<HTMLElement | null>) {
@@ -129,7 +130,9 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
       // it everywhere leaves a stale selection committed with its pill floating
       // over unrelated text, and the next menu builds on that stale selection
       // rather than on what the reader pointed at.
-      if (e.button !== 0 && (e.target as HTMLElement)?.closest?.(SELECTION_MARK_SELECTOR)) return;
+      if (isSecondaryClick(e) && (e.target as HTMLElement)?.closest?.(SELECTION_MARK_SELECTOR)) {
+        return;
+      }
       if (lockedRef.current) return;
       if ((e.target as Element)?.closest?.('[data-comment-form]')) return;
       if ((e.target as Element)?.closest?.('[data-drag-handle]')) return;

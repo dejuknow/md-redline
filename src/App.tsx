@@ -564,23 +564,6 @@ export default function App() {
   const tabCtxMenu = useContextMenu();
   const sidebarCtxMenu = useContextMenu();
 
-  // An overlay taking the screen closes any open context menu. Without this the
-  // palette, settings or the file opener render on top of a menu that is still
-  // live underneath, which is the same two-surfaces-for-one-gesture problem the
-  // pill has with this menu. Keyed on activeModal rather than patched into each
-  // shortcut, so a new overlay inherits it.
-  const closeViewerMenu = viewerCtxMenu.close;
-  const closeExplorerMenu = explorerCtxMenu.close;
-  const closeTabMenu = tabCtxMenu.close;
-  const closeSidebarMenu = sidebarCtxMenu.close;
-  useEffect(() => {
-    if (!activeModal) return;
-    closeViewerMenu();
-    closeExplorerMenu();
-    closeTabMenu();
-    closeSidebarMenu();
-  }, [activeModal, closeViewerMenu, closeExplorerMenu, closeTabMenu, closeSidebarMenu]);
-
   // Triggers for remotely entering edit/reply mode on a CommentCard
   const { requestedEditor, triggerEdit, triggerReply } = useCommentCardTriggers();
 
@@ -896,6 +879,26 @@ export default function App() {
   // it. Close it automatically once the rail becomes available again, so
   // the two surfaces never show at the same time.
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // An overlay taking the screen closes any open context menu. Without this the
+  // palette, settings, the file opener or the comments drawer render on top of
+  // a menu that is still live underneath, which is the same
+  // two-surfaces-for-one-gesture problem the pill has with this menu. Keyed on
+  // the overlay state rather than patched into each shortcut, so a new overlay
+  // inherits it. The drawer is separate from activeModal but covers the
+  // viewport the same way, and Cmd+\\ opens it with no mousedown for the
+  // menu's own outside-close to catch.
+  const closeViewerMenu = viewerCtxMenu.close;
+  const closeExplorerMenu = explorerCtxMenu.close;
+  const closeTabMenu = tabCtxMenu.close;
+  const closeSidebarMenu = sidebarCtxMenu.close;
+  useEffect(() => {
+    if (!activeModal && !drawerOpen) return;
+    closeViewerMenu();
+    closeExplorerMenu();
+    closeTabMenu();
+    closeSidebarMenu();
+  }, [activeModal, drawerOpen, closeViewerMenu, closeExplorerMenu, closeTabMenu, closeSidebarMenu]);
   useEffect(() => {
     if (railShown) setDrawerOpen(false);
   }, [railShown]);
@@ -1457,8 +1460,11 @@ export default function App() {
       setDiffEnabled(false);
       setDiffPending(false);
       clearSelection();
+      // The viewer's menu holds a SelectionInfo captured in the document being
+      // left. Its items would anchor into the one arriving.
+      closeViewerMenu();
     }
-  }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId]);
+  }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId, closeViewerMenu]);
 
   // IDs of the replies present in newContent but not in oldContent. Kept
   // separate from the two things done with them (marking unread, stamping a
@@ -1976,11 +1982,9 @@ export default function App() {
   } = useContextMenuItems({
     comments,
     enableResolve: settings.enableResolve,
-    templates: settings.templates,
     handleResolve,
     handleUnresolve,
     handleDelete,
-    handleAddComment,
     setActiveCommentId,
     ensureCommentSurface,
     selectionRef: commentableSelectionRef,

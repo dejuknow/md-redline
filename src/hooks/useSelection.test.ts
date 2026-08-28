@@ -91,6 +91,23 @@ describe('useSelection modality routing', () => {
     painted.remove();
   });
 
+  it('clears a committed selection on a middle-click, which opens no menu', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // Only the secondary click is spared. The middle button opens no context
+    // menu, so it should end a selection the way any other press does.
+    mockResolve.mockReturnValue(null);
+    const painted = document.createElement('mark');
+    painted.className = 'selection-highlight';
+    document.body.appendChild(painted);
+    pointerDown('mouse');
+    mouseUp(1, painted);
+    expect(hook().selection).toBeNull();
+    painted.remove();
+  });
+
   it('clears a committed selection when a secondary press lands elsewhere', () => {
     pointerDown('mouse');
     mouseUp();

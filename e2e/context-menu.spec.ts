@@ -278,7 +278,7 @@ test.describe('Context menu on a text selection', () => {
     // One surface at a time: both carry Comment and the same templates, and the
     // submenu opens straight over the pill's own template row.
     await expect(menu).toBeVisible();
-    await expect(page.locator('[data-comment-form]')).toHaveCount(0);
+    await expect(page.locator('[data-comment-form]')).toBeHidden();
 
     // Copy closes the menu without ending the selection, so the pill returns.
     await menu.getByText('Copy', { exact: true }).click();
@@ -301,7 +301,7 @@ test.describe('Context menu on a text selection', () => {
     const menu = page.locator('.context-menu-enter');
     await page.locator('mark.selection-highlight').first().click({ button: 'right' });
     await expect(menu).toBeVisible();
-    await expect(page.locator('[data-comment-form]')).toHaveCount(0);
+    await expect(page.locator('[data-comment-form]')).toBeHidden();
 
     // Hidden, not unmounted: the component keeps its state while it renders
     // nothing, so the half-written comment is still there afterwards.
@@ -341,6 +341,124 @@ test.describe('Context menu on a text selection', () => {
     expect(
       await page.evaluate(() => (window as unknown as { __prevented: boolean | null }).__prevented),
     ).toBe(false);
+  });
+
+  test('ctrl+click, the macOS secondary click, keeps the selection', async ({ page }) => {
+    // Blink converts ctrl+click to contextmenu on macOS only, and
+    // isSecondaryClick counts the chord only there, so this asserts nothing on
+    // the Linux runner the e2e job uses. Same gate as advanced.spec.ts.
+    test.skip(process.platform !== 'darwin', 'ctrl+click is the secondary click on macOS only');
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    const mark = page.locator('mark.selection-highlight').first();
+    await expect(mark).toBeVisible({ timeout: 5000 });
+    const box = await mark.boundingBox();
+
+    // macOS sends contextmenu with button 0 and ctrlKey set, so a guard that
+    // tests the button alone misses the platform's own secondary click.
+    await page.keyboard.down('Control');
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.keyboard.up('Control');
+
+    await expect(page.locator('.context-menu-enter')).toBeVisible();
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible();
+  });
+
+  test('a multi-line draft keeps its size and caret through the menu', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    const draft = page.getByPlaceholder('Add your comment...');
+    await expect(draft).toBeVisible({ timeout: 5000 });
+    await draft.fill('one\ntwo\nthree\nfour\nfive');
+    const grown = (await draft.boundingBox())!.height;
+    expect(grown).toBeGreaterThan(60);
+
+    const menu = page.locator('.context-menu-enter');
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+    await expect(menu).toBeVisible();
+    await menu.getByText('Copy', { exact: true }).click();
+    await expect(menu).toHaveCount(0);
+
+    // The textarea auto-sizes on input and focuses on expand, and neither
+    // effect re-runs on a remount, so a discarded node comes back one line
+    // tall with the caret gone and lines two onward unreachable.
+    await expect(draft).toHaveValue('one\ntwo\nthree\nfour\nfive');
+    expect((await draft.boundingBox())!.height).toBe(grown);
+    expect(await draft.evaluate((el) => document.activeElement === el)).toBe(true);
+  });
+
+  test('switching tabs closes the menu', async ({ page }) => {
+    await openFixture(page);
+    await openSecondFile(page);
+    const menu = await openSelectionMenu(page, 'details section');
+    await expect(menu).toBeVisible();
+
+    await page.keyboard.press(withMod('Shift+['));
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 5000,
+    });
+
+    // Its items act on a SelectionInfo captured in the document that is no
+    // longer on screen; Comment would anchor into the wrong file.
+    await expect(menu).toHaveCount(0);
+  });
+
+  test('a live range that is not the committed selection gets no menu', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+    await page.keyboard.press(withMod('Shift+m')); // lock it
+    await page.waitForTimeout(200);
+
+    // Drag out a real selection elsewhere. handleMouseUp bails while locked, so
+    // the native range is now different text from the committed selection.
+    const box = await page.evaluate(() => {
+      const walker = document.createTreeWalker(
+        document.querySelector('.prose') as Node,
+        NodeFilter.SHOW_TEXT,
+      );
+      let node: Text | null;
+      while ((node = walker.nextNode() as Text | null)) {
+        const idx = node.textContent?.indexOf('Rate limiting') ?? -1;
+        if (idx >= 0) {
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + 'Rate limiting'.length);
+          const r = range.getBoundingClientRect();
+          return { x: r.left, y: r.top + r.height / 2, w: r.width };
+        }
+      }
+      return null;
+    });
+    if (!box) throw new Error('target text not found');
+    await page.mouse.move(box.x + 1, box.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.w - 1, box.y, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toContain('Rate limiting');
+    // The precondition this test exists for: the drag was ignored, so the
+    // committed selection is still the first passage. Without asserting it, a
+    // lock that had not landed yet would make this test pass for no reason.
+    expect(await page.locator('mark.selection-highlight').first().textContent()).toContain(
+      'valid credentials',
+    );
+
+    await page.mouse.click(box.x + box.w / 2, box.y, { button: 'right' });
+    await page.waitForTimeout(300);
+
+    // Opening here would put a menu over one passage whose every item acts on
+    // another: Copy writes the old text, Comment anchors to it.
+    await expect(page.locator('.context-menu-enter')).toHaveCount(0);
   });
 
   test('Copy in the selection menu puts the selected text on the clipboard', async ({

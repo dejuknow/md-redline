@@ -1,5 +1,5 @@
 import { useState, useCallback, type RefObject, type Dispatch, type SetStateAction } from 'react';
-import type { ContextMenuEntry, ContextMenuItem } from '../components/ContextMenu';
+import type { ContextMenuEntry } from '../components/ContextMenu';
 import type { ViewerContextMenuInfo, MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { ExplorerContextMenuInfo } from '../components/FileExplorer';
 import type { TabContextMenuInfo } from '../components/TabBar';
@@ -13,25 +13,12 @@ type ContextMenuInstance = {
   close: () => void;
 };
 
-interface CommentTemplate {
-  label: string;
-  text: string;
-}
-
 export interface UseContextMenuItemsParams {
   comments: MdComment[];
   enableResolve: boolean;
-  templates: CommentTemplate[];
   handleResolve: (id: string) => void;
   handleUnresolve: (id: string) => void;
   handleDelete: (id: string) => void;
-  handleAddComment: (
-    anchor: string,
-    text: string,
-    contextBefore?: string,
-    contextAfter?: string,
-    hintOffset?: number,
-  ) => void;
   setActiveCommentId: Dispatch<SetStateAction<string | null>>;
   /**
    * Opens whichever comment surface can currently show one (the rail when it
@@ -94,11 +81,9 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
   const {
     comments,
     enableResolve,
-    templates,
     handleResolve,
     handleUnresolve,
     handleDelete,
-    handleAddComment,
     setActiveCommentId,
     ensureCommentSurface,
     selectionRef,
@@ -219,13 +204,11 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       } else if (info.type === 'selection') {
         const sel = selectionRef.current;
         if (!sel) return false;
-
-        const templateItems: ContextMenuItem[] = templates.map((t) => ({
-          label: t.label,
-          onClick: () => {
-            handleAddComment(sel.text, t.text, sel.contextBefore, sel.contextAfter, sel.offset);
-          },
-        }));
+        // When the viewer resolved this from a live range rather than the
+        // painted mark, that range has to BE the committed selection. While a
+        // selection is locked a fresh drag never reaches the app, so the two
+        // hold different text and every item here would act on the wrong one.
+        if (info.liveText && info.liveText !== sel.text) return false;
 
         const items: ContextMenuEntry[] = [
           {
@@ -238,10 +221,6 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
               adoptSelection(sel);
               setAutoExpandForm(true);
             },
-          },
-          {
-            label: 'Templates',
-            items: templateItems,
           },
           { type: 'divider' as const },
           {
@@ -261,11 +240,9 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     [
       comments,
       enableResolve,
-      templates,
       handleResolve,
       handleUnresolve,
       handleDelete,
-      handleAddComment,
       adoptSelection,
       ensureCommentSurface,
       triggerEdit,

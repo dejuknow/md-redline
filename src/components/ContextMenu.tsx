@@ -178,6 +178,7 @@ export function ContextMenu({ items, position, onClose, preserveSelection = fals
                 {openSubmenuIdx === idx && (
                   <div
                     ref={submenuRef}
+                    data-context-submenu
                     className="fixed z-[201] min-w-[160px] max-w-[240px] py-1 bg-surface-raised rounded-lg shadow-xl border border-border"
                     style={{ left: submenuPos.x, top: submenuPos.y }}
                     onMouseEnter={() => setOpenSubmenuIdx(idx)}
