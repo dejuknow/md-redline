@@ -467,6 +467,47 @@ test.describe('Context menu on a text selection', () => {
     await expect(page.locator('.context-menu-enter')).toHaveCount(0);
   });
 
+  test('a drag released in the empty area below the text still commits', async ({ page }) => {
+    await openFixture(page);
+    // Measure after the document has settled: openFixture waits for .prose to
+    // exist, and geometry read before layout finishes sends the drag somewhere
+    // else entirely.
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.waitForTimeout(300);
+    const from = await page.evaluate(() => {
+      const p = document.querySelector('.prose p') as HTMLElement;
+      const r = document.createRange();
+      r.selectNodeContents(p);
+      const rect = r.getBoundingClientRect();
+      return { x: rect.left + 5, y: rect.top + rect.height / 2 };
+    });
+    // Below the last line, but inside the viewport: a drag past the bottom edge
+    // is a different gesture (autoscroll) and would not test this.
+    const releaseY = await page.evaluate(() => {
+      const bottom = (document.querySelector('.prose') as HTMLElement).getBoundingClientRect()
+        .bottom;
+      return Math.min(bottom + 60, window.innerHeight - 10);
+    });
+
+    // Letting go past the last line carries the range's end into a layout
+    // wrapper above the prose, which used to throw the whole selection away:
+    // native highlight painted, nothing committed, and the right-click that
+    // followed reached the browser's menu.
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 200, releaseY, { steps: 12 });
+    await page.mouse.up();
+
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-comment-form]')).toBeVisible();
+
+    const menu = page.locator('.context-menu-enter');
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+    await expect(menu).toBeVisible();
+  });
+
   test('Copy in the selection menu puts the selected text on the clipboard', async ({
     page,
     context,
