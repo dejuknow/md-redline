@@ -24,6 +24,7 @@ Your job:
 
 export const claudeCli: AgentAdapter = {
   name: 'claude-cli',
+  markerMode: 'remove',
 
   async run(inputPath: string, casePrompt: string): Promise<string> {
     // Create a temp working directory with a copy of the input

@@ -84,3 +84,20 @@ describe('visible-text helpers', () => {
     expect(getVisibleTextOffset(root, parent, parent.childNodes.length)).toBe('Hello World'.length);
   });
 });
+
+describe('getVisibleTextOffset with a textless target', () => {
+  it('reports the position of the next text, not the end of the container', () => {
+    // A rule or an image holds no text, so the walker never yields it. Falling
+    // through returned the container's total length, which put a selection that
+    // starts at the top of the document at its very end.
+    document.body.innerHTML = '<div id="root"><hr><p>Alpha beta gamma.</p></div>';
+    const root = document.getElementById('root')!;
+    expect(getVisibleTextOffset(root, root, 0)).toBe(0);
+  });
+
+  it('still reports the end when the target follows all of the text', () => {
+    document.body.innerHTML = '<div id="root"><p>Alpha beta gamma.</p><hr></div>';
+    const root = document.getElementById('root')!;
+    expect(getVisibleTextOffset(root, root, 1)).toBe('Alpha beta gamma.'.length);
+  });
+});

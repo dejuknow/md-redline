@@ -67,6 +67,86 @@ describe('resolveSelection', () => {
     expect(resolveSelection(container)).toBeNull();
   });
 
+  it('clamps the start to real text when the first block has none', () => {
+    // getVisibleTextOffset walks text nodes and returns the container's total
+    // length when it never meets the node it was given, so clamping to
+    // (container, 0) in front of a childless first block reported the END of
+    // the document as the selection's offset.
+    document.body.innerHTML =
+      '<div id="page"><div id="root"><hr><p>Alpha beta gamma.</p></div><div id="after">tail</div></div>';
+    const container = document.getElementById('root')!;
+    const para = container.querySelector('p')!.firstChild!;
+    const outside = document.getElementById('after')!.firstChild!;
+
+    const range = document.createRange();
+    range.setStartBefore(container.firstChild!);
+    range.setEnd(outside, 4);
+
+    mockSelection({ text: 'Alpha beta gamma.tail', range });
+
+    const result = resolveSelection(container);
+    expect(result).not.toBeNull();
+    expect(result!.offset).toBe(0);
+    expect(para.textContent).toContain('Alpha');
+  });
+
+  it('keeps the blank line between blocks that Selection.toString reports', () => {
+    // Range.toString() collapses a block boundary to a single newline while
+    // Selection.toString() reports the blank line. That string is the comment's
+    // stored anchor and the text/plain clipboard flavour, and in markdown one
+    // newline is a soft break: two paragraphs would paste back as one.
+    document.body.innerHTML = '<div id="root"><p>Para one text.</p><p>Para two text.</p></div>';
+    const container = document.getElementById('root')!;
+    const first = container.firstChild!.firstChild!;
+    const second = container.lastChild!.firstChild!;
+
+    const range = document.createRange();
+    range.setStart(first, 0);
+    range.setEnd(second, second.textContent!.length);
+
+    mockSelection({ text: 'Para one text.\n\nPara two text.', range });
+
+    const result = resolveSelection(container);
+    expect(result!.text).toBe('Para one text.\n\nPara two text.');
+  });
+
+  it('resolves a drag that ends outside the container, clamped to it', () => {
+    // Releasing the mouse in the sheet's empty area leaves the range ending
+    // outside the prose, so its common ancestor is a layout wrapper ABOVE the
+    // container. Rejecting on containment threw the whole selection away: no
+    // pill, no painted mark, and a right-click that fell through to the
+    // browser's menu.
+    document.body.innerHTML =
+      '<div id="page"><div id="root">The quick brown fox jumps over the lazy dog</div><div id="after">trailing</div></div>';
+    const container = document.getElementById('root')!;
+    const textNode = container.firstChild!;
+    const outside = document.getElementById('after')!.firstChild!;
+
+    const range = document.createRange();
+    range.setStart(textNode, 4);
+    range.setEnd(outside, 8);
+
+    mockSelection({ text: 'quick brown fox jumps over the lazy dogtrailing', range });
+
+    const result = resolveSelection(container);
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe('quick brown fox jumps over the lazy dog');
+  });
+
+  it('returns null when the selection does not touch the container at all', () => {
+    document.body.innerHTML =
+      '<div id="page"><div id="root">inside text</div><div id="after">outside text</div></div>';
+    const container = document.getElementById('root')!;
+    const outside = document.getElementById('after')!.firstChild!;
+
+    const range = document.createRange();
+    range.setStart(outside, 0);
+    range.setEnd(outside, 7);
+
+    mockSelection({ text: 'outside', range });
+    expect(resolveSelection(container)).toBeNull();
+  });
+
   it('returns correct contextBefore and contextAfter for a mid-document selection', () => {
     const content = 'The quick brown fox jumps over the lazy dog and then some more text follows';
     document.body.innerHTML = `<div id="root">${content}</div>`;

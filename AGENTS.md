@@ -725,6 +725,107 @@ While a template prefill sits untouched in the full comment form, Escape
 clears the prefill and keeps the form open; a second Escape (or an Escape
 after typing) closes the form as usual.
 
+### Right-clicking a selection
+
+The viewer's own menu (Comment, Templates, Copy) opens from the painted mark,
+not from the native range. `handleContextMenu` in `MarkdownViewer` checks
+`SELECTION_MARK_SELECTOR` before it falls back to `window.getSelection()`,
+because the range is gone by then.
+
+The reason is worth stating precisely, because it decides which layer a fix
+belongs in: committing a selection re-runs the render layout effect, whose deps
+include `selectionText`, and that effect's first act is
+`container.innerHTML = sanitizeRenderedMarkdown(html)`. The whole subtree is
+replaced, so the native Range dies there, before `wrapText` paints any mark.
+Switching the highlight to the CSS Custom Highlight API to avoid wrapping text
+nodes would therefore change nothing: the range would still be destroyed by the
+rebuild above it. Testing the range alone is what left this menu unreachable
+from March until it was fixed; a reader got the browser's menu instead.
+
+Two things keep the selection alive long enough for the menu to act on it, and
+both are load-bearing:
+
+- `useSelection`'s `handleMouseUp` ignores **the platform's secondary click when
+  it lands on the selection's own mark** (`isSecondaryClick`: button 2, plus
+  macOS ctrl+click, which arrives with `button: 0`, so testing the button alone
+  misses the gesture most Mac users make. The middle button is deliberately not
+  included: it opens no menu, so it should clear like any other press). Otherwise the right-click's own mouseup resolves
+  the collapsed range, gets null, and clears the selection the menu was opened
+  on. This also makes the fix independent of event order, which matters because
+  Windows fires `contextmenu` after mouseup rather than before it. Sparing every
+  secondary press everywhere is wrong in the other direction: the selection then
+  outlives a right-click on unrelated text, its pill floats over that text, and
+  the next menu builds on the stale selection instead of what was pointed at.
+- The viewer's menu carries `data-preserve-selection` (the `preserveSelection`
+  prop, set on that instance only), so picking an item does not clear the
+  selection before the item's click handler runs. Two listeners have to respect
+  it, not one: `useSelection`'s mouseup, and `CommentForm`'s dismissal, which
+  with quick comment on is watching an already-open composer.
+- `Comment` commits the selection the menu captured, through `adoptSelection`,
+  rather than locking whatever is live at click time. Locking live state means
+  that if anything cleared the selection in between, `lockedRef` is set with
+  nothing committed and never released, and every later selection in the
+  document is silently ignored: the reader sees the menu stop appearing and has
+  no way to know Escape releases it. The explorer, tab and sidebar
+  menus deliberately do not: they have no items that act on the selection, and
+  sparing them would keep a stale selection alive through clicks that should end
+  it.
+
+`CommentForm`'s click-outside dismissal spares a press that lands on the
+selection's mark, or inside any surface carrying `data-preserve-selection`
+(the menu itself), for the same reason: with quick comment on, the composer is
+open the moment you select, and a press on your own selection would otherwise
+cancel it and take the selection with it. Tested by target rather than by
+button, because a touch long-press opens the same menu and its compatibility
+mousedown reports button 0, indistinguishable from a left-click. The check runs
+after the containment test, so a right-click anywhere else still dismisses an
+empty composer rather than leaving it floating.
+
+**Only one surface at a time.** The pill and this menu both carry Comment, and
+the menu used to open its template submenu straight over the pill's own
+template row, so `CommentForm` takes a `hidden` prop (App passes
+`viewerCtxMenu.isOpen`) and renders nothing while the menu is up. It covers the expanded
+composer too, hidden with `visibility` rather than by returning null: a
+discarded node comes back one line tall with no caret, because `useAutoResize`
+only runs on input and the focus effect only on expand. The browser blurs what
+it hides, so `CommentForm` puts focus back when the surface returns. Symmetrically, an open overlay closes every
+context menu (the effect in App keyed on `activeModal` and `drawerOpen`), so the
+palette, settings, the file opener and the comments drawer never render on top
+of a live menu. A tab switch closes it too: its items hold a `SelectionInfo`
+captured in the document being left.
+
+**The menu carries Comment and Copy, not templates.** It listed the same eight
+templates the pill does, which made one label mean two things: the pill's
+prefill the composer, the menu's posted immediately. Prefilling from the menu
+instead only moved the damage one step earlier, since it overwrites a draft
+already in the composer. Comment opens the composer, and the templates live
+there, one step further along a path the reader is already on.
+
+**A menu resolved from a live range carries that range's text** (`liveText` on
+`ViewerContextMenuInfo`), and the consumer refuses when it does not match the
+committed selection. While a selection is locked a fresh drag never reaches the
+app, so the two hold different text, and a menu built from the committed one
+would sit over one passage while every item acted on another.
+
+**Shift+right-click** returns before every branch, so the browser's own menu is
+never suppressed. That matches what the chord already means in Chrome on
+Windows and Linux, and it is the escape hatch to Inspect on a painted highlight.
+It is gated on `button === 2`: Shift+F10 is the standard keyboard chord for the
+context menu and arrives with `shiftKey` set and button 0, so testing `shiftKey`
+alone would lock keyboard users out of this menu entirely.
+
+`onContextMenu` returns whether it opened a menu, and the viewer calls
+`preventDefault` only when it did. The consumer refuses a mark whose comment is
+already gone, and a selection type it has no `SelectionInfo` for; suppressing
+the native menu for a menu that never appears would leave the reader with no
+menu at all, no Copy, no spellcheck, no Inspect, and nothing on screen saying
+why. Falling back to the browser's menu is the correct answer there.
+
+Precedence is unchanged: the comment-highlight branch runs first, so a selection
+that overlaps an existing anchor opens the comment menu (Edit / Reply / Delete),
+not the selection menu. A right-click on text with nothing selected also reaches
+the browser's menu, since neither branch matches.
+
 ### Copying a document selection
 The rendered view paints the pending selection as `mark.selection-highlight`
 (`MarkdownViewer.tsx`), which replaces the selected text nodes and collapses the
@@ -1619,6 +1720,32 @@ From `src/lib/agent-prompts.ts`:
   comment, which remove mode used to instruct, destroys the question and
   records no answer.
 
+### Changing agent-facing text
+
+`src/lib/agent-prompts.ts` and the tool descriptions in
+`server/mcp-stdio/server.ts` are instructions an agent follows, not code. A
+defect in one is prose that reads fine and behaves wrong, so neither types nor
+assertions can see it: a unit test can only confirm the string contains a
+substring, and it did while a contradiction between two numbered steps made an
+agent keep every marker.
+
+Run the eval harness against a change to either, for both shipped-prompt
+agents, and read the per-case scores rather than the average:
+
+```bash
+npm run eval -- --agent claude-cli-remove
+npm run eval -- --agent claude-cli-resolve
+```
+
+When a case scores below 100%, run the same case against the previous wording
+before assuming you caused it. Several fixtures have pre-existing gaps, and the
+difference between "I broke this" and "this was already here" is one control
+run. `scripts/release.mjs` refuses to publish when the newest run for either
+agent predates the last change to these files.
+
+Playwright covers the other half: `e2e/handoff.spec.ts` asserts the prompt's
+wording verbatim, so a reword breaks it and `npm test` alone will not tell you.
+
 ## Development
 
 Prerequisite: Node 20 or newer.
@@ -1682,6 +1809,15 @@ the "no content changes" empty state, and the diff-reference/handoff plumbing.
 - Scoring weights: parsing 20% (markers handled per `markerMode`?), execution 40% (content changes address feedback?), integrity 20% (valid markdown, no malformed markers?), anchorIntegrity 20% (do surviving anchors still resolve?).
 - `expected.json` takes an optional `markerMode`: `remove` (default, the original contract, marker deleted once addressed) or `resolve` (marker stays, gains a reply, gets `status: resolved`). Anchor drift only shows up under `resolve`, since a deleted marker takes its anchor with it.
 - Agents: `claude-cli` (default, hand-written preamble, remove mode), plus `claude-cli-resolve` and `claude-cli-remove`, which drive the agent with the **shipped** `buildAddressCommentsPrompt` output in their respective modes. Prefer the shipped-prompt pair: they keep the real hand-off wording under test, so a regression in it shows up as a score drop rather than in someone's review session. `claude-cli`'s preamble is a frozen copy of the old contract ("the final file contains no comment markers") and is deliberately left that way as a baseline; it does not track the shipped prompt, which is how a defect in the remove-mode wording once reached a user unnoticed.
+- Case selection: an agent adapter declares its own `markerMode`, and a case is
+  scored only by an agent whose mode matches its own. A remove-mode case run by
+  a resolve-mode agent fails every marker by construction, which is not a
+  measurement; before this rule existed, running the resolve agent over the full
+  set reported 79% overall with 15 cases failing purely for being asked the
+  wrong question. `requiresAgent` is the narrower constraint, for a case that
+  needs one SPECIFIC adapter rather than a mode: fixture 17 pins
+  `claude-cli-remove` because `claude-cli` shares its mode but carries a frozen
+  preamble that fails the case by design. Rules live in `eval/case-selection.ts`.
 - Marker expectations: `markerMode` sets a case-wide default (`remove` or `resolve`), and a comment may override it with `expectedMarker`: `removed`, `resolved`, or `answered`. `answered` is for a QUESTION — the marker survives carrying a reply, with no status required — which is what lets a remove-mode fixture assert that a question was answered rather than deleted. See `eval/fixtures/17-question-comment`.
 - Limit worth knowing before writing a question fixture: `contentHints` and `contentAssertions` run against `cleanMarkdown`, which strips markers entirely, so reply text is never in the string they see. No content assertion can check WHAT an agent answered, only the `parsing` dimension can check THAT it answered. A `shouldContain` naming prose next to a question therefore guards against the agent rewriting the document it was only asked about; it says nothing about the answer. Since parsing carries a weight of 0.2 and is averaged across a case's comments, an agent that ignores one question in a two-comment file still scores around 0.9 overall: read the per-comment `details` lines, not just the number.
 - `anchorIntegrity` scores each surviving marker: 1 for an anchor that still resolves, 0.5 where only position recovery saved it (the agent rewrote the anchored text without updating the marker), 0 for a detached anchor. Resolved comments are included. Half credit is deliberate: recovery is the app's safety net, not the agent doing its job.

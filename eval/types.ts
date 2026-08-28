@@ -99,6 +99,14 @@ export interface ScoringResult {
 
 export interface AgentAdapter {
   name: string;
+  /**
+   * The marker contract this adapter instructs the agent in. A case is scored
+   * only by an agent whose mode matches its `markerMode`: a remove-mode case
+   * run by a resolve-mode agent fails on every marker by construction, which
+   * is not a measurement, and it drags the suite average down far enough to
+   * hide real movement elsewhere.
+   */
+  markerMode: MarkerMode;
   run(inputPath: string, prompt: string): Promise<string>;
 }
 

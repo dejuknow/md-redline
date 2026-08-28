@@ -22,6 +22,7 @@ import type { AgentAdapter } from '../types.js';
  */
 export const claudeCliRemove: AgentAdapter = {
   name: 'claude-cli-remove',
+  markerMode: 'remove',
 
   async run(inputPath: string, casePrompt: string): Promise<string> {
     const tempDir = await mkdtemp(join(tmpdir(), 'md-eval-remove-'));
