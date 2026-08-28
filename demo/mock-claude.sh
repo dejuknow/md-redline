@@ -40,7 +40,7 @@ prompt_mode() {
   # Claude Code startup banner (matches real CLI format)
   echo ""
   echo -e "  ${BOLD}Claude Code${RESET} ${DIM}v2.1.108${RESET}"
-  echo -e "  ${DIM}Opus 4.6 (1M context) with high effort · Claude Max${RESET}"
+  echo -e "  ${DIM}Opus 5 (1M context) with high effort · Claude Max${RESET}"
   echo -e "  ${DIM}~/dev/myapp${RESET}"
   echo ""
   hr 76
@@ -169,7 +169,7 @@ agent_review_mode() {
   # Claude Code startup banner (matches real CLI format)
   echo ""
   echo -e "  ${BOLD}Claude Code${RESET} ${DIM}v2.1.108${RESET}"
-  echo -e "  ${DIM}Opus 4.6 (1M context) with high effort · Claude Max${RESET}"
+  echo -e "  ${DIM}Opus 5 (1M context) with high effort · Claude Max${RESET}"
   echo -e "  ${DIM}~/dev/myapp${RESET}"
   echo ""
   hr 76

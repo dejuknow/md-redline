@@ -26,7 +26,7 @@ npx playwright install chromium   # Playwright drives the browser clips
 ## Pacing rule
 
 A clip that cuts from the terminal to the browser (or back) holds on its final
-frame for **about 4 seconds** before the cut. Measure the hold, not the tape's
+frame for **about 3 seconds** before the cut. Measure the hold, not the tape's
 `Sleep` value: VHS trims some trailing time, so `Sleep 5s` produced a 2.97s
 hold. To check one:
 
@@ -35,11 +35,11 @@ ffmpeg -i demo/clips/03-terminal-agent.mp4 -vf freezedetect=n=0.003:d=0.5 -f nul
   | grep freeze_start | tail -1
 ```
 
-Subtract that from the clip duration. A viewer has to read what the
-agent just did before the scene changes, and 2 to 3 seconds is not enough: the
-state goes by before it can be parsed. The trailing `Sleep` in each
-`demo-terminal-*.tape` is where that dwell lives, and each tape carries a
-comment saying so.
+Subtract that from the clip duration. A viewer has to read what the agent just
+did before the scene changes, and under 2 seconds is not enough: the state goes
+by before it can be parsed. Four seconds turned out to drag, so 3 is the target.
+The trailing `Sleep` in each `demo-terminal-*.tape` is where that dwell lives,
+and each tape carries a comment saying so.
 
 Do not name the fixture file in the TYPED prompts. The agent's tool output
 should name it, as a real one would, and that name has to match the fixture on

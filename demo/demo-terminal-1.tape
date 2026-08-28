@@ -39,6 +39,6 @@ Enter
 # Beat showing "I'll open that in mdr for your review." + the waiting state.
 # Trailing dwell: this clip cuts to a browser clip, so it holds on its
 # final frame long enough to read before the switch. Standing rule for
-# these recordings: >= 4s. Anything shorter and the state a viewer is
-# meant to absorb is gone before they have parsed it.
-Sleep 4s
+# these recordings: ~3s measured. Anything shorter and the state a viewer
+# is meant to absorb is gone before they have parsed it.
+Sleep 3s

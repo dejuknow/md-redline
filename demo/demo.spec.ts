@@ -434,6 +434,11 @@ async function setupDemoPage(page: Page) {
       document.addEventListener(
         'mousedown',
         (e) => {
+          // A drag-to-select spawns its ripple exactly where the highlight
+          // starts, and the ring's glow washes the tint off the first few
+          // characters. The ripple is there to make a click read as a click,
+          // so the drag turns it off for its own duration.
+          if ((window as unknown as { __demoNoRipple?: boolean }).__demoNoRipple) return;
           const ripple = document.createElement('div');
           ripple.className = 'demo-ripple';
           ripple.style.left = e.clientX + TIP_OFFSET_X + 'px';
@@ -566,6 +571,24 @@ async function getTextBounds(page: Page, text: string) {
   }, text);
 }
 
+/** Read the anchor's bounds only once the layout has stopped moving under it.
+ *  The margin rail measures its cards after they mount and nudges the prose,
+ *  which moved the second anchor 13px between reading its bounds and pressing
+ *  the mouse. The whole drag then ran through the gap below the line: the
+ *  comment still landed (the Range pin below guarantees that) but the
+ *  highlight painted offset from the glyphs, so the video showed a drag over
+ *  text that never lit up. Poll until two consecutive reads agree. */
+async function getSettledTextBounds(page: Page, text: string, attempts = 20) {
+  let prev = await getTextBounds(page, text);
+  for (let i = 0; i < attempts; i++) {
+    await page.waitForTimeout(50);
+    const next = await getTextBounds(page, text);
+    if (Math.abs(next.x - prev.x) < 0.5 && Math.abs(next.y - prev.y) < 0.5) return next;
+    prev = next;
+  }
+  return prev;
+}
+
 async function addCommentAnimated(page: Page, anchorText: string, commentText: string) {
   // Double-rAF + brief settle before reading the text bounds. Right after a
   // smooth-scroll and a previous form close, the document layout can still
@@ -577,29 +600,47 @@ async function addCommentAnimated(page: Page, anchorText: string, commentText: s
   );
   await page.waitForTimeout(80);
 
-  const bounds = await getTextBounds(page, anchorText);
-
   // The fake cursor's visible tip sits 2px right / 1px below its DOM origin
   // (SVG tip at (5,3), with transform: translate(-3px, -2px)). To land the
   // tip ON the text rather than to the right and below, shift the Playwright
   // mouse coordinate back by that offset.
   const TIP_DX = 2;
   const TIP_DY = 1;
-  const startX = bounds.x + 2 - TIP_DX;
-  const centerY = bounds.y + bounds.height / 2 - TIP_DY;
-  const endX = bounds.x + bounds.width - 2 - TIP_DX;
+  const track = (b: { x: number; y: number; width: number; height: number }) => ({
+    startX: b.x + 2 - TIP_DX,
+    centerY: b.y + b.height / 2 - TIP_DY,
+    endX: b.x + b.width - 2 - TIP_DX,
+  });
 
   // Glide the cursor over to the anchor text first so the motion reads for viewers.
-  await slowMove(page, startX, centerY, T.CURSOR_TO_ANCHOR);
+  const approach = track(await getSettledTextBounds(page, anchorText));
+  await slowMove(page, approach.startX, approach.centerY, T.CURSOR_TO_ANCHOR);
   await page.waitForTimeout(T.PRE_DRAG_PAUSE);
+
+  // Re-read after the glide and correct. Cheap insurance: if nothing moved
+  // this is a no-op (slowMove short-circuits under 3px), and if something did,
+  // the press still lands on the glyphs instead of in the gap beneath them.
+  const { startX, centerY, endX } = track(await getSettledTextBounds(page, anchorText));
+  if (Math.abs(startX - approach.startX) > 1 || Math.abs(centerY - approach.centerY) > 1) {
+    await slowMove(page, startX, centerY, 120);
+  }
 
   // Drag across the anchor — visibly slow so the highlight tracks the motion.
   // The browser's native selection can extend a bit past the intended range
   // during a slow drag; we pin the final selection to exactly `anchorText`
   // via Range API before mouse.up so the form reads the correct text.
+  await page.evaluate(() => {
+    (window as unknown as { __demoNoRipple?: boolean }).__demoNoRipple = true;
+  });
   await page.mouse.move(startX, centerY);
   await page.mouse.down();
   await slowMove(page, endX, centerY, T.DRAG_DURATION);
+
+  // The drag has to produce a real native selection, because that highlight IS
+  // the shot. The Range pin below would hide a failure here: the comment would
+  // still be correct while the video showed a cursor sliding over dead text.
+  const draggedText = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+  expect(draggedText.length, `drag over "${anchorText}" selected nothing`).toBeGreaterThan(0);
 
   // Re-pin the selection to exactly cover the anchor, independent of what
   // the browser captured during the drag. This is what the comment form
@@ -625,6 +666,9 @@ async function addCommentAnimated(page: Page, anchorText: string, commentText: s
   }, anchorText);
 
   await page.mouse.up();
+  await page.evaluate(() => {
+    (window as unknown as { __demoNoRipple?: boolean }).__demoNoRipple = false;
+  });
   await page.waitForTimeout(T.POST_DRAG);
 
   const input = page.getByPlaceholder('Add your comment...');
