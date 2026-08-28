@@ -91,6 +91,53 @@ describe('resolveSelectionMarkdown', () => {
     expect(result!.markdown).toContain('Para B with ref');
   });
 
+  it('refuses to slice when unselected source sits between the selected blocks', () => {
+    // Two GFM footnote definitions render together at the end of the document
+    // whatever their position in the file. Between them in the SOURCE sits a
+    // paragraph that renders above them, so a slice from the first to the
+    // second would hand back that paragraph too. A monotonic run is not enough
+    // to see this: the two footnotes are in order relative to each other.
+    const source = 'Para A.[^1]\n\n[^1]: Note one.\n\nPara B.[^2]\n\n[^2]: Note two.\n';
+    const container = mount(
+      '<p data-src-start="0" data-src-end="11">Para A.<sup><a>1</a></sup></p>' +
+        '<p data-src-start="30" data-src-end="41">Para B.<sup><a>2</a></sup></p>' +
+        '<section><ol>' +
+        '<li data-src-start="13" data-src-end="28"><p>Note one. <a>↩</a></p></li>' +
+        '<li data-src-start="43" data-src-end="58"><p>Note two. <a>↩</a></p></li>' +
+        '</ol></section>',
+    );
+    const [first, second] = Array.from(container.querySelectorAll('li'));
+    const range = document.createRange();
+    range.setStart(first.querySelector('p')!.firstChild!, 0);
+    const back = second.querySelector('a')!.firstChild!;
+    range.setEnd(back, back.textContent!.length);
+
+    const result = resolveSelectionMarkdown(range, container, source);
+    expect(result).not.toBeNull();
+    expect(result!.exact).toBe(false);
+    expect(result!.markdown).not.toContain('Para B');
+  });
+
+  it('still slices a run of list items whose list is annotated around them', () => {
+    // A list and its items both carry spans. The list overlaps any slice of
+    // its items, and must not be mistaken for unselected source.
+    const source = '- item one\n\n- item two\n\n- item three\n';
+    const container = mount(
+      '<ul data-src-start="0" data-src-end="36">' +
+        '<li data-src-start="0" data-src-end="10"><p>item one</p></li>' +
+        '<li data-src-start="12" data-src-end="22"><p>item two</p></li>' +
+        '<li data-src-start="24" data-src-end="36"><p>item three</p></li>' +
+        '</ul>',
+    );
+    const [first, second] = Array.from(container.querySelectorAll('li'));
+    const range = document.createRange();
+    range.setStart(first.firstChild!.firstChild!, 0);
+    range.setEnd(second.firstChild!.firstChild!, 'item two'.length);
+
+    const result = resolveSelectionMarkdown(range, container, source);
+    expect(result).toEqual({ markdown: '- item one\n\n- item two', exact: true });
+  });
+
   it('returns null for a collapsed selection', () => {
     const container = mount('<p data-src-start="0" data-src-end="52">Text</p>');
     const range = document.createRange();
