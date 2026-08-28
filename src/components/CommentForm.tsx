@@ -14,6 +14,13 @@ interface Props {
    * step the pending flow exists for. */
   isPending?: boolean;
   autoExpand?: boolean;
+  /**
+   * Render nothing while the viewer's context menu is open. Both surfaces carry
+   * Comment and the same templates, and the menu's submenu opens straight over
+   * the pill's own template row. Hiding is not unmounting: state survives, so
+   * an expanded composer comes back with whatever was typed into it.
+   */
+  hidden?: boolean;
   onSubmit: (
     anchor: string,
     text: string,
@@ -29,6 +36,7 @@ export function CommentForm({
   selection,
   isPending,
   autoExpand,
+  hidden = false,
   onSubmit,
   onCancel,
   onLock,
@@ -296,6 +304,11 @@ export function CommentForm({
     // already bails, and the pill carries that attribute.
     setShowPillMenu((prev) => !prev);
   };
+
+  // After every hook, and before either branch: rendering nothing is not
+  // unmounting, so an expanded composer keeps its draft while it is out of
+  // sight and comes back with it when the menu closes.
+  if (hidden) return null;
 
   if (!isExpanded) {
     const pillTemplates = TEMPLATES.slice(0, 2);

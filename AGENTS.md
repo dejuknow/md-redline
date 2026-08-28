@@ -778,6 +778,16 @@ mousedown reports button 0, indistinguishable from a left-click. The check runs
 after the containment test, so a right-click anywhere else still dismisses an
 empty composer rather than leaving it floating.
 
+**Only one surface at a time.** The pill and this menu both carry Comment and
+the same templates, and the menu's submenu opens straight over the pill's own
+template row, so `CommentForm` takes a `hidden` prop (App passes
+`viewerCtxMenu.isOpen`) and renders nothing while the menu is up. It covers the
+expanded composer too: rendering null is not unmounting, so a half-written
+comment survives and comes back when the menu closes without ending the
+selection, Copy being the everyday case. Symmetrically, an open overlay closes
+every context menu (the `activeModal` effect in App), so the palette, settings
+and the file opener never render on top of a live menu.
+
 **Shift+right-click** returns before every branch, so the browser's own menu is
 never suppressed. That matches what the chord already means in Chrome on
 Windows and Linux, and it is the escape hatch to Inspect on a painted highlight.

@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -150,8 +151,10 @@ test.describe('Context menu on a text selection', () => {
 
     // The menu's items act on the selection. If the right-click's own mouseup
     // clears it, the menu is left floating over text it can no longer touch.
+    // The painted mark is the evidence here: the pill is deliberately hidden
+    // while the menu is up (see the one-surface test below), so its absence
+    // would prove nothing either way.
     await expect(page.locator('mark.selection-highlight').first()).toBeVisible();
-    await expect(page.locator('[data-comment-form]')).toBeVisible();
   });
 
   test('Comment in the selection menu opens the composer on that selection', async ({ page }) => {
@@ -258,6 +261,86 @@ test.describe('Context menu on a text selection', () => {
     await page.keyboard.press('Escape');
     const second = await openSelectionMenu(page, 'bcrypt');
     await expect(second).toBeVisible();
+  });
+
+  test('the pill hides while the menu is open, and comes back when it closes', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    await expect(page.locator('[data-comment-form]')).toBeVisible({ timeout: 5000 });
+
+    const menu = page.locator('.context-menu-enter');
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+
+    // One surface at a time: both carry Comment and the same templates, and the
+    // submenu opens straight over the pill's own template row.
+    await expect(menu).toBeVisible();
+    await expect(page.locator('[data-comment-form]')).toHaveCount(0);
+
+    // Copy closes the menu without ending the selection, so the pill returns.
+    await menu.getByText('Copy', { exact: true }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator('[data-comment-form]')).toBeVisible();
+  });
+
+  test('an expanded composer hides too, and comes back with its draft', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    const draft = page.getByPlaceholder('Add your comment...');
+    await expect(draft).toBeVisible({ timeout: 5000 });
+    await draft.fill('half a thought');
+
+    const menu = page.locator('.context-menu-enter');
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+    await expect(menu).toBeVisible();
+    await expect(page.locator('[data-comment-form]')).toHaveCount(0);
+
+    // Hidden, not unmounted: the component keeps its state while it renders
+    // nothing, so the half-written comment is still there afterwards.
+    await menu.getByText('Copy', { exact: true }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(draft).toBeVisible();
+    await expect(draft).toHaveValue('half a thought');
+  });
+
+  test('opening an overlay closes the context menu', async ({ page }) => {
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await expect(menu).toBeVisible();
+
+    await page.keyboard.press(withMod('k'));
+
+    // Two stacked surfaces again otherwise: the palette renders over a menu
+    // that is still live underneath it.
+    await expect(page.getByPlaceholder('Type a command...')).toBeVisible({ timeout: 5000 });
+    await expect(menu).toHaveCount(0);
+  });
+
+  test('a right-click that is not on a selection leaves the browser menu alone', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await page.evaluate(() => {
+      (window as unknown as { __prevented: boolean | null }).__prevented = null;
+      document.addEventListener('contextmenu', (e) => {
+        (window as unknown as { __prevented: boolean | null }).__prevented = e.defaultPrevented;
+      });
+    });
+
+    await page.locator('.prose p').first().click({ button: 'right' });
+
+    await expect(page.locator('.context-menu-enter')).toHaveCount(0);
+    expect(
+      await page.evaluate(() => (window as unknown as { __prevented: boolean | null }).__prevented),
+    ).toBe(false);
   });
 
   test('Copy in the selection menu puts the selected text on the clipboard', async ({

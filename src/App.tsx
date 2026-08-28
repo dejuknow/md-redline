@@ -564,6 +564,23 @@ export default function App() {
   const tabCtxMenu = useContextMenu();
   const sidebarCtxMenu = useContextMenu();
 
+  // An overlay taking the screen closes any open context menu. Without this the
+  // palette, settings or the file opener render on top of a menu that is still
+  // live underneath, which is the same two-surfaces-for-one-gesture problem the
+  // pill has with this menu. Keyed on activeModal rather than patched into each
+  // shortcut, so a new overlay inherits it.
+  const closeViewerMenu = viewerCtxMenu.close;
+  const closeExplorerMenu = explorerCtxMenu.close;
+  const closeTabMenu = tabCtxMenu.close;
+  const closeSidebarMenu = sidebarCtxMenu.close;
+  useEffect(() => {
+    if (!activeModal) return;
+    closeViewerMenu();
+    closeExplorerMenu();
+    closeTabMenu();
+    closeSidebarMenu();
+  }, [activeModal, closeViewerMenu, closeExplorerMenu, closeTabMenu, closeSidebarMenu]);
+
   // Triggers for remotely entering edit/reply mode on a CommentCard
   const { requestedEditor, triggerEdit, triggerReply } = useCommentCardTriggers();
 
@@ -3236,6 +3253,7 @@ export default function App() {
               selection={commentSelection}
               isPending={isPending}
               autoExpand={autoExpandForm}
+              hidden={viewerCtxMenu.isOpen}
               onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
                 handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
                 setAutoExpandForm(false);
