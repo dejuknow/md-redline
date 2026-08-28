@@ -38,7 +38,22 @@ export function resolveSelection(containerEl: HTMLElement): SelectionInfo | null
   const range = clampToContainer(sel.getRangeAt(0), containerEl);
   if (!range) return null;
 
-  const rawText = range.toString();
+  // `Selection.toString()` reports block boundaries, so two paragraphs come
+  // back separated by a blank line; `Range.toString()` runs them together.
+  // That string is the comment's stored anchor and the text/plain clipboard
+  // flavour, and in markdown a single newline is a soft break, so the blank
+  // line is the difference between pasting two paragraphs and pasting one.
+  //
+  // Prefer the selection's own string whenever the clamp only dropped empty
+  // layout space, which is the whitespace-release case it exists for. When the
+  // clamp removed actual content, the drag ran into another surface and the
+  // clamped text is the honest answer.
+  // Compared without whitespace, since the whole difference between the two is
+  // whitespace: same characters means the clamp dropped nothing that matters.
+  const squash = (t: string) => t.replace(/\s+/g, '');
+  const selectionText = sel.toString();
+  const clampedText = range.toString();
+  const rawText = squash(selectionText) === squash(clampedText) ? selectionText : clampedText;
   const text = rawText.trim();
   if (!text || text.length < 2) return null;
 

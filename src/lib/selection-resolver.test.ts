@@ -67,6 +67,26 @@ describe('resolveSelection', () => {
     expect(resolveSelection(container)).toBeNull();
   });
 
+  it('keeps the blank line between blocks that Selection.toString reports', () => {
+    // Range.toString() collapses a block boundary to a single newline while
+    // Selection.toString() reports the blank line. That string is the comment's
+    // stored anchor and the text/plain clipboard flavour, and in markdown one
+    // newline is a soft break: two paragraphs would paste back as one.
+    document.body.innerHTML = '<div id="root"><p>Para one text.</p><p>Para two text.</p></div>';
+    const container = document.getElementById('root')!;
+    const first = container.firstChild!.firstChild!;
+    const second = container.lastChild!.firstChild!;
+
+    const range = document.createRange();
+    range.setStart(first, 0);
+    range.setEnd(second, second.textContent!.length);
+
+    mockSelection({ text: 'Para one text.\n\nPara two text.', range });
+
+    const result = resolveSelection(container);
+    expect(result!.text).toBe('Para one text.\n\nPara two text.');
+  });
+
   it('resolves a drag that ends outside the container, clamped to it', () => {
     // Releasing the mouse in the sheet's empty area leaves the range ending
     // outside the prose, so its common ancestor is a layout wrapper ABOVE the

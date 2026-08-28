@@ -121,6 +121,33 @@ test.describe('Copy selection', () => {
     expect(copied.html).toContain('<strong>');
   });
 
+  test('a selection spanning two paragraphs keeps the blank line between them', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await armCopyListener(page);
+    await page.evaluate(() => {
+      const ps = [...document.querySelectorAll('.prose p')];
+      const first = ps.find((p) => p.textContent?.includes('First paragraph ends here'))!;
+      const second = ps.find((p) => p.textContent?.includes('Second paragraph starts here'))!;
+      const range = document.createRange();
+      range.setStart(first.firstChild!, 0);
+      range.setEnd(second.firstChild!, 20);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    await page.keyboard.press('ControlOrMeta+c');
+
+    await expect.poll(() => readCopied(page)).not.toBeNull();
+    // In markdown a single newline is a soft break, so losing the blank line
+    // pastes two paragraphs back as one. A Range reports no blank line at a
+    // paragraph boundary; the Selection does.
+    expect((await readCopied(page))!.plain).toContain('ends here.\n\nSecond paragraph');
+  });
+
   test('Quick comment focusing the composer with a collapsed caret still copies the document selection', async ({
     page,
   }) => {
