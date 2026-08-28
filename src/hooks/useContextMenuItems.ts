@@ -128,8 +128,14 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
   const [tabCtxMenuItems, setTabCtxMenuItems] = useState<ContextMenuEntry[]>([]);
   const [sidebarCtxMenuItems, setSidebarCtxMenuItems] = useState<ContextMenuEntry[]>([]);
 
+  /**
+   * Returns whether a menu was opened. The viewer suppresses the browser's own
+   * menu only when this says yes: a right-click that opens nothing and also
+   * eats the native menu is a dead gesture, with no Copy, no spellcheck and no
+   * Inspect, and nothing on screen to explain it.
+   */
   const handleViewerContextMenu = useCallback(
-    (info: ViewerContextMenuInfo) => {
+    (info: ViewerContextMenuInfo): boolean => {
       explorerCtxMenu.close();
       tabCtxMenu.close();
       sidebarCtxMenu.close();
@@ -137,7 +143,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       if (info.type === 'highlight' && info.commentIds?.length) {
         const commentId = info.commentIds[0];
         const comment = comments.find((c) => c.id === commentId);
-        if (!comment) return;
+        if (!comment) return false;
 
         const isResolved = enableResolve && getEffectiveStatus(comment) === 'resolved';
 
@@ -208,9 +214,10 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
 
         setCtxMenuItems(items);
         viewerCtxMenu.open(info.x, info.y);
+        return true;
       } else if (info.type === 'selection') {
         const sel = selectionRef.current;
-        if (!sel) return;
+        if (!sel) return false;
 
         const templateItems: ContextMenuItem[] = templates.map((t) => ({
           label: t.label,
@@ -242,7 +249,9 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
 
         setCtxMenuItems(items);
         viewerCtxMenu.open(info.x, info.y);
+        return true;
       }
+      return false;
     },
     [
       comments,

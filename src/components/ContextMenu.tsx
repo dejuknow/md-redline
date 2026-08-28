@@ -130,6 +130,11 @@ export function ContextMenu({ items, position, onClose }: Props) {
         className="fixed z-[200] min-w-[160px] max-w-[240px] py-1 bg-surface-raised rounded-lg shadow-xl border border-border context-menu-enter"
         style={{ left: adjustedPos.x, top: adjustedPos.y }}
         onContextMenu={(e) => e.preventDefault()}
+        /* Items opened on a selection act on it, and some read live state
+           rather than a captured copy. Without this the mouseup that picks an
+           item resolves a selection the viewer has already painted over, gets
+           null, and clears it before the item's click handler runs. */
+        data-preserve-selection
       >
         {items.map((entry, idx) => {
           if (isDivider(entry)) {

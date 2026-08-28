@@ -725,6 +725,46 @@ While a template prefill sits untouched in the full comment form, Escape
 clears the prefill and keeps the form open; a second Escape (or an Escape
 after typing) closes the form as usual.
 
+### Right-clicking a selection
+
+The viewer's own menu (Comment, Templates, Copy) opens from the painted mark,
+not from the native range. `handleContextMenu` in `MarkdownViewer` checks
+`SELECTION_MARK_SELECTOR` before it falls back to `window.getSelection()`,
+because the range is gone by then: painting `mark.selection-highlight` replaces
+the selected text nodes and collapses it. Testing the range alone is what left
+this menu unreachable from March until it was fixed; a reader got the browser's
+menu instead.
+
+Two things keep the selection alive long enough for the menu to act on it, and
+both are load-bearing:
+
+- `useSelection`'s `handleMouseUp` ignores any non-primary button. Otherwise the
+  right-click's own mouseup resolves the collapsed range, gets null, and clears
+  the selection the menu was opened on. This also makes the fix independent of
+  event order, which matters because Windows fires `contextmenu` after mouseup
+  rather than before it.
+- The menu root carries `data-preserve-selection`, so picking an item does not
+  clear the selection before the item's click handler runs. `Copy` closes over
+  a captured `SelectionInfo` and would survive either way; `Comment` reads live
+  state and would not.
+
+`CommentForm`'s click-outside dismissal ignores button 2 for the same reason: a
+right-click on your own selection is an outside mousedown, and with quick
+comment on it would otherwise cancel the composer and take the selection with
+it. Middle-click still dismisses.
+
+`onContextMenu` returns whether it opened a menu, and the viewer calls
+`preventDefault` only when it did. The consumer refuses a mark whose comment is
+already gone, and a selection type it has no `SelectionInfo` for; suppressing
+the native menu for a menu that never appears would leave the reader with no
+menu at all, no Copy, no spellcheck, no Inspect, and nothing on screen saying
+why. Falling back to the browser's menu is the correct answer there.
+
+Precedence is unchanged: the comment-highlight branch runs first, so a selection
+that overlaps an existing anchor opens the comment menu (Edit / Reply / Delete),
+not the selection menu. A right-click on text with nothing selected also reaches
+the browser's menu, since neither branch matches.
+
 ### Copying a document selection
 The rendered view paints the pending selection as `mark.selection-highlight`
 (`MarkdownViewer.tsx`), which replaces the selected text nodes and collapses the

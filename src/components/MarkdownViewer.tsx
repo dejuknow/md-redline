@@ -40,7 +40,8 @@ interface Props {
   selectionOffset: number | null;
   onHighlightClick: (commentId: string) => void;
   onLocalLinkClick?: (path: string, fragment?: string) => void;
-  onContextMenu?: (info: ViewerContextMenuInfo) => void;
+  /** Returns whether it opened a menu; the native one is suppressed only then. */
+  onContextMenu?: (info: ViewerContextMenuInfo) => boolean;
   enableResolve?: boolean;
   sentCommentIds?: string[];
   searchQuery?: string;
@@ -71,6 +72,15 @@ export interface TocHeading {
  * useDragHandles checks status, so this omission is the only thing enforcing
  * that.
  */
+/**
+ * The class the viewer paints a committed selection with, and the selector for
+ * finding it again. Right-click resolution reads the painted mark rather than
+ * the native range, so the two have to agree; keeping one name is what makes
+ * that true by construction.
+ */
+const SELECTION_MARK_CLASS = 'selection-highlight';
+const SELECTION_MARK_SELECTOR = `mark.${SELECTION_MARK_CLASS}`;
+
 const COMMENT_MARK_SELECTOR =
   '.comment-highlight, .comment-highlight-sent, .comment-highlight-resolved, .mermaid-comment-highlight';
 
@@ -492,7 +502,7 @@ export const MarkdownViewer = memo(
           container,
           selectionText,
           (mark) => {
-            mark.className = 'selection-highlight';
+            mark.className = SELECTION_MARK_CLASS;
           },
           selectionOffset ?? undefined,
           undefined,
@@ -620,21 +630,40 @@ export const MarkdownViewer = memo(
       // Check if right-click is on a comment highlight
       const mark = markToAct(e.target as HTMLElement);
       if (mark?.dataset.commentIds) {
-        e.preventDefault();
         const ids = mark.dataset.commentIds.split(',');
-        onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY });
+        // preventDefault only if a menu actually opened: the consumer refuses a
+        // mark whose comment is gone, and eating the native menu for a menu
+        // that never appears leaves the reader with no menu at all.
+        if (onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
         return;
       }
 
-      // Check if there is a text selection within the container
+      // The viewer paints the committed selection as mark.selection-highlight,
+      // which replaces the selected text nodes and so collapses the browser's
+      // own range. By the time a right-click arrives there is no native
+      // selection left for the check below to find, which is why right-clicking
+      // one's own selection fell through to the browser's menu. The painted
+      // mark IS the selection, so recognize it directly.
+      if ((e.target as HTMLElement).closest(SELECTION_MARK_SELECTOR)) {
+        if (onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // A selection the viewer has not painted (nothing committed yet) still
+      // has a live native range, so keep testing for one.
       const sel = window.getSelection();
       if (
         sel &&
         sel.toString().trim().length > 0 &&
         containerRef.current?.contains(sel.anchorNode)
       ) {
-        e.preventDefault();
-        onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY });
+        if (onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
         return;
       }
     };

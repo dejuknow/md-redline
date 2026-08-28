@@ -32,9 +32,14 @@ function pointerDown(pointerType: string) {
   });
 }
 
-function mouseUp() {
+/**
+ * A real mouseup always carries a button, and the hook now reads it: only the
+ * primary button commits or clears a selection. Dispatching a bare Event here
+ * left `button` undefined, which is not a state the browser can produce.
+ */
+function mouseUp(button = 0) {
   act(() => {
-    document.dispatchEvent(new Event('mouseup'));
+    document.dispatchEvent(new MouseEvent('mouseup', { button }));
   });
 }
 
@@ -66,6 +71,20 @@ describe('useSelection modality routing', () => {
     mouseUp();
     expect(hook().selection).toEqual(INFO);
     expect(hook().pendingSelection).toBeNull();
+  });
+
+  it('leaves a committed selection alone on a secondary-button mouseup', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // Right-clicking the selection opens the viewer's context menu, whose items
+    // act on it. Resolving again here would find the collapsed native range,
+    // return null, and clear the selection out from under the menu.
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse');
+    mouseUp(2);
+    expect(hook().selection).toEqual(INFO);
   });
 
   it('does not open on mouseup when the gesture was touch', () => {

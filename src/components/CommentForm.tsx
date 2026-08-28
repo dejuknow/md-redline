@@ -97,6 +97,11 @@ export function CommentForm({
   useEffect(() => {
     if (!isExpanded) return;
     const handler = (e: MouseEvent) => {
+      // Secondary buttons are not dismissals: a right-click on the selection
+      // opens the viewer's context menu, and cancelling here would clear the
+      // selection that menu acts on. Scoped to button 2 rather than "not
+      // primary" so a middle-click still dismisses as it always has.
+      if (e.button === 2) return;
       if (formRef.current && !formRef.current.contains(e.target as Node) && !text.trim()) {
         onCancel();
       }

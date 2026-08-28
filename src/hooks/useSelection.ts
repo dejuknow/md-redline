@@ -100,6 +100,14 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
 
     const handleMouseUp = (e: MouseEvent) => {
       if (lastPointerType !== 'mouse') return;
+      // A secondary button never commits or clears a selection. Right-clicking
+      // your own selection opens the viewer's context menu, whose items act on
+      // that selection, and resolveSelection below would return null for it:
+      // the viewer has painted the selection as a mark, which collapses the
+      // native range. So this handler would destroy the selection the menu was
+      // opened on. It also decouples the fix from event ordering, since Windows
+      // fires contextmenu after mouseup rather than before it.
+      if (e.button !== 0) return;
       if (lockedRef.current) return;
       if ((e.target as Element)?.closest?.('[data-comment-form]')) return;
       if ((e.target as Element)?.closest?.('[data-drag-handle]')) return;

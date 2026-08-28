@@ -61,6 +61,18 @@ async function selectText(page: Page, text: string) {
   }, text);
 }
 
+/**
+ * Select `text` and right-click the mark the viewer paints over it, which is
+ * what a reader's right-click actually lands on. Returns the open menu.
+ */
+async function openSelectionMenu(page: Page, text: string) {
+  await selectText(page, text);
+  const highlight = page.locator('mark.selection-highlight').first();
+  await expect(highlight).toBeVisible({ timeout: 5000 });
+  await highlight.click({ button: 'right' });
+  return page.locator('.context-menu-enter');
+}
+
 async function addComment(page: Page, anchorText: string, commentText: string) {
   await selectText(page, anchorText);
   const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
@@ -116,6 +128,91 @@ test.describe('Context menu on comment highlight', () => {
 
     // Comment should be removed
     await expect(page.getByText('Delete via ctx')).not.toBeVisible();
+  });
+});
+
+test.describe('Context menu on a text selection', () => {
+  test('right-clicking a selection shows the selection context menu', async ({ page }) => {
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+
+    await expect(menu).toBeVisible();
+    await expect(menu.getByText('Copy', { exact: true })).toBeVisible();
+  });
+
+  test('the selection survives the right-click that opened the menu', async ({ page }) => {
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await expect(menu).toBeVisible();
+
+    // The menu's items act on the selection. If the right-click's own mouseup
+    // clears it, the menu is left floating over text it can no longer touch.
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible();
+    await expect(page.locator('[data-comment-form]')).toBeVisible();
+  });
+
+  test('Comment in the selection menu opens the composer on that selection', async ({ page }) => {
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await menu.getByText('Comment', { exact: true }).click();
+
+    await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('right-clicking a selection opens the menu with quick comment on', async ({ page }) => {
+    // Quick comment opens the composer the moment a selection is made, and the
+    // composer dismisses itself on an outside mousedown. A right-click on your
+    // own selection is such a mousedown, so this is a second way the menu was
+    // lost, independent of the one the tests above cover.
+    await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
+    await openFixture(page);
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    const menu = await openSelectionMenu(page, 'valid credentials');
+
+    await expect(menu).toBeVisible();
+    await expect(menu.getByText('Copy', { exact: true })).toBeVisible();
+  });
+
+  test('a right-click the app cannot answer falls back to the browser menu', async ({ page }) => {
+    await openFixture(page);
+
+    // A painted mark the app holds no selection for. The consumer refuses to
+    // build a menu for it, so suppressing the native one would leave the reader
+    // with no menu at all: no Copy, no spellcheck, no Inspect.
+    await page.evaluate(() => {
+      const p = document.querySelector('.prose p');
+      const mark = document.createElement('mark');
+      mark.className = 'selection-highlight';
+      mark.textContent = 'orphaned highlight';
+      p?.appendChild(mark);
+      (window as unknown as { __prevented: boolean | null }).__prevented = null;
+      document.addEventListener('contextmenu', (e) => {
+        (window as unknown as { __prevented: boolean | null }).__prevented = e.defaultPrevented;
+      });
+    });
+
+    await page.locator('mark.selection-highlight').last().click({ button: 'right' });
+
+    await expect(page.locator('.context-menu-enter')).toHaveCount(0);
+    expect(
+      await page.evaluate(() => (window as unknown as { __prevented: boolean | null }).__prevented),
+    ).toBe(false);
+  });
+
+  test('Copy in the selection menu puts the selected text on the clipboard', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await menu.getByText('Copy', { exact: true }).click();
+
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 5000 })
+      .toBe('valid credentials');
   });
 });
 
