@@ -10,9 +10,17 @@ detail on whatever you are actually touching.
 
 ## Setup
 
-Node 20 or newer.
+Node 20 or newer to RUN md-redline. To work on it, use the version in `.nvmrc`
+(22, which is what CI runs): `nvm use`.
+
+The pin is not fussiness. On Node 26 the unit tests fail in a way that looks
+like a code bug and is not: jsdom stops exposing `localStorage`, so every test
+touching it dies with `Cannot read properties of undefined (reading 'clear')`.
+The tool itself is unaffected, it builds and runs fine there, so the mismatch
+only ever costs you a debugging session.
 
 ```bash
+nvm use            # or any Node 22
 npm install
 npm run dev        # server + Vite client + MCP bundle watcher
 ```
@@ -53,7 +61,7 @@ is solution-style (references only), so it exits clean having verified nothing a
 all. Use `npx tsc -b`, which is what `npm run build` runs.
 
 **Rebasing after a formatting change is much easier in one specific order.** Run
-`npm run format` on your branch and commit that *before* rebasing onto main. Both
+`npm run format` on your branch and commit that _before_ rebasing onto main. Both
 sides then hold identical formatting and the whitespace conflicts mostly vanish,
 leaving only genuine overlap to resolve.
 
