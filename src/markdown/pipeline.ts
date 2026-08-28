@@ -7,11 +7,15 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 import { visit, SKIP } from 'unist-util-visit';
+import { visitParents } from 'unist-util-visit-parents';
 import type { Root, Element } from 'hast';
 import { rewriteLocalUrls } from './rewriteLocalUrls';
 
-// Allow mark elements (used for comment highlights), data-* attributes, and
-// the data-mdr-* attrs that the local-link rewriter emits on <a> tags.
+// Allow mark elements (used for comment highlights) and the data-mdr-* attrs
+// that the local-link rewriter emits on <a> tags. Note what is NOT here: a
+// blanket data-* allowance. rehypeAnnotateSource writes data-src-start /
+// data-src-end AFTER this schema runs, and its whole safety argument is that a
+// document cannot smuggle its own copy of those through raw HTML.
 // Allow className only on elements that remark-gfm / remark-rehype / our
 // highlight pipeline actually emit classes on. A wildcard `*` would let
 // markdown authors apply arbitrary CSS classes for UI spoofing.
@@ -87,13 +91,20 @@ const SOURCE_SPAN_TAGS = new Set([
   'ul',
   'ol',
   'table',
-  'tr',
-  'td',
-  'th',
-  'dl',
-  'dt',
-  'dd',
 ]);
+
+/**
+ * Containers whose markers travel with every line they hold, so a block nested
+ * inside one does not slice back to anything clean: a paragraph in a blockquote
+ * spans `quoted line\n> more`, with the marker stranded mid-text, and a
+ * paragraph in a list item carries the continuation indent. The container's own
+ * span is clean, so that is the one worth recording.
+ *
+ * Table cells are excluded a level up, by being absent from SOURCE_SPAN_TAGS:
+ * remark-gfm starts a cell at the preceding pipe, so adjacent cells share a
+ * delimiter and neither one slices back to its own content.
+ */
+const MARKER_CARRYING_ANCESTORS = new Set(['blockquote', 'li']);
 
 /**
  * Record where each block came from in the source, as `data-src-start` and
@@ -110,8 +121,15 @@ const SOURCE_SPAN_TAGS = new Set([
  */
 function rehypeAnnotateSource() {
   return (tree: Root) => {
-    visit(tree, 'element', (node: Element) => {
+    visitParents(tree, 'element', (node: Element, ancestors) => {
       if (!SOURCE_SPAN_TAGS.has(node.tagName)) return;
+      if (
+        ancestors.some(
+          (a) => a.type === 'element' && MARKER_CARRYING_ANCESTORS.has((a as Element).tagName),
+        )
+      ) {
+        return;
+      }
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       // Elements the pipeline invents (the table scroll wrappers, the

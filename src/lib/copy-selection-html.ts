@@ -289,6 +289,9 @@ function expandBoundaries(range: Range, container: Element): void {
 /** Transient attribute used to find a source list's clone. Never serialized. */
 const CLONE_MARK = 'data-mdr-copy-list';
 
+/** Blocks carry their markdown offsets; the clipboard must not. */
+const SOURCE_SPAN_SELECTOR = '[data-src-start], [data-src-end]';
+
 /** A list the selection passes through, paired with the item it starts at. */
 interface ListLevel {
   list: Element;
@@ -408,6 +411,15 @@ function serializeRange(range: Range, container: Element | null): string | null 
 
   for (const marked of Array.from(fragment.querySelectorAll(`[${CLONE_MARK}]`))) {
     marked.removeAttribute(CLONE_MARK);
+  }
+
+  // The pipeline annotates blocks with the markdown offsets they came from, so
+  // a copy can hand back the document's own source. Those offsets mean nothing
+  // outside this app, and pasting them into Google Docs or another editor is
+  // the same leak the layout-wrapper stripping above exists to prevent.
+  for (const annotated of Array.from(fragment.querySelectorAll(SOURCE_SPAN_SELECTOR))) {
+    annotated.removeAttribute('data-src-start');
+    annotated.removeAttribute('data-src-end');
   }
 
   const holder = doc.createElement('div');

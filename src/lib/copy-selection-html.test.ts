@@ -476,3 +476,29 @@ describe('buildRangeHtml', () => {
     expect(html).not.toContain('that');
   });
 });
+
+describe('internal attributes never reach the clipboard', () => {
+  it('strips the source spans the pipeline annotates blocks with', () => {
+    // data-src-start / data-src-end exist so a copy can find the markdown a
+    // block came from. They are app-internal offsets, and pasting them into
+    // Google Docs or another editor is exactly what the wrapper-stripping in
+    // this file exists to prevent.
+    document.body.innerHTML =
+      '<div id="root">' +
+      '<p data-src-start="0" data-src-end="14">Some text here</p>' +
+      '<p data-src-start="16" data-src-end="30">And more text</p>' +
+      '</div>';
+    const container = document.getElementById('root')!;
+    const [first, second] = Array.from(container.querySelectorAll('p'));
+    // Spanning two blocks is what puts the elements themselves, attributes and
+    // all, into the cloned fragment.
+    const range = document.createRange();
+    range.setStart(first.firstChild!, 0);
+    range.setEnd(second.firstChild!, 5);
+
+    const html = buildRangeHtml(range, container)!;
+    expect(html).toContain('Some text here');
+    expect(html).not.toContain('data-src-start');
+    expect(html).not.toContain('data-src-end');
+  });
+});

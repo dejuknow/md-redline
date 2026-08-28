@@ -17,6 +17,24 @@ describe('renderMarkdown source positions', () => {
     expect(md.slice(Number(span![1]), Number(span![2]))).toBe(md);
   });
 
+  it('leaves table cells unannotated, since their spans include the pipes', () => {
+    // remark-gfm starts a cell's position at the preceding pipe, so adjacent
+    // cells share a delimiter and neither slices back to its own content.
+    const html = renderMarkdown('| A | B |\n| --- | --- |\n| 1 | 2 |');
+    expect(attrs(html, 'th')).not.toContain('data-src-start');
+    expect(attrs(html, 'td')).not.toContain('data-src-start');
+    expect(attrs(html, 'table')).toContain('data-src-start');
+  });
+
+  it('leaves blocks inside a blockquote unannotated, since the markers travel with them', () => {
+    // A paragraph inside a blockquote spans "quoted line\n> more": slicing it
+    // hands back a stray marker in the middle of the text. The blockquote's own
+    // span is clean, so that is the one worth keeping.
+    const html = renderMarkdown('> quoted line\n> more quoted');
+    expect(attrs(html, 'blockquote')).toContain('data-src-start');
+    expect(attrs(html, 'p')).not.toContain('data-src-start');
+  });
+
   it('leaves inline elements unannotated, which is what keeps the HTML small', () => {
     const html = renderMarkdown('Some **bold** and a [link](https://example.com).');
     expect(attrs(html, 'strong')).not.toContain('data-src-start');
