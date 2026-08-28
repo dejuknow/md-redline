@@ -120,7 +120,11 @@ const MARKER_CARRYING_ANCESTORS = new Set(['blockquote', 'li']);
  * that belongs on a clipboard.
  */
 function rehypeAnnotateSource() {
-  return (tree: Root) => {
+  return (tree: Root, file: { value: unknown }) => {
+    // micromark skips a leading byte-order mark before it starts counting, so
+    // every position in a BOM-prefixed document is one short of the string's
+    // own index. The spans index the string, since that is what a copy slices.
+    const bom = String(file.value).charCodeAt(0) === 0xfeff ? 1 : 0;
     visitParents(tree, 'element', (node: Element, ancestors) => {
       if (!SOURCE_SPAN_TAGS.has(node.tagName)) return;
       if (
@@ -137,8 +141,8 @@ function rehypeAnnotateSource() {
       if (start == null || end == null) return;
       node.properties = {
         ...node.properties,
-        dataSrcStart: String(start),
-        dataSrcEnd: String(end),
+        dataSrcStart: String(start + bom),
+        dataSrcEnd: String(end + bom),
       };
     });
   };
