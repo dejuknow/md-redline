@@ -235,7 +235,11 @@ export function validateReviewInput(raw: unknown): ValidationResult<ReviewInput>
     value: {
       ...payload,
       filePaths: obj.filePaths as string[],
-      enableResolve: obj.enableResolve === true ? true : undefined,
+      // Preserve absence, as validateRequestReviewInput does. The server falls
+      // back to the reader's saved mode when the field is missing, so
+      // collapsing false into "missing" handed an agent that asked for remove
+      // mode a resolve-mode session.
+      enableResolve: typeof obj.enableResolve === 'boolean' ? obj.enableResolve : undefined,
     },
   };
 }
