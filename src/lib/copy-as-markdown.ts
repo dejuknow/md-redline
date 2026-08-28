@@ -60,6 +60,42 @@ function coversWholeElement(range: Range, el: HTMLElement): boolean {
   );
 }
 
+/**
+ * Whether every annotated block from `startBlock` to `endBlock` runs forward in
+ * the source, so that slicing between their spans returns those blocks and
+ * nothing else.
+ *
+ * The reason this is not obvious: a GFM footnote definition renders at the end
+ * of the document whatever its position in the file, so DOM order and source
+ * order come apart. Selecting from the first paragraph through such a footnote
+ * would slice from the paragraph's start to the footnote's end and hand back a
+ * stretch of file the reader never highlighted, while dropping one they did.
+ * Whenever the run is not monotonic, the rebuild path answers instead, which
+ * cannot invent text because it is built from what is on screen.
+ */
+function spansRunInSourceOrder(
+  startBlock: HTMLElement,
+  endBlock: HTMLElement,
+  container: HTMLElement,
+): boolean {
+  const blocks = Array.from(container.querySelectorAll<HTMLElement>(`[${START}][${END}]`));
+  const from = blocks.indexOf(startBlock);
+  const to = blocks.indexOf(endBlock);
+  if (from < 0 || to < 0 || to < from) return false;
+
+  let previousEnd = -1;
+  for (const block of blocks.slice(from, to + 1)) {
+    const start = Number(block.getAttribute(START));
+    const end = Number(block.getAttribute(END));
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+    // Nested blocks are excluded from annotation, so spans never legitimately
+    // contain one another: each must begin at or after the last one ended.
+    if (start < previousEnd) return false;
+    previousEnd = end;
+  }
+  return true;
+}
+
 const toMarkdown = unified()
   .use(rehypeParse, { fragment: true })
   .use(rehypeRemark)
@@ -89,7 +125,8 @@ export function resolveSelectionMarkdown(
     startBlock &&
     endBlock &&
     coversWholeElement(range, startBlock) &&
-    coversWholeElement(range, endBlock)
+    coversWholeElement(range, endBlock) &&
+    spansRunInSourceOrder(startBlock, endBlock, container)
   ) {
     const start = Number(startBlock.getAttribute(START));
     const end = Number(endBlock.getAttribute(END));
@@ -100,8 +137,16 @@ export function resolveSelectionMarkdown(
 
   const html = buildRangeHtml(range, container);
   if (!html) return null;
-  const markdown = String(toMarkdown.processSync(html)).trim();
-  return markdown ? { markdown, exact: false } : null;
+  // Guarded for the same reason buildRangeHtml is: this runs inside a menu
+  // item's click handler, and a unified compile error on an unusual fragment
+  // would throw out of a React event handler rather than simply copying
+  // nothing.
+  try {
+    const markdown = String(toMarkdown.processSync(html)).trim();
+    return markdown ? { markdown, exact: false } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

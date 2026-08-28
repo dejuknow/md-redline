@@ -2550,7 +2550,10 @@ export default function App() {
         onExecute: () => setConfirmDeleteAll(true),
       });
     }
-    if (commentSelection) {
+    // `selection`, not `commentSelection`: a touch or pen selection sits in
+    // pendingSelection and is never painted, and this reads the painted marks,
+    // so offering it there would copy nothing at all.
+    if (selection) {
       cmds.push({
         id: 'copy-selection-markdown',
         // Named for its subject, unlike the menu's "Copy as Markdown": nothing
@@ -2604,7 +2607,7 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
-    commentSelection,
+    selection,
     copySelectionAsMarkdown,
     resolvedCommentCount,
     settings.enableResolve,

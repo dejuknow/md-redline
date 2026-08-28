@@ -64,6 +64,33 @@ describe('resolveSelectionMarkdown', () => {
     expect(result!.markdown).toBe(source.slice(0, 77));
   });
 
+  it('refuses to slice when the blocks are out of source order', () => {
+    // GFM footnotes render their definitions at the end of the document
+    // whatever their position in the file, so DOM order and source order come
+    // apart. Slicing from the first block's start to the last one's end would
+    // hand back a stretch of the file the reader never highlighted, and drop
+    // one they did.
+    const footnoted = 'Para A.\n\n[^1]: Note text.\n\nPara B with ref[^1].\n';
+    const container = mount(
+      '<p data-src-start="0" data-src-end="7">Para A.</p>' +
+        '<p data-src-start="27" data-src-end="47">Para B with ref.</p>' +
+        '<li data-src-start="9" data-src-end="25">Note text.</li>',
+    );
+    const first = container.querySelector('p')!;
+    const footnote = container.querySelector('li')!;
+    const range = document.createRange();
+    range.setStart(first.firstChild!, 0);
+    range.setEnd(footnote.firstChild!, footnote.textContent!.length);
+
+    const result = resolveSelectionMarkdown(range, container, footnoted);
+    expect(result).not.toBeNull();
+    expect(result!.exact).toBe(false);
+    expect(result!.markdown).not.toBe(footnoted.slice(0, 25));
+    // Whatever it hands back is built from what was on screen, so the body
+    // paragraph the reader highlighted is in it.
+    expect(result!.markdown).toContain('Para B with ref');
+  });
+
   it('returns null for a collapsed selection', () => {
     const container = mount('<p data-src-start="0" data-src-end="52">Text</p>');
     const range = document.createRange();

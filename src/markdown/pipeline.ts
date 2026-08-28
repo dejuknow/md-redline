@@ -75,7 +75,7 @@ const sanitizeSchema = {
  * HTML of a 118KB document from 134KB to 209KB, and that string is assigned
  * through innerHTML on every render of the layout effect. Blocks alone cost
  * 158KB, a third of the increase, and cover what exact slicing is for: a
- * paragraph, a heading, a list item, a fenced block, a table cell.
+ * paragraph, a heading, a list item, a fenced block, a whole table.
  */
 const SOURCE_SPAN_TAGS = new Set([
   'p',
