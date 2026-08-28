@@ -57,6 +57,19 @@ describe('renderMarkdown source positions', () => {
     const html = renderMarkdown(md);
     expect(html).not.toContain('data-src-end="99999"');
   });
+
+  it('counts a leading byte-order mark, so spans index the string it was handed', () => {
+    // micromark skips a BOM before it starts counting. Without correcting for
+    // it every span is one short: a copy sliced by it drops the block's last
+    // character and picks up the delimiter before its first.
+    const source = '\uFEFFFirst para.\n\nSecond para.\n';
+    const html = renderMarkdown(source);
+    const spans = [...html.matchAll(/data-src-start="(\d+)" data-src-end="(\d+)"/g)];
+    expect(spans.map((m) => source.slice(Number(m[1]), Number(m[2])))).toEqual([
+      'First para.',
+      'Second para.',
+    ]);
+  });
 });
 
 describe('renderMarkdown', () => {

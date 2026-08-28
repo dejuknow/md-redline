@@ -727,7 +727,7 @@ after typing) closes the form as usual.
 
 ### Right-clicking a selection
 
-The viewer's own menu (Comment, Templates, Copy) opens from the painted mark,
+The viewer's own menu (Comment, Copy, Copy as Markdown) opens from the painted mark,
 not from the native range. `handleContextMenu` in `MarkdownViewer` checks
 `SELECTION_MARK_SELECTOR` before it falls back to `window.getSelection()`,
 because the range is gone by then.
@@ -810,9 +810,10 @@ would sit over one passage while every item acted on another.
 **Shift+right-click** returns before every branch, so the browser's own menu is
 never suppressed. That matches what the chord already means in Chrome on
 Windows and Linux, and it is the escape hatch to Inspect on a painted highlight.
-It is gated on `button === 2`: Shift+F10 is the standard keyboard chord for the
-context menu and arrives with `shiftKey` set and button 0, so testing `shiftKey`
-alone would lock keyboard users out of this menu entirely.
+It is gated on `isSecondaryClick` (button 2, or ctrl+click on macOS): Shift+F10
+is the standard keyboard chord for the context menu and arrives with `shiftKey`
+set and button 0, so testing `shiftKey` alone would lock keyboard users out of
+this menu entirely.
 
 `onContextMenu` returns whether it opened a menu, and the viewer calls
 `preventDefault` only when it did. The consumer refuses a mark whose comment is

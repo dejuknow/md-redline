@@ -31,8 +31,12 @@ export function parseRunDirName(name) {
   const parts = String(name).split('_');
   if (parts.length !== 3) return null;
   const [stamp, agent, format] = parts;
-  // 2026-08-27T07-03-32 -> 2026-08-27T07:03:32
-  const iso = stamp.replace(/T(\d{2})-(\d{2})-(\d{2})$/, 'T$1:$2:$3');
+  // 2026-08-27T07-03-32 -> 2026-08-27T07:03:32Z. The runner stamps the
+  // directory from toISOString(), which is UTC, and the Z has to say so:
+  // Date.parse reads a date-time with no offset as LOCAL time, which shifted
+  // every run by the machine's offset and let a run from before a prompt
+  // change pass as fresh on a UTC-7 machine.
+  const iso = stamp.replace(/T(\d{2})-(\d{2})-(\d{2})$/, 'T$1:$2:$3Z');
   if (iso === stamp) return null;
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return null;

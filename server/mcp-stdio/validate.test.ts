@@ -100,6 +100,19 @@ describe('validateReviewInput', () => {
     if (!res.ok) expect(res.error).toMatch(/enableResolve/);
   });
 
+  it('preserves an explicit enableResolve: false in the filePaths form', () => {
+    // The server falls back to the reader's saved mode when the field is
+    // absent, so collapsing false into "absent" hands an agent that asked for
+    // remove mode a resolve-mode session.
+    const res = validateReviewInput({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      comments: [{ filePath: '/tmp/a.md', anchor: 'hi', text: 't' }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.enableResolve).toBe(false);
+  });
+
   it('names both forms when neither filePaths nor sessionId is given', () => {
     const res = validateReviewInput({
       comments: [{ filePath: '/tmp/a.md', anchor: 'hi', text: 't' }],

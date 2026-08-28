@@ -61,17 +61,23 @@ function coversWholeElement(range: Range, el: HTMLElement): boolean {
 }
 
 /**
- * Whether every annotated block from `startBlock` to `endBlock` runs forward in
- * the source, so that slicing between their spans returns those blocks and
- * nothing else.
+ * Whether slicing the source from `startBlock`'s span to `endBlock`'s returns
+ * those blocks and nothing else.
  *
- * The reason this is not obvious: a GFM footnote definition renders at the end
- * of the document whatever its position in the file, so DOM order and source
- * order come apart. Selecting from the first paragraph through such a footnote
- * would slice from the paragraph's start to the footnote's end and hand back a
- * stretch of file the reader never highlighted, while dropping one they did.
- * Whenever the run is not monotonic, the rebuild path answers instead, which
- * cannot invent text because it is built from what is on screen.
+ * Two things have to hold, and neither implies the other. First, the annotated
+ * blocks from `startBlock` to `endBlock` in DOM order must run forward in the
+ * source, or a selected block falls outside the slice: a GFM footnote
+ * definition renders at the end of the document whatever its position in the
+ * file, so selecting from the first paragraph through such a footnote would
+ * hand back a stretch of file the reader never highlighted while dropping one
+ * they did. Second, no annotated block OUTSIDE that run may overlap the slice,
+ * or an unselected block falls inside it: two footnote definitions are in
+ * order relative to each other, and the paragraph between them in the file
+ * renders above both. A block that contains a run block, or sits inside one,
+ * is exempt from the second check; its overlap is the run's own content.
+ *
+ * Whenever either fails, the rebuild path answers instead, which cannot invent
+ * text because it is built from what is on screen.
  */
 function spansRunInSourceOrder(
   startBlock: HTMLElement,
@@ -83,15 +89,26 @@ function spansRunInSourceOrder(
   const to = blocks.indexOf(endBlock);
   if (from < 0 || to < 0 || to < from) return false;
 
+  const run = blocks.slice(from, to + 1);
   let previousEnd = -1;
-  for (const block of blocks.slice(from, to + 1)) {
+  for (const block of run) {
     const start = Number(block.getAttribute(START));
     const end = Number(block.getAttribute(END));
     if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
-    // Nested blocks are excluded from annotation, so spans never legitimately
-    // contain one another: each must begin at or after the last one ended.
+    // A list and its items are both annotated, so a run that crosses into a
+    // list holds a span inside another and is refused here. Between top-level
+    // blocks, each must begin at or after the last one ended.
     if (start < previousEnd) return false;
     previousEnd = end;
+  }
+
+  const sliceStart = Number(startBlock.getAttribute(START));
+  const sliceEnd = Number(endBlock.getAttribute(END));
+  for (const block of blocks) {
+    if (run.some((r) => r === block || r.contains(block) || block.contains(r))) continue;
+    const start = Number(block.getAttribute(START));
+    const end = Number(block.getAttribute(END));
+    if (start < sliceEnd && end > sliceStart) return false;
   }
   return true;
 }
