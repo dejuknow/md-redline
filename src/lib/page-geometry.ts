@@ -29,10 +29,17 @@ export interface PageGeometry {
  * `reserveRail` collapses the empty right gutter while keeping the rail
  * logically shown. When the anchored rail has no cards to place, the sheet
  * drops the rail footprint and re-centers on the prose (symmetric PAD_L),
- * but colWidth stays on the rail-shown track so the prose column never
- * reflows across the transition — only the sheet slides as the gutter opens
- * with the first comment. railShown is unaffected, so the rail's chrome
- * (density toggle, open count) stays visible.
+ * and the freed width goes to the column rather than to the canvas: a
+ * comment-free document reads at its full Document width instead of sitting
+ * narrow between two dead margins.
+ *
+ * The cost is a reflow whenever the open-comment count crosses 0 and 1 in
+ * either direction, since the column swaps tracks: adding the first comment,
+ * and equally resolving, deleting or unresolving the last one. It only
+ * rewraps text between 888 and 1080 of content width; above that both tracks
+ * clamp to colMax and only the sheet moves. That is the deliberate trade for
+ * every comment-free document reading at full measure. railShown is
+ * unaffected, so the rail chrome (density toggle, open count) stays visible.
  */
 export function pageGeometry(
   contentWidth: number,
@@ -40,13 +47,29 @@ export function pageGeometry(
   colMax: number = COL_MAX,
   reserveRail: boolean = true,
 ): PageGeometry {
+  // The column with nothing reserved to its right: the whole sheet minus
+  // symmetric padding, capped by the Document width setting. Both the
+  // collapsed-gutter case and the no-rail case land here, so an empty margin
+  // is never wider than the text it sits next to.
+  const fullCol = Math.max(Math.min(contentWidth - 2 * PAD_L, colMax), 320);
   const railCol = contentWidth - PAD_L - RAIL_FOOTPRINT;
   const railFits = railCol >= COL_MIN;
   if (railAllowed && railFits) {
+    if (!reserveRail) {
+      return {
+        railFits,
+        railShown: true,
+        colWidth: fullCol,
+        pageWidth: PAD_L + fullCol + PAD_L,
+      };
+    }
     const colWidth = Math.min(railCol, colMax);
-    const pageWidth = reserveRail ? PAD_L + colWidth + RAIL_FOOTPRINT : PAD_L + colWidth + PAD_L;
-    return { railFits, railShown: true, colWidth, pageWidth };
+    return {
+      railFits,
+      railShown: true,
+      colWidth,
+      pageWidth: PAD_L + colWidth + RAIL_FOOTPRINT,
+    };
   }
-  const colWidth = Math.max(Math.min(contentWidth - 2 * PAD_L, colMax), 320);
-  return { railFits, railShown: false, colWidth, pageWidth: PAD_L + colWidth + PAD_L };
+  return { railFits, railShown: false, colWidth: fullCol, pageWidth: PAD_L + fullCol + PAD_L };
 }

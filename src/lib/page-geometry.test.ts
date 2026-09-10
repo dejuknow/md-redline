@@ -55,25 +55,41 @@ describe('pageGeometry', () => {
     expect(g.colWidth).toBe(320);
   });
 
-  it('collapses the empty gutter but keeps the rail shown and column stable', () => {
+  it('collapses the empty gutter and keeps the rail shown', () => {
     // Same width as the full-rail case, but the anchored rail has no cards.
     const reserved = pageGeometry(1400, true);
     const collapsed = pageGeometry(1400, true, COL_MAX, false);
-    // Rail stays logically shown and the prose column is byte-for-byte the
-    // same, so the first comment slides the gutter open without reflowing text.
+    // The rail stays logically shown, so its chrome and focus routing are
+    // unchanged; only the sheet loses the footprint it has nothing to put in.
     expect(collapsed.railShown).toBe(true);
-    expect(collapsed.colWidth).toBe(reserved.colWidth);
-    // Only the sheet shrinks: rail footprint drops to a symmetric PAD_L.
     expect(collapsed.pageWidth).toBe(PAD_L + collapsed.colWidth + PAD_L);
     expect(collapsed.pageWidth).toBeLessThan(reserved.pageWidth);
   });
 
-  it('holds the column on the rail-shown track when collapsed mid-width', () => {
-    // 1000px: rail-shown column is 592 (below COL_MAX). Collapsing must keep
-    // that same 592 so the text does not rewrap when the first comment lands.
+  it('gives the collapsed gutter to the column, not to the canvas', () => {
+    // 1000px: the rail-shown column is 592, but with no card to place the
+    // 360px footprint belongs to the prose. Anything less leaves a
+    // comment-free document narrow between two dead margins.
     const collapsed = pageGeometry(1000, true, COL_MAX, false);
-    expect(collapsed.colWidth).toBe(592);
-    expect(collapsed.pageWidth).toBe(PAD_L + 592 + PAD_L);
+    expect(collapsed.colWidth).toBe(Math.min(1000 - 2 * PAD_L, COL_MAX));
+    expect(collapsed.colWidth).toBeGreaterThan(pageGeometry(1000, true).colWidth);
+    expect(collapsed.pageWidth).toBe(PAD_L + collapsed.colWidth + PAD_L);
+  });
+
+  it('lays a collapsed gutter out exactly like the no-rail case', () => {
+    // The two states differ only in whether the rail chrome is mounted, so
+    // their geometry must not drift apart.
+    for (const w of [900, 1000, 1200, 1400, 2000]) {
+      const collapsed = pageGeometry(w, true, COL_MAX, false);
+      const noRail = pageGeometry(w, false);
+      expect(collapsed.colWidth).toBe(noRail.colWidth);
+      expect(collapsed.pageWidth).toBe(noRail.pageWidth);
+    }
+  });
+
+  it('respects the docWidth cap when the gutter collapses', () => {
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.narrow, false).colWidth).toBe(520);
+    expect(pageGeometry(2000, true, DOC_WIDTH_COLS.wide, false).colWidth).toBe(860);
   });
 
   it('ignores reserveRail when the rail cannot fit by width', () => {
