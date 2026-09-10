@@ -514,6 +514,9 @@ export const MarkdownViewer = memo(
             if (!textEl.closest('.mermaid-block')) return;
             applyMermaidSvgTextHighlight(textEl, mermaidTheme, true, matchStart, matchEnd);
           },
+          // The selection resolver measured this offset over the same text
+          // nodes, so it is exact.
+          true,
         );
       }
 
@@ -695,6 +698,8 @@ export const MarkdownViewer = memo(
  *  When `hintOffset` is provided (in rendered/plain-text space), uses it to disambiguate
  *  duplicate anchor text. When `contextBefore`/`contextAfter` are provided, uses them as
  *  primary disambiguation (more reliable than offset across coordinate spaces).
+ *  `exactHint` marks a hint measured over these same text nodes, so a match
+ *  starting exactly there is taken before any other disambiguation.
  *  Handles text that spans multiple DOM elements. */
 function wrapText(
   container: HTMLElement,
@@ -704,6 +709,7 @@ function wrapText(
   contextBefore?: string,
   contextAfter?: string,
   onSvgText?: (textEl: SVGElement, matchStart: number, matchEnd: number) => void,
+  exactHint = false,
 ) {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const allTextNodes = collectVisibleTextNodes(container);
@@ -722,7 +728,17 @@ function wrapText(
   // Find the match. The fallback tiers (literal → stripped → Mermaid label →
   // flexibleSearch) are shared between the hint-offset and no-offset paths;
   // see findMatchRange for the consolidated implementation.
-  const matchRange = findMatchRange(fullText, text, hintOffset, contextBefore, contextAfter);
+  //
+  // An exact hint that lands on the text is taken as is. Without context,
+  // findMatchRange takes the first match starting up to 20 characters before
+  // the hint, and table cells run together in this text: a double-click on a
+  // bold "source" opening a row painted the "knowledge source" ending the row
+  // above. Comment hints come from the markdown, where table pipes push them
+  // off the rendered text, so they keep the window.
+  const matchRange =
+    exactHint && hintOffset !== undefined && fullText.startsWith(text, hintOffset)
+      ? { start: hintOffset, end: hintOffset + text.length }
+      : findMatchRange(fullText, text, hintOffset, contextBefore, contextAfter);
   if (!matchRange) return;
   const matchStart = matchRange.start;
   const matchEnd = matchRange.end;
