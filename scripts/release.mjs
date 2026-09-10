@@ -341,7 +341,16 @@ function generateNotes(currentVersion, nextVersion) {
  * we leave the default notes in place and let the user edit at the prompt.
  *
  * Set RELEASE_SKIP_CLAUDE=1 to skip this step (e.g. offline / CI).
+ *
+ * The session runs in dontAsk mode so a tool call outside the allowlist is
+ * refused on the spot. Under a terminal that injects a PermissionRequest
+ * hook (cmux does), any other mode parks each unlisted call on a prompt
+ * nobody can see until the hook times out, which stalls the release for
+ * minutes with no output. The timeout is the backstop for anything else
+ * that hangs.
  */
+const CLAUDE_REWRITE_TIMEOUT_MS = 5 * 60 * 1000;
+
 function rewriteNotesWithClaude(notesPath, currentVersion, nextVersion) {
   if (process.env.RELEASE_SKIP_CLAUDE === '1') {
     console.log(`\n→ Skipping Claude rewrite (RELEASE_SKIP_CLAUDE=1)`);
@@ -355,6 +364,9 @@ function rewriteNotesWithClaude(notesPath, currentVersion, nextVersion) {
     `2. Run: git log v${currentVersion}..HEAD --format='%h %s%n%n%b%n---'`,
     `3. Overwrite ${notesPath} with the polished release notes.`,
     ``,
+    `The only shell commands available are git log, git describe, and`,
+    `gh release list/view. Anything else is refused, so don't retry it.`,
+    ``,
     `Do not output anything else. Do not add commentary outside the file.`,
   ].join('\n');
   const result = spawnSync(
@@ -363,20 +375,23 @@ function rewriteNotesWithClaude(notesPath, currentVersion, nextVersion) {
       '-p',
       prompt,
       '--allowed-tools',
-      'Read Write Bash(git log:*)',
+      'Read Write Bash(git log:*) Bash(git describe:*) Bash(gh release list:*) Bash(gh release view:*)',
       '--permission-mode',
-      'acceptEdits',
+      'dontAsk',
     ],
     {
       cwd: PROJECT_ROOT,
       stdio: ['ignore', 'ignore', 'inherit'],
+      timeout: CLAUDE_REWRITE_TIMEOUT_MS,
     },
   );
   if (result.error) {
     const reason =
       result.error.code === 'ENOENT'
         ? 'claude CLI not found (install Claude Code or set RELEASE_SKIP_CLAUDE=1)'
-        : result.error.message;
+        : result.error.code === 'ETIMEDOUT'
+          ? `timed out after ${CLAUDE_REWRITE_TIMEOUT_MS / 60000} minutes; keeping default notes`
+          : result.error.message;
     console.warn(`  ! Claude rewrite skipped: ${reason}`);
     return false;
   }
