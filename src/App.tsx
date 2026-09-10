@@ -323,7 +323,7 @@ export default function App() {
   const [homeDir, setHomeDir] = useState<string>('');
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
-  const { settings, updateDocWidth, updateProseSize } = useSettings();
+  const { settings, updateDocWidth, updateProseSize, updateKeepLineBreaks } = useSettings();
   const setTheme = useSetPersistedTheme();
   const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();
   const pageVisible = usePageVisible();
@@ -763,6 +763,7 @@ export default function App() {
     saveFile,
     author,
     enableResolve: settings.enableResolve,
+    keepLineBreaks: settings.keepLineBreaks,
     tabs,
     activeFilePath,
     viewerRef,
@@ -2390,6 +2391,12 @@ export default function App() {
         onExecute: () => updateProseSize('large'),
       },
       {
+        id: 'toggle-keep-line-breaks',
+        label: settings.keepLineBreaks ? 'Keep line breaks: Off' : 'Keep line breaks: On',
+        section: 'View',
+        onExecute: () => updateKeepLineBreaks(!settings.keepLineBreaks),
+      },
+      {
         id: 'view-raw',
         label: 'Switch to raw markdown',
         section: 'View',
@@ -2456,6 +2463,8 @@ export default function App() {
     setViewMode,
     updateDocWidth,
     updateProseSize,
+    updateKeepLineBreaks,
+    settings.keepLineBreaks,
     setExplorerVisibleGuarded,
     setLeftPanelView,
     explorerVisible,
@@ -3158,6 +3167,7 @@ export default function App() {
                                 rawMarkdown={rawMarkdown}
                                 diffSnapshot={currentSnapshot}
                                 diffLines={diffLines}
+                                keepLineBreaks={settings.keepLineBreaks}
                               />
                             ) : (
                               <>

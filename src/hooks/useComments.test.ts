@@ -38,6 +38,7 @@ function defaultParams(overrides: Partial<UseCommentsParams> = {}): UseCommentsP
     saveFile: vi.fn(),
     author: 'Tester',
     enableResolve: false,
+    keepLineBreaks: false,
     tabs: [],
     activeFilePath: null,
     viewerRef: {

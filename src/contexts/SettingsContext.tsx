@@ -30,6 +30,7 @@ interface SettingsContextValue {
   updateProseFont: (font: 'serif' | 'sans') => void;
   updateDocWidth: (width: DocWidth) => void;
   updateProseSize: (size: ProseSize) => void;
+  updateKeepLineBreaks: (keep: boolean) => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -130,6 +131,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const updateProseSize = useCallback((proseSize: ProseSize) => update({ proseSize }), [update]);
 
+  const updateKeepLineBreaks = useCallback(
+    (keepLineBreaks: boolean) => update({ keepLineBreaks }),
+    [update],
+  );
+
   const resetTemplates = useCallback(() => update({ templates: DEFAULT_TEMPLATES }), [update]);
 
   const resetAll = useCallback(() => {
@@ -156,6 +162,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateProseFont,
         updateDocWidth,
         updateProseSize,
+        updateKeepLineBreaks,
         resetTemplates,
         resetAll,
       }}

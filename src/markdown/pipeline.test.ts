@@ -72,6 +72,39 @@ describe('renderMarkdown source positions', () => {
   });
 });
 
+describe('renderMarkdown keepLineBreaks', () => {
+  const md = '**Actor:** the creator.\n**Trigger:** what now?';
+  const textOf = (html: string) => html.replace(/<[^>]+>/g, '');
+
+  it('joins soft-broken lines by default, as CommonMark does', () => {
+    expect(renderMarkdown(md)).not.toContain('<br>');
+  });
+
+  it('turns each single newline into a line break when on', () => {
+    const html = renderMarkdown(md, undefined, { keepLineBreaks: true });
+    expect(html).toContain('the creator.<br>\n<strong>Trigger:</strong>');
+  });
+
+  it('leaves the text that comment anchoring searches unchanged', () => {
+    expect(textOf(renderMarkdown(md, undefined, { keepLineBreaks: true }))).toBe(
+      textOf(renderMarkdown(md)),
+    );
+  });
+
+  it('does not touch fenced code', () => {
+    const fenced = '```\nline one\nline two\n```';
+    expect(renderMarkdown(fenced, undefined, { keepLineBreaks: true })).toBe(
+      renderMarkdown(fenced),
+    );
+  });
+
+  it('keeps the source span a whole-paragraph copy slices by', () => {
+    expect(renderMarkdown(md, undefined, { keepLineBreaks: true })).toContain(
+      `data-src-start="0" data-src-end="${md.length}"`,
+    );
+  });
+});
+
 describe('renderMarkdown', () => {
   it('renders basic markdown (headings, paragraphs, bold, italic)', () => {
     const md = '# Hello\n\nThis is **bold** and *italic*.';

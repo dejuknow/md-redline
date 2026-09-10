@@ -848,7 +848,9 @@ highlighted:
   passage has to find it in the file, and rebuilt markdown may not match.
 - Anything finer: markdown rebuilt from the rendered fragment through
   `rehype-remark`, which keeps the words as selected and normalises only the
-  syntax (`_x_` may come back as `*x*`).
+  syntax (`_x_` may come back as `*x*`). A soft break comes back as a space
+  with Keep line breaks off, and as a backslash hard break (`\` then newline)
+  with it on, since the rendered `<br>` is what gets rebuilt.
 
 Widening a ragged selection out to its enclosing block was considered and
 rejected. It hands back more text than was highlighted, and people paste into a
@@ -1589,6 +1591,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 - **Prose typeface**: `'serif'` or `'sans'`, default `'serif'`. Controls the rendered document body font (`[data-prose-font]` attribute plus `.prose` font-family in `src/index.css`). Set from the General tab.
 - **Document width**: `'narrow' | 'default' | 'wide'` (520/672/860px column caps, `DOC_WIDTH_COLS` in `src/lib/page-geometry.ts`), default `'default'`. Feeds the page geometry's `colMax`; also settable from the command palette ("Document width: ..."). The rail threshold (888px) is width-setting independent since `COL_MIN` governs it.
 - **Prose size**: `'small' | 'default' | 'large'` (14px/16px/18px), default `'default'`. Controls the rendered document body font size (`[data-prose-size]` attribute plus `.prose` font-size rules in `src/index.css`); the typography plugin's em-based spacing scales proportionally with it. Set from the General tab; also settable from the command palette ("Prose size: ...").
+- **Keep line breaks**: boolean, default `false`. When on, `remark-breaks` (in `src/markdown/pipeline.ts`, via the `keepLineBreaks` render option) turns each single newline inside a paragraph into a `<br>`, the way Obsidian and GitHub comments render. Off follows CommonMark, where a soft break renders as a space, which is also what GitHub's file view does. The DOM text does not change (remark-rehype emits a `<br>` followed by a `"\n"` text node), so comment anchoring behaves the same either way. Applies to the rendered view and the rendered diff; fenced code is untouched. Set from the General tab; also togglable from the command palette ("Keep line breaks: On/Off").
 
 The Prose typeface, Document width, and Prose size controls are each an accessible
 segmented control (`role="group"` with a label) whose segments show a crimson

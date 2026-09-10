@@ -837,7 +837,12 @@ describe('cross-process file lock', () => {
     // DEFAULT_SETTINGS always carries every AppSettings key, so a field added
     // on the client that the server whitelist drops fails this test even if
     // the compile-time exhaustiveness check in SETTING_SANITIZERS is bypassed.
-    const full: ClientAppSettings = { ...DEFAULT_SETTINGS, proseFont: 'sans', docWidth: 'wide' };
+    const full: ClientAppSettings = {
+      ...DEFAULT_SETTINGS,
+      proseFont: 'sans',
+      docWidth: 'wide',
+      keepLineBreaks: true,
+    };
     const result = await writePreferences(testDir, { settings: full });
     expect(result.settings).toEqual(full);
     expect(await readPreferences(testDir)).toEqual({ settings: full });
