@@ -2,6 +2,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import remarkRehype from 'remark-rehype';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -256,7 +257,7 @@ function frontmatterHandler(_state: unknown, node: { value: string }): Element |
   };
 }
 
-function buildProcessor(filePath?: string, allowFrontmatter = true) {
+function buildProcessor(filePath?: string, allowFrontmatter = true, keepLineBreaks = false) {
   const processor = unified().use(remarkParse);
   // Frontmatter is defined as being at offset 0 of the DOCUMENT. A caller
   // rendering a fragment (the diff overlay renders one segment at a time) has
@@ -264,8 +265,14 @@ function buildProcessor(filePath?: string, allowFrontmatter = true) {
   // this on invents a frontmatter block out of any `---` that happens to start
   // a segment.
   if (allowFrontmatter) processor.use(remarkFrontmatter, ['yaml', 'toml']);
+  processor.use(remarkGfm);
+  // A single newline is a soft break in CommonMark and renders as a space.
+  // remark-breaks turns each one into a hard break instead. The visible text
+  // does not change: remark-rehype emits every break as a <br> followed by a
+  // "\n" text node, so the DOM text that comment anchoring searches reads the
+  // same with the setting on or off.
+  if (keepLineBreaks) processor.use(remarkBreaks);
   return processor
-    .use(remarkGfm)
     .use(remarkRehype, {
       allowDangerousHtml: true,
       handlers: { yaml: frontmatterHandler, toml: frontmatterHandler },
@@ -285,6 +292,11 @@ export interface RenderOptions {
    * fragment's offset 0 is not the document's.
    */
   allowFrontmatter?: boolean;
+  /**
+   * Render a single newline in the source as a line break rather than a
+   * space. Off by default, which is CommonMark and what GitHub's file view does.
+   */
+  keepLineBreaks?: boolean;
 }
 
 export function renderMarkdown(
@@ -292,7 +304,7 @@ export function renderMarkdown(
   filePath?: string,
   options: RenderOptions = {},
 ): string {
-  const { allowFrontmatter = true } = options;
-  const file = buildProcessor(filePath, allowFrontmatter).processSync(markdown);
+  const { allowFrontmatter = true, keepLineBreaks = false } = options;
+  const file = buildProcessor(filePath, allowFrontmatter, keepLineBreaks).processSync(markdown);
   return String(file);
 }

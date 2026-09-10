@@ -96,6 +96,7 @@ const SETTING_SANITIZERS: {
   proseFont: (v) => sanitizeEnum(PROSE_FONTS, v),
   docWidth: (v) => sanitizeEnum(DOC_WIDTHS, v),
   proseSize: (v) => sanitizeEnum(PROSE_SIZES, v),
+  keepLineBreaks: sanitizeBoolean,
 };
 
 function sanitizeSettings(value: unknown): AppSettings | undefined {

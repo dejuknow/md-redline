@@ -26,6 +26,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     updateProseFont,
     updateDocWidth,
     updateProseSize,
+    updateKeepLineBreaks,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -718,6 +719,33 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                       ))}
                     </div>
                   </div>
+                </div>
+
+                {/* Keep Line Breaks */}
+                <div>
+                  <label className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Keep line breaks</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Show a single line break in the file as a new line. Off follows standard
+                        Markdown, which joins those lines into one paragraph.
+                      </p>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={settings.keepLineBreaks}
+                      onClick={() => updateKeepLineBreaks(!settings.keepLineBreaks)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                        settings.keepLineBreaks ? 'bg-primary' : 'bg-border'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                          settings.keepLineBreaks ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </button>
+                  </label>
                 </div>
 
                 {/* Comment Max Length */}

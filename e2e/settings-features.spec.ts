@@ -306,6 +306,33 @@ test.describe('Quick comment mode', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Keep line breaks
+// ---------------------------------------------------------------------------
+
+test.describe('Keep line breaks', () => {
+  const SOFT_BREAKS =
+    '# Test Document\n\n**Actor:** the creator.\n**Trigger:** what do I do now?\n';
+
+  test('joins lines by default, then keeps each source line when enabled', async ({ page }) => {
+    writeFileSync(FIXTURE, SOFT_BREAKS);
+    await openFixture(page);
+    const paragraph = page.locator('.prose p', { hasText: 'Actor:' });
+    await expect(paragraph.locator('br')).toHaveCount(0);
+
+    await toggleSetting(page, 'Keep line breaks');
+    await expect(paragraph.locator('br')).toHaveCount(1);
+  });
+
+  test('comments still anchor with line breaks kept', async ({ page }) => {
+    writeFileSync(FIXTURE, SOFT_BREAKS);
+    await openFixture(page);
+    await toggleSetting(page, 'Keep line breaks');
+    await addComment(page, 'what do I do now', 'Anchors with kept breaks');
+    await expect(page.locator('.prose mark', { hasText: 'what do I do now' })).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Middle-click tab close
 // ---------------------------------------------------------------------------
 

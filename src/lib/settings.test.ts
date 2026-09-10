@@ -104,6 +104,7 @@ describe('parseSettings', () => {
       proseFont: 'serif',
       docWidth: 'wide',
       proseSize: 'large',
+      keepLineBreaks: true,
     };
     expect(parseSettings(full)).toEqual(full);
   });
@@ -118,6 +119,18 @@ describe('parseSettings docWidth', () => {
   it('accepts narrow, default, and wide', () => {
     expect(parseSettings({ docWidth: 'narrow' }).docWidth).toBe('narrow');
     expect(parseSettings({ docWidth: 'wide' }).docWidth).toBe('wide');
+  });
+});
+
+describe('parseSettings keepLineBreaks', () => {
+  it('defaults to off, which is CommonMark', () => {
+    expect(DEFAULT_SETTINGS.keepLineBreaks).toBe(false);
+    expect(parseSettings({}).keepLineBreaks).toBe(false);
+  });
+
+  it('keeps a stored boolean and ignores anything else', () => {
+    expect(parseSettings({ keepLineBreaks: true }).keepLineBreaks).toBe(true);
+    expect(parseSettings({ keepLineBreaks: 'yes' }).keepLineBreaks).toBe(false);
   });
 });
 

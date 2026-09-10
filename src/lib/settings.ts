@@ -32,6 +32,8 @@ export interface AppSettings {
   docWidth: DocWidth;
   /** Font size for rendered document prose (small 14px, default 16px, large 18px). */
   proseSize: ProseSize;
+  /** Render a single newline in the source as a line break instead of a space. Off follows CommonMark. */
+  keepLineBreaks: boolean;
 }
 
 /**
@@ -115,6 +117,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proseFont: 'serif',
   docWidth: 'default',
   proseSize: 'default',
+  keepLineBreaks: false,
 };
 
 /**
@@ -174,5 +177,9 @@ export function parseSettings(input: unknown): AppSettings {
     proseSize: PROSE_SIZES.includes(parsed.proseSize as ProseSize)
       ? (parsed.proseSize as ProseSize)
       : DEFAULT_SETTINGS.proseSize,
+    keepLineBreaks:
+      typeof parsed.keepLineBreaks === 'boolean'
+        ? parsed.keepLineBreaks
+        : DEFAULT_SETTINGS.keepLineBreaks,
   };
 }

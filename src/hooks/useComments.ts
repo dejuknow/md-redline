@@ -60,6 +60,8 @@ export interface UseCommentsParams {
   saveFile: (content: string) => void;
   author: string;
   enableResolve: boolean;
+  /** Render single source newlines as line breaks (the Keep line breaks setting). */
+  keepLineBreaks: boolean;
   tabs: TabInfo[];
   activeFilePath: string | null;
   viewerRef: RefObject<MarkdownViewerHandle | null>;
@@ -78,6 +80,7 @@ export function useComments(params: UseCommentsParams) {
     saveFile,
     author,
     enableResolve,
+    keepLineBreaks,
     tabs,
     activeFilePath,
     viewerRef,
@@ -98,8 +101,11 @@ export function useComments(params: UseCommentsParams) {
 
   // Render markdown to HTML
   const html = useMemo(
-    () => (cleanMarkdown ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined) : ''),
-    [cleanMarkdown, activeFilePath],
+    () =>
+      cleanMarkdown
+        ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined, { keepLineBreaks })
+        : '',
+    [cleanMarkdown, activeFilePath, keepLineBreaks],
   );
 
   // Detect missing anchors
