@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, type RefObject } from 'react';
 
 /**
  * Auto-resizes a textarea to fit its content.
@@ -12,7 +12,9 @@ export function useAutoResize(ref: RefObject<HTMLTextAreaElement | null>, value:
     el.style.height = `${el.scrollHeight}px`;
   }, [ref]);
 
-  useEffect(() => {
+  // A layout effect, so the new height lands before paint and before any
+  // layout effect declared after this hook measures the surrounding surface.
+  useLayoutEffect(() => {
     resize();
   }, [value, resize]);
 

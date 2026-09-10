@@ -531,6 +531,27 @@ test.describe('Comment form click-outside dismiss', () => {
   });
 });
 
+test.describe('Comment form placement', () => {
+  test('a long paste keeps the form and its buttons on screen', async ({ page }) => {
+    await openFixture(page);
+    await selectText(page, 'This is a test document');
+    await page.locator('[data-comment-form] button', { hasText: 'Comment' }).click();
+    const form = page.locator('[data-comment-form]');
+    const textarea = page.getByPlaceholder('Add your comment...');
+    await expect(textarea).toBeFocused();
+
+    // One input event, the way a paste or a dictation tool delivers text. Typed
+    // text re-measured the form on the next key, so it hid the bug.
+    await page.keyboard.insertText(
+      Array.from({ length: 20 }, (_, i) => `Line ${i + 1} of a long comment`).join('\n'),
+    );
+
+    await expect(form).toBeInViewport({ ratio: 1 });
+    await expect(form.getByRole('button', { name: 'Comment' })).toBeInViewport({ ratio: 1 });
+    await expect(form.getByRole('button', { name: 'Cancel' })).toBeInViewport({ ratio: 1 });
+  });
+});
+
 test.describe('Sidebar toggle', () => {
   test.use({ viewport: { width: 1600, height: 900 } });
 

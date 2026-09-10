@@ -197,6 +197,10 @@ export function CommentForm({
     };
   }, [isExpanded, selection.rect]);
 
+  // Measures after useAutoResize above has sized the textarea for this text:
+  // both are layout effects and run in declaration order. Measured before the
+  // resize, a paste or a dictated sentence leaves the form placed for its old
+  // height, pushing the buttons off the bottom of the viewport.
   useLayoutEffect(() => {
     const node = formRef.current;
     if (!node) return;
