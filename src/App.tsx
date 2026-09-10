@@ -850,13 +850,16 @@ export default function App() {
     [marginComments],
   );
   // The anchored rail earns its gutter width only once it has a card to
-  // place. List density always reserves — its panel is intentional even when
+  // place. List density always reserves: its panel is intentional even when
   // empty. Anchored + zero non-resolved comments collapses the empty margin
   // instead of parking a wide dead gutter next to the prose. The rail itself
   // stays mounted (railShown is unaffected, so chrome and routing are
-  // unchanged); only the sheet width drops and re-centers, and colWidth is
-  // held constant so the first comment slides the gutter open without
-  // reflowing the text.
+  // unchanged); the sheet re-centers on the prose and the freed width goes to
+  // the column, so a comment-free document reads at its full Document width.
+  // Note this boundary is the open-comment count crossing 0 and 1, not a
+  // one-way door: resolving, deleting or unresolving the last comment swaps
+  // the column back the other way, and between 888 and 1080 of content width
+  // that rewraps the prose.
   const railHasContent = railDensity === 'list' || marginComments.length > 0;
   const geometry = usePageGeometry(
     containerRef as RefObject<HTMLElement | null>,

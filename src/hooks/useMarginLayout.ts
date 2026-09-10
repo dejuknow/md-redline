@@ -46,6 +46,7 @@ export function useMarginLayout(
   const heightObserver = useRef<ResizeObserver | null>(null);
   const [remeasureTick, setRemeasureTick] = useState(0);
   const lastProseHeightRef = useRef<number | null>(null);
+  const lastProseWidthRef = useRef<number | null>(null);
 
   // Anchor measurement: one pass over painted marks per trigger (paint tick,
   // comment set change, or a late-reflow remeasure tick). Measured against
@@ -73,16 +74,26 @@ export function useMarginLayout(
 
   // Mermaid stabilization and image loads can shift prose height after the
   // paint signal already fired. Watch the prose column itself and bump a
-  // tick when its height actually changes, so the anchor-measurement effect
+  // tick when its box actually changes, so the anchor-measurement effect
   // above re-runs and catches the late reflow.
+  //
+  // Width counts as well as height: the first comment on a document collapses
+  // the empty gutter back into a reserved rail, which animates the column
+  // narrower over 150ms while the measurement effect has already run against
+  // the pre-transition layout. A rewrap that happens to land at the same
+  // total height would otherwise leave the new card on a stale top.
   useEffect(() => {
     if (!active) return;
     const prose = pageRef.current?.firstElementChild;
     if (!prose) return;
     const ro = new ResizeObserver((entries) => {
-      const height = entries[0]?.contentRect.height;
-      if (height === undefined || height === lastProseHeightRef.current) return;
-      lastProseHeightRef.current = height;
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      if (box.height === lastProseHeightRef.current && box.width === lastProseWidthRef.current) {
+        return;
+      }
+      lastProseHeightRef.current = box.height;
+      lastProseWidthRef.current = box.width;
       setRemeasureTick((t) => t + 1);
     });
     ro.observe(prose);
