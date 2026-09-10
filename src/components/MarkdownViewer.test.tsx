@@ -10,6 +10,7 @@ import {
 } from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
 import { insertComment, parseComments } from '../lib/comment-parser';
+import { getVisibleTextOffset } from '../lib/visible-text';
 
 describe('matchTableScroll', () => {
   it('restores offsets to the same tables when nothing changed', () => {
@@ -475,6 +476,53 @@ describe('MarkdownViewer selection highlights', () => {
 
     const leadingCode = paragraph?.querySelector('mark.selection-highlight > code');
     expect(leadingCode?.textContent).toBe('md-redline');
+  });
+
+  it('paints the occurrence at the selection offset, not a copy just before it', async () => {
+    // Table cells run together in the rendered text, so a row ending in
+    // "knowledge source" puts a second "source" a few characters before the
+    // bold one that starts the next row.
+    const markdown =
+      '| Say this | Engineering calls it |\n| --- | --- |\n| **library** | knowledge source |\n| **source** (one connected channel) | connector |\n';
+    const props = {
+      html: renderMarkdown(markdown),
+      cleanMarkdown: markdown,
+      comments: [],
+      activeCommentId: null,
+      onHighlightClick: vi.fn(),
+    };
+
+    // jsdom has no ResizeObserver, and the viewer observes every table for
+    // its scroll cues.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    try {
+      const { container, rerender } = render(
+        <MarkdownViewer {...props} selectionText={null} selectionOffset={null} />,
+      );
+      const prose = container.querySelector('.prose') as HTMLElement;
+      const target = Array.from(prose.querySelectorAll('td strong')).find(
+        (el) => el.textContent === 'source',
+      );
+      // The offset the selection resolver reports for a double-click on it.
+      const offset = getVisibleTextOffset(prose, target!.firstChild!, 0);
+
+      rerender(<MarkdownViewer {...props} selectionText="source" selectionOffset={offset} />);
+
+      await waitFor(() => {
+        expect(container.querySelector('mark.selection-highlight')).not.toBeNull();
+      });
+      const row = container.querySelector('mark.selection-highlight')?.closest('tr');
+      expect(row?.querySelector('td')?.textContent).toBe('source (one connected channel)');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
