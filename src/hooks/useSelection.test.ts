@@ -405,3 +405,80 @@ describe('useSelection modality routing', () => {
     expect(mockResolve).toHaveBeenCalledTimes(1);
   });
 });
+
+// A triple-click reaches the page as three presses. The second selects a word,
+// which is committed and, with Quick comment on, locked by the composer on
+// mount, all before the third press widens the native selection to the line.
+describe('useSelection multi-click', () => {
+  const WORD: SelectionInfo = { ...INFO, text: 'gets' };
+  const LINE: SelectionInfo = { ...INFO, text: 'F4. A member asks and gets a cited answer' };
+
+  /**
+   * One press of a multi-click. The browser fires a pointerdown for each press
+   * and numbers them in the mouseup's `detail`: 1, then 2, then 3.
+   */
+  function click(detail: number, target: EventTarget = document) {
+    pointerDown('mouse');
+    act(() => {
+      target.dispatchEvent(new MouseEvent('mouseup', { button: 0, detail, bubbles: true }));
+    });
+  }
+
+  function doubleClickAndLock() {
+    mockResolve.mockReturnValue(null);
+    click(1);
+    mockResolve.mockReturnValue(WORD);
+    click(2);
+    act(() => hook().lockSelection());
+  }
+
+  it('the third press of a triple-click replaces the word its double-click locked', () => {
+    doubleClickAndLock();
+    mockResolve.mockReturnValue(LINE);
+    click(3);
+    expect(hook().selection).toEqual(LINE);
+  });
+
+  it('the line a triple-click selects stays locked', () => {
+    doubleClickAndLock();
+    mockResolve.mockReturnValue(LINE);
+    click(3);
+
+    // Unlocking here would let the next stray click clear the composer and
+    // whatever the reader had typed into it.
+    mockResolve.mockReturnValue(null);
+    click(1);
+    expect(hook().selection).toEqual(LINE);
+  });
+
+  it('a triple-click made after the lock does not replace the locked selection', () => {
+    // The composer is open on a drag selection, possibly with a comment typed,
+    // and the reader triple-clicks somewhere else. None of those presses
+    // committed what is locked, so none of them may replace it.
+    click(1);
+    act(() => hook().lockSelection());
+    mockResolve.mockReturnValue(LINE);
+    click(1);
+    click(2);
+    click(3);
+    expect(hook().selection).toEqual(INFO);
+  });
+
+  it('a third press that resolves to nothing keeps the locked word', () => {
+    doubleClickAndLock();
+    mockResolve.mockReturnValue(null);
+    click(3);
+    expect(hook().selection).toEqual(WORD);
+  });
+
+  it('a third press inside the composer does not replace the locked word', () => {
+    doubleClickAndLock();
+    const form = document.createElement('div');
+    form.setAttribute('data-comment-form', '');
+    document.body.appendChild(form);
+    mockResolve.mockReturnValue(LINE);
+    click(3, form);
+    expect(hook().selection).toEqual(WORD);
+    form.remove();
+  });
+});

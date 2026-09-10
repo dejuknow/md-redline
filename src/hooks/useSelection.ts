@@ -106,6 +106,10 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
     // Whether the gesture in progress started inside something that must not
     // lose the selection: the pill, the comment form, a drag handle.
     let pointerInPreserved = false;
+    // The press that committed the current selection: its multi-click count
+    // and the epoch right after the commit. handleMouseUp reads it to tell the
+    // next press of the same double- or triple-click from a new gesture.
+    let lastCommit: { epoch: number; detail: number } | null = null;
     const handlePointerDown = (e: PointerEvent) => {
       // A new gesture invalidates any timer armed by the previous one.
       epochRef.current += 1;
@@ -133,7 +137,19 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
       if (isSecondaryClick(e) && (e.target as HTMLElement)?.closest?.(SELECTION_MARK_SELECTOR)) {
         return;
       }
-      if (lockedRef.current) return;
+      // A locked selection ignores mouseups, except the next press of the
+      // multi-click that committed it. A triple-click arrives as three presses:
+      // the second commits a word, which quick comment locks as its composer
+      // mounts, and the third widens the browser's highlight to the whole line.
+      // Ignoring that press left the composer anchored to the word. `detail`
+      // numbers the presses, and an epoch moved by exactly this press's
+      // pointerdown means nothing else wrote a selection in between.
+      const continuesCommit =
+        lastCommit !== null &&
+        e.detail >= 2 &&
+        e.detail === lastCommit.detail + 1 &&
+        epochRef.current === lastCommit.epoch + 1;
+      if (lockedRef.current && !continuesCommit) return;
       if ((e.target as Element)?.closest?.('[data-comment-form]')) return;
       if ((e.target as Element)?.closest?.('[data-drag-handle]')) return;
       if ((e.target as Element)?.closest?.('[data-preserve-selection]')) return;
@@ -141,9 +157,14 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
       if (!containerRef.current) return;
 
       const info = resolveSelection(containerRef.current);
+      // That press may replace a locked selection but never clear it, and the
+      // lock carries over to the replacement: the composer does not remount,
+      // so nothing would lock it again.
+      if (lockedRef.current && !info) return;
       // Also clears any pending touch selection: the mouse gesture supersedes
       // it, whether it resolved to something or collapsed to nothing.
       commitSelection(info);
+      lastCommit = info ? { epoch: epochRef.current, detail: e.detail } : null;
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
