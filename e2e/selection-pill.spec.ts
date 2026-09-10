@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
-import { resetTestAppState } from './helpers/test-state';
+import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
 import { addComment } from './helpers/comments';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -179,5 +179,47 @@ test.describe('Selection pill', () => {
     await selectOutsideProse(page, 'Is this per tenant?');
 
     await expect(page.locator('[data-comment-form]')).toHaveCount(0);
+  });
+});
+
+test.describe('triple-click with quick comment on', () => {
+  // Quick comment persists to the prefs file that every later spec boots into.
+  test.afterAll(() => clearPersistedPreferences());
+
+  test('anchors the composer to the line a triple-click selects', async ({ page }) => {
+    // The second press selects a word, and quick comment opens and locks the
+    // composer on it. The third press then widened only the browser's
+    // highlight, so the composer kept offering the word.
+    await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
+    await openFixture(page);
+    await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const point = await page.evaluate(() => {
+      const heading = [...document.querySelectorAll('.prose h2')].find((h) =>
+        h.textContent?.includes('Section One'),
+      );
+      if (!heading) throw new Error('"Section One" heading not found');
+      const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
+      let node: Text | null;
+      while ((node = walker.nextNode() as Text | null)) {
+        const idx = node.textContent?.indexOf('Section') ?? -1;
+        if (idx < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + 'Section'.length);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+      throw new Error('"Section" not found in the heading');
+    });
+    // Real presses rather than a synthetic mouseup: the bug is in how the three
+    // presses of one gesture arrive.
+    await page.mouse.click(point.x, point.y, { clickCount: 3 });
+
+    await expect(page.locator('[data-comment-form]')).toContainText('“Section One”', {
+      timeout: 5000,
+    });
   });
 });

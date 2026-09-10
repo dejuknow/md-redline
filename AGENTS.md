@@ -717,7 +717,11 @@ or any template opens the full form with the template grid hidden; the footer's
 selection while the document scrolls (live DOM selection when available, a
 scroll-delta fallback for locked selections) and hides while the selected text is
 off-screen. The **Quick comment** setting skips the pill entirely and opens the
-full form immediately on selection, as before. The pill's width is capped to
+full form immediately on selection, as before. That form locks its selection on
+mount, which lands between a triple-click's second and third presses, so
+`useSelection` lets the next press of the multi-click that committed a locked
+selection replace it (the lock carries over): a triple-click anchors the whole
+line, not the word its double-click opened the form on. The pill's width is capped to
 `calc(100vw - 24px)` so it never overflows on narrow windows, and its buttons
 show a crimson focus-visible ring on keyboard focus.
 
