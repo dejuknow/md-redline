@@ -167,3 +167,88 @@ describe('useDiffSnapshot', () => {
     expect(result.current.currentSnapshot).toBe('v1');
   });
 });
+
+describe('agent-captured references', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  const agentRef = (capturedAt: number, content = 'agent copy'): DiffReference => ({
+    content,
+    capturedAt,
+    origin: 'agent',
+    agentName: 'Claude',
+  });
+
+  it('seedReference stores a reference for a path with none', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    let seeded = false;
+    act(() => {
+      seeded = result.current.seedReference('/a.md', agentRef(100));
+    });
+    expect(seeded).toBe(true);
+    expect(result.current.currentReference).toEqual(agentRef(100));
+  });
+
+  it('seedReference replaces an older local reference', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    act(() => result.current.captureReference('handoff'));
+    const older = result.current.currentReference!.capturedAt;
+    let seeded = false;
+    act(() => {
+      seeded = result.current.seedReference('/a.md', agentRef(older + 1));
+    });
+    expect(seeded).toBe(true);
+    expect(result.current.currentReference?.origin).toBe('agent');
+  });
+
+  it('seedReference keeps a newer local reference (newest wins)', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    act(() => result.current.captureReference('review'));
+    const local = result.current.currentReference!.capturedAt;
+    let seeded = true;
+    act(() => {
+      seeded = result.current.seedReference('/a.md', agentRef(local - 1));
+    });
+    expect(seeded).toBe(false);
+    expect(result.current.currentReference?.origin).toBe('review');
+  });
+
+  it('seedReference works for a path that is not the active file', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    act(() => {
+      result.current.seedReference('/b.md', agentRef(5, 'b before'));
+    });
+    expect(result.current.getReference('/b.md')).toEqual(agentRef(5, 'b before'));
+    expect(result.current.currentReference).toBeNull();
+  });
+
+  it('persists and reloads the agent origin and name', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const first = renderHook(() => useDiffSnapshot(...hookArgs));
+    act(() => {
+      first.result.current.seedReference('/a.md', agentRef(7));
+    });
+    first.unmount();
+    const second = renderHook(() => useDiffSnapshot(...hookArgs));
+    expect(second.result.current.currentReference).toEqual(agentRef(7));
+  });
+
+  it('migrates an unknown stored origin to handoff', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ '/a.md': { content: 'x', capturedAt: 1, origin: 'weird', agentName: 9 } }),
+    );
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    expect(result.current.currentReference).toEqual({
+      content: 'x',
+      capturedAt: 1,
+      origin: 'handoff',
+    });
+  });
+});

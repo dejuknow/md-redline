@@ -2,11 +2,17 @@ import { useState, useCallback, useEffect, useRef, type RefObject } from 'react'
 
 const STORAGE_KEY = 'md-redline-snapshots';
 
+export type DiffReferenceOrigin = 'handoff' | 'review' | 'agent';
+
 export interface DiffReference {
   content: string;
   capturedAt: number;
-  origin: 'handoff' | 'review';
+  origin: DiffReferenceOrigin;
+  /** Set when origin is 'agent' and the tool call named the agent. */
+  agentName?: string;
 }
+
+const ORIGINS: ReadonlySet<string> = new Set(['handoff', 'review', 'agent']);
 
 /** Normalize stored data, migrating the legacy bare-string format to records. */
 function normalizeStored(parsed: unknown): Map<string, DiffReference> {
@@ -20,11 +26,23 @@ function normalizeStored(parsed: unknown): Map<string, DiffReference> {
       typeof val === 'object' &&
       typeof (val as { content?: unknown }).content === 'string'
     ) {
-      const v = val as { content: string; capturedAt?: unknown; origin?: unknown };
+      const v = val as {
+        content: string;
+        capturedAt?: unknown;
+        origin?: unknown;
+        agentName?: unknown;
+      };
+      const origin: DiffReferenceOrigin =
+        typeof v.origin === 'string' && ORIGINS.has(v.origin)
+          ? (v.origin as DiffReferenceOrigin)
+          : 'handoff';
       map.set(path, {
         content: v.content,
         capturedAt: typeof v.capturedAt === 'number' ? v.capturedAt : Date.now(),
-        origin: v.origin === 'review' ? 'review' : 'handoff',
+        origin,
+        ...(origin === 'agent' && typeof v.agentName === 'string'
+          ? { agentName: v.agentName }
+          : {}),
       });
     }
   }
@@ -101,10 +119,34 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
     [activeFilePath],
   );
 
+  /**
+   * Accept a reference the browser did not capture itself (an agent's
+   * before copy from the server). Newest wins: the seed lands only when the
+   * path has no reference or its reference is older. A Mark reviewed or
+   * handoff click after the agent's capture is newer and stays put.
+   */
+  const seedReference = useCallback((path: string, ref: DiffReference): boolean => {
+    const existing = refsRef.current.get(path);
+    if (existing && existing.capturedAt >= ref.capturedAt) return false;
+    const next = new Map(refsRef.current);
+    next.set(path, ref);
+    refsRef.current = next;
+    setRefs(next);
+    return true;
+  }, []);
+
+  /** Synchronous read of any path's reference, for callers outside render. */
+  const getReference = useCallback(
+    (path: string): DiffReference | null => refsRef.current.get(path) ?? null,
+    [],
+  );
+
   return {
     currentReference,
     currentSnapshot,
     captureReference,
     restoreReference,
+    seedReference,
+    getReference,
   };
 }
