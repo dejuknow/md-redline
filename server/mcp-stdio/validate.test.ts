@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { validateAskInput, validateReviewInput, validateWaitInput } from './validate';
+import {
+  validateAskInput,
+  validateBaselineInput,
+  validateReviewInput,
+  validateWaitInput,
+} from './validate';
 
 describe('validateReviewInput', () => {
   it('accepts comments-only input', () => {
@@ -317,5 +322,33 @@ describe('validateWaitInput', () => {
   it('rejects non-object input', () => {
     const res = validateWaitInput('rev_abc');
     expect(res.ok).toBe(false);
+  });
+});
+
+describe('validateBaselineInput', () => {
+  it('accepts filePaths with an optional agentName', () => {
+    const res = validateBaselineInput({ filePaths: ['/tmp/a.md'], agentName: 'Claude' });
+    expect(res).toEqual({ ok: true, value: { filePaths: ['/tmp/a.md'], agentName: 'Claude' } });
+  });
+
+  it('omits agentName when not given', () => {
+    const res = validateBaselineInput({ filePaths: ['/tmp/a.md'] });
+    expect(res).toEqual({ ok: true, value: { filePaths: ['/tmp/a.md'] } });
+  });
+
+  it('rejects a missing or empty filePaths', () => {
+    expect(validateBaselineInput({}).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: [] }).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: [''] }).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: [1] }).ok).toBe(false);
+  });
+
+  it('rejects a non-string or empty agentName', () => {
+    expect(validateBaselineInput({ filePaths: ['/a.md'], agentName: 3 }).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: ['/a.md'], agentName: '' }).ok).toBe(false);
+  });
+
+  it('rejects a non-object', () => {
+    expect(validateBaselineInput(null).ok).toBe(false);
   });
 });

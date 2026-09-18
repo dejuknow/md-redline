@@ -1,6 +1,7 @@
 import type {
   AskInput,
   AskWaitResult,
+  BaselineInput,
   PostReviewResult,
   RequestReviewInput,
   ReviewInput,
@@ -720,4 +721,30 @@ export async function handleReviewToolCall(
     `When you have finished posting all feedback, call mdr_wait with ` +
       `sessionId "${session.sessionId}" to block until the user has engaged.`,
   );
+}
+
+/**
+ * mdr_baseline: ask the server to keep a copy of each file as it is now, so
+ * the reviewer's diff can show what the agent changed. Non-blocking. Access
+ * is granted first, exactly as the review tools do, so a path the agent has
+ * never opened in mdr still resolves inside the allowed roots.
+ */
+export async function handleBaselineToolCall(
+  input: BaselineInput,
+  ctx: Pick<ToolCallContext, 'client'>,
+): Promise<ToolCallResult> {
+  await ctx.client.grantAccess(input.filePaths);
+  const result = await ctx.client.captureBaseline(input);
+  const paths = result.baselines.map((b) => b.path);
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `mdr_baseline: saved a before copy of ${paths.length} file(s): ${paths.join(', ')}. ` +
+          `Edit them now, then call mdr_request_review with the same paths so the user ` +
+          `can see a diff of your changes.`,
+      },
+    ],
+  };
 }

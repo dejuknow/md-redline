@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import type {
   AskQuestion,
   AskWaitResult,
+  BaselineInput,
+  CaptureBaselineResult,
   CreateSessionInput,
   CreateSessionResult,
   MdrClient,
@@ -77,6 +79,19 @@ export function createMdrClient(baseUrl: string): MdrClient {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `abort failed for ${sessionId} (HTTP ${res.status})`);
       }
+    },
+
+    async captureBaseline(input: BaselineInput) {
+      const res = await fetch(url('/api/baselines'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `captureBaseline failed (HTTP ${res.status})`);
+      }
+      return (await res.json()) as CaptureBaselineResult;
     },
 
     async postAgentComments(sessionId: string, questions: AskQuestion[]) {

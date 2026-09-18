@@ -3,6 +3,7 @@ import { handleRequestReviewToolCall } from './mcp-stdio';
 import type { AskWaitResult, MdrClient } from './mcp-stdio/types';
 import {
   handleAskToolCall,
+  handleBaselineToolCall,
   handleReviewToolCall,
   handleWaitToolCall,
   __resetOpenedBrowserUrlsForTests,
@@ -26,6 +27,7 @@ describe('handleRequestReviewToolCall', () => {
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
       ...overrides,
     } as MdrClient;
   }
@@ -144,6 +146,7 @@ describe('handleRequestReviewToolCall', () => {
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
     };
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
@@ -175,6 +178,7 @@ describe('handleRequestReviewToolCall', () => {
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
     };
     const openInBrowser = vi.fn();
 
@@ -664,6 +668,7 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
         .mockResolvedValue({ commentsWritten: 2, repliesWritten: 0, commentIds: ['c1', 'c2'] }),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
       ...overrides,
     } as MdrClient;
   }
@@ -856,6 +861,60 @@ describe('createMdrClient HTTP methods', () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       'http://localhost:3000/api/review-sessions/rev_xyz/asks/ask_abc/release',
       expect.objectContaining({ method: 'POST' }),
+    );
+  });
+});
+
+describe('handleBaselineToolCall', () => {
+  function makeClient(overrides: Partial<MdrClient> = {}): MdrClient {
+    return {
+      grantAccess: vi.fn().mockResolvedValue(undefined),
+      createSession: vi.fn(),
+      waitForSession: vi.fn(),
+      abortSession: vi.fn(),
+      postAgentComments: vi.fn(),
+      waitForAsk: vi.fn(),
+      postReview: vi.fn(),
+      releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
+      ...overrides,
+    } as MdrClient;
+  }
+
+  it('grants access, captures, and tells the agent what to do next', async () => {
+    const client = makeClient({
+      captureBaseline: vi.fn().mockResolvedValue({
+        baselines: [
+          { path: '/abs/a.md', capturedAt: 1, bytes: 10 },
+          { path: '/abs/b.md', capturedAt: 1, bytes: 12 },
+        ],
+      }),
+    });
+
+    const result = await handleBaselineToolCall(
+      { filePaths: ['/abs/a.md', '/abs/b.md'], agentName: 'Claude' },
+      { client },
+    );
+
+    expect(client.grantAccess).toHaveBeenCalledWith(['/abs/a.md', '/abs/b.md']);
+    expect(client.captureBaseline).toHaveBeenCalledWith({
+      filePaths: ['/abs/a.md', '/abs/b.md'],
+      agentName: 'Claude',
+    });
+    const text = result.content[0].text;
+    expect(text).toMatch(
+      /^mdr_baseline: saved a before copy of 2 file\(s\): \/abs\/a\.md, \/abs\/b\.md\./,
+    );
+    expect(text).toContain('mdr_request_review');
+  });
+
+  it('surfaces a server error as the tool error', async () => {
+    const client = makeClient({
+      captureBaseline: vi.fn().mockRejectedValue(new Error('File not found: /abs/a.md')),
+    });
+    await expect(handleBaselineToolCall({ filePaths: ['/abs/a.md'] }, { client })).rejects.toThrow(
+      'File not found: /abs/a.md',
     );
   });
 });

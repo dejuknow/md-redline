@@ -1,5 +1,6 @@
 import type {
   AskInput,
+  BaselineInput,
   RequestReviewInput,
   ReviewInput,
   ValidationResult,
@@ -311,6 +312,38 @@ export function validateAskInput(raw: unknown): ValidationResult<AskInput> {
     value: {
       sessionId: obj.sessionId,
       questions: obj.questions as AskInput['questions'],
+    },
+  };
+}
+
+/**
+ * Validate a raw mdr_baseline argument object: `{ filePaths, agentName? }`.
+ * The server re-checks paths against its allowed roots; this only guards shape.
+ */
+export function validateBaselineInput(raw: unknown): ValidationResult<BaselineInput> {
+  if (typeof raw !== 'object' || raw === null) {
+    return { ok: false, error: 'input must be an object' };
+  }
+  const obj = raw as { filePaths?: unknown; agentName?: unknown };
+  if (!Array.isArray(obj.filePaths)) {
+    return { ok: false, error: 'filePaths must be an array' };
+  }
+  if (obj.filePaths.length === 0) {
+    return { ok: false, error: 'filePaths must be non-empty' };
+  }
+  if (obj.filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
+    return { ok: false, error: 'filePaths must contain non-empty strings' };
+  }
+  if (obj.agentName !== undefined) {
+    if (typeof obj.agentName !== 'string' || obj.agentName.length === 0) {
+      return { ok: false, error: 'agentName must be a non-empty string' };
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      filePaths: obj.filePaths as string[],
+      ...(typeof obj.agentName === 'string' ? { agentName: obj.agentName } : {}),
     },
   };
 }
