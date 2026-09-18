@@ -131,7 +131,13 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
     const next = new Map(refsRef.current);
     next.set(path, ref);
     refsRef.current = next;
-    setRefs(next);
+    setRefs((prevMap) => {
+      const queued = prevMap.get(path);
+      if (queued && queued.capturedAt >= ref.capturedAt) return prevMap;
+      const merged = new Map(prevMap);
+      merged.set(path, ref);
+      return merged;
+    });
     return true;
   }, []);
 

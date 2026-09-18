@@ -91,7 +91,7 @@ export function PanelToolbar({
   // and e2e selectors), and the aria-label.
   const viewModeLabel = isRaw ? 'Switch to rendered view' : 'View raw markdown';
   const diffLabel = !hasDiffSnapshot
-    ? 'Show diff. Hand off to an agent first.'
+    ? 'Show diff. Available after a handoff, or once an agent saves a copy before editing.'
     : diffEnabled
       ? 'Hide diff'
       : 'Show diff';

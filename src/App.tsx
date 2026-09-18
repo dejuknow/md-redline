@@ -72,7 +72,8 @@ import { useUpdateNotice } from './hooks/useUpdateNotice';
 import { useModalState } from './hooks/useModalState';
 import { useSearch } from './hooks/useSearch';
 import { useCommentCardTriggers } from './hooks/useCommentCardTriggers';
-import { useDiffSnapshot } from './hooks/useDiffSnapshot';
+import { useDiffSnapshot, type DiffReference } from './hooks/useDiffSnapshot';
+import { useAgentBaselines } from './hooks/useAgentBaselines';
 import { shouldAdvanceFrontier, formatReferenceLabel } from './lib/review-frontier';
 import { useComments, type CommentFocusOrigin } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
@@ -589,10 +590,14 @@ export default function App() {
   }, [rawMarkdown]);
 
   // Diff snapshot state
-  const { currentSnapshot, currentReference, captureReference, restoreReference } = useDiffSnapshot(
-    activeFilePath,
-    rawMarkdownRef,
-  );
+  const {
+    currentSnapshot,
+    currentReference,
+    captureReference,
+    restoreReference,
+    seedReference,
+    getReference,
+  } = useDiffSnapshot(activeFilePath, rawMarkdownRef);
 
   // Ref to access snapshot state inside callbacks without adding dependencies.
   const currentSnapshotRef = useRef(currentSnapshot);
@@ -602,6 +607,29 @@ export default function App() {
 
   // Track whether the diff has unseen external changes (badge indicator on diff button)
   const [diffPending, setDiffPending] = useState(false);
+
+  // An agent's before copy (mdr_baseline) arrives silently: the diff button
+  // enables on its own. The pending dot lights only when the file we are
+  // looking at already differs from that copy, which is the agent-first case
+  // where the edit landed before the reference did.
+  const activeFilePathRef = useRef(activeFilePath);
+  useLayoutEffect(() => {
+    activeFilePathRef.current = activeFilePath;
+  }, [activeFilePath]);
+  const onBaselineSeeded = useCallback(
+    (path: string, ref: DiffReference) => {
+      if (path === activeFilePathRef.current && ref.content !== rawMarkdownRef.current) {
+        setDiffPending(true);
+      }
+    },
+    [rawMarkdownRef],
+  );
+  useAgentBaselines({
+    openPaths: tabs.map((t) => t.filePath),
+    getReference,
+    seedReference,
+    onSeeded: onBaselineSeeded,
+  });
 
   // Single source of truth for diff state — both views and the panel
   // toolbar badge read from this so they always agree, and the badge can
