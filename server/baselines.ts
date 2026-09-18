@@ -86,6 +86,7 @@ export class BaselineStore {
 }
 
 function toMeta(entry: Baseline): BaselineMeta {
-  const { content: _content, ...meta } = entry;
+  const meta: BaselineMeta = { path: entry.path, capturedAt: entry.capturedAt, bytes: entry.bytes };
+  if (entry.agentName !== undefined) meta.agentName = entry.agentName;
   return meta;
 }
