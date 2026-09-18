@@ -43,6 +43,10 @@ export function useAgentBaselines(opts: Options): {
 } {
   const { openPaths, getReference, seedReference, onSeeded, enabled = true } = opts;
   const [baselines, setBaselines] = useState<BaselineMeta[]>([]);
+  // Bumped after every successful metadata poll, even when the metadata
+  // itself is unchanged, so the seed pass below reruns and can retry a
+  // content fetch that failed on a previous pass.
+  const [pollTick, setPollTick] = useState(0);
   const attempted = useRef(new Set<string>());
 
   const callbacks = useRef({ getReference, seedReference, onSeeded });
@@ -57,6 +61,7 @@ export function useAgentBaselines(opts: Options): {
       if (!res.ok) return;
       const data = (await res.json()) as { baselines: BaselineMeta[] };
       setBaselines((prev) => (metasEqual(prev, data.baselines) ? prev : data.baselines));
+      setPollTick((t) => t + 1);
     } catch {
       /* next poll retries */
     }
@@ -76,11 +81,13 @@ export function useAgentBaselines(opts: Options): {
     };
   }, [enabled, fetchMetas]);
 
-  // Seed pass: whenever metadata or the open set changes.
+  // Seed pass: whenever metadata, the open set, or a poll tick changes. A
+  // fetch that is still in flight when this reruns is not cancelled: the
+  // `callbacks` ref always calls the latest seedReference/onSeeded, and
+  // seedReference is newest-wins, so a late-resolving fetch is harmless.
   const openKey = openPaths.join('\n');
   useEffect(() => {
     if (!enabled) return;
-    let cancelled = false;
     const open = new Set(openPaths);
     for (const meta of baselines) {
       if (!open.has(meta.path)) continue;
@@ -97,7 +104,10 @@ export function useAgentBaselines(opts: Options): {
           const res = await fetch(`/api/baselines/content?path=${encodeURIComponent(meta.path)}`, {
             cache: 'no-store',
           });
-          if (!res.ok || cancelled) return;
+          if (!res.ok) {
+            attempted.current.delete(key);
+            return;
+          }
           const full = (await res.json()) as BaselineMeta & { content: string };
           const ref: DiffReference = {
             content: full.content,
@@ -105,23 +115,21 @@ export function useAgentBaselines(opts: Options): {
             origin: 'agent',
             ...(full.agentName ? { agentName: full.agentName } : {}),
           };
-          if (cancelled) return;
           if (callbacks.current.seedReference(meta.path, ref)) {
             callbacks.current.onSeeded?.(meta.path, ref);
           }
         } catch {
-          // A failed fetch stays in `attempted`; the next capture has a new
-          // capturedAt and gets its own attempt.
+          // Release the key so the next poll retries this path.
+          attempted.current.delete(key);
         }
       })();
     }
-    return () => {
-      cancelled = true;
-    };
     // openKey stands in for openPaths so a new array with the same members
-    // does not re-run the pass.
+    // does not re-run the pass; pollTick forces a rerun after every poll so
+    // a released key (a failed fetch) gets retried even when the polled
+    // metadata itself is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baselines, openKey, enabled]);
+  }, [baselines, openKey, enabled, pollTick]);
 
   const refresh = useCallback(() => fetchMetas(), [fetchMetas]);
   return { baselines, refresh };

@@ -150,4 +150,62 @@ describe('useAgentBaselines', () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('still seeds when the open set changes while the content fetch is in flight', async () => {
+    const metas: BaselineMeta[] = [{ path: '/a.md', capturedAt: 200, bytes: 3 }];
+    let release: (() => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/baselines/content?path=')) {
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        return new Response(JSON.stringify({ ...metas[0], content: 'old' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ baselines: metas }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const refs = makeRefs();
+    const { rerender } = renderHook(({ openPaths }) => useAgentBaselines({ openPaths, ...refs }), {
+      initialProps: { openPaths: ['/a.md'] },
+    });
+    await waitFor(() => expect(release).not.toBeNull());
+
+    rerender({ openPaths: ['/a.md', '/b.md'] });
+    await act(async () => {
+      release!();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(refs.seedReference).toHaveBeenCalledWith(
+      '/a.md',
+      expect.objectContaining({ content: 'old' }),
+    );
+    expect(contentCalls(fetchMock)).toBe(1);
+  });
+
+  it('retries a content fetch that failed on the next poll', async () => {
+    const metas: BaselineMeta[] = [{ path: '/a.md', capturedAt: 200, bytes: 3 }];
+    let contentAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/baselines/content?path=')) {
+        contentAttempts += 1;
+        if (contentAttempts === 1) return new Response('boom', { status: 500 });
+        return new Response(JSON.stringify({ ...metas[0], content: 'old' }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ baselines: metas }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const refs = makeRefs();
+    renderHook(() => useAgentBaselines({ openPaths: ['/a.md'], ...refs }));
+    await waitFor(() => expect(contentAttempts).toBe(1));
+    expect(refs.seedReference).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(refs.seedReference).toHaveBeenCalledTimes(1));
+    expect(contentAttempts).toBe(2);
+  });
 });
