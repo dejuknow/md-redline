@@ -90,8 +90,11 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
       if (!activeFilePath) return null;
       const prev = refsRef.current.get(activeFilePath) ?? null;
       const now = Date.now();
-      setRefs((prevMap) => {
-        const next = new Map(prevMap);
+      // Applied to both the synchronous mirror and the functional setRefs
+      // updater, so a seedReference called later in the same batch reads a
+      // mirror that already reflects this capture instead of a stale one.
+      const apply = (base: Map<string, DiffReference>) => {
+        const next = new Map(base);
         next.set(activeFilePath, { content: rawMarkdownRef.current, capturedAt: now, origin });
         if (extraEntries) {
           for (const [path, content] of extraEntries) {
@@ -99,7 +102,9 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
           }
         }
         return next;
-      });
+      };
+      refsRef.current = apply(refsRef.current);
+      setRefs(apply);
       return prev;
     },
     [activeFilePath, rawMarkdownRef],
@@ -109,12 +114,15 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
   const restoreReference = useCallback(
     (ref: DiffReference | null) => {
       if (!activeFilePath) return;
-      setRefs((prevMap) => {
-        const next = new Map(prevMap);
+      // Same mirror-then-updater shape as captureReference; see its comment.
+      const apply = (base: Map<string, DiffReference>) => {
+        const next = new Map(base);
         if (ref) next.set(activeFilePath, ref);
         else next.delete(activeFilePath);
         return next;
-      });
+      };
+      refsRef.current = apply(refsRef.current);
+      setRefs(apply);
     },
     [activeFilePath],
   );

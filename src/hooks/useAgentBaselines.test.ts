@@ -208,4 +208,60 @@ describe('useAgentBaselines', () => {
     await waitFor(() => expect(refs.seedReference).toHaveBeenCalledTimes(1));
     expect(contentAttempts).toBe(2);
   });
+
+  it('does not retry a content fetch that returns 403 (4xx is terminal)', async () => {
+    const metas: BaselineMeta[] = [{ path: '/a.md', capturedAt: 200, bytes: 3 }];
+    let contentAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/baselines/content?path=')) {
+        contentAttempts += 1;
+        return new Response('nope', { status: 403 });
+      }
+      return new Response(JSON.stringify({ baselines: metas }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const refs = makeRefs();
+    renderHook(() => useAgentBaselines({ openPaths: ['/a.md'], ...refs }));
+    await waitFor(() => expect(contentAttempts).toBe(1));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(contentAttempts).toBe(1);
+    expect(refs.seedReference).not.toHaveBeenCalled();
+  });
+
+  it('does not re-render its consumer on a poll that finds nothing to retry', async () => {
+    mockServer([{ path: '/a.md', capturedAt: 200, agentName: 'Claude', bytes: 3 }], {
+      '/a.md': 'old',
+    });
+    const refs = makeRefs();
+    let renders = 0;
+    renderHook(() => {
+      renders += 1;
+      return useAgentBaselines({ openPaths: ['/a.md'], ...refs });
+    });
+
+    await waitFor(() => expect(refs.seedReference).toHaveBeenCalledTimes(1));
+    // Let one full poll cycle pass before measuring: React can still spend a
+    // single incidental render settling the first post-mount interval tick
+    // even when polled state does not change. What this test guards against
+    // is a poll that finds nothing to retry costing a render forever, so it
+    // measures the steady state after that one tick has passed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    const rendersAfterSettle = renders;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(renders).toBe(rendersAfterSettle);
+  });
 });

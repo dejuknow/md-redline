@@ -21,6 +21,7 @@ interface Options {
   enabled?: boolean;
 }
 
+// Positional compare: relies on the server listing newest first, deterministically.
 function metasEqual(a: BaselineMeta[], b: BaselineMeta[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -43,11 +44,12 @@ export function useAgentBaselines(opts: Options): {
 } {
   const { openPaths, getReference, seedReference, onSeeded, enabled = true } = opts;
   const [baselines, setBaselines] = useState<BaselineMeta[]>([]);
-  // Bumped after every successful metadata poll, even when the metadata
-  // itself is unchanged, so the seed pass below reruns and can retry a
-  // content fetch that failed on a previous pass.
+  // Bumped after a poll whose seed pass released a key for retry, so the
+  // seed pass below reruns and can retry a content fetch that failed on a
+  // previous pass. A poll that finds nothing to retry leaves this alone.
   const [pollTick, setPollTick] = useState(0);
   const attempted = useRef(new Set<string>());
+  const retryPending = useRef(false);
 
   const callbacks = useRef({ getReference, seedReference, onSeeded });
   useEffect(() => {
@@ -61,7 +63,10 @@ export function useAgentBaselines(opts: Options): {
       if (!res.ok) return;
       const data = (await res.json()) as { baselines: BaselineMeta[] };
       setBaselines((prev) => (metasEqual(prev, data.baselines) ? prev : data.baselines));
-      setPollTick((t) => t + 1);
+      if (retryPending.current) {
+        retryPending.current = false;
+        setPollTick((t) => t + 1);
+      }
     } catch {
       /* next poll retries */
     }
@@ -105,7 +110,13 @@ export function useAgentBaselines(opts: Options): {
             cache: 'no-store',
           });
           if (!res.ok) {
-            attempted.current.delete(key);
+            // A 4xx will not fix itself (a 404 from expiry is dropped from
+            // the list on the next poll anyway), so only a server error is
+            // worth retrying.
+            if (res.status >= 500) {
+              attempted.current.delete(key);
+              retryPending.current = true;
+            }
             return;
           }
           const full = (await res.json()) as BaselineMeta & { content: string };
@@ -119,14 +130,15 @@ export function useAgentBaselines(opts: Options): {
             callbacks.current.onSeeded?.(meta.path, ref);
           }
         } catch {
-          // Release the key so the next poll retries this path.
+          // Network error: release the key so the next poll retries this path.
           attempted.current.delete(key);
+          retryPending.current = true;
         }
       })();
     }
     // openKey stands in for openPaths so a new array with the same members
-    // does not re-run the pass; pollTick forces a rerun after every poll so
-    // a released key (a failed fetch) gets retried even when the polled
+    // does not re-run the pass; pollTick advances only when a released key
+    // needs a retry, forcing a rerun of this pass even when the polled
     // metadata itself is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baselines, openKey, enabled, pollTick]);

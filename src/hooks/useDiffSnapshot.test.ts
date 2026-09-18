@@ -248,6 +248,18 @@ describe('agent-captured references', () => {
     expect(result.current.currentReference?.origin).toBe('review');
   });
 
+  it('reports false for a seed older than a capture queued in the same batch', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    let seeded = true;
+    act(() => {
+      result.current.captureReference('review');
+      seeded = result.current.seedReference('/a.md', agentRef(1));
+    });
+    expect(seeded).toBe(false);
+    expect(result.current.currentReference?.origin).toBe('review');
+  });
+
   it('migrates an unknown stored origin to handoff', () => {
     localStorage.setItem(
       STORAGE_KEY,

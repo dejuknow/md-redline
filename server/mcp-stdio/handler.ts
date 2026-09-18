@@ -725,9 +725,10 @@ export async function handleReviewToolCall(
 
 /**
  * mdr_baseline: ask the server to keep a copy of each file as it is now, so
- * the reviewer's diff can show what the agent changed. Non-blocking. Access
- * is granted first, exactly as the review tools do, so a path the agent has
- * never opened in mdr still resolves inside the allowed roots.
+ * the reviewer's diff can show what the agent changed. Non-blocking.
+ * grantAccess checks each path sits inside the allowed roots and returns
+ * its canonical form, exactly as the review tools do before creating a
+ * session; it widens nothing.
  */
 export async function handleBaselineToolCall(
   input: BaselineInput,

@@ -4935,6 +4935,15 @@ describe('baselines API', () => {
     expect(response.status).toBe(400);
   });
 
+  it('GET /api/baselines/content is 403 for a path outside the allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toMatch(/Access denied/);
+  });
+
   it('POST rejects a malformed body', async () => {
     expect((await post({})).response.status).toBe(400);
     expect((await post({ filePaths: [] })).response.status).toBe(400);

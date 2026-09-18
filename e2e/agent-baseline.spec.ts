@@ -6,6 +6,9 @@ import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// The server's baseline store lives for the whole Playwright run while browser
+// storage is per test, so this spec owns its own fixture file: no other spec
+// should POST a baseline for a fixture shared with another spec.
 const FIXTURE = resolve(__dirname, 'fixtures/agent-baseline-doc.md');
 
 test.beforeEach(async ({ page }) => {
