@@ -4879,3 +4879,107 @@ describe('writePortFile', () => {
     }
   });
 });
+
+describe('baselines API', () => {
+  const post = (body: unknown) =>
+    requestJson(app, '/api/baselines', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('POST captures the file content from disk and returns metadata', async () => {
+    await writeFile(docsFile, '# before\n', 'utf8');
+    const { response, body } = await post({ filePaths: [docsFile], agentName: 'Claude' });
+    expect(response.status).toBe(201);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    expect(baselines).toHaveLength(1);
+    expect(baselines[0]).toMatchObject({ path: docsFile, agentName: 'Claude', bytes: 9 });
+    expect(typeof baselines[0].capturedAt).toBe('number');
+    expect(baselines[0]).not.toHaveProperty('content');
+  });
+
+  it('GET /api/baselines lists metadata only', async () => {
+    await writeFile(docsFile, '# listed\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    const { response, body } = await requestJson(app, '/api/baselines');
+    expect(response.status).toBe(200);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    const mine = baselines.find((b) => b.path === docsFile);
+    expect(mine).toBeDefined();
+    expect(mine).not.toHaveProperty('content');
+  });
+
+  it('GET /api/baselines/content returns the stored copy', async () => {
+    await writeFile(docsFile, '# stored\n', 'utf8');
+    await post({ filePaths: [docsFile], agentName: 'Codex' });
+    await writeFile(docsFile, '# edited after capture\n', 'utf8');
+    const { response, body } = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ path: docsFile, content: '# stored\n', agentName: 'Codex' });
+  });
+
+  it('GET /api/baselines/content is 404 when nothing was captured', async () => {
+    const { response } = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(rootFile)}`,
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('GET /api/baselines/content is 400 without a path', async () => {
+    const { response } = await requestJson(app, '/api/baselines/content');
+    expect(response.status).toBe(400);
+  });
+
+  it('POST rejects a malformed body', async () => {
+    expect((await post({})).response.status).toBe(400);
+    expect((await post({ filePaths: [] })).response.status).toBe(400);
+    expect((await post({ filePaths: [''] })).response.status).toBe(400);
+    expect((await post({ filePaths: [docsFile], agentName: '' })).response.status).toBe(400);
+    expect((await post({ filePaths: [docsFile], agentName: 'x'.repeat(65) })).response.status).toBe(
+      400,
+    );
+  });
+
+  it('POST is 403 for a file outside the allowed roots', async () => {
+    const { response, body } = await post({ filePaths: [externalFile] });
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toMatch(/Access denied/);
+  });
+
+  it('POST is 400 for a non-markdown file', async () => {
+    const txt = join(cwdRoot, 'notes.txt');
+    await writeFile(txt, 'plain', 'utf8');
+    const { response } = await post({ filePaths: [txt] });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST is 404 for a missing file', async () => {
+    const { response, body } = await post({ filePaths: [join(cwdRoot, 'nope.md')] });
+    expect(response.status).toBe(404);
+    expect(String(body.error)).toMatch(/File not found/);
+  });
+
+  it('POST is 413 for an oversize file', async () => {
+    const big = join(cwdRoot, 'big.md');
+    await writeFile(big, 'x'.repeat(2 * 1024 * 1024 + 1), 'utf8');
+    const { response } = await post({ filePaths: [big] });
+    expect(response.status).toBe(413);
+  });
+
+  it('POST is all-or-nothing across a mixed batch', async () => {
+    const atomic = join(cwdRoot, 'atomic.md');
+    await writeFile(atomic, '# atomic\n', 'utf8');
+    const { response } = await post({ filePaths: [atomic, join(cwdRoot, 'missing.md')] });
+    expect(response.status).toBe(404);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(atomic)}`,
+    );
+    expect(probe.response.status).toBe(404);
+  });
+});
