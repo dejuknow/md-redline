@@ -4943,6 +4943,8 @@ describe('baselines API', () => {
     expect((await post({ filePaths: [docsFile], agentName: 'x'.repeat(65) })).response.status).toBe(
       400,
     );
+    expect((await post(null)).response.status).toBe(400);
+    expect((await post([docsFile])).response.status).toBe(400);
   });
 
   it('POST is 403 for a file outside the allowed roots', async () => {

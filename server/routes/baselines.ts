@@ -54,6 +54,9 @@ export function registerBaselineRoutes(
     } catch {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return c.json({ error: 'Body must be a JSON object' }, 400);
+    }
     const { filePaths, agentName } = body;
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       return c.json({ error: 'filePaths must be a non-empty array' }, 400);
