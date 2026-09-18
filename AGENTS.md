@@ -42,6 +42,8 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `server/index.ts`: file I/O API, preferences, native picker, SSE watch, reveal-in-file-manager
 - `server/review-sessions.ts`: review session store (create, batch, finish, abort, heartbeat, sweep)
 - `server/routes/review-sessions.ts`: HTTP routes for review session endpoints
+- `server/baselines.ts`: in-memory store of agent "before" copies behind `mdr_baseline` (newest wins, 64 entries, 2 MiB each, 24h lazy expiry)
+- `server/routes/baselines.ts`: HTTP routes for the baseline store
 - `server/mcp-stdio/`: MCP stdio server (handler, client, server, types, validate)
 - `server/update-check.ts`: daily npm registry check for a newer published version, cached via preferences
 - `bin/fs-atomic.js`: `atomicWriteFile` (temp + rename, temp removed on failure) and the
@@ -79,6 +81,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
+- `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
 - `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the toolbar badge
 - `bin/cli.js`: auto-start CLI and browser opener
 - `eval/runner.ts`: eval harness; default adapter is currently `claude-cli`
@@ -186,6 +189,11 @@ chooses, not about every byte that can reach disk during a request.
 - `POST /api/review-sessions/:id/asks/:askId/reply` — structured reply channel; resolves the ask. The web UI no longer uses it (users reply inline on the comment card; the file-save sweep resolves the ask), but it remains for programmatic callers.
 - `POST /api/review-sessions/:id/asks/:askId/release` — resolve the ask with `{ status: 'no_reply', reason: 'released' }`. Only producer today is the agent's own tool-call cancellation (no UI button).
 - `GET /api/review-sessions/:id/asks` — list pending asks for the session
+
+**Baselines (agent before copies)**
+- `POST /api/baselines` — `{ filePaths, agentName? }`. Reads each file from disk after the same allowed-roots check as session creation and stores the content keyed by canonical path. All-or-nothing: 403 outside roots, 400 non-`.md`, 404 missing, 413 over 2 MiB, and nothing is stored on any failure. 201 `{ baselines: [{ path, capturedAt, agentName?, bytes }] }`.
+- `GET /api/baselines` — metadata only, newest first. The browser polls this every 5s.
+- `GET /api/baselines/content?path=` — one full record `{ path, content, capturedAt, agentName?, bytes }`, or 404.
 
 **Inline reply delivery** — when the user answers an agent question by replying on
 the comment card, the reply is stored inside the marker and saved via `PUT
@@ -457,7 +465,7 @@ terminal update notice.
 
 ## MCP stdio server
 
-The MCP server exposes four tools.
+The MCP server exposes five tools.
 
 **`mdr_request_review`** — An AI agent calls it with `{ filePaths, enableResolve? }` to
 create a user-initiated review session. The server opens the browser with
@@ -563,6 +571,13 @@ see the caveat under `mdr_comment` above.
 
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.
+
+**`mdr_baseline`** — `{ filePaths, agentName? }`. Non-blocking. Grants access to the
+paths, then asks the server to store a copy of each file as it is now. An agent that
+edits a document and then calls `mdr_request_review` must call this first, or the
+reviewer's diff button stays disabled on that first round (only the reviewer's own
+clicks capture a reference otherwise). The `mdr_request_review` description points
+agents at it. Newest capture wins on the server and in the browser.
 
 The `AskWaitResult` type returned by `mdr_ask`'s wait:
 
@@ -1355,9 +1370,10 @@ States, driven by the active file's sendable-comment count:
   this review. The active row is tagged "· this file".
 
 ### Diff overlay
-After a review handoff, a diff overlay shows what changed since the handoff,
+After a review handoff, or after an agent saves a before copy with `mdr_baseline`,
+a diff overlay shows what changed since that reference,
 available in both rendered and raw views via the panel toolbar. The handoff
-captures a **diff reference** per file (`{ content, capturedAt, origin }`,
+captures a **diff reference** per file (`{ content, capturedAt, origin, agentName? }`,
 persisted in `localStorage` under `md-redline-snapshots`; legacy bare-string
 values are migrated on load). The change set is computed by `useDiffLines`
 (`diffChunkCount` is the number of changed chunks). The reference is
@@ -1378,6 +1394,14 @@ auto-managed as a "review frontier":
 - **Mark reviewed** (panel toolbar text button + command palette, shown only
   when `diffChunkCount > 0`) manually advances the reference to the current
   content, also with an Undo toast.
+- **Agent before copies**: `useAgentBaselines` polls `GET /api/baselines` and, for
+  every open tab whose server copy is newer than the local reference, fetches the
+  content once and seeds it as `origin: 'agent'`. Precedence is newest `capturedAt`
+  wins, in both directions: a Mark reviewed or handoff click after the agent's
+  capture stays; the agent's next capture re-seeds. Arrival is silent; the pending
+  dot lights only when the active file already differs from the copy. The label
+  reads "Before Claude's edits, 3:14 PM" (or "Before the agent's edits" without a
+  name).
 
 Reference store + migration live in `src/hooks/useDiffSnapshot.ts`; the pure
 advance decision and label formatter in `src/lib/review-frontier.ts`.
