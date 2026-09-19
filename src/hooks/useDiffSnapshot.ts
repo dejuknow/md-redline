@@ -92,12 +92,15 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
       if (!activeFilePath) return null;
       const prev = refsRef.current.get(activeFilePath) ?? null;
       const now = Date.now();
+      // Read once, before apply is defined, so the mirror and the queued
+      // state capture the same text even if React runs the updater later.
+      const content = rawMarkdownRef.current;
       // Applied to both the synchronous mirror and the functional setRefs
       // updater, so a seedReference called later in the same batch reads a
       // mirror that already reflects this capture instead of a stale one.
       const apply = (base: Map<string, DiffReference>) => {
         const next = new Map(base);
-        next.set(activeFilePath, { content: rawMarkdownRef.current, capturedAt: now, origin });
+        next.set(activeFilePath, { content, capturedAt: now, origin });
         if (extraEntries) {
           for (const [path, content] of extraEntries) {
             next.set(path, { content, capturedAt: now, origin: 'handoff' });
@@ -139,6 +142,8 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
   const seedReference = useCallback((path: string, ref: DiffReference): boolean => {
     if (refsRef.current.has(path)) return false;
     const apply = (base: Map<string, DiffReference>) => {
+      // Defensive: the mirror check above already refused this path, and the
+      // mirror always equals the queued state, so this cannot fire today.
       if (base.has(path)) return base;
       const next = new Map(base);
       next.set(path, ref);

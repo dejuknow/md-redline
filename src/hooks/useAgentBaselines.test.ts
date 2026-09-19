@@ -52,7 +52,7 @@ describe('useAgentBaselines', () => {
     vi.useRealTimers();
   });
 
-  it('seeds an open path whose server baseline is newer than the local reference', async () => {
+  it('seeds an open path that has no local reference', async () => {
     const fetchMock = mockServer(
       [{ path: '/a.md', capturedAt: 200, agentName: 'Claude', bytes: 3 }],
       { '/a.md': 'old' },

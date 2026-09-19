@@ -5,7 +5,7 @@
  * reference that, until now, only the reviewer's own clicks could create.
  * An agent calls `mdr_baseline` before editing; the route reads the file
  * from disk and stores it here; the browser seeds its reference from this
- * copy when it has none newer for that path.
+ * copy only when it has no reference for that path at all.
  *
  * Pure in-memory store. Reading files, checking sizes, and validating
  * paths belong to the route layer. Nothing survives a server restart,
@@ -16,7 +16,10 @@ export interface Baseline {
   /** Canonical absolute path (realpath), as the routes resolve it. */
   path: string;
   content: string;
-  /** Epoch ms at capture. The precedence rule everywhere is newest wins. */
+  /**
+   * Epoch ms at capture. The store keeps the newest copy per path; the
+   * browser only uses a copy to fill a gap.
+   */
   capturedAt: number;
   agentName?: string;
   /** UTF-8 byte length of `content`. */

@@ -5015,7 +5015,9 @@ describe('baselines API', () => {
   });
 
   it('POST is 403 when the parent directory does not exist', async () => {
-    const { response } = await post({ filePaths: [join(cwdRoot, 'no-such-dir', 'x.md')] });
+    const missing = join(cwdRoot, 'no-such-dir', 'x.md');
+    const { response, body } = await post({ filePaths: [missing] });
     expect(response.status).toBe(403);
+    expect(String(body.error)).toContain(missing);
   });
 });

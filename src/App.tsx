@@ -620,9 +620,9 @@ export default function App() {
   useLayoutEffect(() => {
     activeIsLoadingRef.current = isLoading;
   }, [isLoading]);
-  const onBaselineSeeded = useCallback(
-    (path: string, ref: DiffReference) => {
-      if (path !== activeFilePathRef.current || activeIsLoadingRef.current) return;
+  const seedAwaitingLoadRef = useRef<{ path: string; ref: DiffReference } | null>(null);
+  const checkSeedAgainstFile = useCallback(
+    (ref: DiffReference) => {
       try {
         // Same comparison the external-change handler uses: the diff is
         // computed on comment-stripped text, so marker-only differences
@@ -636,6 +636,25 @@ export default function App() {
     },
     [rawMarkdownRef],
   );
+  // A seed that arrives while the file is still loading is checked once the
+  // load finishes (see the effect below), so it is never silently dropped.
+  const onBaselineSeeded = useCallback(
+    (path: string, ref: DiffReference) => {
+      if (path !== activeFilePathRef.current) return;
+      if (activeIsLoadingRef.current) {
+        seedAwaitingLoadRef.current = { path, ref };
+        return;
+      }
+      checkSeedAgainstFile(ref);
+    },
+    [checkSeedAgainstFile],
+  );
+  useEffect(() => {
+    const pending = seedAwaitingLoadRef.current;
+    if (!pending || isLoading) return;
+    seedAwaitingLoadRef.current = null;
+    if (pending.path === activeFilePath) checkSeedAgainstFile(pending.ref);
+  }, [isLoading, activeFilePath, checkSeedAgainstFile]);
   useAgentBaselines({
     openPaths: tabs.map((t) => t.filePath),
     getReference,

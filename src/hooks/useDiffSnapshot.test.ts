@@ -217,7 +217,7 @@ describe('agent-captured references', () => {
     expect(result.current.currentReference?.origin).toBe('agent');
   });
 
-  it('seedReference keeps a newer local reference (newest wins)', () => {
+  it('seedReference keeps a newer local reference', () => {
     const { hookArgs } = setup('/a.md', 'now');
     const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
     act(() => result.current.captureReference('review'));
@@ -261,7 +261,7 @@ describe('agent-captured references', () => {
     expect(result.current.currentReference?.origin).toBe('review');
   });
 
-  it('reports false for a seed older than a capture queued in the same batch', () => {
+  it('reports false for a seed after a capture queued in the same batch', () => {
     const { hookArgs } = setup('/a.md', 'now');
     const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
     let seeded = true;

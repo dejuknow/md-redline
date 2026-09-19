@@ -39,7 +39,7 @@ export function registerBaselineRoutes(
       const msg = err instanceof Error ? err.message : 'invalid path';
       return {
         ok: false,
-        failure: { status: msg.startsWith('Access denied') ? 403 : 400, error: msg },
+        failure: { status: msg.startsWith('Access denied') ? 403 : 400, error: `${msg}: ${input}` },
       };
     }
     if (extname(resolved).toLowerCase() !== '.md') {
