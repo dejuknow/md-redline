@@ -609,17 +609,29 @@ export default function App() {
   const [diffPending, setDiffPending] = useState(false);
 
   // An agent's before copy (mdr_baseline) arrives silently: the diff button
-  // enables on its own. The pending dot lights only when the file we are
-  // looking at already differs from that copy, which is the agent-first case
-  // where the edit landed before the reference did.
+  // enables on its own. The pending dot lights only when the active file's
+  // text, ignoring comment markers, already differs from that copy, which is
+  // the agent-first case where the edit landed before the reference did.
   const activeFilePathRef = useRef(activeFilePath);
   useLayoutEffect(() => {
     activeFilePathRef.current = activeFilePath;
   }, [activeFilePath]);
+  const activeIsLoadingRef = useRef(isLoading);
+  useLayoutEffect(() => {
+    activeIsLoadingRef.current = isLoading;
+  }, [isLoading]);
   const onBaselineSeeded = useCallback(
     (path: string, ref: DiffReference) => {
-      if (path === activeFilePathRef.current && ref.content !== rawMarkdownRef.current) {
-        setDiffPending(true);
+      if (path !== activeFilePathRef.current || activeIsLoadingRef.current) return;
+      try {
+        // Same comparison the external-change handler uses: the diff is
+        // computed on comment-stripped text, so marker-only differences
+        // must not light the dot over an empty diff.
+        const before = parseComments(ref.content).cleanMarkdown;
+        const now = parseComments(rawMarkdownRef.current).cleanMarkdown;
+        if (before !== now) setDiffPending(true);
+      } catch {
+        /* unparseable content: leave the dot alone */
       }
     },
     [rawMarkdownRef],
@@ -863,7 +875,7 @@ export default function App() {
   // (railAllowed, the surface toggles, the focus-routing effects, the density
   // strip, the margin layer render) cannot silently diverge when rail
   // eligibility changes.
-  const railCapable = viewMode === 'rendered' && !(diffEnabled && currentSnapshot);
+  const railCapable = viewMode === 'rendered' && !(diffEnabled && currentSnapshot != null);
   const railAllowed = railCapable && sidebarVisible && !focusMode;
   // Resolved comments still paint a faint trace on their anchor, but they get
   // no margin card: one would read as an orphan, and the whole point of
@@ -1406,7 +1418,7 @@ export default function App() {
   const persistedTheme = usePersistedTheme();
   const mermaidFullscreen = useMermaidFullscreen();
   const openMermaidFullscreenState = mermaidFullscreen.open;
-  const renderedDiffVisible = Boolean(diffEnabled && currentSnapshot && diffLines);
+  const renderedDiffVisible = Boolean(diffEnabled && currentSnapshot != null && diffLines);
   const mermaidRendererEnabled =
     mermaidFullscreen.isOpen || (viewMode === 'rendered' && !renderedDiffVisible);
   const mermaidSvgMap = useMermaidRenderer(
@@ -1699,7 +1711,7 @@ export default function App() {
             if (d > 0) parts.push(`${d} addressed`);
             if (rp > 0) parts.push(`${rp} ${rp > 1 ? 'replies' : 'reply'} added`);
             const diffAction =
-              cleanContentChanged && currentSnapshotRef.current
+              cleanContentChanged && currentSnapshotRef.current != null
                 ? {
                     label: 'View diff',
                     // Stay in whatever view the user is in — diff overlay
@@ -1742,7 +1754,7 @@ export default function App() {
       }
 
       // Flag the diff button when content changed and a snapshot exists
-      if (cleanContentChanged && currentSnapshotRef.current) {
+      if (cleanContentChanged && currentSnapshotRef.current != null) {
         setDiffPending(true);
       }
     },
@@ -2452,7 +2464,7 @@ export default function App() {
         },
       },
     ];
-    if (currentSnapshot) {
+    if (currentSnapshot != null) {
       cmds.push({
         id: 'toggle-diff-overlay',
         label: diffEnabled ? 'Hide diff' : 'Show diff',
@@ -3183,7 +3195,7 @@ export default function App() {
                             className="motion-safe:transition-[width] motion-safe:duration-150"
                             style={{ marginLeft: PAD_L, width: geometry.colWidth }}
                           >
-                            {diffEnabled && currentSnapshot && diffLines ? (
+                            {diffEnabled && currentSnapshot != null && diffLines ? (
                               // key on activeFilePath forces a remount when the user
                               // switches files while the diff overlay is on, so the
                               // mount-time auto-scroll-to-first-chunk fires for each

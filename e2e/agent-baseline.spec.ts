@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { writeFileSync } from 'fs';
+import { rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
@@ -10,14 +10,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // storage is per test, so this spec owns its own fixture file: no other spec
 // should POST a baseline for a fixture shared with another spec.
 const FIXTURE = resolve(__dirname, 'fixtures/agent-baseline-doc.md');
+// A path this spec captures a baseline for before the file exists, then
+// creates. Removed before and after every run so no test starts from a
+// leftover file another run left behind.
+const NEW_FILE = resolve(__dirname, 'fixtures/agent-baseline-new.md');
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, TEST_DOC_BASELINE);
+  rmSync(NEW_FILE, { force: true });
   await resetTestAppState(page);
 });
 
 test.afterAll(() => {
   writeFileSync(FIXTURE, TEST_DOC_BASELINE);
+  rmSync(NEW_FILE, { force: true });
 });
 
 async function openFixture(page: Page) {
@@ -26,7 +32,9 @@ async function openFixture(page: Page) {
 }
 
 function diffToggle(page: Page) {
-  return page.locator('.raw-toolbar button[title*="diff" i]').first();
+  return page
+    .locator('.raw-toolbar')
+    .locator('button[title^="Show diff"], button[title^="Hide diff"]');
 }
 
 test.describe('agent before copy (mdr_baseline)', () => {
@@ -56,7 +64,7 @@ test.describe('agent before copy (mdr_baseline)', () => {
     });
   });
 
-  test('a later Mark reviewed click outranks the agent copy until the agent captures again', async ({
+  test("an agent copy never replaces the reviewer's reference, even when called after editing", async ({
     page,
     request,
     baseURL,
@@ -75,14 +83,52 @@ test.describe('agent before copy (mdr_baseline)', () => {
     await page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' }).click();
     await expect(page.getByTestId('diff-reference-label')).toHaveCount(0);
 
-    // The agent edits again and captures again: the newer copy re-seeds.
+    // The reviewer's own edit lands after Mark reviewed, then the agent
+    // captures a copy of that same, already-newer file. seedReference only
+    // fills a gap, so this late capture must never overwrite the reference
+    // Mark reviewed just set.
+    writeFileSync(FIXTURE, TEST_DOC_BASELINE.replace('Section One', 'Section One, revised twice'));
     await request.post(`${baseURL}/api/baselines`, {
       headers: { 'content-type': 'application/json' },
       data: { filePaths: [FIXTURE], agentName: 'Claude' },
     });
-    writeFileSync(FIXTURE, TEST_DOC_BASELINE.replace('Section One', 'Section One, revised twice'));
-    await expect(page.getByTestId('diff-reference-label')).toContainText("Before Claude's edits", {
+    await expect(page.getByTestId('diff-reference-label')).toContainText('Since last review', {
       timeout: 15_000,
     });
+
+    // Wait past one full poll cycle of the agent-baseline poller: the label
+    // must still read "Since last review", never flip to the agent copy.
+    await page.waitForTimeout(6_000);
+    await expect(page.getByTestId('diff-reference-label')).toContainText('Since last review');
+    await expect(page.getByTestId('diff-reference-label')).not.toContainText(
+      "Before Claude's edits",
+    );
+  });
+
+  test('a file the agent is about to create diffs as fully added', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    // The agent announces a file that does not exist yet: an empty copy.
+    const captured = await request.post(`${baseURL}/api/baselines`, {
+      headers: { 'content-type': 'application/json' },
+      data: { filePaths: [NEW_FILE], agentName: 'Claude' },
+    });
+    expect(captured.status()).toBe(201);
+    const { baselines } = (await captured.json()) as { baselines: Array<{ bytes: number }> };
+    expect(baselines[0].bytes).toBe(0);
+
+    // The agent creates the file.
+    writeFileSync(NEW_FILE, '# New spec\n\nA brand new paragraph.\n');
+
+    await page.goto(`/?file=${NEW_FILE}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+
+    await expect(diffToggle(page)).toBeEnabled({ timeout: 10_000 });
+    await diffToggle(page).click();
+
+    await expect(page.locator('.rendered-diff-added')).toBeVisible();
+    await expect(page.getByTestId('diff-reference-label')).toContainText("Before Claude's edits");
   });
 });
