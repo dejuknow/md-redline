@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, openSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -234,4 +234,61 @@ describe('mdr baseline --hook --no-start (stdin regression)', () => {
     expect(outcome.timedOut).toBe(false);
     expect(outcome.code).toBe(0);
   }, 7000);
+
+  it('exits 0 and posts nothing when stdin is redirected from /dev/null', async () => {
+    const child = spawn(process.execPath, [BIN, 'baseline', '--hook'], {
+      env: {
+        ...process.env,
+        MD_REDLINE_PORT: String(serverPort),
+        PORT: '',
+      },
+      // File-backed stdin from /dev/null: process.stdin.unref() does not
+      // exist on such streams, so this would crash unless guarded.
+      stdio: [openSync('/dev/null', 'r'), 'pipe', 'pipe'],
+    });
+    children.push(child);
+
+    const result = await new Promise<CliResult>((resolvePromise) => {
+      let stdout = '';
+      let stderr = '';
+      child.stdout!.on('data', (chunk) => (stdout += String(chunk)));
+      child.stderr!.on('data', (chunk) => (stderr += String(chunk)));
+      child.once('exit', (code) => resolvePromise({ code, stdout, stderr }));
+    });
+
+    expect(result.code).toBe(0);
+    expect(posts).toEqual([]);
+  });
+
+  it('exits 0 and posts the path when stdin is a temp file with a hook payload', async () => {
+    const docPath = join(scratchDir(), 'doc.md');
+    const payloadFile = join(scratchDir(), 'payload.json');
+    writeFileSync(
+      payloadFile,
+      JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: docPath } }),
+    );
+
+    const child = spawn(process.execPath, [BIN, 'baseline', '--hook'], {
+      env: {
+        ...process.env,
+        MD_REDLINE_PORT: String(serverPort),
+        PORT: '',
+      },
+      // File-backed stdin from a regular temp file: process.stdin.unref()
+      // does not exist on such streams.
+      stdio: [openSync(payloadFile, 'r'), 'pipe', 'pipe'],
+    });
+    children.push(child);
+
+    const result = await new Promise<CliResult>((resolvePromise) => {
+      let stdout = '';
+      let stderr = '';
+      child.stdout!.on('data', (chunk) => (stdout += String(chunk)));
+      child.stderr!.on('data', (chunk) => (stderr += String(chunk)));
+      child.once('exit', (code) => resolvePromise({ code, stdout, stderr }));
+    });
+
+    expect(result.code).toBe(0);
+    expect(posts).toEqual([{ filePaths: [docPath], onlyIfMissing: true }]);
+  });
 });

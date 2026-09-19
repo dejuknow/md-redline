@@ -915,7 +915,10 @@ function readStdin() {
     const finish = (value) => {
       clearTimeout(timer);
       process.stdin.pause();
-      process.stdin.unref();
+      // unref exists on socket- and tty-backed stdin, not on the file-backed
+      // stream a shell redirect from a file or /dev/null produces, where there
+      // is no handle keeping the loop alive to release.
+      if (typeof process.stdin.unref === 'function') process.stdin.unref();
       resolveStdin(value);
     };
     const timer = setTimeout(() => finish(''), 2000);
