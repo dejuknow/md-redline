@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useAgentBaselines, type BaselineMeta } from './useAgentBaselines';
+import { useAgentBaselines, MAX_SEED_BYTES, type BaselineMeta } from './useAgentBaselines';
 import type { DiffReference } from './useDiffSnapshot';
 
 type FetchMock = ReturnType<typeof vi.fn>;
@@ -33,8 +33,7 @@ function makeRefs(initial: Record<string, DiffReference> = {}) {
     map,
     getReference: (p: string) => map.get(p) ?? null,
     seedReference: vi.fn((p: string, ref: DiffReference) => {
-      const existing = map.get(p);
-      if (existing && existing.capturedAt >= ref.capturedAt) return false;
+      if (map.has(p)) return false;
       map.set(p, ref);
       return true;
     }),
@@ -73,18 +72,35 @@ describe('useAgentBaselines', () => {
     expect(contentCalls(fetchMock)).toBe(1);
   });
 
-  it('does not fetch content when the local reference is newer', async () => {
+  it('does not fetch content when the path already has a reference, even an older one', async () => {
     const fetchMock = mockServer([{ path: '/a.md', capturedAt: 100, bytes: 3 }], {
       '/a.md': 'old',
     });
     const refs = makeRefs({
-      '/a.md': { content: 'mine', capturedAt: 150, origin: 'review' },
+      '/a.md': { content: 'mine', capturedAt: 50, origin: 'review' },
     });
     renderHook(() => useAgentBaselines({ openPaths: ['/a.md'], ...refs }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/baselines', expect.anything()),
     );
+    expect(contentCalls(fetchMock)).toBe(0);
+    expect(refs.seedReference).not.toHaveBeenCalled();
+  });
+
+  it('skips a copy above the seed size cap', async () => {
+    const fetchMock = mockServer([{ path: '/a.md', capturedAt: 200, bytes: MAX_SEED_BYTES + 1 }], {
+      '/a.md': 'old',
+    });
+    const refs = makeRefs();
+    renderHook(() => useAgentBaselines({ openPaths: ['/a.md'], ...refs }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/baselines', expect.anything()),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
     expect(contentCalls(fetchMock)).toBe(0);
     expect(refs.seedReference).not.toHaveBeenCalled();
   });
@@ -121,16 +137,22 @@ describe('useAgentBaselines', () => {
     const fetchMock = mockServer([{ path: '/a.md', capturedAt: 200, bytes: 3 }], {
       '/a.md': 'old',
     });
-    const refs = makeRefs();
-    renderHook(() => useAgentBaselines({ openPaths: ['/a.md'], ...refs }));
+    // seedReference reports success but never actually stores, so
+    // getReference keeps returning null: the only thing that can stop a
+    // second fetch for the same (path, capturedAt) is the attempted set.
+    const refs = {
+      getReference: () => null,
+      seedReference: vi.fn(() => true),
+    };
+    const { rerender } = renderHook(({ openPaths }) => useAgentBaselines({ openPaths, ...refs }), {
+      initialProps: { openPaths: ['/a.md'] },
+    });
     await waitFor(() => expect(refs.seedReference).toHaveBeenCalledTimes(1));
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-    });
+    // Force two more seed passes without a new baseline or a retry tick.
+    rerender({ openPaths: ['/a.md', '/y.md'] });
+    rerender({ openPaths: ['/a.md', '/y.md', '/z.md'] });
+
     expect(contentCalls(fetchMock)).toBe(1);
   });
 
@@ -210,21 +232,36 @@ describe('useAgentBaselines', () => {
   });
 
   it('does not retry a content fetch that returns 403 (4xx is terminal)', async () => {
-    const metas: BaselineMeta[] = [{ path: '/a.md', capturedAt: 200, bytes: 3 }];
-    let contentAttempts = 0;
+    const metas: BaselineMeta[] = [
+      { path: '/a.md', capturedAt: 200, bytes: 3 },
+      { path: '/b.md', capturedAt: 200, bytes: 3 },
+    ];
+    let aAttempts = 0;
+    let bAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith('/api/baselines/content?path=')) {
-        contentAttempts += 1;
-        return new Response('nope', { status: 403 });
+        const path = decodeURIComponent(url.slice('/api/baselines/content?path='.length));
+        if (path === '/a.md') {
+          aAttempts += 1;
+          return new Response('nope', { status: 403 });
+        }
+        bAttempts += 1;
+        if (bAttempts === 1) return new Response('boom', { status: 500 });
+        return new Response(JSON.stringify({ ...metas[1], content: 'b content' }), {
+          status: 200,
+        });
       }
       return new Response(JSON.stringify({ baselines: metas }), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const refs = makeRefs();
-    renderHook(() => useAgentBaselines({ openPaths: ['/a.md'], ...refs }));
-    await waitFor(() => expect(contentAttempts).toBe(1));
+    renderHook(() => useAgentBaselines({ openPaths: ['/a.md', '/b.md'], ...refs }));
+    await waitFor(() => expect(aAttempts).toBe(1));
+    await waitFor(() => expect(bAttempts).toBe(1));
 
+    // The first poll's retry (from /b.md's 500) also gives a 403-released
+    // key a chance to be retried, which is exactly what must not happen.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
@@ -232,8 +269,9 @@ describe('useAgentBaselines', () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
 
-    expect(contentAttempts).toBe(1);
-    expect(refs.seedReference).not.toHaveBeenCalled();
+    expect(aAttempts).toBe(1);
+    expect(bAttempts).toBe(2);
+    expect(refs.seedReference).not.toHaveBeenCalledWith('/a.md', expect.anything());
   });
 
   it('does not re-render its consumer on a poll that finds nothing to retry', async () => {

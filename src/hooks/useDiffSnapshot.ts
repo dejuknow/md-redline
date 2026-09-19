@@ -60,11 +60,13 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
     }
   });
 
-  // Mirror of refs for synchronous reads inside imperative callbacks.
+  // Mirror of refs for synchronous reads inside imperative callbacks. Every
+  // writer updates it synchronously with the same function it hands to
+  // setRefs, so it always equals the latest queued state. There is
+  // deliberately no post-commit sync: that effect could run after a later
+  // write had already advanced the mirror and roll it back to an older
+  // committed map.
   const refsRef = useRef(refs);
-  useEffect(() => {
-    refsRef.current = refs;
-  }, [refs]);
 
   useEffect(() => {
     try {
@@ -129,23 +131,21 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
 
   /**
    * Accept a reference the browser did not capture itself (an agent's
-   * before copy from the server). Newest wins: the seed lands only when the
-   * path has no reference or its reference is older. A Mark reviewed or
-   * handoff click after the agent's capture is newer and stays put.
+   * before copy from the server). Fills gaps only: it lands when the path
+   * has no reference and never replaces one. An existing reference is the
+   * reviewer's own last-seen point, so diffing from it already shows the
+   * agent's edits, while a later agent copy could hide them.
    */
   const seedReference = useCallback((path: string, ref: DiffReference): boolean => {
-    const existing = refsRef.current.get(path);
-    if (existing && existing.capturedAt >= ref.capturedAt) return false;
-    const next = new Map(refsRef.current);
-    next.set(path, ref);
-    refsRef.current = next;
-    setRefs((prevMap) => {
-      const queued = prevMap.get(path);
-      if (queued && queued.capturedAt >= ref.capturedAt) return prevMap;
-      const merged = new Map(prevMap);
-      merged.set(path, ref);
-      return merged;
-    });
+    if (refsRef.current.has(path)) return false;
+    const apply = (base: Map<string, DiffReference>) => {
+      if (base.has(path)) return base;
+      const next = new Map(base);
+      next.set(path, ref);
+      return next;
+    };
+    refsRef.current = apply(refsRef.current);
+    setRefs(apply);
     return true;
   }, []);
 

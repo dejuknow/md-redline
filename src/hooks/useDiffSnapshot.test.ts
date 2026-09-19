@@ -191,14 +191,27 @@ describe('agent-captured references', () => {
     expect(result.current.currentReference).toEqual(agentRef(100));
   });
 
-  it('seedReference replaces an older local reference', () => {
+  it('seedReference never replaces an existing reference, even an older one', () => {
     const { hookArgs } = setup('/a.md', 'now');
     const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
     act(() => result.current.captureReference('handoff'));
     const older = result.current.currentReference!.capturedAt;
-    let seeded = false;
+    let seeded = true;
     act(() => {
       seeded = result.current.seedReference('/a.md', agentRef(older + 1));
+    });
+    expect(seeded).toBe(false);
+    expect(result.current.currentReference?.origin).toBe('handoff');
+  });
+
+  it('seeds after an Undo cleared the reference in the same batch', () => {
+    const { hookArgs } = setup('/a.md', 'now');
+    const { result } = renderHook(() => useDiffSnapshot(...hookArgs));
+    act(() => result.current.captureReference('handoff'));
+    let seeded = false;
+    act(() => {
+      result.current.restoreReference(null);
+      seeded = result.current.seedReference('/a.md', agentRef(1));
     });
     expect(seeded).toBe(true);
     expect(result.current.currentReference?.origin).toBe('agent');

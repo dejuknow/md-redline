@@ -10,11 +10,18 @@ export interface BaselineMeta {
 
 const POLL_INTERVAL_MS = 5_000;
 
+/**
+ * Copies above this are left to the reviewer's own handoff: every seeded
+ * copy is persisted in one localStorage blob with a few MiB of quota for
+ * the whole origin, and a write past it fails silently.
+ */
+export const MAX_SEED_BYTES = 512 * 1024;
+
 interface Options {
   /** Every open tab's file path. Only these are ever fetched. */
   openPaths: string[];
   getReference: (path: string) => DiffReference | null;
-  /** Newest-wins seed from useDiffSnapshot. Returns whether it landed. */
+  /** Gap-filling seed from useDiffSnapshot. Returns whether it landed. */
   seedReference: (path: string, ref: DiffReference) => boolean;
   /** Fired after a seed lands. App uses it for the pending dot. */
   onSeeded?: (path: string, ref: DiffReference) => void;
@@ -34,9 +41,8 @@ function metasEqual(a: BaselineMeta[], b: BaselineMeta[]): boolean {
  * Pick up "before" copies an agent saved on the server (via mdr_baseline)
  * and seed the browser's diff reference for open tabs. Polls metadata on
  * the same cadence as review sessions; content is fetched per path only
- * when the server copy is newer than the local reference, and only once
- * per (path, capturedAt) so a seed that lost to a newer local reference
- * is not retried every tick.
+ * when the path has no local reference, and only once per (path,
+ * capturedAt) so a path already attempted is not retried every tick.
  */
 export function useAgentBaselines(opts: Options): {
   baselines: BaselineMeta[];
@@ -89,7 +95,8 @@ export function useAgentBaselines(opts: Options): {
   // Seed pass: whenever metadata, the open set, or a poll tick changes. A
   // fetch that is still in flight when this reruns is not cancelled: the
   // `callbacks` ref always calls the latest seedReference/onSeeded, and
-  // seedReference is newest-wins, so a late-resolving fetch is harmless.
+  // seedReference never replaces an existing reference, so a late-resolving
+  // fetch is harmless.
   const openKey = openPaths.join('\n');
   useEffect(() => {
     if (!enabled) return;
@@ -98,11 +105,11 @@ export function useAgentBaselines(opts: Options): {
       if (!open.has(meta.path)) continue;
       const key = `${meta.path}@${meta.capturedAt}`;
       if (attempted.current.has(key)) continue;
-      const local = callbacks.current.getReference(meta.path);
-      if (local && local.capturedAt >= meta.capturedAt) {
-        attempted.current.add(key);
-        continue;
-      }
+      // Fill gaps only: a path that already has a reference keeps it. Not
+      // recorded in `attempted`, so if that reference is later cleared (an
+      // Undo back to nothing) a later pass can still seed this copy.
+      if (callbacks.current.getReference(meta.path)) continue;
+      if (meta.bytes > MAX_SEED_BYTES) continue;
       attempted.current.add(key);
       void (async () => {
         try {
