@@ -6,6 +6,7 @@ import type {
   CaptureBaselineResult,
   CreateSessionInput,
   CreateSessionResult,
+  ListBaselinesResult,
   MdrClient,
   PostReviewArgs,
   PostReviewResult,
@@ -92,6 +93,19 @@ export function createMdrClient(baseUrl: string): MdrClient {
         throw new Error(body.error ?? `captureBaseline failed (HTTP ${res.status})`);
       }
       return (await res.json()) as CaptureBaselineResult;
+    },
+
+    async listBaselines() {
+      const res = await fetch(url('/api/baselines'), { method: 'GET' });
+      if (!res.ok) return { baselines: [] };
+      return (await res.json()) as ListBaselinesResult;
+    },
+
+    async getSessionFilePaths(sessionId: string) {
+      const res = await fetch(url(`/api/review-sessions/${sessionId}`), { method: 'GET' });
+      if (!res.ok) return [];
+      const body = (await res.json().catch(() => ({}))) as { filePaths?: string[] };
+      return body.filePaths ?? [];
     },
 
     async postAgentComments(sessionId: string, questions: AskQuestion[]) {

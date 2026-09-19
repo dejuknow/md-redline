@@ -29,6 +29,11 @@ const DONE_PREAMBLE =
 const DONE_NO_COMMENTS =
   'Review complete. The user has no more feedback. Continue with your original plan.';
 
+const NO_BASELINE_NOTE = (paths: string[]) =>
+  `\n\nNote: mdr held no before copy for ${paths.join(', ')} when this review opened, ` +
+  `so the user could not see a diff of your changes to ${paths.length === 1 ? 'it' : 'them'}. ` +
+  `Call mdr_baseline before you edit, or install the mdr baseline hook.`;
+
 const STILL_WAITING = (sessionId: string) =>
   `Review in progress. The user is still adding comments — the file(s) under ` +
   `review may contain unsubmitted @comment markers that are not yet part of ` +
@@ -125,6 +130,21 @@ export async function handleRequestReviewToolCall(
     enableResolve: input.enableResolve,
   });
 
+  // The reviewer's diff needs a copy from before the agent's edits. Comparing
+  // the session's canonical paths against the store says whether this handoff
+  // can show one, and the note below is the only way the agent finds out.
+  let missingBaseline: string[] = [];
+  try {
+    const [sessionPaths, held] = await Promise.all([
+      ctx.client.getSessionFilePaths(session.sessionId),
+      ctx.client.listBaselines(),
+    ]);
+    const heldPaths = new Set(held.baselines.map((b) => b.path));
+    missingBaseline = sessionPaths.filter((p) => !heldPaths.has(p));
+  } catch {
+    missingBaseline = [];
+  }
+
   const fullUrl = `${ctx.baseUrl.replace(/\/$/, '')}${session.url}`;
   // Server-side dedupe says "this is a fresh session" → open the browser.
   // The process-scoped `openBrowserOnce` ensures we never open the same URL
@@ -180,20 +200,24 @@ export async function handleRequestReviewToolCall(
     };
   }
 
+  const baselineNote = missingBaseline.length > 0 ? NO_BASELINE_NOTE(missingBaseline) : '';
+
   if (result.status === 'batch') {
     return {
-      content: [{ type: 'text', text: BATCH_PREAMBLE(session.sessionId) + result.prompt }],
+      content: [
+        { type: 'text', text: BATCH_PREAMBLE(session.sessionId) + result.prompt + baselineNote },
+      ],
     };
   }
 
   if (result.status === 'done') {
     if (result.prompt) {
       return {
-        content: [{ type: 'text', text: DONE_PREAMBLE + result.prompt }],
+        content: [{ type: 'text', text: DONE_PREAMBLE + result.prompt + baselineNote }],
       };
     }
     return {
-      content: [{ type: 'text', text: DONE_NO_COMMENTS }],
+      content: [{ type: 'text', text: DONE_NO_COMMENTS + baselineNote }],
     };
   }
 

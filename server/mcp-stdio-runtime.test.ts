@@ -28,6 +28,8 @@ describe('handleRequestReviewToolCall', () => {
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
       captureBaseline: vi.fn(),
+      getSessionFilePaths: vi.fn().mockResolvedValue([]),
+      listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
       ...overrides,
     } as MdrClient;
   }
@@ -147,6 +149,8 @@ describe('handleRequestReviewToolCall', () => {
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
       captureBaseline: vi.fn(),
+      getSessionFilePaths: vi.fn().mockResolvedValue([]),
+      listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
     };
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
@@ -179,6 +183,8 @@ describe('handleRequestReviewToolCall', () => {
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
       captureBaseline: vi.fn(),
+      getSessionFilePaths: vi.fn().mockResolvedValue([]),
+      listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
     };
     const openInBrowser = vi.fn();
 
@@ -436,6 +442,116 @@ describe('handleRequestReviewToolCall', () => {
 
     expect(client.abortSession).toHaveBeenCalled();
     expect(result.content[0].text).toContain('Review was not completed');
+  });
+
+  describe('missing baseline note', () => {
+    it('appends a note to a batch result when the store held no copy for a session file', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({
+          status: 'batch',
+          prompt: 'BATCH PROMPT',
+          commentIds: ['c1'],
+        }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('no before copy');
+      expect(result.content[0].text).toContain('/abs/a.md');
+    });
+
+    it('does not append the note when the store already held a copy for the session file', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({
+          status: 'batch',
+          prompt: 'BATCH PROMPT',
+          commentIds: ['c1'],
+        }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({
+          baselines: [{ path: '/abs/a.md', capturedAt: 1, bytes: 10 }],
+        }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).not.toContain('no before copy');
+    });
+
+    it('appends the note to a done result carrying a prompt', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'FINAL PROMPT' }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('FINAL PROMPT');
+      expect(result.content[0].text).toContain('no before copy');
+    });
+
+    it('appends the note to a done result with no comments', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({ status: 'done' }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('no more feedback');
+      expect(result.content[0].text).toContain('no before copy');
+    });
+
+    it('leaves the text unchanged when listBaselines rejects', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({
+          status: 'batch',
+          prompt: 'BATCH PROMPT',
+          commentIds: ['c1'],
+        }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockRejectedValue(new Error('network error')),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('BATCH PROMPT');
+      expect(result.content[0].text).not.toContain('no before copy');
+    });
   });
 });
 

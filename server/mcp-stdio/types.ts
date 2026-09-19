@@ -156,6 +156,10 @@ export interface CaptureBaselineResult {
   baselines: BaselineMeta[];
 }
 
+export interface ListBaselinesResult {
+  baselines: BaselineMeta[];
+}
+
 export type WaitForReviewResult =
   | { status: 'done' }
   | { status: 'pending' }
@@ -193,6 +197,13 @@ export interface MdrClient {
   waitForReview(sessionId: string, timeoutSeconds?: number): Promise<WaitForReviewResult>;
   /** POST /api/baselines. Returns immediately; the server reads the files itself. */
   captureBaseline(input: BaselineInput): Promise<CaptureBaselineResult>;
+  /** GET /api/baselines. Resolves { baselines: [] } on a non-ok response rather than throwing. */
+  listBaselines(): Promise<ListBaselinesResult>;
+  /**
+   * GET /api/review-sessions/:id, returning its canonical filePaths. Resolves
+   * [] on a non-ok response rather than throwing.
+   */
+  getSessionFilePaths(sessionId: string): Promise<string[]>;
 }
 
 export interface ToolCallContext {
