@@ -76,6 +76,10 @@ function printHelp() {
   console.log('  mcp install     Register md-redline with Claude Code and Claude Desktop');
   console.log('                    --claude-code     just Claude Code (via `claude mcp add`)');
   console.log('                    --claude-desktop  just Claude Desktop (JSON config file)');
+  console.log('  baseline [--hook] [--agent NAME] [paths...]');
+  console.log(
+    '                    Save a before copy of markdown files so a later review can show a diff (for a PreToolUse hook).',
+  );
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -887,6 +891,114 @@ async function installMcpConfig(target) {
   }
 }
 
+/**
+ * The concatenated stdin as a string. Resolves with '' when stdin is a TTY
+ * (nothing was piped) or when nothing arrives within 2000 ms, so a hook that
+ * forgets to close its pipe never hangs waiting on this.
+ *
+ * @returns {Promise<string>}
+ */
+function readStdin() {
+  return new Promise((resolveStdin) => {
+    if (process.stdin.isTTY) {
+      resolveStdin('');
+      return;
+    }
+    let data = '';
+    const timer = setTimeout(() => resolveStdin(''), 2000);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => {
+      clearTimeout(timer);
+      resolveStdin(data);
+    });
+  });
+}
+
+/**
+ * `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]`
+ *
+ * Saves a copy of each markdown file as it is right now so a later review can
+ * diff against it. Built to run from a PreToolUse hook: with --hook it reads
+ * the hook's JSON from stdin and takes the path out of it. It keeps whatever
+ * copy the server already holds, because the hook fires on every edit and the
+ * copy worth keeping is the one from before the first of them. It never fails
+ * the edit it runs in front of: every failure path returns quietly.
+ *
+ * @param {string[]} args
+ */
+async function runBaselineCommand(args) {
+  let agent;
+  let hookMode = false;
+  let allowStart = true;
+  const requested = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--hook') hookMode = true;
+    else if (arg === '--no-start') allowStart = false;
+    else if (arg === '--agent') agent = args[++i];
+    else if (arg.startsWith('--agent=')) agent = arg.slice('--agent='.length);
+    else if (!arg.startsWith('-')) requested.push(arg);
+  }
+
+  if (hookMode) {
+    const raw = await readStdin();
+    try {
+      const payload = JSON.parse(raw);
+      const input = (payload && payload.tool_input) || {};
+      for (const key of ['file_path', 'notebook_path']) {
+        if (typeof input[key] === 'string' && input[key]) requested.push(input[key]);
+      }
+    } catch {
+      // Not hook JSON. Nothing to capture.
+    }
+  }
+
+  const paths = [
+    ...new Set(
+      requested
+        .map((p) => resolve(expandHomePath(p)))
+        .filter((p) => p.toLowerCase().endsWith('.md')),
+    ),
+  ];
+  if (paths.length === 0) return;
+
+  let port = await findServerPort();
+  if (!port) {
+    if (!allowStart) return;
+    try {
+      await ensureServerRunning();
+    } catch (err) {
+      console.error(`mdr baseline: ${errorMessage(err)}`);
+      return;
+    }
+    port = await findServerPort();
+    if (!port) return;
+  }
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/baselines`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        filePaths: paths,
+        onlyIfMissing: true,
+        ...(agent ? { agentName: agent } : {}),
+      }),
+    });
+    if (!res.ok) {
+      // json() types as unknown here (no DOM lib in this project's bin
+      // tsconfig), same reason getServerVersionInfo above casts its own parse.
+      const body = /** @type {{ error?: string } | null} */ (await res.json().catch(() => null));
+      console.error(`mdr baseline: ${body?.error ?? `HTTP ${res.status}`}`);
+    }
+  } catch (err) {
+    console.error(`mdr baseline: ${errorMessage(err)}`);
+  }
+}
+
 async function runMcpStdio() {
   const distMcp = join(APP_DIR, 'dist', 'mcp-stdio.js');
   if (!isProductionMode()) {
@@ -1049,6 +1161,11 @@ async function main() {
     // it, and everything else opens a browser at it. Neither is something a
     // test can do to a developer's machine.
     console.log((await findServerPort()) ?? 'none');
+    return;
+  }
+
+  if (process.argv[2] === 'baseline') {
+    await runBaselineCommand(process.argv.slice(3));
     return;
   }
 
