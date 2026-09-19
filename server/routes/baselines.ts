@@ -135,10 +135,11 @@ export function registerBaselineRoutes(
     const baselines = captured.map(({ path, content }) =>
       store.set({ path, content, ...(agentName !== undefined ? { agentName } : {}) }),
     );
+    const captureLine = `[baseline] captured ${baselines.length} file(s), kept ${kept.length}`;
     console.log(
-      `[baseline] captured ${baselines.length} file(s), kept ${kept.length}: ${baselines
-        .map((b) => b.path)
-        .join(', ')}`,
+      baselines.length > 0
+        ? `${captureLine}: ${baselines.map((b) => b.path).join(', ')}`
+        : captureLine,
     );
     return c.json({ baselines, kept }, 201);
   });

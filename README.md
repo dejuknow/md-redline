@@ -133,7 +133,7 @@ The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlig
 }
 ```
 
-It acts only on markdown files. It keeps the first copy it takes of a file rather than replacing it on every edit, so the diff covers the whole editing session. It starts mdr if nothing is running, and it never blocks an edit: every failure gets out of the way quietly.
+It acts only on markdown files. It keeps the first copy it takes of a file rather than replacing it on every edit, so the diff covers the whole editing session. It starts mdr if nothing is running. Add `--no-start` to the command if you would rather it skip the capture than start one, for when you do not want a markdown edit anywhere on your machine to boot mdr. Either way it never blocks an edit: every failure gets out of the way quietly.
 
 ### 2. The agent reviews your doc
 

@@ -55,6 +55,10 @@ const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
 const UPDATE_CHECK_WAIT_MS = 6_000;
 const UPDATE_CHECK_POLL_MS = 100;
+// Every subcommand name, so a positional-file guard can check against the
+// whole set instead of one name at a time and a new subcommand cannot repeat
+// the bug where its name got forwarded to the server as a path.
+const SUBCOMMANDS = new Set(['mcp', 'baseline']);
 
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
@@ -76,10 +80,9 @@ function printHelp() {
   console.log('  mcp install     Register md-redline with Claude Code and Claude Desktop');
   console.log('                    --claude-code     just Claude Code (via `claude mcp add`)');
   console.log('                    --claude-desktop  just Claude Desktop (JSON config file)');
-  console.log('  baseline [--hook] [--agent NAME] [paths...]');
-  console.log(
-    '                    Save a before copy of markdown files so a later review can show a diff (for a PreToolUse hook).',
-  );
+  console.log('  baseline [--hook] [--agent NAME] [--no-start] [paths...]');
+  console.log('                    Save a before copy of markdown files so a later review');
+  console.log('                    can show a diff (for a PreToolUse hook).');
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -567,11 +570,13 @@ async function ensureServerRunning() {
   if (isProductionMode()) {
     const serverArgs = [DIST_SERVER];
     const userArg = process.argv[2];
-    // Don't forward the `mcp` subcommand as a positional file arg. When
-    // Claude Code spawns `mdr mcp`, argv[2] is 'mcp', which would otherwise
-    // resolve against Claude Code's cwd and get passed to the server as an
-    // initial path — triggering a bogus trusted-roots permission dialog.
-    if (userArg && !userArg.startsWith('-') && userArg !== 'mcp') {
+    // Don't forward a subcommand name as a positional file arg. When Claude
+    // Code spawns `mdr mcp`, or a hook runs `mdr baseline`, argv[2] is the
+    // subcommand name, which would otherwise resolve against the caller's cwd
+    // and get passed to the server as an initial path, opening a nonexistent
+    // file (or, for `mcp`, triggering a bogus trusted-roots permission
+    // dialog). Covers every subcommand in SUBCOMMANDS, not just `mcp`.
+    if (userArg && !userArg.startsWith('-') && !SUBCOMMANDS.has(userArg)) {
       serverArgs.push(resolve(userArg));
     }
     child = await spawnDetached(process.execPath, serverArgs, { cwd: process.cwd() });
@@ -893,8 +898,9 @@ async function installMcpConfig(target) {
 
 /**
  * The concatenated stdin as a string. Resolves with '' when stdin is a TTY
- * (nothing was piped) or when nothing arrives within 2000 ms, so a hook that
- * forgets to close its pipe never hangs waiting on this.
+ * (nothing was piped) or when nothing arrives within 2000 ms. Also stops
+ * reading and unrefs stdin once it resolves, so a pipe that stays open past
+ * that point does not keep the process alive waiting for more input.
  *
  * @returns {Promise<string>}
  */
@@ -905,15 +911,20 @@ function readStdin() {
       return;
     }
     let data = '';
-    const timer = setTimeout(() => resolveStdin(''), 2000);
+    /** @param {string} value */
+    const finish = (value) => {
+      clearTimeout(timer);
+      process.stdin.pause();
+      process.stdin.unref();
+      resolveStdin(value);
+    };
+    const timer = setTimeout(() => finish(''), 2000);
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', (chunk) => {
       data += chunk;
     });
-    process.stdin.on('end', () => {
-      clearTimeout(timer);
-      resolveStdin(data);
-    });
+    process.stdin.on('end', () => finish(data));
+    process.stdin.on('error', () => finish(data));
   });
 }
 
@@ -942,15 +953,19 @@ async function runBaselineCommand(args) {
     else if (arg.startsWith('--agent=')) agent = arg.slice('--agent='.length);
     else if (!arg.startsWith('-')) requested.push(arg);
   }
+  // The server rejects the whole capture when agentName is over 64 characters
+  // (MAX_AGENT_NAME_LEN in server/routes/baselines.ts), and under a hook that
+  // rejection is invisible. Trim here to match what the MCP validator does
+  // (server/mcp-stdio/validate.ts) so an overlong --agent value never quietly
+  // drops the capture it was meant to make.
+  if (agent) agent = agent.trim().slice(0, 64);
 
   if (hookMode) {
     const raw = await readStdin();
     try {
       const payload = JSON.parse(raw);
       const input = (payload && payload.tool_input) || {};
-      for (const key of ['file_path', 'notebook_path']) {
-        if (typeof input[key] === 'string' && input[key]) requested.push(input[key]);
-      }
+      if (typeof input.file_path === 'string' && input.file_path) requested.push(input.file_path);
     } catch {
       // Not hook JSON. Nothing to capture.
     }

@@ -204,3 +204,34 @@ describe('mdr baseline <paths...>', () => {
     expect(posts).toEqual([{ filePaths: [mdPath], onlyIfMissing: true }]);
   });
 });
+
+describe('mdr baseline --hook --no-start (stdin regression)', () => {
+  it('exits within 5s when the stdin pipe is opened and never closed', async () => {
+    const child = spawn(process.execPath, [BIN, 'baseline', '--hook', '--no-start'], {
+      env: {
+        ...process.env,
+        MD_REDLINE_PORT: String(serverPort),
+        PORT: '',
+      },
+      // A real pipe, deliberately never written to and never ended: this is
+      // what a hook runner that forgets to close its stdin leaves behind.
+      // readStdin's own 2000ms timer must resolve AND stop listening, or the
+      // open pipe keeps the event loop alive and the process never exits.
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    children.push(child);
+
+    const outcome = await new Promise<{ code: number | null; timedOut: boolean }>(
+      (resolveOutcome) => {
+        const timer = setTimeout(() => resolveOutcome({ code: null, timedOut: true }), 5000);
+        child.once('exit', (code) => {
+          clearTimeout(timer);
+          resolveOutcome({ code, timedOut: false });
+        });
+      },
+    );
+
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.code).toBe(0);
+  }, 7000);
+});

@@ -31,7 +31,7 @@ const DONE_NO_COMMENTS =
 
 const NO_BASELINE_NOTE = (paths: string[]) =>
   `\n\nNote: mdr held no before copy for ${paths.join(', ')} when this review opened, ` +
-  `so the user could not see a diff of your changes to ${paths.length === 1 ? 'it' : 'them'}. ` +
+  `so the user may not have seen a diff of your changes to ${paths.length === 1 ? 'it' : 'them'}. ` +
   `Call mdr_baseline before you edit, or install the mdr baseline hook.`;
 
 const STILL_WAITING = (sessionId: string) =>

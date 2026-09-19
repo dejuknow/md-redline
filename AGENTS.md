@@ -604,8 +604,9 @@ created a session but never posted comments (server GC fired). Comments already
 written persist in the file; every reason except `agent_silent` tells the agent
 to re-read the file(s) since the user may have replied inline or edited the doc.
 
+- `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]` — save a before copy of markdown files so a later review can show a diff. Built for a Claude Code PreToolUse hook: `--hook` reads the hook's JSON from stdin and takes `tool_input.file_path` out of it. Non-markdown paths are ignored. It posts with `onlyIfMissing`, so the copy from before the first edit of a session survives later edits. It starts a server when none is running unless `--no-start` is passed, and it always exits 0 so a failing capture never blocks the edit it runs in front of. A copy expires after 24 hours, so edits to one file that straddle a day boundary diff from the later copy.
+
 Install commands:
-- `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]` — save a before copy of markdown files so a later review can show a diff. Built for a Claude Code PreToolUse hook: `--hook` reads the hook's JSON from stdin and takes `tool_input.file_path` out of it. Non-markdown paths are ignored. It posts with `onlyIfMissing`, so the copy from before the first edit of a session survives later edits. It starts a server when none is running unless `--no-start` is passed, and it always exits 0 so a failing capture never blocks the edit it runs in front of.
 - `mdr mcp install` — install for Claude Code (writes to `.mcp.json`)
 - `mdr mcp install --claude-desktop` — install for Claude Desktop
 - `mdr mcp install --claude-code` — explicit Claude Code install
