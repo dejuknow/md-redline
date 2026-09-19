@@ -118,6 +118,23 @@ The common flow right after an agent drafts a document. Tell the agent:
 
 The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlight text and leave comments, then click **Send N comments**. The agent receives your feedback as a structured prompt and starts addressing your comments. You can keep sending follow-up batches while it works; **Send N & finish** sends the last batch and closes the loop. The review is opt-in per request. The agent only pauses when you ask for it. If the agent edits the document before asking you to review it, it calls `mdr_baseline` first, so the diff shows its changes on the first round.
 
+**Automatic before copies.** A capable agent calls `mdr_baseline` on its own, but a smaller or hurried one skips it, and then the diff button is greyed out on the round you most want it. A hook makes it automatic. Add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "mdr baseline --hook --agent Claude" }]
+      }
+    ]
+  }
+}
+```
+
+It acts only on markdown files. It keeps the first copy it takes of a file rather than replacing it on every edit, so the diff covers the whole editing session. It starts mdr if nothing is running, and it never blocks an edit: every failure gets out of the way quietly.
+
 ### 2. The agent reviews your doc
 
 The reverse direction, for docs the agent did not just write: your own draft, a teammate's PRD, a spec from another repo. Tell the agent:

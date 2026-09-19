@@ -191,7 +191,7 @@ chooses, not about every byte that can reach disk during a request.
 - `GET /api/review-sessions/:id/asks` — list pending asks for the session
 
 **Baselines (agent before copies)**
-- `POST /api/baselines` — `{ filePaths, agentName? }`, at most 64 paths (400 above that). Checks each path with the same allowed-roots rule as session creation, then stats and reads it. A path that does not exist yet (its parent does) is captured as an empty copy, so a file the agent is about to create diffs as fully added. All-or-nothing: 403 outside the roots, for a missing parent directory, or on a permission error; 400 for a malformed body or `agentName` (non-string, empty, or over 64 characters), non-`.md`, a directory, or another read error; 413 over 2 MiB (checked from the stat, before reading). Nothing is stored on any failure. 201 `{ baselines: [{ path, capturedAt, agentName?, bytes }] }`.
+- `POST /api/baselines` — `{ filePaths, agentName?, onlyIfMissing? }`, at most 64 paths (400 above that). With `onlyIfMissing: true`, a path whose copy the store already holds is left alone and reported in `kept` instead of being re-read; every other check still applies to it. A non-boolean `onlyIfMissing` is 400. Checks each path with the same allowed-roots rule as session creation, then stats and reads it. A path that does not exist yet (its parent does) is captured as an empty copy, so a file the agent is about to create diffs as fully added. All-or-nothing: 403 outside the roots, for a missing parent directory, or on a permission error; 400 for a malformed body or `agentName` (non-string, empty, or over 64 characters), non-`.md`, a directory, or another read error; 413 over 2 MiB (checked from the stat, before reading). Nothing is stored on any failure. 201 `{ baselines: [{ path, capturedAt, agentName?, bytes }], kept: [path] }`.
 - `GET /api/baselines` — metadata only, newest first. The browser polls this every 5s.
 - `GET /api/baselines/content?path=` — one full record `{ path, content, capturedAt, agentName?, bytes }`; 400 without a path or for non-`.md`, 403 outside the roots, 404 when nothing is held.
 
@@ -584,6 +584,9 @@ contain the edits; both tool descriptions say so. The result tells an agent that
 has a review session open to continue it by `sessionId` rather than passing file paths
 again. The server keeps the newest copy per path; the browser only uses a copy to fill a
 gap (see Diff overlay).
+A review handoff also reports back: when the store held no copy for a file in the
+session, the `mdr_request_review` result ends with a note naming those files, which is
+the only signal an agent gets that it skipped the call.
 
 The `AskWaitResult` type returned by `mdr_ask`'s wait:
 
@@ -602,6 +605,7 @@ written persist in the file; every reason except `agent_silent` tells the agent
 to re-read the file(s) since the user may have replied inline or edited the doc.
 
 Install commands:
+- `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]` — save a before copy of markdown files so a later review can show a diff. Built for a Claude Code PreToolUse hook: `--hook` reads the hook's JSON from stdin and takes `tool_input.file_path` out of it. Non-markdown paths are ignored. It posts with `onlyIfMissing`, so the copy from before the first edit of a session survives later edits. It starts a server when none is running unless `--no-start` is passed, and it always exits 0 so a failing capture never blocks the edit it runs in front of.
 - `mdr mcp install` — install for Claude Code (writes to `.mcp.json`)
 - `mdr mcp install --claude-desktop` — install for Claude Desktop
 - `mdr mcp install --claude-code` — explicit Claude Code install
