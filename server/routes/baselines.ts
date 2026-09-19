@@ -59,7 +59,7 @@ export function registerBaselineRoutes(
   }
 
   app.post('/api/baselines', async (c) => {
-    let body: { filePaths?: unknown; agentName?: unknown };
+    let body: { filePaths?: unknown; agentName?: unknown; onlyIfMissing?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -68,7 +68,7 @@ export function registerBaselineRoutes(
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return c.json({ error: 'Body must be a JSON object' }, 400);
     }
-    const { filePaths, agentName } = body;
+    const { filePaths, agentName, onlyIfMissing } = body;
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       return c.json({ error: 'filePaths must be a non-empty array' }, 400);
     }
@@ -90,14 +90,22 @@ export function registerBaselineRoutes(
         );
       }
     }
+    if (onlyIfMissing !== undefined && typeof onlyIfMissing !== 'boolean') {
+      return c.json({ error: 'onlyIfMissing must be a boolean' }, 400);
+    }
 
     const tooLarge = (p: string) =>
       c.json({ error: `File too large to baseline (max ${MAX_BASELINE_BYTES} bytes): ${p}` }, 413);
 
     const captured: Array<{ path: string; content: string }> = [];
+    const kept: string[] = [];
     for (const p of filePaths as string[]) {
       const r = await resolveMarkdownPath(p);
       if (!r.ok) return c.json({ error: r.failure.error }, r.failure.status);
+      if (onlyIfMissing === true && store.has(r.path)) {
+        kept.push(r.path);
+        continue;
+      }
       // A path that does not exist yet (its parent does, or resolveAndValidate
       // would have refused it) is a file the agent is about to create: its
       // before state is empty, so the whole new file will diff as added.
@@ -128,9 +136,11 @@ export function registerBaselineRoutes(
       store.set({ path, content, ...(agentName !== undefined ? { agentName } : {}) }),
     );
     console.log(
-      `[baseline] captured ${baselines.length} file(s): ${baselines.map((b) => b.path).join(', ')}`,
+      `[baseline] captured ${baselines.length} file(s), kept ${kept.length}: ${baselines
+        .map((b) => b.path)
+        .join(', ')}`,
     );
-    return c.json({ baselines }, 201);
+    return c.json({ baselines, kept }, 201);
   });
 
   app.get('/api/baselines', (c) => {

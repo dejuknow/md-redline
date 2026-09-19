@@ -66,6 +66,12 @@ export class BaselineStore {
     return this.entries.get(path) ?? null;
   }
 
+  /** Whether a live copy exists for `path`, after the same lazy expiry as `get`. */
+  has(path: string): boolean {
+    this.expire();
+    return this.entries.has(path);
+  }
+
   /** Metadata for every live entry, newest first. Never includes content. */
   list(): BaselineMeta[] {
     this.expire();

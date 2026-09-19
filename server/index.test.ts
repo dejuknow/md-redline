@@ -5020,4 +5020,60 @@ describe('baselines API', () => {
     expect(response.status).toBe(403);
     expect(String(body.error)).toContain(missing);
   });
+
+  it('POST with onlyIfMissing keeps an existing copy', async () => {
+    await writeFile(docsFile, '# first capture\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    await writeFile(docsFile, '# rewritten after capture\n', 'utf8');
+    const { response, body } = await post({ filePaths: [docsFile], onlyIfMissing: true });
+    expect(response.status).toBe(201);
+    expect(body.baselines).toEqual([]);
+    expect(body.kept).toEqual([docsFile]);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(probe.body.content).toBe('# first capture\n');
+  });
+
+  it('POST with onlyIfMissing still captures a path with no copy', async () => {
+    const fresh = join(cwdRoot, 'only-if-missing-fresh.md');
+    await writeFile(fresh, '# fresh\n', 'utf8');
+    const { response, body } = await post({ filePaths: [fresh], onlyIfMissing: true });
+    expect(response.status).toBe(201);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    expect(baselines).toHaveLength(1);
+    expect(baselines[0]).toMatchObject({ path: fresh });
+    expect(body.kept).toEqual([]);
+  });
+
+  it('POST without onlyIfMissing still replaces', async () => {
+    await writeFile(docsFile, '# v1\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    await writeFile(docsFile, '# v2\n', 'utf8');
+    const { response, body } = await post({ filePaths: [docsFile] });
+    expect(response.status).toBe(201);
+    expect(body.kept).toEqual([]);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(probe.body.content).toBe('# v2\n');
+  });
+
+  it('POST is 400 for a non-boolean onlyIfMissing', async () => {
+    const { response } = await post({ filePaths: [docsFile], onlyIfMissing: 'yes' });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST with onlyIfMissing still validates skipped paths', async () => {
+    await writeFile(docsFile, '# already held\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    const { response, body } = await post({
+      filePaths: [docsFile, externalFile],
+      onlyIfMissing: true,
+    });
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toMatch(/Access denied/);
+  });
 });

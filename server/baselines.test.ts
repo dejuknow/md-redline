@@ -78,4 +78,14 @@ describe('BaselineStore', () => {
     const meta = store.set({ path: '/a.md', content: 'a' });
     expect(meta).not.toHaveProperty('agentName');
   });
+
+  it('has is true after set, false for an unknown path, false once expired', () => {
+    const { store, tick } = makeStore();
+    expect(store.has('/a.md')).toBe(false);
+    store.set({ path: '/a.md', content: 'a' });
+    expect(store.has('/a.md')).toBe(true);
+    expect(store.has('/unknown.md')).toBe(false);
+    tick(BASELINE_TTL_MS + 1);
+    expect(store.has('/a.md')).toBe(false);
+  });
 });
