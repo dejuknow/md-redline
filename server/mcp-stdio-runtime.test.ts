@@ -882,7 +882,7 @@ describe('handleBaselineToolCall', () => {
     } as MdrClient;
   }
 
-  it('grants access, captures, and tells the agent what to do next', async () => {
+  it('captures without a separate access check, and tells the agent what to do next', async () => {
     const client = makeClient({
       captureBaseline: vi.fn().mockResolvedValue({
         baselines: [
@@ -897,7 +897,7 @@ describe('handleBaselineToolCall', () => {
       { client },
     );
 
-    expect(client.grantAccess).toHaveBeenCalledWith(['/abs/a.md', '/abs/b.md']);
+    expect(client.grantAccess).not.toHaveBeenCalled();
     expect(client.captureBaseline).toHaveBeenCalledWith({
       filePaths: ['/abs/a.md', '/abs/b.md'],
       agentName: 'Claude',
@@ -907,6 +907,7 @@ describe('handleBaselineToolCall', () => {
       /^mdr_baseline: saved a before copy of 2 file\(s\): \/abs\/a\.md, \/abs\/b\.md\./,
     );
     expect(text).toContain('mdr_request_review');
+    expect(text).toContain('sessionId');
   });
 
   it('surfaces a server error as the tool error', async () => {

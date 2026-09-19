@@ -343,9 +343,23 @@ describe('validateBaselineInput', () => {
     expect(validateBaselineInput({ filePaths: [1] }).ok).toBe(false);
   });
 
-  it('rejects a non-string or empty agentName', () => {
-    expect(validateBaselineInput({ filePaths: ['/a.md'], agentName: 3 }).ok).toBe(false);
-    expect(validateBaselineInput({ filePaths: ['/a.md'], agentName: '' }).ok).toBe(false);
+  it('drops a non-string, null, or empty agentName', () => {
+    for (const agentName of [3, null, '', '   ']) {
+      expect(validateBaselineInput({ filePaths: ['/a.md'], agentName })).toEqual({
+        ok: true,
+        value: { filePaths: ['/a.md'] },
+      });
+    }
+  });
+
+  it('truncates agentName to 64 characters', () => {
+    const res = validateBaselineInput({ filePaths: ['/a.md'], agentName: 'x'.repeat(80) });
+    expect(res.ok).toBe(true);
+    expect(res.ok && (res.value.agentName as string).length).toBe(64);
+  });
+
+  it('rejects more than 64 filePaths', () => {
+    expect(validateBaselineInput({ filePaths: Array(65).fill('/a.md') }).ok).toBe(false);
   });
 
   it('rejects a non-object', () => {

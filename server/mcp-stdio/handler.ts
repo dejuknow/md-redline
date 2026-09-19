@@ -726,15 +726,13 @@ export async function handleReviewToolCall(
 /**
  * mdr_baseline: ask the server to keep a copy of each file as it is now, so
  * the reviewer's diff can show what the agent changed. Non-blocking.
- * grantAccess checks each path sits inside the allowed roots and returns
- * its canonical form, exactly as the review tools do before creating a
- * session; it widens nothing.
+ * The route checks each path against the allowed roots when it reads the
+ * file, so there is no separate access call.
  */
 export async function handleBaselineToolCall(
   input: BaselineInput,
   ctx: Pick<ToolCallContext, 'client'>,
 ): Promise<ToolCallResult> {
-  await ctx.client.grantAccess(input.filePaths);
   const result = await ctx.client.captureBaseline(input);
   const paths = result.baselines.map((b) => b.path);
   return {
@@ -743,8 +741,9 @@ export async function handleBaselineToolCall(
         type: 'text',
         text:
           `mdr_baseline: saved a before copy of ${paths.length} file(s): ${paths.join(', ')}. ` +
-          `Edit them now, then call mdr_request_review with the same paths so the user ` +
-          `can see a diff of your changes.`,
+          `Edit them now. When you are done, hand them to the user with mdr_request_review: ` +
+          `pass these paths to start a review, or, if a review session is already open for ` +
+          `them, pass its sessionId (without filePaths) to continue it.`,
       },
     ],
   };

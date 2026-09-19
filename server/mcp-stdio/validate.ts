@@ -334,16 +334,18 @@ export function validateBaselineInput(raw: unknown): ValidationResult<BaselineIn
   if (obj.filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
     return { ok: false, error: 'filePaths must contain non-empty strings' };
   }
-  if (obj.agentName !== undefined) {
-    if (typeof obj.agentName !== 'string' || obj.agentName.length === 0) {
-      return { ok: false, error: 'agentName must be a non-empty string' };
-    }
+  if (obj.filePaths.length > 64) {
+    return { ok: false, error: 'filePaths must have at most 64 entries' };
+  }
+  // agentName only sets the diff label, so a bad one is dropped or trimmed
+  // rather than failing the capture.
+  let agentName: string | undefined;
+  if (typeof obj.agentName === 'string') {
+    const trimmed = obj.agentName.trim().slice(0, 64);
+    if (trimmed.length > 0) agentName = trimmed;
   }
   return {
     ok: true,
-    value: {
-      filePaths: obj.filePaths as string[],
-      ...(typeof obj.agentName === 'string' ? { agentName: obj.agentName } : {}),
-    },
+    value: { filePaths: obj.filePaths as string[], ...(agentName ? { agentName } : {}) },
   };
 }

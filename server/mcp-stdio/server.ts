@@ -40,9 +40,9 @@ export const MDR_TOOLS = [
       '"open X so I can comment", or "let me look at X". The user is the ' +
       'reviewer here; you wait and then address what they write. ' +
       'To start a new review, pass filePaths. ' +
-      'If you edited those files yourself, call mdr_baseline BEFORE editing so the ' +
-      'user can see a diff of your changes; without it the diff is unavailable on ' +
-      'the first round. ' +
+      'If you are about to edit files the user will review, call mdr_baseline ' +
+      'before editing them so the user can see a diff of your changes. Calling it ' +
+      'after you have edited does not help: the copy would already include your edits. ' +
       'To continue after addressing a batch of comments, or to re-poll while ' +
       'the user is still reviewing, pass the sessionId from the previous result ' +
       '(without filePaths). If the result says the user has not finished yet, ' +
@@ -258,9 +258,11 @@ export const MDR_TOOLS = [
       'Call this BEFORE you edit markdown files the user will later review in mdr ' +
       '(md-redline). It saves a copy of each file as it is right now so the ' +
       "reviewer's diff can show exactly what you changed. Returns immediately. " +
-      'Workflow: mdr_baseline (before editing) -> edit the files -> ' +
-      'mdr_request_review (same paths). Safe to call again; the newest copy ' +
-      'replaces the older one for that file.',
+      'Include files you are about to create; they are saved as empty. Do not call ' +
+      'it after you have already edited a file: the copy would already contain your ' +
+      'changes. Workflow: mdr_baseline (before editing) -> edit the files -> ' +
+      'mdr_request_review. At most 64 files per call. If the reviewer already has a ' +
+      'before point for a file from an earlier handoff or review, that one is kept.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -268,11 +270,13 @@ export const MDR_TOOLS = [
           type: 'array',
           items: { type: 'string' },
           minItems: 1,
+          maxItems: 64,
           description: 'Absolute paths to the markdown files you are about to edit.',
         },
         agentName: {
           type: 'string',
-          description: 'Your agent name (e.g. "Claude"). Shown in the diff label.',
+          description:
+            'Your agent name (e.g. "Claude"). Shown in the diff label; longer than 64 characters is cut.',
         },
       },
       required: ['filePaths'],

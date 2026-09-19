@@ -66,4 +66,11 @@ describe('mdr_baseline', () => {
   it('is pointed at from mdr_request_review, since that is where an agent decides its workflow', () => {
     expect(describeOf('mdr_request_review')).toContain('mdr_baseline');
   });
+
+  it('warns against calling it after editing', () => {
+    expect(describeOf('mdr_baseline')).toMatch(/Do not call it after you have already edited/);
+    expect(describeOf('mdr_request_review')).toMatch(
+      /Calling it after you have edited does not help/,
+    );
+  });
 });

@@ -4969,10 +4969,18 @@ describe('baselines API', () => {
     expect(response.status).toBe(400);
   });
 
-  it('POST is 404 for a missing file', async () => {
-    const { response, body } = await post({ filePaths: [join(cwdRoot, 'nope.md')] });
-    expect(response.status).toBe(404);
-    expect(String(body.error)).toMatch(/File not found/);
+  it('POST captures a file that does not exist yet as empty', async () => {
+    const notYet = join(cwdRoot, 'not-yet.md');
+    const { response, body } = await post({ filePaths: [notYet] });
+    expect(response.status).toBe(201);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    expect(baselines[0].bytes).toBe(0);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(notYet)}`,
+    );
+    expect(probe.response.status).toBe(200);
+    expect(probe.body.content).toBe('');
   });
 
   it('POST is 413 for an oversize file', async () => {
@@ -4985,12 +4993,29 @@ describe('baselines API', () => {
   it('POST is all-or-nothing across a mixed batch', async () => {
     const atomic = join(cwdRoot, 'atomic.md');
     await writeFile(atomic, '# atomic\n', 'utf8');
-    const { response } = await post({ filePaths: [atomic, join(cwdRoot, 'missing.md')] });
-    expect(response.status).toBe(404);
+    const { response } = await post({ filePaths: [atomic, externalFile] });
+    expect(response.status).toBe(403);
     const probe = await requestJson(
       app,
       `/api/baselines/content?path=${encodeURIComponent(atomic)}`,
     );
     expect(probe.response.status).toBe(404);
+  });
+
+  it('POST is 400 for more than 64 files', async () => {
+    const { response } = await post({ filePaths: Array(65).fill(docsFile) });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST is 400 for a directory named like a markdown file', async () => {
+    const dirAsFile = join(cwdRoot, 'folder.md');
+    await mkdir(dirAsFile, { recursive: true });
+    const { response } = await post({ filePaths: [dirAsFile] });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST is 403 when the parent directory does not exist', async () => {
+    const { response } = await post({ filePaths: [join(cwdRoot, 'no-such-dir', 'x.md')] });
+    expect(response.status).toBe(403);
   });
 });

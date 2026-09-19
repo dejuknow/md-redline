@@ -1,7 +1,8 @@
 import type { Hono } from 'hono';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
+import type { Stats } from 'fs';
 import { extname } from 'path';
-import { BaselineStore, MAX_BASELINE_BYTES } from '../baselines';
+import { BaselineStore, MAX_BASELINE_BYTES, MAX_BASELINES } from '../baselines';
 
 export interface BaselineRoutesDeps {
   /** Same closure the review-session routes use; enforces allowed roots. */
@@ -10,7 +11,7 @@ export interface BaselineRoutesDeps {
 
 const MAX_AGENT_NAME_LEN = 64;
 
-type PathFailure = { status: 400 | 403 | 404 | 413; error: string };
+type PathFailure = { status: 400 | 403 | 413; error: string };
 
 /**
  * `/api/baselines`: the server-held "before" copies behind `mdr_baseline`.
@@ -47,6 +48,16 @@ export function registerBaselineRoutes(
     return { ok: true, path: resolved };
   }
 
+  /** ENOENT means "not created yet" (null, keep going); anything else is a failure. */
+  function readFailure(err: unknown, p: string): PathFailure | null {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    if (code === 'EACCES' || code === 'EPERM') {
+      return { status: 403, error: `Permission denied: ${p}` };
+    }
+    return { status: 400, error: `Could not read ${p}` };
+  }
+
   app.post('/api/baselines', async (c) => {
     let body: { filePaths?: unknown; agentName?: unknown };
     try {
@@ -64,6 +75,9 @@ export function registerBaselineRoutes(
     if (filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
       return c.json({ error: 'filePaths must contain non-empty strings' }, 400);
     }
+    if (filePaths.length > MAX_BASELINES) {
+      return c.json({ error: `At most ${MAX_BASELINES} files per call` }, 400);
+    }
     if (agentName !== undefined) {
       if (
         typeof agentName !== 'string' ||
@@ -77,23 +91,35 @@ export function registerBaselineRoutes(
       }
     }
 
+    const tooLarge = (p: string) =>
+      c.json({ error: `File too large to baseline (max ${MAX_BASELINE_BYTES} bytes): ${p}` }, 413);
+
     const captured: Array<{ path: string; content: string }> = [];
     for (const p of filePaths as string[]) {
       const r = await resolveMarkdownPath(p);
       if (!r.ok) return c.json({ error: r.failure.error }, r.failure.status);
-      let content: string;
+      // A path that does not exist yet (its parent does, or resolveAndValidate
+      // would have refused it) is a file the agent is about to create: its
+      // before state is empty, so the whole new file will diff as added.
+      let content = '';
+      let info: Stats | null = null;
       try {
-        content = await readFile(r.path, 'utf8');
+        info = await stat(r.path);
       } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT') return c.json({ error: `File not found: ${p}` }, 404);
-        return c.json({ error: `Could not read ${p}` }, 400);
+        const failure = readFailure(err, p);
+        if (failure) return c.json({ error: failure.error }, failure.status);
       }
-      if (Buffer.byteLength(content, 'utf8') > MAX_BASELINE_BYTES) {
-        return c.json(
-          { error: `File too large to baseline (max ${MAX_BASELINE_BYTES} bytes): ${p}` },
-          413,
-        );
+      if (info) {
+        if (!info.isFile()) return c.json({ error: `Not a file: ${p}` }, 400);
+        if (info.size > MAX_BASELINE_BYTES) return tooLarge(p);
+        try {
+          content = await readFile(r.path, 'utf8');
+        } catch (err) {
+          const failure = readFailure(err, p);
+          if (failure) return c.json({ error: failure.error }, failure.status);
+        }
+        // The file can grow between stat and read.
+        if (Buffer.byteLength(content, 'utf8') > MAX_BASELINE_BYTES) return tooLarge(p);
       }
       captured.push({ path: r.path, content });
     }
