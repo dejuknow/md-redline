@@ -42,7 +42,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `server/index.ts`: file I/O API, preferences, native picker, SSE watch, reveal-in-file-manager
 - `server/review-sessions.ts`: review session store (create, batch, finish, abort, heartbeat, sweep)
 - `server/routes/review-sessions.ts`: HTTP routes for review session endpoints
-- `server/baselines.ts`: in-memory store of agent "before" copies behind `mdr_baseline` (newest wins, 64 entries, 2 MiB each, 24h lazy expiry)
+- `server/baselines.ts`: in-memory store of agent "before" copies behind `mdr_baseline` (newest copy per path, 64 entries, 2 MiB each, 24h lazy expiry)
 - `server/routes/baselines.ts`: HTTP routes for the baseline store
 - `server/mcp-stdio/`: MCP stdio server (handler, client, server, types, validate)
 - `server/update-check.ts`: daily npm registry check for a newer published version, cached via preferences
@@ -191,9 +191,9 @@ chooses, not about every byte that can reach disk during a request.
 - `GET /api/review-sessions/:id/asks` — list pending asks for the session
 
 **Baselines (agent before copies)**
-- `POST /api/baselines` — `{ filePaths, agentName? }`. Reads each file from disk after the same allowed-roots check as session creation and stores the content keyed by canonical path. All-or-nothing: 403 outside roots, 400 non-`.md`, 404 missing, 413 over 2 MiB, and nothing is stored on any failure. 201 `{ baselines: [{ path, capturedAt, agentName?, bytes }] }`.
+- `POST /api/baselines` — `{ filePaths, agentName? }`, at most 64 paths (400 above that). Checks each path with the same allowed-roots rule as session creation, then stats and reads it. A path that does not exist yet (its parent does) is captured as an empty copy, so a file the agent is about to create diffs as fully added. All-or-nothing: 403 outside the roots, for a missing parent directory, or on a permission error; 400 for non-`.md`, a directory, or another read error; 413 over 2 MiB (checked from the stat, before reading). Nothing is stored on any failure. 201 `{ baselines: [{ path, capturedAt, agentName?, bytes }] }`.
 - `GET /api/baselines` — metadata only, newest first. The browser polls this every 5s.
-- `GET /api/baselines/content?path=` — one full record `{ path, content, capturedAt, agentName?, bytes }`, or 404.
+- `GET /api/baselines/content?path=` — one full record `{ path, content, capturedAt, agentName?, bytes }`; 400 without a path or for non-`.md`, 403 outside the roots, 404 when nothing is held.
 
 **Inline reply delivery** — when the user answers an agent question by replying on
 the comment card, the reply is stored inside the marker and saved via `PUT
@@ -572,12 +572,18 @@ see the caveat under `mdr_comment` above.
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.
 
-**`mdr_baseline`** — `{ filePaths, agentName? }`. Non-blocking. Grants access to the
-paths, then asks the server to store a copy of each file as it is now. An agent that
-edits a document and then calls `mdr_request_review` must call this first, or the
-reviewer's diff button stays disabled on that first round (only the reviewer's own
-clicks capture a reference otherwise). The `mdr_request_review` description points
-agents at it. Newest capture wins on the server and in the browser.
+**`mdr_baseline`** — `{ filePaths, agentName? }`, at most 64 paths. Non-blocking. Asks the
+server to store a copy of each file as it is now; the route checks allowed roots itself,
+so there is no separate grant-access call. Files the agent is about to create may be
+included and are saved as empty. `agentName` only sets the diff label: it is trimmed, cut
+to 64 characters, and dropped when empty, and never fails the call. An agent that edits a
+document and then calls `mdr_request_review` must call this first, or the reviewer's diff
+button stays disabled on that first round (only the reviewer's own clicks capture a
+reference otherwise). Calling it after editing does not help, since the copy would already
+contain the edits; both tool descriptions say so. The result tells an agent that already
+has a review session open to continue it by `sessionId` rather than passing file paths
+again. The server keeps the newest copy per path; the browser only uses a copy to fill a
+gap (see Diff overlay).
 
 The `AskWaitResult` type returned by `mdr_ask`'s wait:
 
@@ -1395,13 +1401,14 @@ auto-managed as a "review frontier":
   when `diffChunkCount > 0`) manually advances the reference to the current
   content, also with an Undo toast.
 - **Agent before copies**: `useAgentBaselines` polls `GET /api/baselines` and, for
-  every open tab whose server copy is newer than the local reference, fetches the
-  content once and seeds it as `origin: 'agent'`. Precedence is newest `capturedAt`
-  wins, in both directions: a Mark reviewed or handoff click after the agent's
-  capture stays; the agent's next capture re-seeds. Arrival is silent; the pending
-  dot lights only when the active file already differs from the copy. The label
-  reads "Before Claude's edits, 3:14 PM" (or "Before the agent's edits" without a
-  name).
+  every open tab with no reference at all, fetches the content once and seeds it as
+  `origin: 'agent'`. Agent copies fill gaps only: a path that already has a reference
+  (a handoff, Send, Mark reviewed, or an earlier agent copy) keeps it, because that
+  reference is the reviewer's last-seen point and already shows the agent's edits; a
+  later copy would hide them. Copies over 512 KiB are not seeded, to protect the shared
+  localStorage quota. Arrival is silent; the pending dot lights only when the active
+  file's comment-stripped text already differs from the copy. The label reads "Before
+  Claude's edits, 3:14 PM" (or "Before the agent's edits" without a name).
 
 Reference store + migration live in `src/hooks/useDiffSnapshot.ts`; the pure
 advance decision and label formatter in `src/lib/review-frontier.ts`.
