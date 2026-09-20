@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
 import { mkdtempSync, rmSync, writeFileSync, openSync } from 'fs';
-import { tmpdir } from 'os';
+import { devNull, tmpdir } from 'os';
 import { join } from 'path';
 
 // `mdr baseline` is what a Claude Code PreToolUse hook calls before every
@@ -235,16 +235,17 @@ describe('mdr baseline --hook --no-start (stdin regression)', () => {
     expect(outcome.code).toBe(0);
   }, 7000);
 
-  it('exits 0 and posts nothing when stdin is redirected from /dev/null', async () => {
+  it('exits 0 and posts nothing when stdin is redirected from the null device', async () => {
     const child = spawn(process.execPath, [BIN, 'baseline', '--hook'], {
       env: {
         ...process.env,
         MD_REDLINE_PORT: String(serverPort),
         PORT: '',
       },
-      // File-backed stdin from /dev/null: process.stdin.unref() does not
-      // exist on such streams, so this would crash unless guarded.
-      stdio: [openSync('/dev/null', 'r'), 'pipe', 'pipe'],
+      // File-backed stdin from the null device: process.stdin.unref() does
+      // not exist on such streams, so this would crash unless guarded.
+      // os.devNull, not a literal, because Windows spells it NUL.
+      stdio: [openSync(devNull, 'r'), 'pipe', 'pipe'],
     });
     children.push(child);
 
