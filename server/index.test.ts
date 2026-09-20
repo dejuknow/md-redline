@@ -4879,3 +4879,201 @@ describe('writePortFile', () => {
     }
   });
 });
+
+describe('baselines API', () => {
+  const post = (body: unknown) =>
+    requestJson(app, '/api/baselines', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('POST captures the file content from disk and returns metadata', async () => {
+    await writeFile(docsFile, '# before\n', 'utf8');
+    const { response, body } = await post({ filePaths: [docsFile], agentName: 'Claude' });
+    expect(response.status).toBe(201);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    expect(baselines).toHaveLength(1);
+    expect(baselines[0]).toMatchObject({ path: docsFile, agentName: 'Claude', bytes: 9 });
+    expect(typeof baselines[0].capturedAt).toBe('number');
+    expect(baselines[0]).not.toHaveProperty('content');
+  });
+
+  it('GET /api/baselines lists metadata only', async () => {
+    await writeFile(docsFile, '# listed\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    const { response, body } = await requestJson(app, '/api/baselines');
+    expect(response.status).toBe(200);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    const mine = baselines.find((b) => b.path === docsFile);
+    expect(mine).toBeDefined();
+    expect(mine).not.toHaveProperty('content');
+  });
+
+  it('GET /api/baselines/content returns the stored copy', async () => {
+    await writeFile(docsFile, '# stored\n', 'utf8');
+    await post({ filePaths: [docsFile], agentName: 'Codex' });
+    await writeFile(docsFile, '# edited after capture\n', 'utf8');
+    const { response, body } = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ path: docsFile, content: '# stored\n', agentName: 'Codex' });
+  });
+
+  it('GET /api/baselines/content is 404 when nothing was captured', async () => {
+    const { response } = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(rootFile)}`,
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('GET /api/baselines/content is 400 without a path', async () => {
+    const { response } = await requestJson(app, '/api/baselines/content');
+    expect(response.status).toBe(400);
+  });
+
+  it('GET /api/baselines/content is 403 for a path outside the allowed roots', async () => {
+    const { response, body } = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(externalFile)}`,
+    );
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toMatch(/Access denied/);
+  });
+
+  it('POST rejects a malformed body', async () => {
+    expect((await post({})).response.status).toBe(400);
+    expect((await post({ filePaths: [] })).response.status).toBe(400);
+    expect((await post({ filePaths: [''] })).response.status).toBe(400);
+    expect((await post({ filePaths: [docsFile], agentName: '' })).response.status).toBe(400);
+    expect((await post({ filePaths: [docsFile], agentName: 'x'.repeat(65) })).response.status).toBe(
+      400,
+    );
+    expect((await post(null)).response.status).toBe(400);
+    expect((await post([docsFile])).response.status).toBe(400);
+  });
+
+  it('POST is 403 for a file outside the allowed roots', async () => {
+    const { response, body } = await post({ filePaths: [externalFile] });
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toMatch(/Access denied/);
+  });
+
+  it('POST is 400 for a non-markdown file', async () => {
+    const txt = join(cwdRoot, 'notes.txt');
+    await writeFile(txt, 'plain', 'utf8');
+    const { response } = await post({ filePaths: [txt] });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST captures a file that does not exist yet as empty', async () => {
+    const notYet = join(cwdRoot, 'not-yet.md');
+    const { response, body } = await post({ filePaths: [notYet] });
+    expect(response.status).toBe(201);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    expect(baselines[0].bytes).toBe(0);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(notYet)}`,
+    );
+    expect(probe.response.status).toBe(200);
+    expect(probe.body.content).toBe('');
+  });
+
+  it('POST is 413 for an oversize file', async () => {
+    const big = join(cwdRoot, 'big.md');
+    await writeFile(big, 'x'.repeat(2 * 1024 * 1024 + 1), 'utf8');
+    const { response } = await post({ filePaths: [big] });
+    expect(response.status).toBe(413);
+  });
+
+  it('POST is all-or-nothing across a mixed batch', async () => {
+    const atomic = join(cwdRoot, 'atomic.md');
+    await writeFile(atomic, '# atomic\n', 'utf8');
+    const { response } = await post({ filePaths: [atomic, externalFile] });
+    expect(response.status).toBe(403);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(atomic)}`,
+    );
+    expect(probe.response.status).toBe(404);
+  });
+
+  it('POST is 400 for more than 64 files', async () => {
+    const { response } = await post({ filePaths: Array(65).fill(docsFile) });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST is 400 for a directory named like a markdown file', async () => {
+    const dirAsFile = join(cwdRoot, 'folder.md');
+    await mkdir(dirAsFile, { recursive: true });
+    const { response } = await post({ filePaths: [dirAsFile] });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST is 403 when the parent directory does not exist', async () => {
+    const missing = join(cwdRoot, 'no-such-dir', 'x.md');
+    const { response, body } = await post({ filePaths: [missing] });
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toContain(missing);
+  });
+
+  it('POST with onlyIfMissing keeps an existing copy', async () => {
+    await writeFile(docsFile, '# first capture\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    await writeFile(docsFile, '# rewritten after capture\n', 'utf8');
+    const { response, body } = await post({ filePaths: [docsFile], onlyIfMissing: true });
+    expect(response.status).toBe(201);
+    expect(body.baselines).toEqual([]);
+    expect(body.kept).toEqual([docsFile]);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(probe.body.content).toBe('# first capture\n');
+  });
+
+  it('POST with onlyIfMissing still captures a path with no copy', async () => {
+    const fresh = join(cwdRoot, 'only-if-missing-fresh.md');
+    await writeFile(fresh, '# fresh\n', 'utf8');
+    const { response, body } = await post({ filePaths: [fresh], onlyIfMissing: true });
+    expect(response.status).toBe(201);
+    const baselines = body.baselines as Array<Record<string, unknown>>;
+    expect(baselines).toHaveLength(1);
+    expect(baselines[0]).toMatchObject({ path: fresh });
+    expect(body.kept).toEqual([]);
+  });
+
+  it('POST without onlyIfMissing still replaces', async () => {
+    await writeFile(docsFile, '# v1\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    await writeFile(docsFile, '# v2\n', 'utf8');
+    const { response, body } = await post({ filePaths: [docsFile] });
+    expect(response.status).toBe(201);
+    expect(body.kept).toEqual([]);
+    const probe = await requestJson(
+      app,
+      `/api/baselines/content?path=${encodeURIComponent(docsFile)}`,
+    );
+    expect(probe.body.content).toBe('# v2\n');
+  });
+
+  it('POST is 400 for a non-boolean onlyIfMissing', async () => {
+    const { response } = await post({ filePaths: [docsFile], onlyIfMissing: 'yes' });
+    expect(response.status).toBe(400);
+  });
+
+  it('POST with onlyIfMissing still validates skipped paths', async () => {
+    await writeFile(docsFile, '# already held\n', 'utf8');
+    await post({ filePaths: [docsFile] });
+    const { response, body } = await post({
+      filePaths: [docsFile, externalFile],
+      onlyIfMissing: true,
+    });
+    expect(response.status).toBe(403);
+    expect(String(body.error)).toMatch(/Access denied/);
+  });
+});

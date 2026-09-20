@@ -327,7 +327,9 @@ test.describe('Comment editing and replies', () => {
     await expect(editArea).toBeVisible();
     // fill() clears then types — avoids re-render issues from a separate clear()
     await editArea.fill('Updated comment text');
-    await page.getByRole('button', { name: 'Save' }).click();
+    // exact: the diff toggle's disabled tooltip contains "saves a copy", which
+    // a substring match on "Save" also picks up.
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     await expect(page.getByText('Updated comment text')).toBeVisible();
     await expect(page.getByText('Original edit text')).not.toBeVisible();

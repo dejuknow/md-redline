@@ -3,6 +3,7 @@ import { handleRequestReviewToolCall } from './mcp-stdio';
 import type { AskWaitResult, MdrClient } from './mcp-stdio/types';
 import {
   handleAskToolCall,
+  handleBaselineToolCall,
   handleReviewToolCall,
   handleWaitToolCall,
   __resetOpenedBrowserUrlsForTests,
@@ -26,6 +27,9 @@ describe('handleRequestReviewToolCall', () => {
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
+      getSessionFilePaths: vi.fn().mockResolvedValue([]),
+      listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
       ...overrides,
     } as MdrClient;
   }
@@ -144,6 +148,9 @@ describe('handleRequestReviewToolCall', () => {
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
+      getSessionFilePaths: vi.fn().mockResolvedValue([]),
+      listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
     };
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
@@ -175,6 +182,9 @@ describe('handleRequestReviewToolCall', () => {
       postReview: vi.fn(),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
+      getSessionFilePaths: vi.fn().mockResolvedValue([]),
+      listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
     };
     const openInBrowser = vi.fn();
 
@@ -433,6 +443,116 @@ describe('handleRequestReviewToolCall', () => {
     expect(client.abortSession).toHaveBeenCalled();
     expect(result.content[0].text).toContain('Review was not completed');
   });
+
+  describe('missing baseline note', () => {
+    it('appends a note to a batch result when the store held no copy for a session file', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({
+          status: 'batch',
+          prompt: 'BATCH PROMPT',
+          commentIds: ['c1'],
+        }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('no before copy');
+      expect(result.content[0].text).toContain('/abs/a.md');
+    });
+
+    it('does not append the note when the store already held a copy for the session file', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({
+          status: 'batch',
+          prompt: 'BATCH PROMPT',
+          commentIds: ['c1'],
+        }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({
+          baselines: [{ path: '/abs/a.md', capturedAt: 1, bytes: 10 }],
+        }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).not.toContain('no before copy');
+    });
+
+    it('appends the note to a done result carrying a prompt', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({ status: 'done', prompt: 'FINAL PROMPT' }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('FINAL PROMPT');
+      expect(result.content[0].text).toContain('no before copy');
+    });
+
+    it('appends the note to a done result with no comments', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({ status: 'done' }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('no more feedback');
+      expect(result.content[0].text).toContain('no before copy');
+    });
+
+    it('leaves the text unchanged when listBaselines rejects', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({
+          status: 'batch',
+          prompt: 'BATCH PROMPT',
+          commentIds: ['c1'],
+        }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockRejectedValue(new Error('network error')),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('BATCH PROMPT');
+      expect(result.content[0].text).not.toContain('no before copy');
+    });
+  });
 });
 
 describe('handleAskToolCall', () => {
@@ -664,6 +784,7 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
         .mockResolvedValue({ commentsWritten: 2, repliesWritten: 0, commentIds: ['c1', 'c2'] }),
       releaseAsk: vi.fn(),
       waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
       ...overrides,
     } as MdrClient;
   }
@@ -856,6 +977,61 @@ describe('createMdrClient HTTP methods', () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       'http://localhost:3000/api/review-sessions/rev_xyz/asks/ask_abc/release',
       expect.objectContaining({ method: 'POST' }),
+    );
+  });
+});
+
+describe('handleBaselineToolCall', () => {
+  function makeClient(overrides: Partial<MdrClient> = {}): MdrClient {
+    return {
+      grantAccess: vi.fn().mockResolvedValue(undefined),
+      createSession: vi.fn(),
+      waitForSession: vi.fn(),
+      abortSession: vi.fn(),
+      postAgentComments: vi.fn(),
+      waitForAsk: vi.fn(),
+      postReview: vi.fn(),
+      releaseAsk: vi.fn(),
+      waitForReview: vi.fn(),
+      captureBaseline: vi.fn(),
+      ...overrides,
+    } as MdrClient;
+  }
+
+  it('captures without a separate access check, and tells the agent what to do next', async () => {
+    const client = makeClient({
+      captureBaseline: vi.fn().mockResolvedValue({
+        baselines: [
+          { path: '/abs/a.md', capturedAt: 1, bytes: 10 },
+          { path: '/abs/b.md', capturedAt: 1, bytes: 12 },
+        ],
+      }),
+    });
+
+    const result = await handleBaselineToolCall(
+      { filePaths: ['/abs/a.md', '/abs/b.md'], agentName: 'Claude' },
+      { client },
+    );
+
+    expect(client.grantAccess).not.toHaveBeenCalled();
+    expect(client.captureBaseline).toHaveBeenCalledWith({
+      filePaths: ['/abs/a.md', '/abs/b.md'],
+      agentName: 'Claude',
+    });
+    const text = result.content[0].text;
+    expect(text).toMatch(
+      /^mdr_baseline: saved a before copy of 2 file\(s\): \/abs\/a\.md, \/abs\/b\.md\./,
+    );
+    expect(text).toContain('mdr_request_review');
+    expect(text).toContain('sessionId');
+  });
+
+  it('surfaces a server error as the tool error', async () => {
+    const client = makeClient({
+      captureBaseline: vi.fn().mockRejectedValue(new Error('File not found: /abs/a.md')),
+    });
+    await expect(handleBaselineToolCall({ filePaths: ['/abs/a.md'] }, { client })).rejects.toThrow(
+      'File not found: /abs/a.md',
     );
   });
 });

@@ -144,7 +144,13 @@ async function waitFor(
       ).toBeDefined();
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       const names = tools.map((t) => t.name).sort();
-      expect(names).toEqual(['mdr_ask', 'mdr_comment', 'mdr_request_review', 'mdr_wait']);
+      expect(names).toEqual([
+        'mdr_ask',
+        'mdr_baseline',
+        'mdr_comment',
+        'mdr_request_review',
+        'mdr_wait',
+      ]);
     } finally {
       child.kill();
     }

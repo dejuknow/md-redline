@@ -55,6 +55,10 @@ const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
 const UPDATE_CHECK_WAIT_MS = 6_000;
 const UPDATE_CHECK_POLL_MS = 100;
+// Every subcommand name, so a positional-file guard can check against the
+// whole set instead of one name at a time and a new subcommand cannot repeat
+// the bug where its name got forwarded to the server as a path.
+const SUBCOMMANDS = new Set(['mcp', 'baseline']);
 
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
@@ -76,6 +80,9 @@ function printHelp() {
   console.log('  mcp install     Register md-redline with Claude Code and Claude Desktop');
   console.log('                    --claude-code     just Claude Code (via `claude mcp add`)');
   console.log('                    --claude-desktop  just Claude Desktop (JSON config file)');
+  console.log('  baseline [--hook] [--agent NAME] [--no-start] [paths...]');
+  console.log('                    Save a before copy of markdown files so a later review');
+  console.log('                    can show a diff (for a PreToolUse hook).');
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -563,11 +570,13 @@ async function ensureServerRunning() {
   if (isProductionMode()) {
     const serverArgs = [DIST_SERVER];
     const userArg = process.argv[2];
-    // Don't forward the `mcp` subcommand as a positional file arg. When
-    // Claude Code spawns `mdr mcp`, argv[2] is 'mcp', which would otherwise
-    // resolve against Claude Code's cwd and get passed to the server as an
-    // initial path — triggering a bogus trusted-roots permission dialog.
-    if (userArg && !userArg.startsWith('-') && userArg !== 'mcp') {
+    // Don't forward a subcommand name as a positional file arg. When Claude
+    // Code spawns `mdr mcp`, or a hook runs `mdr baseline`, argv[2] is the
+    // subcommand name, which would otherwise resolve against the caller's cwd
+    // and get passed to the server as an initial path, opening a nonexistent
+    // file (or, for `mcp`, triggering a bogus trusted-roots permission
+    // dialog). Covers every subcommand in SUBCOMMANDS, not just `mcp`.
+    if (userArg && !userArg.startsWith('-') && !SUBCOMMANDS.has(userArg)) {
       serverArgs.push(resolve(userArg));
     }
     child = await spawnDetached(process.execPath, serverArgs, { cwd: process.cwd() });
@@ -887,6 +896,127 @@ async function installMcpConfig(target) {
   }
 }
 
+/**
+ * The concatenated stdin as a string. Resolves with '' when stdin is a TTY
+ * (nothing was piped) or when nothing arrives within 2000 ms. Also stops
+ * reading and unrefs stdin once it resolves, so a pipe that stays open past
+ * that point does not keep the process alive waiting for more input.
+ *
+ * @returns {Promise<string>}
+ */
+function readStdin() {
+  return new Promise((resolveStdin) => {
+    if (process.stdin.isTTY) {
+      resolveStdin('');
+      return;
+    }
+    let data = '';
+    /** @param {string} value */
+    const finish = (value) => {
+      clearTimeout(timer);
+      process.stdin.pause();
+      // unref exists on socket- and tty-backed stdin, not on the file-backed
+      // stream a shell redirect from a file or /dev/null produces, where there
+      // is no handle keeping the loop alive to release.
+      if (typeof process.stdin.unref === 'function') process.stdin.unref();
+      resolveStdin(value);
+    };
+    const timer = setTimeout(() => finish(''), 2000);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => finish(data));
+    process.stdin.on('error', () => finish(data));
+  });
+}
+
+/**
+ * `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]`
+ *
+ * Saves a copy of each markdown file as it is right now so a later review can
+ * diff against it. Built to run from a PreToolUse hook: with --hook it reads
+ * the hook's JSON from stdin and takes the path out of it. It keeps whatever
+ * copy the server already holds, because the hook fires on every edit and the
+ * copy worth keeping is the one from before the first of them. It never fails
+ * the edit it runs in front of: every failure path returns quietly.
+ *
+ * @param {string[]} args
+ */
+async function runBaselineCommand(args) {
+  let agent;
+  let hookMode = false;
+  let allowStart = true;
+  const requested = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--hook') hookMode = true;
+    else if (arg === '--no-start') allowStart = false;
+    else if (arg === '--agent') agent = args[++i];
+    else if (arg.startsWith('--agent=')) agent = arg.slice('--agent='.length);
+    else if (!arg.startsWith('-')) requested.push(arg);
+  }
+  // The server rejects the whole capture when agentName is over 64 characters
+  // (MAX_AGENT_NAME_LEN in server/routes/baselines.ts), and under a hook that
+  // rejection is invisible. Trim here to match what the MCP validator does
+  // (server/mcp-stdio/validate.ts) so an overlong --agent value never quietly
+  // drops the capture it was meant to make.
+  if (agent) agent = agent.trim().slice(0, 64);
+
+  if (hookMode) {
+    const raw = await readStdin();
+    try {
+      const payload = JSON.parse(raw);
+      const input = (payload && payload.tool_input) || {};
+      if (typeof input.file_path === 'string' && input.file_path) requested.push(input.file_path);
+    } catch {
+      // Not hook JSON. Nothing to capture.
+    }
+  }
+
+  const paths = [
+    ...new Set(
+      requested
+        .map((p) => resolve(expandHomePath(p)))
+        .filter((p) => p.toLowerCase().endsWith('.md')),
+    ),
+  ];
+  if (paths.length === 0) return;
+
+  let port = await findServerPort();
+  if (!port) {
+    if (!allowStart) return;
+    try {
+      await ensureServerRunning();
+    } catch (err) {
+      console.error(`mdr baseline: ${errorMessage(err)}`);
+      return;
+    }
+    port = await findServerPort();
+    if (!port) return;
+  }
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/baselines`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        filePaths: paths,
+        onlyIfMissing: true,
+        ...(agent ? { agentName: agent } : {}),
+      }),
+    });
+    if (!res.ok) {
+      // json() types as unknown here (no DOM lib in this project's bin
+      // tsconfig), same reason getServerVersionInfo above casts its own parse.
+      const body = /** @type {{ error?: string } | null} */ (await res.json().catch(() => null));
+      console.error(`mdr baseline: ${body?.error ?? `HTTP ${res.status}`}`);
+    }
+  } catch (err) {
+    console.error(`mdr baseline: ${errorMessage(err)}`);
+  }
+}
+
 async function runMcpStdio() {
   const distMcp = join(APP_DIR, 'dist', 'mcp-stdio.js');
   if (!isProductionMode()) {
@@ -1049,6 +1179,11 @@ async function main() {
     // it, and everything else opens a browser at it. Neither is something a
     // test can do to a developer's machine.
     console.log((await findServerPort()) ?? 'none');
+    return;
+  }
+
+  if (process.argv[2] === 'baseline') {
+    await runBaselineCommand(process.argv.slice(3));
     return;
   }
 

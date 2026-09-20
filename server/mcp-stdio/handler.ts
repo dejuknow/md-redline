@@ -1,6 +1,7 @@
 import type {
   AskInput,
   AskWaitResult,
+  BaselineInput,
   PostReviewResult,
   RequestReviewInput,
   ReviewInput,
@@ -27,6 +28,11 @@ const DONE_PREAMBLE =
 
 const DONE_NO_COMMENTS =
   'Review complete. The user has no more feedback. Continue with your original plan.';
+
+const NO_BASELINE_NOTE = (paths: string[]) =>
+  `\n\nNote: mdr held no before copy for ${paths.join(', ')} when this review opened, ` +
+  `so the user may not have seen a diff of your changes to ${paths.length === 1 ? 'it' : 'them'}. ` +
+  `Call mdr_baseline before you edit, or install the mdr baseline hook.`;
 
 const STILL_WAITING = (sessionId: string) =>
   `Review in progress. The user is still adding comments — the file(s) under ` +
@@ -124,6 +130,21 @@ export async function handleRequestReviewToolCall(
     enableResolve: input.enableResolve,
   });
 
+  // The reviewer's diff needs a copy from before the agent's edits. Comparing
+  // the session's canonical paths against the store says whether this handoff
+  // can show one, and the note below is the only way the agent finds out.
+  let missingBaseline: string[] = [];
+  try {
+    const [sessionPaths, held] = await Promise.all([
+      ctx.client.getSessionFilePaths(session.sessionId),
+      ctx.client.listBaselines(),
+    ]);
+    const heldPaths = new Set(held.baselines.map((b) => b.path));
+    missingBaseline = sessionPaths.filter((p) => !heldPaths.has(p));
+  } catch {
+    missingBaseline = [];
+  }
+
   const fullUrl = `${ctx.baseUrl.replace(/\/$/, '')}${session.url}`;
   // Server-side dedupe says "this is a fresh session" → open the browser.
   // The process-scoped `openBrowserOnce` ensures we never open the same URL
@@ -179,20 +200,24 @@ export async function handleRequestReviewToolCall(
     };
   }
 
+  const baselineNote = missingBaseline.length > 0 ? NO_BASELINE_NOTE(missingBaseline) : '';
+
   if (result.status === 'batch') {
     return {
-      content: [{ type: 'text', text: BATCH_PREAMBLE(session.sessionId) + result.prompt }],
+      content: [
+        { type: 'text', text: BATCH_PREAMBLE(session.sessionId) + result.prompt + baselineNote },
+      ],
     };
   }
 
   if (result.status === 'done') {
     if (result.prompt) {
       return {
-        content: [{ type: 'text', text: DONE_PREAMBLE + result.prompt }],
+        content: [{ type: 'text', text: DONE_PREAMBLE + result.prompt + baselineNote }],
       };
     }
     return {
-      content: [{ type: 'text', text: DONE_NO_COMMENTS }],
+      content: [{ type: 'text', text: DONE_NO_COMMENTS + baselineNote }],
     };
   }
 
@@ -720,4 +745,30 @@ export async function handleReviewToolCall(
     `When you have finished posting all feedback, call mdr_wait with ` +
       `sessionId "${session.sessionId}" to block until the user has engaged.`,
   );
+}
+
+/**
+ * mdr_baseline: ask the server to keep a copy of each file as it is now, so
+ * the reviewer's diff can show what the agent changed. Non-blocking.
+ * The route checks each path against the allowed roots when it reads the
+ * file, so there is no separate access call.
+ */
+export async function handleBaselineToolCall(
+  input: BaselineInput,
+  ctx: Pick<ToolCallContext, 'client'>,
+): Promise<ToolCallResult> {
+  const result = await ctx.client.captureBaseline(input);
+  const paths = result.baselines.map((b) => b.path);
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `mdr_baseline: saved a before copy of ${paths.length} file(s): ${paths.join(', ')}. ` +
+          `Edit them now. When you are done, hand them to the user with mdr_request_review: ` +
+          `pass these paths to start a review, or, if a review session is already open for ` +
+          `them, pass its sessionId (without filePaths) to continue it.`,
+      },
+    ],
+  };
 }

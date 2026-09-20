@@ -51,4 +51,16 @@ describe('formatReferenceLabel', () => {
       /^Since last review, /,
     );
   });
+  it('labels an agent reference with the agent name', () => {
+    const at = new Date('2026-07-12T15:14:00').getTime();
+    expect(formatReferenceLabel({ origin: 'agent', capturedAt: at, agentName: 'Claude' })).toMatch(
+      /^Before Claude's edits, /,
+    );
+  });
+  it('labels an agent reference without a name', () => {
+    const at = new Date('2026-07-12T15:14:00').getTime();
+    expect(formatReferenceLabel({ origin: 'agent', capturedAt: at })).toMatch(
+      /^Before the agent's edits, /,
+    );
+  });
 });

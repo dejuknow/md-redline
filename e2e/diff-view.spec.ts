@@ -179,7 +179,7 @@ test.describe('Diff overlay', () => {
     const diffBtn = toggleBtn(page, 'diff');
     await expect(diffBtn).toBeVisible();
     await expect(diffBtn).toBeDisabled();
-    await expect(diffBtn).toHaveAttribute('title', /hand off/i);
+    await expect(diffBtn).toHaveAttribute('title', /^Show diff\. Available after a handoff/);
   });
 
   test('chunk count badge is visible even when diff overlay is toggled off', async ({

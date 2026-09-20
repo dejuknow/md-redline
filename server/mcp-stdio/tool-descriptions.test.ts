@@ -41,9 +41,10 @@ describe('review tool disambiguation', () => {
     expect(d).toMatch(/USER/);
   });
 
-  it('still advertises all four tools', () => {
+  it('still advertises all five tools', () => {
     expect(MDR_TOOLS.map((t) => t.name).sort()).toEqual([
       'mdr_ask',
+      'mdr_baseline',
       'mdr_comment',
       'mdr_request_review',
       'mdr_wait',
@@ -54,5 +55,22 @@ describe('review tool disambiguation', () => {
 describe('the old tool name', () => {
   it('is not advertised, so it cannot compete for "review X in mdr"', () => {
     expect(MDR_TOOLS.map((t) => t.name)).not.toContain('mdr_review');
+  });
+});
+
+describe('mdr_baseline', () => {
+  it('tells the agent to call it BEFORE editing', () => {
+    expect(describeOf('mdr_baseline')).toMatch(/BEFORE/);
+  });
+
+  it('is pointed at from mdr_request_review, since that is where an agent decides its workflow', () => {
+    expect(describeOf('mdr_request_review')).toContain('mdr_baseline');
+  });
+
+  it('warns against calling it after editing', () => {
+    expect(describeOf('mdr_baseline')).toMatch(/Do not call it after you have already edited/);
+    expect(describeOf('mdr_request_review')).toMatch(
+      /Calling it after you have edited does not help/,
+    );
   });
 });

@@ -1,5 +1,6 @@
 import type {
   AskInput,
+  BaselineInput,
   RequestReviewInput,
   ReviewInput,
   ValidationResult,
@@ -312,5 +313,39 @@ export function validateAskInput(raw: unknown): ValidationResult<AskInput> {
       sessionId: obj.sessionId,
       questions: obj.questions as AskInput['questions'],
     },
+  };
+}
+
+/**
+ * Validate a raw mdr_baseline argument object: `{ filePaths, agentName? }`.
+ * The server re-checks paths against its allowed roots; this only guards shape.
+ */
+export function validateBaselineInput(raw: unknown): ValidationResult<BaselineInput> {
+  if (typeof raw !== 'object' || raw === null) {
+    return { ok: false, error: 'input must be an object' };
+  }
+  const obj = raw as { filePaths?: unknown; agentName?: unknown };
+  if (!Array.isArray(obj.filePaths)) {
+    return { ok: false, error: 'filePaths must be an array' };
+  }
+  if (obj.filePaths.length === 0) {
+    return { ok: false, error: 'filePaths must be non-empty' };
+  }
+  if (obj.filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
+    return { ok: false, error: 'filePaths must contain non-empty strings' };
+  }
+  if (obj.filePaths.length > 64) {
+    return { ok: false, error: 'filePaths must have at most 64 entries' };
+  }
+  // agentName only sets the diff label, so a bad one is dropped or trimmed
+  // rather than failing the capture.
+  let agentName: string | undefined;
+  if (typeof obj.agentName === 'string') {
+    const trimmed = obj.agentName.trim().slice(0, 64);
+    if (trimmed.length > 0) agentName = trimmed;
+  }
+  return {
+    ok: true,
+    value: { filePaths: obj.filePaths as string[], ...(agentName ? { agentName } : {}) },
   };
 }

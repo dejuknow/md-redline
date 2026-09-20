@@ -9,6 +9,7 @@ import {
 import { createMdrClient } from './client';
 import {
   handleAskToolCall,
+  handleBaselineToolCall,
   handleRequestReviewToolCall,
   handleReviewToolCall,
   handleWaitToolCall,
@@ -16,6 +17,7 @@ import {
 import type { RunMcpServerOptions } from './types';
 import {
   validateAskInput,
+  validateBaselineInput,
   validateRequestReviewInput,
   validateReviewInput,
   validateWaitInput,
@@ -38,6 +40,9 @@ export const MDR_TOOLS = [
       '"open X so I can comment", or "let me look at X". The user is the ' +
       'reviewer here; you wait and then address what they write. ' +
       'To start a new review, pass filePaths. ' +
+      'If you are about to edit or create files the user will review, call mdr_baseline ' +
+      'before touching them so the user can see a diff of your changes. Calling it ' +
+      'after you have edited does not help: the copy would already include your edits. ' +
       'To continue after addressing a batch of comments, or to re-poll while ' +
       'the user is still reviewing, pass the sessionId from the previous result ' +
       '(without filePaths). If the result says the user has not finished yet, ' +
@@ -247,6 +252,37 @@ export const MDR_TOOLS = [
       },
     },
   },
+  {
+    name: 'mdr_baseline',
+    description:
+      'Call this BEFORE you edit markdown files the user will later review in mdr ' +
+      '(md-redline). It saves a copy of each file as it is right now so the ' +
+      "reviewer's diff can show exactly what you changed. Returns immediately. " +
+      'Include files you are about to create (their folder must already exist); ' +
+      'they are saved as empty. Do not call ' +
+      'it after you have already edited a file: the copy would already contain your ' +
+      'changes. Workflow: mdr_baseline (before editing) -> edit the files -> ' +
+      'mdr_request_review. At most 64 files per call. If the reviewer already has a ' +
+      'before point for a file from an earlier handoff or review, that one is kept.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 64,
+          description: 'Absolute paths to the markdown files you are about to edit.',
+        },
+        agentName: {
+          type: 'string',
+          description:
+            'Your agent name (e.g. "Claude"). Shown in the diff label; longer than 64 characters is cut.',
+        },
+      },
+      required: ['filePaths'],
+    },
+  },
 ];
 
 /**
@@ -337,6 +373,13 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
       const validation = validateWaitInput(request.params.arguments);
       if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
       const result = await handleWaitToolCall(validation.value, { client, sendProgress, signal });
+      return result as CallToolResult;
+    }
+
+    if (request.params.name === 'mdr_baseline') {
+      const validation = validateBaselineInput(request.params.arguments);
+      if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
+      const result = await handleBaselineToolCall(validation.value, { client });
       return result as CallToolResult;
     }
 

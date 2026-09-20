@@ -25,6 +25,8 @@ import { atomicWriteFile } from './fs-retry';
 import { injectSvgDimensions } from './svg-dimensions';
 import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
+import { BaselineStore } from './baselines';
+import { registerBaselineRoutes } from './routes/baselines';
 import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
@@ -468,6 +470,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
   >();
 
   const reviewSessions = new ReviewSessionStore();
+  const baselines = new BaselineStore();
 
   reviewSessions.setOnSessionAborted((_sessionId, asks) => {
     void cleanupAgentMarkers(asks).catch((err) => {
@@ -689,6 +692,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
     writeFileText: (p, content) => withFileLock(p, () => atomicWriteFile(p, content)),
     notifyFileChanged,
   });
+
+  registerBaselineRoutes(app, baselines, { resolveAndValidate });
 
   app.get('/api/config', (c) => {
     return c.json({ initialFile, initialDir, homeDir });

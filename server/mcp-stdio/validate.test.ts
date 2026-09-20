@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { validateAskInput, validateReviewInput, validateWaitInput } from './validate';
+import {
+  validateAskInput,
+  validateBaselineInput,
+  validateReviewInput,
+  validateWaitInput,
+} from './validate';
 
 describe('validateReviewInput', () => {
   it('accepts comments-only input', () => {
@@ -317,5 +322,47 @@ describe('validateWaitInput', () => {
   it('rejects non-object input', () => {
     const res = validateWaitInput('rev_abc');
     expect(res.ok).toBe(false);
+  });
+});
+
+describe('validateBaselineInput', () => {
+  it('accepts filePaths with an optional agentName', () => {
+    const res = validateBaselineInput({ filePaths: ['/tmp/a.md'], agentName: 'Claude' });
+    expect(res).toEqual({ ok: true, value: { filePaths: ['/tmp/a.md'], agentName: 'Claude' } });
+  });
+
+  it('omits agentName when not given', () => {
+    const res = validateBaselineInput({ filePaths: ['/tmp/a.md'] });
+    expect(res).toEqual({ ok: true, value: { filePaths: ['/tmp/a.md'] } });
+  });
+
+  it('rejects a missing or empty filePaths', () => {
+    expect(validateBaselineInput({}).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: [] }).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: [''] }).ok).toBe(false);
+    expect(validateBaselineInput({ filePaths: [1] }).ok).toBe(false);
+  });
+
+  it('drops a non-string, null, or empty agentName', () => {
+    for (const agentName of [3, null, '', '   ']) {
+      expect(validateBaselineInput({ filePaths: ['/a.md'], agentName })).toEqual({
+        ok: true,
+        value: { filePaths: ['/a.md'] },
+      });
+    }
+  });
+
+  it('truncates agentName to 64 characters', () => {
+    const res = validateBaselineInput({ filePaths: ['/a.md'], agentName: 'x'.repeat(80) });
+    expect(res.ok).toBe(true);
+    expect(res.ok && (res.value.agentName as string).length).toBe(64);
+  });
+
+  it('rejects more than 64 filePaths', () => {
+    expect(validateBaselineInput({ filePaths: Array(65).fill('/a.md') }).ok).toBe(false);
+  });
+
+  it('rejects a non-object', () => {
+    expect(validateBaselineInput(null).ok).toBe(false);
   });
 });

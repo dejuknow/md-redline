@@ -97,7 +97,7 @@ Add this server entry to your client's MCP config file:
 
 Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
 
-After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_comment`, `mdr_ask`, and `mdr_wait`. (`mdr_comment` was called `mdr_review` before 0.9; the old name still works if you have it saved in a prompt, but agents are no longer offered it.)
+After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_comment`, `mdr_ask`, `mdr_wait`, and `mdr_baseline`. (`mdr_comment` was called `mdr_review` before 0.9; the old name still works if you have it saved in a prompt, but agents are no longer offered it.)
 
 ## Review workflow
 
@@ -116,7 +116,24 @@ The common flow right after an agent drafts a document. Tell the agent:
 
 > "Let me review docs/specs/feature-x.md in mdr before you continue."
 
-The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlight text and leave comments, then click **Send N comments**. The agent receives your feedback as a structured prompt and starts addressing your comments. You can keep sending follow-up batches while it works; **Send N & finish** sends the last batch and closes the loop. The review is opt-in per request. The agent only pauses when you ask for it.
+The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlight text and leave comments, then click **Send N comments**. The agent receives your feedback as a structured prompt and starts addressing your comments. You can keep sending follow-up batches while it works; **Send N & finish** sends the last batch and closes the loop. The review is opt-in per request. The agent only pauses when you ask for it. If the agent edits the document before asking you to review it, it calls `mdr_baseline` first, so the diff shows its changes on the first round.
+
+**Automatic before copies.** A capable agent calls `mdr_baseline` on its own, but a smaller or hurried one skips it, and then the diff button is greyed out on the round you most want it. A hook makes it automatic. Add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "mdr baseline --hook --agent Claude" }]
+      }
+    ]
+  }
+}
+```
+
+It acts only on markdown files. It keeps the first copy it takes of a file rather than replacing it on every edit, so the diff covers the whole editing session. It starts mdr if nothing is running. Add `--no-start` to the command if you would rather it skip the capture than start one, for when you do not want a markdown edit anywhere on your machine to boot mdr. Either way it never blocks an edit: every failure gets out of the way quietly.
 
 ### 2. The agent reviews your doc
 

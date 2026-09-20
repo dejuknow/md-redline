@@ -36,13 +36,21 @@ export function shouldAdvanceFrontier(input: FrontierAdvanceInput): boolean {
 
 /** Human label for the diff reference, e.g. "Since last handoff, 3:14 PM". */
 export function formatReferenceLabel(ref: {
-  origin: 'handoff' | 'review';
+  origin: 'handoff' | 'review' | 'agent';
   capturedAt: number;
+  agentName?: string;
 }): string {
   const time = new Date(ref.capturedAt).toLocaleTimeString([], {
     hour: 'numeric',
     minute: '2-digit',
   });
-  const what = ref.origin === 'handoff' ? 'Since last handoff' : 'Since last review';
+  let what: string;
+  if (ref.origin === 'agent') {
+    what = ref.agentName ? `Before ${ref.agentName}'s edits` : "Before the agent's edits";
+  } else if (ref.origin === 'handoff') {
+    what = 'Since last handoff';
+  } else {
+    what = 'Since last review';
+  }
   return `${what}, ${time}`;
 }
