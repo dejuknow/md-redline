@@ -606,6 +606,8 @@ to re-read the file(s) since the user may have replied inline or edited the doc.
 
 - `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]` — save a before copy of markdown files so a later review can show a diff. Built for a Claude Code PreToolUse hook: `--hook` reads the hook's JSON from stdin and takes `tool_input.file_path` out of it. Non-markdown paths are ignored. It posts with `onlyIfMissing`, so the copy from before the first edit of a session survives later edits. It starts a server when none is running unless `--no-start` is passed, and it always exits 0 so a failing capture never blocks the edit it runs in front of. A copy expires after 24 hours, so edits to one file that straddle a day boundary diff from the later copy.
 
+- `mdr sessions [--json] [--kill ID]` — list the review sessions the running server holds open, oldest first: id, origin, caller (the first 12 characters of `clientId`), age, time since the last heartbeat, and file paths with the home directory shortened to `~`. The caller column is how to tell one agent's sessions from per-process callers that each mint their own (#121). `--json` prints the `GET /api/review-sessions` array unchanged, for scripts. `--kill ID` ends one through `POST /api/review-sessions/:id/abort`, the same route as the banner's cancel button, and exits 1 for an unknown or already-ended ID. It never starts a server: with none running it says so and exits 0 (or prints `[]` under `--json`), except under `--kill`, which exits 1. Formatting lives in `bin/sessions.js`.
+
 Install commands:
 - `mdr mcp install` — install for Claude Code (writes to `.mcp.json`)
 - `mdr mcp install --claude-desktop` — install for Claude Desktop

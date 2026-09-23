@@ -33,6 +33,7 @@ npm install -g md-redline
 mdr /path/to/spec.md        # Open a file
 mdr /path/to/dir             # Open a directory
 mdr --stop                   # Stop the running server
+mdr sessions                 # List open review sessions (--kill ID ends one)
 ```
 
 `md-redline` also works as an alias for `mdr`.
