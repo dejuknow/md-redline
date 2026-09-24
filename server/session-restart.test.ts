@@ -204,7 +204,10 @@ async function stopServer(
  * (server/index.ts's defaultTrustHome) on its first boot since a temp dir
  * never has a pre-existing .md-redline preferences file. */
 function makeHomeDir(): { homeDir: string; docPath: string } {
-  const homeDir = mkdtempSync(join(tmpdir(), 'mdr-restart-test-home-'));
+  // Resolved to its real long path: on Windows runners tmpdir() is an 8.3
+  // short form (RUNNER~1), while the server compares a review's file by its
+  // real path, so an unresolved home would not count as trusted (403).
+  const homeDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'mdr-restart-test-home-')));
   scratchDirs.push(homeDir);
   const docPath = join(homeDir, 'doc.md');
   writeFileSync(docPath, '# Doc\n\nSome body text.\n');
