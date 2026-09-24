@@ -83,7 +83,7 @@ describe('SettingsPanel: hidden HTML comments', () => {
   it('starts collapsed to one summary row and expands on click', () => {
     renderPanel({ open: true });
     expect(summary().getAttribute('aria-expanded')).toBe('false');
-    expect(summary().textContent).toContain('14 tools');
+    expect(summary().textContent).toContain('16 tools');
     expect(screen.queryByRole('checkbox', { name: 'Keep Vale comments hidden' })).toBeNull();
 
     expand();
@@ -116,7 +116,7 @@ describe('SettingsPanel: hidden HTML comments', () => {
       (screen.getByRole('checkbox', { name: 'Keep Vale comments hidden' }) as HTMLInputElement)
         .checked,
     ).toBe(false);
-    expect(summary().textContent).toContain('13 of 14 tools');
+    expect(summary().textContent).toContain('15 of 16 tools');
   });
 
   it('adds, switches off, and removes your own words', () => {
@@ -206,7 +206,7 @@ describe('SettingsPanel: hidden HTML comments', () => {
     renderPanel({ open: true });
 
     expect(
-      await screen.findByRole('button', { name: /13 of 14 tools, 1 of your own/i }),
+      await screen.findByRole('button', { name: /15 of 16 tools, 1 of your own/i }),
     ).not.toBeNull();
     expand();
     expect(within(screen.getByText('Your own').parentElement!).getByText('TODO')).not.toBeNull();

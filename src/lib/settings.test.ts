@@ -296,6 +296,19 @@ describe('parseSettings', () => {
       expect(enabled.at(-1)).toBe('TODO');
     });
 
+    it("shows one tool's markers without showing another tool's that look alike", () => {
+      // One row per tool: showing markdown-toc's `toc` or the read-more `more`
+      // leaves the VS Code TOC markers and Docusaurus's `truncate` hidden.
+      const enabled = getEnabledHiddenCommentPrefixes({
+        shownTools: ['toc', 'read-more'],
+        custom: [],
+        customEnabled: true,
+      });
+      expect(enabled).not.toContain('toc');
+      expect(enabled).not.toContain('more');
+      expect(enabled).toEqual(expect.arrayContaining(['TOC', '/TOC', 'truncate']));
+    });
+
     it('leaves out your own words while they are switched off', () => {
       expect(
         getEnabledHiddenCommentPrefixes({ shownTools: [], custom: ['TODO'], customEnabled: false }),

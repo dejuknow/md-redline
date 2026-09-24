@@ -97,6 +97,8 @@ export const DEFAULT_HIDDEN_COMMENT_TOOLS: HiddenCommentTool[] = [
       'DOCTOC EXCLUDE',
     ],
   },
+  // The blog truncation marker.
+  { id: 'docusaurus', label: 'Docusaurus', prefixes: ['truncate'] },
   {
     id: 'markdown-all-in-one',
     label: 'Markdown All in One',
@@ -107,6 +109,8 @@ export const DEFAULT_HIDDEN_COMMENT_TOOLS: HiddenCommentTool[] = [
     label: 'markdown-link-check',
     prefixes: ['markdown-link-check-disable', 'markdown-link-check-enable'],
   },
+  // Kept as `toc`, its id since #124, where it shared a row with other tools.
+  { id: 'toc', label: 'markdown-toc', prefixes: ['toc', 'tocstop'] },
   {
     id: 'markdownlint',
     label: 'markdownlint',
@@ -119,16 +123,19 @@ export const DEFAULT_HIDDEN_COMMENT_TOOLS: HiddenCommentTool[] = [
     ],
   },
   { id: 'prettier', label: 'Prettier', prefixes: ['prettier-ignore'] },
-  { id: 'read-more', label: 'Read-more cut', prefixes: ['more', 'truncate'] },
+  // Hugo's summary divider, also Jekyll's and Hexo's usual excerpt separator.
+  { id: 'read-more', label: 'Read-more cut', prefixes: ['more'] },
   {
     id: 'remark-lint',
     label: 'remark-lint',
     prefixes: ['lint disable', 'lint enable', 'lint ignore'],
   },
   { id: 'textlint', label: 'textlint', prefixes: ['textlint-disable', 'textlint-enable'] },
-  { id: 'toc', label: 'TOC markers', prefixes: ['toc', 'tocstop', 'TOC', '/TOC'] },
   // Bare `vale` covers every form: `vale off`, `vale Style.Rule = NO`, `vale style = X`.
   { id: 'vale', label: 'Vale', prefixes: ['vale'] },
+  // The VS Code Markdown TOC extension's start and end markers. Labelled so it
+  // can't be mistaken for the markdown-toc row.
+  { id: 'markdown-toc-vscode', label: 'VS Code TOC', prefixes: ['TOC', '/TOC'] },
 ];
 
 /** Every shipped prefix, for callers that render with no settings at all. */
@@ -232,7 +239,6 @@ export function migrateLegacyHiddenCommentPrefixes(value: unknown): HiddenCommen
   };
 }
 
-/** The stored `hiddenComments`, else a converted legacy list, else the defaults. */
 /**
  * What stored settings say about hidden comments: `hiddenComments` if it is
  * valid, else a converted legacy list, else null. The one precedence rule,
