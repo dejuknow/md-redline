@@ -77,7 +77,9 @@ export type AskWaitResult =
       replies: Array<{ questionIndex: number; text: string }>;
       totalQuestions: number;
     }
-  | { status: 'no_reply'; reason: AskNoReplyReason };
+  | { status: 'no_reply'; reason: AskNoReplyReason }
+  /** The long-poll timeout elapsed with the ask still open; poll again. */
+  | { status: 'pending' };
 
 export interface PostAgentCommentsResult {
   askId: string;
@@ -190,7 +192,7 @@ export interface MdrClient {
   abortSession(sessionId: string): Promise<void>;
   postAgentComments(sessionId: string, questions: AskQuestion[]): Promise<PostAgentCommentsResult>;
   /** Long-poll — intentionally not signal-aware; cancel via releaseAsk instead. */
-  waitForAsk(sessionId: string, askId: string): Promise<AskWaitResult>;
+  waitForAsk(sessionId: string, askId: string, timeoutSeconds?: number): Promise<AskWaitResult>;
   postReview(sessionId: string, args: PostReviewArgs): Promise<PostReviewResult>;
   releaseAsk(sessionId: string, askId: string): Promise<void>;
   /** Long-poll — server's 90s timeout bounds the wait; client doesn't abort the fetch. */

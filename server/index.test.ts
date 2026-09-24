@@ -3454,6 +3454,110 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
   });
 });
 
+describe('ask wait as a bounded long-poll (#131)', () => {
+  // The agent now polls with ?timeout= and re-polls, so the reply can land
+  // while no request is parked. These pin that it is never lost.
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  async function openAsk() {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-askpoll-')));
+    dirs.push(tmp);
+    const filePath = join(tmp, 'spec.md');
+    await writeFile(filePath, 'Some text here.\n', 'utf8');
+    const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const post = await app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ questions: [{ filePath, anchor: 'Some text', text: 'q?' }] }),
+    });
+    expect(post.ok).toBe(true);
+    const { askId } = (await post.json()) as { askId: string };
+    const commentId = reviewSessions.getPendingAsks(sessionId)[0].questions[0].commentId;
+    const poll = (query = '', session = sessionId) =>
+      app.request(`/api/review-sessions/${session}/asks/${askId}/wait${query}`);
+    return { app, reviewSessions, sessionId, askId, commentId, poll, tmp };
+  }
+
+  it('returns pending when the timeout elapses with no reply', async () => {
+    const { poll } = await openAsk();
+    const res = await poll('?timeout=1');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: 'pending' });
+  });
+
+  it('returns at once when the reply arrives during a bounded poll', async () => {
+    const { reviewSessions, sessionId, askId, commentId, poll } = await openAsk();
+    const started = Date.now();
+    const waiting = poll('?timeout=30');
+    setTimeout(() => {
+      reviewSessions.resolveReplies(sessionId, askId, [{ commentId, text: 'yes' }]);
+    }, 20);
+    const body = (await (await waiting).json()) as { status: string };
+    expect(body.status).toBe('reply');
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it('delivers a reply that landed between two polls, instead of losing it', async () => {
+    const { reviewSessions, sessionId, askId, commentId, poll } = await openAsk();
+    // Resolved while no request is parked: the ask has already left the
+    // pending list, which used to make the next poll a 404.
+    reviewSessions.resolveReplies(sessionId, askId, [{ commentId, text: 'late reply' }]);
+    expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
+
+    const res = await poll('?timeout=1');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: 'reply',
+      replies: [{ questionIndex: 0, text: 'late reply' }],
+      totalQuestions: 1,
+    });
+  });
+
+  it('delivers a release that landed between two polls', async () => {
+    const { reviewSessions, sessionId, askId, poll } = await openAsk();
+    reviewSessions.releaseAsk(sessionId, askId);
+    expect(await (await poll('?timeout=1')).json()).toEqual({
+      status: 'no_reply',
+      reason: 'released',
+    });
+  });
+
+  it('keeps a settled result scoped to its own session', async () => {
+    const { app, reviewSessions, sessionId, askId, commentId, poll, tmp } = await openAsk();
+    reviewSessions.resolveReplies(sessionId, askId, [{ commentId, text: 'private' }]);
+    await writeFile(join(tmp, 'b.md'), '# b\n', 'utf8');
+    const other = await app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [join(tmp, 'b.md')] }),
+    });
+    // Without this, a failed create leaves otherId undefined and poll() falls
+    // back to the ask's own session, which passes for the wrong reason.
+    expect(other.ok).toBe(true);
+    const { sessionId: otherId } = (await other.json()) as { sessionId: string };
+    expect(otherId).not.toBe(sessionId);
+
+    expect((await poll('?timeout=1', otherId)).status).toBe(404);
+  });
+
+  it('rejects a timeout that is not a positive integer', async () => {
+    const { poll } = await openAsk();
+    // 241 is past the cap, which stays below Node fetch's 300s header timeout.
+    for (const bad of ['?timeout=0', '?timeout=-5', '?timeout=abc', '?timeout=241']) {
+      expect((await poll(bad)).status).toBe(400);
+    }
+  });
+});
+
 describe('POST /api/review-sessions/:id/asks/:askId/reply', () => {
   it('resolves the wait, removes markers, and returns ok', async () => {
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
