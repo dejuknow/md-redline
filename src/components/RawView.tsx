@@ -15,8 +15,8 @@ import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
 import {
-  createCommentMarkerRegex,
   createFrontmatterRegex,
+  getCommentMarkerRanges,
   MDR_MARKER_PREFIX,
 } from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
@@ -28,7 +28,7 @@ interface SyntaxRule {
   className: string;
 }
 
-// Comment markers are handled separately via createCommentMarkerRegex() so
+// Comment markers are handled separately via getCommentMarkerRanges() so
 // they get a fresh /g regex per call (no shared lastIndex). The other
 // patterns below have no overlap risk because each rule iterates and resets
 // independently within the same function scope.
@@ -150,7 +150,16 @@ function extractNodeText(node: MarkdownAstNode): string {
 }
 
 export function extractRawHeadings(rawMarkdown: string): RawHeading[] {
-  const cleanRaw = rawMarkdown.replace(createCommentMarkerRegex(), '');
+  // The parser's ranges, like buildHighlightedHtml, so a heading's outline
+  // text keeps a documentation example of the marker format (#123). Removing
+  // each marker in place keeps the line numbers the outline maps back to.
+  let cleanRaw = '';
+  let last = 0;
+  for (const range of getCommentMarkerRanges(rawMarkdown)) {
+    cleanRaw += rawMarkdown.slice(last, range.start);
+    last = range.end;
+  }
+  cleanRaw += rawMarkdown.slice(last);
   const tree = rawHeadingProcessor.parse(cleanRaw) as MarkdownAstNode;
   const headings: Array<{ text: string; level: number; lineIndex: number }> = [];
 
@@ -184,16 +193,17 @@ export function extractRawHeadings(rawMarkdown: string): RawHeading[] {
 export function buildHighlightedHtml(raw: string): string {
   // Step 1: Collect comment marker matches first (they have absolute priority)
   const commentRegions: Region[] = [];
-  const commentRe = createCommentMarkerRegex();
-  let cm: RegExpExecArray | null;
-  while ((cm = commentRe.exec(raw)) !== null) {
+  // The parser's ranges, not the bare regex, so a documentation example of the
+  // format inside backticks shows as the code it is (#123).
+  for (const range of getCommentMarkerRanges(raw)) {
+    const markerText = raw.slice(range.start, range.end);
     const region: Region = {
-      start: cm.index,
-      end: cm.index + cm[0].length,
+      start: range.start,
+      end: range.end,
       className: 'raw-comment-marker',
     };
     try {
-      const jsonStr = cm[0].replace(/^<!-- @comment/, '').replace(/ -->$/, '');
+      const jsonStr = markerText.replace(/^<!-- @comment/, '').replace(/ -->$/, '');
       const parsed = JSON.parse(jsonStr);
       if (parsed.id) {
         region.id = parsed.id;

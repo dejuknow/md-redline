@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { ANCHOR_EDGE_CASES_DOC_BASELINE } from './helpers/fixture-baselines';
@@ -165,5 +165,32 @@ test.describe('Comments anchor cleanly across markdown constructs', () => {
 
     await expect(page.getByText('this paragraph escapes asterisks')).toBeVisible();
     await expect(page.getByText(/Needs re-anchoring/)).not.toBeVisible();
+  });
+
+  test('inline code: marker lands before the backticks and still highlights the code', async ({
+    page,
+  }) => {
+    // #123. The marker used to go inside the backticks, where every other
+    // renderer shows it as literal code.
+    writeFileSync(
+      fixturePath,
+      '# Anchor Edge Cases\n\nCall `computeToken` first, and write `<!--` to open a note.\n\nLater text here.\n',
+    );
+    await openFixture(page);
+    await selectSingleText(page, 'computeToken');
+    await submitCommentForm(page, 'why this helper');
+
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf8'))
+      .toMatch(/Call <!-- @comment\{.*?\} -->`computeToken` first/);
+    await expect(page.locator('mark.comment-highlight')).toHaveText('computeToken');
+    await expect(page.getByText(/Needs re-anchoring/)).not.toBeVisible();
+
+    // The `<!--` in code no longer drags a later marker up into it.
+    await selectSingleText(page, 'Later text');
+    await submitCommentForm(page, 'and this one');
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf8'))
+      .toMatch(/\n\n<!-- @comment\{.*?\} -->Later text here\.\n$/);
   });
 });

@@ -116,12 +116,26 @@ highlighting, orphan detection, and agent handoff are unaffected.
 | Fenced code block | Before the opening fence, own line | A marker inside is literal text |
 | YAML/TOML frontmatter (offset 0 only) | After the closing fence, own line | It can't go before, and a comment body containing `: ` breaks the YAML parse |
 | HTML comment | Before the block; own line only when the comment owns its line | Nested comments don't exist: the first `-->` closes the outer one and the rest becomes visible text |
+| Inline code span | Before the opening backticks, inline | Inside, every other renderer shows the marker as literal code (#123) |
 
-The ranges are computed with regexes, and each container's scan excludes the
-others (a fence line inside frontmatter is YAML, a `<!--` inside a fence is
-sample text). Do not add a fifth exclusion: four rounds of that have already
-happened and the fourth cost a silently lost comment. #30 tracks replacing the
-computation with ranges derived from the parse.
+Fences, frontmatter and HTML comments are computed with regexes, and each
+container's scan excludes the others (a fence line inside frontmatter is YAML,
+a `<!--` inside a fence or a code span is sample text). Code spans are the one
+container taken from the parse (`getInlineCodeRanges`: remark-parse with
+frontmatter and GFM, the renderer's parser, cached by text), because they
+interact with nearly everything inline: HTML tags and autolinks outrank them,
+and they end at every block boundary. That is deliberately narrow. #30 built
+the full parse-derived rewrite for the block containers and it corrupted
+documents six ways, since block node boundaries do not match the source; an
+inline code node's offsets are exactly its backticks. Extend the regex
+scanners for block containers, not the parse.
+
+**Reading, inside a code span:** a complete marker still parses (mdr wrote
+markers inside backticks before #123, and those keep working). Anything else
+marker-shaped there, like a README's `<!-- @comment{"id":"x"} -->` example, is
+left as literal text: not stripped, not a comment, never deleted by cleanup.
+`getCommentMarkerRanges` exposes the same answer to views that style or strip
+markers (RawView), and Copy document uses `parseComments().cleanMarkdown`.
 
 **Placement alone treats an unclosed fence as running to end of document**
 (`getCodeBlockRanges`'s `unclosedRunsToEof`), because that is how every renderer

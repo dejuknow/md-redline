@@ -19,7 +19,6 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import {
   backfillReplyTimestamps,
-  createCommentMarkerRegex,
   findNewReplyIds,
   parseComments,
   stripInlineFormatting,
@@ -752,7 +751,9 @@ export default function App() {
     [getTabSnapshot, updateTab],
   );
   const handleCopyDocument = useCallback(() => {
-    const clean = rawMarkdownRef.current.replace(createCommentMarkerRegex(), '');
+    // The parser's clean text, so a documentation example of the marker format
+    // inside backticks is copied rather than stripped (#123).
+    const clean = parseComments(rawMarkdownRef.current).cleanMarkdown;
     navigator.clipboard.writeText(clean).then(
       () => {
         setCopyFeedback(true);

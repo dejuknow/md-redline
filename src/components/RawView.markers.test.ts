@@ -32,3 +32,29 @@ describe('buildHighlightedHtml comment marker folding', () => {
     expect(html).not.toContain('raw-marker-pill');
   });
 });
+
+describe('buildHighlightedHtml and marker-shaped text in code (#123)', () => {
+  it('shows a documentation example of the format as code, not a folded comment', () => {
+    const html = buildHighlightedHtml(
+      'Write `<!-- @comment{"id":"x","anchor":"y"} -->` to leave a note.',
+    );
+    expect(html).not.toContain('raw-comment-marker');
+    expect(html).not.toContain('data-comment-id="x"');
+  });
+
+  it('still folds a real marker next to such an example', () => {
+    const html = buildHighlightedHtml(
+      `Write \`<!-- @comment{"id":"x","anchor":"y"} -->\` then ${marker}foo`,
+    );
+    expect(html).toContain('data-comment-id="c1"');
+    expect(html).not.toContain('data-comment-id="x"');
+  });
+});
+
+describe('extractRawHeadings and marker-shaped text in code (#123)', () => {
+  it('keeps a documentation example in the heading text, like the rendered view', async () => {
+    const { extractRawHeadings } = await import('./RawView');
+    const [heading] = extractRawHeadings('## The `<!-- @comment{"id":"x"} -->` form\n');
+    expect(heading.text).toBe('The <!-- @comment{"id":"x"} --> form');
+  });
+});
