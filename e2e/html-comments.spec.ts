@@ -239,3 +239,56 @@ test.describe('HTML comments in the rendered view', () => {
     await expect(page.locator('.doc-html-comment')).toHaveCount(0);
   });
 });
+
+// The forms fixture is also a hand-testing document: each section says what to
+// expect. This checks the sections a selector can judge.
+const FORMS_FIXTURE = resolve(__dirname, 'fixtures/html-comment-forms.md');
+
+test.describe('HTML comment forms fixture', () => {
+  test('renders, hides and preformats each form as its section says', async ({ page }) => {
+    await page.goto(`/?file=${FORMS_FIXTURE}`);
+    await expect(page.getByRole('heading', { name: 'HTML comment forms' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const comments = page.locator('.doc-html-comment');
+    const bodies = (await comments.allInnerTexts()).map((t) => t.replace(/\r/g, ''));
+    const shown = (fragment: string) => bodies.some((b) => b.includes(fragment));
+
+    // Section 7: every shipped directive is hidden.
+    for (const directive of [
+      'prettier-ignore -',
+      'lint disable',
+      'markdownlint-disable',
+      'deno-fmt-ignore',
+      'textlint-disable',
+      'alex ignore',
+      'vale off',
+      'cSpell:ignore',
+      'cspell:words',
+      'doctoc generated',
+    ]) {
+      expect(shown(directive), directive).toBe(false);
+    }
+
+    // Section 8: a note that only mentions a directive still renders.
+    expect(shown('We use prettier-ignore on the table')).toBe(true);
+
+    // Section 9: a short prefix hides its directive and a note opening with the
+    // same word, but not a longer word that starts with the same letters.
+    expect(shown('more thought needed')).toBe(false);
+    expect(shown('moreover, this paragraph')).toBe(true);
+    expect(shown('tocopherol')).toBe(true);
+
+    // Section 10: a malformed marker never renders.
+    expect(shown('comment-malformed')).toBe(false);
+
+    // Section 5: a multi-line body keeps its line breaks and column alignment.
+    const pre = page.locator('.doc-html-comment--pre');
+    await expect(pre).toHaveCount(2);
+    expect((await pre.nth(0).innerText()).replace(/\r/g, '')).toBe(
+      'A comment spanning several lines.\nThe second line.\n    An indented third line, to check that leading whitespace is emitted verbatim.',
+    );
+    expect(await pre.nth(1).innerText()).toContain('\n     ▲                    │\n');
+  });
+});
