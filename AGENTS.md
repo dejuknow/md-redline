@@ -457,7 +457,14 @@ out of. `unreadable` says so in its own words rather than welcoming them.
 and respawns from the code on disk. Nothing is downloaded here:
 `npm install -g md-redline@latest` (or a version bump in a linked dev repo)
 is what puts new code on disk; this path only stops the long-lived background
-server from serving stale code after that has happened.
+server from serving stale code after that has happened. The same check runs
+before every `mdr mcp` tool call. It compares against the version on disk at
+that moment (`readInstalledVersion` in `bin/version-compare.js`), not the one
+the process started with, so a long-running `mdr mcp` whose install was
+upgraded under it accepts the upgraded server instead of restarting it on
+every call (#134). When `package.json` can't be read (an install mid-write),
+it keeps the running server. Under `mdr mcp`, `console.log` goes to stderr,
+since stdout is the MCP protocol channel.
 
 **Update checks**: `server/update-check.ts` checks
 `<registry>/-/package/md-redline/dist-tags` once a day, from the server, never
