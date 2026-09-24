@@ -724,8 +724,12 @@ per session:
   confirmation: unanswered questions are reported back to the agent as unanswered.
 
 **End review** posts to `/agent-done`: inline replies in the markers are delivered
-to the agent, the session closes, and the banner clears. The agent's name comes
-from the first agent-initiated comment's author, falling back to "Agent".
+to the agent, the session closes, and the banner clears. The agent's name is
+the session's `author`: the server stores the first name any batch supplies,
+comments or replies (`recordAgentComments`), ignoring the "Agent" fallback the
+markers get. The banner shows "Agent" until then. It used to be read back out of
+comment markers in open tabs, which missed reply-only sessions and files with no
+open tab (#113).
 
 The browser tab title reflects the active file as "{filename} · md-redline" (just
 "md-redline" when no file is open), so multiple md-redline tabs are distinguishable.

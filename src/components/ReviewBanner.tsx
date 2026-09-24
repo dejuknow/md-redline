@@ -17,8 +17,6 @@ interface ReviewBannerProps {
   showToast?: ShowToast;
   /** Comment IDs grouped by file path. */
   commentIdsByFile: Map<string, string[]>;
-  /** Agent name per session id — used for the completion banner in fire-and-forget sessions. */
-  agentNamesBySession?: Map<string, string>;
   /** Count of agent questions awaiting a reply, per session id. */
   pendingAskCountsBySession?: Map<string, number>;
   /** Scroll/focus the session's first pending agent question. */
@@ -55,7 +53,6 @@ export function ReviewBanner({
   onBatchSent,
   showToast,
   commentIdsByFile,
-  agentNamesBySession,
   pendingAskCountsBySession,
   onJumpToAsk,
 }: ReviewBannerProps) {
@@ -253,7 +250,9 @@ export function ReviewBanner({
         // Unified agent-reviewing banner: covers both wait-mode (pending ask) and
         // fire-and-forget. Shape is always the same; only the button label differs.
         if (s.origin === 'agent') {
-          const agentName = agentNamesBySession?.get(s.id) ?? 'Agent';
+          // Stored on the session by the server (#113), so it does not depend
+          // on which files are open or whether the agent only replied.
+          const agentName = s.author ?? 'Agent';
           const agentCommentCount = s.filePaths.reduce(
             (sum, p) => sum + (agentCommentCounts?.get(p) ?? 0),
             0,

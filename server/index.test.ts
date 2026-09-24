@@ -5077,3 +5077,89 @@ describe('baselines API', () => {
     expect(String(body.error)).toMatch(/Access denied/);
   });
 });
+
+describe('review session author (#113)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  // The banner used to mine the agent's name out of comment markers, which a
+  // reply-only session never has and a file with no open tab never shows. The
+  // server now stores it on the session from the first batch that names one.
+  async function agentSessionOnSeededFile() {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-author-')));
+    dirs.push(tmp);
+    const filePath = join(tmp, 'spec.md');
+    const seeded = insertComment(
+      '# Title\n\nThe rate limit is 100 req/min today.\n',
+      'rate limit is 100 req/min',
+      'Is this per-tenant?',
+      'Reviewer',
+      undefined,
+      undefined,
+      undefined,
+      'cmt_seed',
+    );
+    await writeFile(filePath, seeded, 'utf8');
+    const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = await testApp.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+    });
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    // Asserts the post landed: a rejected batch would otherwise leave the
+    // author unset and pass the "stays undefined" checks for the wrong reason.
+    const postBatch = async (body: object) => {
+      const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'review', ...body }),
+      });
+      expect(res.ok, await res.clone().text()).toBe(true);
+      return res;
+    };
+    const author = async () => {
+      const res = await testApp.request(`/api/review-sessions/${sessionId}`);
+      return ((await res.json()) as { author?: string }).author;
+    };
+    return { filePath, postBatch, author };
+  }
+
+  it('takes the name from a batch of replies alone', async () => {
+    const { filePath, postBatch, author } = await agentSessionOnSeededFile();
+    expect(await author()).toBeUndefined();
+
+    await postBatch({
+      replies: [{ filePath, commentId: 'cmt_seed', text: 'Per-tenant.', author: 'Claude' }],
+    });
+
+    expect(await author()).toBe('Claude');
+  });
+
+  it("does not store the marker's 'Agent' fallback as the name, so a later real name wins", async () => {
+    const { filePath, postBatch, author } = await agentSessionOnSeededFile();
+
+    await postBatch({ replies: [{ filePath, commentId: 'cmt_seed', text: 'ack' }] });
+    expect(await author()).toBeUndefined();
+
+    await postBatch({
+      comments: [{ filePath, anchor: 'Title', text: 'Rename this.', author: '  Codex  ' }],
+    });
+    expect(await author()).toBe('Codex');
+  });
+
+  it('keeps the first name when a later batch posts under another', async () => {
+    const { filePath, postBatch, author } = await agentSessionOnSeededFile();
+
+    await postBatch({
+      comments: [{ filePath, anchor: 'Title', text: 'Rename this.', author: 'Claude' }],
+    });
+    await postBatch({
+      replies: [{ filePath, commentId: 'cmt_seed', text: 'ack', author: 'Someone else' }],
+    });
+
+    expect(await author()).toBe('Claude');
+  });
+});
