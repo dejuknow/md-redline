@@ -586,9 +586,72 @@ describe('handleAskToolCall', () => {
     expect(client.postAgentComments).toHaveBeenCalledWith('rev_xyz', [
       { filePath: '/tmp/a.md', anchor: 'a', text: 'q?' },
     ]);
-    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
+    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test', 90);
     expect(result.content[0].text).toContain('the answer');
     expect(result.content[0].text).toContain('questionIndex');
+  });
+
+  it('keeps polling through pending until the reply arrives (#131)', async () => {
+    // Each poll is bounded at 90s so no single request outlasts Node's 300s
+    // header timeout; a slow reader just means more polls.
+    const waitForAsk = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'pending' })
+      .mockResolvedValueOnce({ status: 'pending' })
+      .mockResolvedValueOnce({
+        status: 'reply',
+        replies: [{ questionIndex: 0, text: 'slow answer' }],
+        totalQuestions: 1,
+      });
+    const client = makeMockClient({ waitForAsk });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+
+    expect(waitForAsk).toHaveBeenCalledTimes(3);
+    for (const call of waitForAsk.mock.calls) expect(call).toEqual(['rev_xyz', 'ask_test', 90]);
+    expect(result.content[0].text).toContain('slow answer');
+  });
+
+  it('stops polling once the call is cancelled, even if the release failed', async () => {
+    const controller = new AbortController();
+    // Answers on the fourth poll, so a loop that ignores the cancel fails the
+    // call-count assertion below instead of spinning forever.
+    let polls = 0;
+    const waitForAsk = vi.fn().mockImplementation(async () => {
+      polls += 1;
+      controller.abort();
+      return polls >= 4
+        ? { status: 'reply', replies: [], totalQuestions: 1 }
+        : { status: 'pending' };
+    });
+    const client = makeMockClient({
+      waitForAsk,
+      releaseAsk: vi.fn().mockRejectedValue(new Error('releaseAsk failed (HTTP 500)')),
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: controller.signal },
+    );
+
+    expect(waitForAsk).toHaveBeenCalledTimes(1);
+    expect(result.content[0].text).toContain('cancelled before the user could reply');
+  });
+
+  it('releases the ask before rethrowing when a poll fails, so the next mdr_ask is not blocked', async () => {
+    const releaseAsk = vi.fn().mockResolvedValue(undefined);
+    const client = makeMockClient({
+      waitForAsk: vi.fn().mockRejectedValue(new Error('waitForAsk failed (HTTP 500)')),
+      releaseAsk,
+    });
+    await expect(
+      handleAskToolCall(
+        { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+        { client, sendProgress: undefined, signal: undefined },
+      ),
+    ).rejects.toThrow('waitForAsk failed (HTTP 500)');
+    expect(releaseAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
   });
 
   it('returns a no_reply result when wait reports cancelled', async () => {

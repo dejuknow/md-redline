@@ -1095,3 +1095,59 @@ describe('recordAgentAuthor (#113)', () => {
     expect(author()).toBe('x'.repeat(MAX_SESSION_AUTHOR_LEN));
   });
 });
+
+describe('settled ask results (#131)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps a result for a later poll, then lets it expire after five minutes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-24T12:00:00Z'));
+    const store = new ReviewSessionStore();
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const { askId } = store.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    store.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'reply' }]);
+
+    expect(store.getSettledAsk(session.id, askId)?.status).toBe('reply');
+    expect(store.getSettledAsk('rev_other', askId)).toBeUndefined();
+
+    vi.setSystemTime(new Date('2026-09-24T12:05:01Z'));
+    expect(store.getSettledAsk(session.id, askId)).toBeUndefined();
+  });
+
+  it('records every way an ask ends, not only a reply', () => {
+    const store = new ReviewSessionStore();
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const first = store.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    store.releaseAsk(session.id, first.askId);
+    const second = store.addAsk(session.id, [
+      { commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' },
+    ]);
+    store.abortAsks(session.id, 'session_cancelled');
+
+    expect(store.getSettledAsk(session.id, first.askId)).toEqual({
+      status: 'no_reply',
+      reason: 'released',
+    });
+    expect(store.getSettledAsk(session.id, second.askId)).toEqual({
+      status: 'no_reply',
+      reason: 'cancelled',
+    });
+  });
+
+  it('forgets everything on dispose', () => {
+    const store = new ReviewSessionStore();
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const { askId } = store.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    store.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'reply' }]);
+    store.dispose();
+    expect(store.getSettledAsk(session.id, askId)).toBeUndefined();
+  });
+});

@@ -1065,6 +1065,10 @@ export function registerReviewSessionRoutes(
   app.get('/api/review-sessions/:id/asks/:askId/wait', async (c) => {
     const sessionId = c.req.param('id');
     const askId = c.req.param('askId');
+    // Before the session check: a re-poll can arrive after the ask ended, and
+    // after its session ended too, and must still get the result (#131).
+    const settled = reviewSessions.getSettledAsk(sessionId, askId);
+    if (settled) return c.json(settled);
     if (!reviewSessions.getSession(sessionId)) {
       return c.json({ error: 'Session not found' }, 404);
     }
@@ -1076,6 +1080,53 @@ export function registerReviewSessionRoutes(
     if (!waiter) {
       return c.json({ error: 'Ask not found' }, 404);
     }
+
+    // Optional ?timeout=<seconds>, as on /agent-wait: return {status:'pending'}
+    // when it elapses so the client re-polls. Without it the request parks
+    // until the reply, and Node's fetch gives up on a response whose headers
+    // take over 300s, so an answer slower than 5 minutes never arrived (#131).
+    // Capped below Node fetch's 300s header timeout: a longer poll would fail
+    // on the client before the server ever answered 'pending', which is the
+    // bug this parameter exists to avoid.
+    const MAX_ASK_POLL_SECONDS = 240;
+    const timeoutParam = c.req.query('timeout');
+    let timeoutMs = 0;
+    if (timeoutParam !== undefined) {
+      const parsedSec = parseInt(timeoutParam, 10);
+      if (!Number.isFinite(parsedSec) || parsedSec <= 0 || parsedSec > MAX_ASK_POLL_SECONDS) {
+        return c.json(
+          {
+            error: `timeout query parameter must be a positive integer of at most ${MAX_ASK_POLL_SECONDS} (seconds)`,
+          },
+          400,
+        );
+      }
+      timeoutMs = parsedSec * 1000;
+    }
+    if (timeoutMs > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const pending = new Promise<'pending'>((resolve) => {
+        timer = setTimeout(() => resolve('pending'), timeoutMs);
+        if (typeof timer === 'object' && 'unref' in timer) {
+          (timer as { unref: () => void }).unref();
+        }
+      });
+      // A client that went away stops the poll early. Nothing is lost: an ask
+      // that ends meanwhile is kept in getSettledAsk for the next poll.
+      const signal: AbortSignal | undefined = c.req.raw.signal;
+      const dropped = new Promise<'pending'>((resolve) => {
+        if (!signal) return;
+        if (signal.aborted) resolve('pending');
+        else signal.addEventListener('abort', () => resolve('pending'), { once: true });
+      });
+      try {
+        const winner = await Promise.race([waiter, pending, dropped]);
+        return c.json(winner === 'pending' ? { status: 'pending' } : winner);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     const result = await waiter;
     return c.json(result);
   });

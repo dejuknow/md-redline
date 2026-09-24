@@ -231,10 +231,12 @@ export function createMdrClient(baseUrl: string): MdrClient {
         return (await res.json()) as { askId: string };
       },
 
-      async waitForAsk(sessionId: string, askId: string) {
-        const res = await request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`, {
-          method: 'GET',
-        });
+      async waitForAsk(sessionId: string, askId: string, timeoutSeconds?: number) {
+        const path = `/api/review-sessions/${sessionId}/asks/${askId}/wait`;
+        const res = await request(
+          timeoutSeconds !== undefined ? `${path}?timeout=${timeoutSeconds}` : path,
+          { method: 'GET' },
+        );
         if (!res.ok) {
           throw new Error(`waitForAsk failed (HTTP ${res.status})`);
         }

@@ -185,7 +185,7 @@ chooses, not about every byte that can reach disk during a request.
   - Ask mode works on BOTH session origins; asking about the user's own review comments (a `mdr_request_review` handoff) is the flagship case.
   - Length caps enforced server-side: anchor and context 8 KB, text 64 KB.
   Response includes `failedComments[]` and `failedReplies[]`.
-- `GET /api/review-sessions/:id/asks/:askId/wait` — agent long-polls for the user's reply
+- `GET /api/review-sessions/:id/asks/:askId/wait?timeout=<seconds>` — agent long-polls for the user's reply. With `timeout` it returns `{ status: 'pending' }` when the time runs out, and the MCP handler re-polls every 90s until the ask ends; without it the request parks until the reply. An ask that already ended (reply, release, session abort) returns its result from `getSettledAsk`, even after its session ended, because the reply can land between two polls (#131). A settled result is only returned to its own session, and kept for `TERMINAL_RETENTION_MS` (the agent re-polls within 90s). `timeout` is capped at 240, below Node fetch's 300s header timeout, since a longer poll would fail on the client before the server answered `pending`. A client that drops mid-poll releases the request early; nothing is lost, since the result waits in `getSettledAsk`.
 - `POST /api/review-sessions/:id/asks/:askId/reply` — structured reply channel; resolves the ask. The web UI no longer uses it (users reply inline on the comment card; the file-save sweep resolves the ask), but it remains for programmatic callers.
 - `POST /api/review-sessions/:id/asks/:askId/release` — resolve the ask with `{ status: 'no_reply', reason: 'released' }`. Only producer today is the agent's own tool-call cancellation (no UI button).
 - `GET /api/review-sessions/:id/asks` — list pending asks for the session
@@ -609,7 +609,17 @@ The `AskWaitResult` type returned by `mdr_ask`'s wait:
 type AskWaitResult =
   | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
   | { status: 'no_reply'; reason: 'released' | 'tab_closed' | 'cancelled' | 'done_without_reply' | 'timeout' | 'agent_silent' }
+  | { status: 'pending' } // a bounded poll ran out; the handler polls again and never returns it
 ```
+
+`mdr_ask` polls in 90-second rounds rather than one request that parks until the
+reply: Node's `fetch` gives up on a response whose headers take more than 300
+seconds, so a reader who took over 5 minutes used to get `fetch failed` (#131). The
+loop stops on a cancelled call even if its `releaseAsk` failed, and releases the
+ask before rethrowing a failed poll, since an ask left pending blocks every later
+`mdr_ask` on the session with a 409. Hosts with their own per-call limit (Codex,
+120s) can still cut a long `mdr_ask` short: the tool blocks for the whole ask by
+design, unlike `mdr_wait`, which hands `pending` back to the agent.
 
 `no_reply` reasons: `released` = the agent cancelled its own tool call (no UI
 button produces this); `tab_closed` = browser disconnected; `cancelled` = user

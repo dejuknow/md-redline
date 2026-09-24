@@ -401,14 +401,36 @@ export async function handleAskToolCall(
     ctx.signal?.addEventListener('abort', cancelListener, { once: true });
   }
 
-  let askResult: AskWaitResult;
+  let askResult: Exclude<AskWaitResult, { status: 'pending' }>;
   try {
     // Intentionally NOT passing ctx.signal here. The cancelListener already
     // fires releaseAsk on cancel, which resolves the server-side waiter and
     // makes /asks/:askId/wait return {status:'released'}. Aborting the fetch
     // would race with that resolution and cause an AbortError before the
     // handler can return the graceful "released" payload.
-    askResult = await ctx.client.waitForAsk(input.sessionId, askId);
+    // Bounded polls, re-issued until the ask ends: one unbounded request
+    // could not outlast Node's 300s header timeout (#131).
+    for (;;) {
+      // A cancelled call stops here even if its releaseAsk failed, instead of
+      // polling every 90s with nobody listening.
+      if (ctx.signal?.aborted) {
+        askResult = { status: 'no_reply', reason: 'released' };
+        break;
+      }
+      let polled: AskWaitResult;
+      try {
+        polled = await ctx.client.waitForAsk(input.sessionId, askId, POLL_TIMEOUT_SECONDS);
+      } catch (err) {
+        // Release before giving up: an ask left pending on the server blocks
+        // every later mdr_ask on this session with a 409.
+        void ctx.client.releaseAsk(input.sessionId, askId).catch(() => {});
+        throw err;
+      }
+      if (polled.status !== 'pending') {
+        askResult = polled;
+        break;
+      }
+    }
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);

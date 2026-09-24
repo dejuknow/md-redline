@@ -765,10 +765,16 @@ export class ReviewSessionStore {
       }
     }
     const askId = `ask_${randomUUID()}`;
-    let resolver!: (result: AskResult) => void;
+    let settle!: (result: AskResult) => void;
     const waiter = new Promise<AskResult>((resolve) => {
-      resolver = resolve;
+      settle = resolve;
     });
+    // Every way an ask ends (reply, release, session abort) goes through this
+    // resolver, so the result is kept here for a poll that arrives after it.
+    const resolver = (result: AskResult) => {
+      this.rememberSettledAsk(askId, sessionId, result);
+      settle(result);
+    };
     this.pendingAsks.set(askId, {
       askId,
       sessionId,
@@ -777,6 +783,35 @@ export class ReviewSessionStore {
       waiter,
     });
     return { askId, waiter };
+  }
+
+  /**
+   * Final results of recent asks, kept after they leave pendingAsks. The agent
+   * long-polls with a timeout and re-polls (#131), so a reply can land while no
+   * request is parked; without this, the next poll would get "Ask not found"
+   * and the reply would be lost. A result holds the reply text, so it is kept
+   * only TERMINAL_RETENTION_MS (the agent re-polls within 90s) and the map is
+   * capped, and dispose() clears it.
+   */
+  private settledAsks = new Map<string, { sessionId: string; result: AskResult; at: number }>();
+  private static SETTLED_ASKS_CAP = 200;
+  private rememberSettledAsk(askId: string, sessionId: string, result: AskResult): void {
+    if (this.settledAsks.size >= ReviewSessionStore.SETTLED_ASKS_CAP) {
+      const oldest = this.settledAsks.keys().next().value;
+      if (oldest !== undefined) this.settledAsks.delete(oldest);
+    }
+    this.settledAsks.set(askId, { sessionId, result, at: Date.now() });
+  }
+
+  /** The ask's final result if it ended within TERMINAL_RETENTION_MS, scoped to its session. */
+  getSettledAsk(sessionId: string, askId: string): AskResult | undefined {
+    const settled = this.settledAsks.get(askId);
+    if (!settled) return undefined;
+    if (Date.now() - settled.at > TERMINAL_RETENTION_MS) {
+      this.settledAsks.delete(askId);
+      return undefined;
+    }
+    return settled.sessionId === sessionId ? settled.result : undefined;
   }
 
   waitForAsk(askId: string): Promise<AskResult> | undefined {
@@ -955,6 +990,9 @@ export class ReviewSessionStore {
   private sweepStale(): void {
     this.gcSilentAgentSessions();
     const now = Date.now();
+    for (const [askId, settled] of this.settledAsks) {
+      if (now - settled.at > TERMINAL_RETENTION_MS) this.settledAsks.delete(askId);
+    }
     const heartbeatCutoff = now - HEARTBEAT_TIMEOUT_MS;
     const retentionCutoff = now - TERMINAL_RETENTION_MS;
     const agentTimeoutCutoff = now - WAITING_FOR_AGENT_TIMEOUT_MS;
@@ -1011,6 +1049,7 @@ export class ReviewSessionStore {
     this.sessions.clear();
     this.pendingAsks.clear();
     this.recentlyDoneIds.clear();
+    this.settledAsks.clear();
   }
 
   private toPublic(s: InternalSession): ReviewSession {
