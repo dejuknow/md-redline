@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  validateAddFilesInput,
   validateAskInput,
   validateBaselineInput,
   validateReviewInput,
@@ -364,5 +365,27 @@ describe('validateBaselineInput', () => {
 
   it('rejects a non-object', () => {
     expect(validateBaselineInput(null).ok).toBe(false);
+  });
+});
+
+describe('validateAddFilesInput (#117)', () => {
+  it('accepts a session id and files', () => {
+    expect(validateAddFilesInput({ sessionId: 'rev_1', filePaths: ['/d/b.md'] })).toEqual({
+      ok: true,
+      value: { sessionId: 'rev_1', filePaths: ['/d/b.md'] },
+    });
+  });
+
+  it.each([
+    [null, 'input must be an object'],
+    [{ filePaths: ['/d/b.md'] }, 'sessionId must be a non-empty string'],
+    [{ sessionId: '', filePaths: ['/d/b.md'] }, 'sessionId must be a non-empty string'],
+    [{ sessionId: 'rev_1', filePaths: [] }, 'filePaths must be a non-empty array'],
+    [{ sessionId: 'rev_1', filePaths: [''] }, 'filePaths must contain non-empty strings'],
+    [{ sessionId: 'rev_1', filePaths: Array(65).fill('/d/x.md') }, 'at most 64'],
+  ])('rejects %j', (input, error) => {
+    const result = validateAddFilesInput(input);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain(error);
   });
 });

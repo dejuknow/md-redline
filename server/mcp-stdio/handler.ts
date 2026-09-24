@@ -1,4 +1,6 @@
 import type {
+  AddFilesInput,
+  AddFilesResult,
   AskInput,
   AskWaitResult,
   BaselineInput,
@@ -11,6 +13,7 @@ import type {
   WaitInput,
   WaitResult,
 } from './types';
+import { ServerUnreachableError } from './client';
 
 const BATCH_PREAMBLE = (sessionId: string) =>
   `Review batch received (session ${sessionId}). Address ONLY the comments ` +
@@ -110,6 +113,16 @@ const POLL_TIMEOUT_SECONDS = 90;
  *   7. Return a ToolCallResult with the prompt (handoff) or a descriptive
  *      "review not completed" message (abort/disconnect).
  */
+/**
+ * The route rejects a comment on a file outside the session with "filePath
+ * not part of this session". mdr_add_files is the fix, so say so there.
+ */
+function withAddFilesHint(message: string): string {
+  return message.includes('not part of this session')
+    ? `${message}. Add the file to the session first with mdr_add_files, then post again.`
+    : message;
+}
+
 export async function handleRequestReviewToolCall(
   input: RequestReviewInput,
   ctx: ToolCallContext,
@@ -328,7 +341,7 @@ export async function handleAskToolCall(
       content: [
         {
           type: 'text',
-          text: `mdr_ask: ${e.message}${detail}`,
+          text: `mdr_ask: ${withAddFilesHint(e.message)}${detail}`,
         },
       ],
     };
@@ -343,7 +356,9 @@ export async function handleAskToolCall(
   if (ctx.signal?.aborted) {
     void ctx.client.releaseAsk(input.sessionId, askId).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('HTTP 404')) {
+      // A server that is gone has already dropped the ask with the session,
+      // so there is nothing to release and nothing worth logging.
+      if (!msg.includes('HTTP 404') && !(err instanceof ServerUnreachableError)) {
         console.warn(
           `[mcp] releaseAsk on early-cancel failed for ${input.sessionId}/${askId}:`,
           err,
@@ -385,7 +400,9 @@ export async function handleAskToolCall(
       // user may have answered just before cancel fired). Any other error
       // is a real failure worth surfacing on the server log.
       const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('HTTP 404')) {
+      // A server that is gone has already dropped the ask with the session,
+      // so there is nothing to release and nothing worth logging.
+      if (!msg.includes('HTTP 404') && !(err instanceof ServerUnreachableError)) {
         console.warn(`[mcp] releaseAsk on cancel failed for ${input.sessionId}/${askId}:`, err);
       }
     });
@@ -396,14 +413,36 @@ export async function handleAskToolCall(
     ctx.signal?.addEventListener('abort', cancelListener, { once: true });
   }
 
-  let askResult: AskWaitResult;
+  let askResult: Exclude<AskWaitResult, { status: 'pending' }>;
   try {
     // Intentionally NOT passing ctx.signal here. The cancelListener already
     // fires releaseAsk on cancel, which resolves the server-side waiter and
     // makes /asks/:askId/wait return {status:'released'}. Aborting the fetch
     // would race with that resolution and cause an AbortError before the
     // handler can return the graceful "released" payload.
-    askResult = await ctx.client.waitForAsk(input.sessionId, askId);
+    // Bounded polls, re-issued until the ask ends: one unbounded request
+    // could not outlast Node's 300s header timeout (#131).
+    for (;;) {
+      // A cancelled call stops here even if its releaseAsk failed, instead of
+      // polling every 90s with nobody listening.
+      if (ctx.signal?.aborted) {
+        askResult = { status: 'no_reply', reason: 'released' };
+        break;
+      }
+      let polled: AskWaitResult;
+      try {
+        polled = await ctx.client.waitForAsk(input.sessionId, askId, POLL_TIMEOUT_SECONDS);
+      } catch (err) {
+        // Release before giving up: an ask left pending on the server blocks
+        // every later mdr_ask on this session with a 409.
+        void ctx.client.releaseAsk(input.sessionId, askId).catch(() => {});
+        throw err;
+      }
+      if (polled.status !== 'pending') {
+        askResult = polled;
+        break;
+      }
+    }
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);
@@ -632,7 +671,7 @@ async function postReviewBatch(
     const detail = detailParts.length > 0 ? ` ${detailParts.join('; ')}` : '';
     return {
       isError: true,
-      content: [{ type: 'text', text: `mdr_comment: ${e.message}${detail}` }],
+      content: [{ type: 'text', text: `mdr_comment: ${withAddFilesHint(e.message)}${detail}` }],
     };
   }
 
@@ -745,6 +784,69 @@ export async function handleReviewToolCall(
     `When you have finished posting all feedback, call mdr_wait with ` +
       `sessionId "${session.sessionId}" to block until the user has engaged.`,
   );
+}
+
+/**
+ * mdr_add_files: widen an open session with more files (#117). Each tab
+ * showing the session opens the new files by itself, so there is no browser
+ * to open here.
+ */
+export async function handleAddFilesToolCall(
+  input: AddFilesInput,
+  ctx: Pick<ToolCallContext, 'client'>,
+): Promise<ToolCallResult> {
+  let result: AddFilesResult;
+  try {
+    await ctx.client.grantAccess(input.filePaths);
+    result = await ctx.client.addSessionFiles(input.sessionId, input.filePaths);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = (err as { status?: unknown }).status;
+    // A session that ended (409) or is gone (404) can't grow: say so and point
+    // at the way forward rather than surfacing a bare HTTP error. Only the
+    // route's own 404 counts: a server older than the route 404s too, with no
+    // JSON body, and starting a new review would not help there.
+    if (status === 409 || (status === 404 && msg === 'Session not found')) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text:
+              `mdr_add_files: session ${input.sessionId} is no longer open, so it can't take ` +
+              'more files. Start a new review that covers every file instead.',
+          },
+        ],
+      };
+    }
+    if (status === 404) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text:
+              'mdr_add_files: the running mdr server does not know this tool, so it is ' +
+              'probably older than this mdr mcp. Ask the reviewer to restart mdr, or ' +
+              'start a new review that covers every file instead.',
+          },
+        ],
+      };
+    }
+    return { isError: true, content: [{ type: 'text', text: `mdr_add_files: ${msg}` }] };
+  }
+
+  const next =
+    'Carry on with the same sessionId: mdr_request_review to wait for the ' +
+    "reviewer's next batch, or mdr_comment to post comments on the new file(s).";
+  const text =
+    result.added.length === 0
+      ? `mdr_add_files: session ${input.sessionId} already covers ${input.filePaths.join(', ')}. ` +
+        `Nothing was added. ${next}`
+      : `mdr_add_files: added ${result.added.join(', ')} to session ${input.sessionId}, which ` +
+        `now covers ${result.filePaths.length} file(s). The reviewer's mdr tab opens the ` +
+        `new file(s). ${next}`;
+  return { content: [{ type: 'text', text }] };
 }
 
 /**

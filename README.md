@@ -33,6 +33,7 @@ npm install -g md-redline
 mdr /path/to/spec.md        # Open a file
 mdr /path/to/dir             # Open a directory
 mdr --stop                   # Stop the running server
+mdr sessions                 # List open review sessions (--kill ID ends one)
 ```
 
 `md-redline` also works as an alias for `mdr`.
@@ -97,7 +98,7 @@ Add this server entry to your client's MCP config file:
 
 Prerequisite: `mdr` must be on your `PATH` (e.g. via `npm install -g md-redline`). If your client spawns subprocesses without inheriting your shell's `PATH`, use the absolute path from `which mdr` as the `command` value.
 
-After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_comment`, `mdr_ask`, `mdr_wait`, and `mdr_baseline`. (`mdr_comment` was called `mdr_review` before 0.9; the old name still works if you have it saved in a prompt, but agents are no longer offered it.)
+After installing, restart your MCP client; most clients only discover new servers at launch. To verify, ask your agent "what mdr tools do you have?" and it should list `mdr_request_review`, `mdr_comment`, `mdr_ask`, `mdr_wait`, `mdr_baseline`, and `mdr_add_files`. (`mdr_comment` was called `mdr_review` before 0.9; the old name still works if you have it saved in a prompt, but agents are no longer offered it.)
 
 ## Review workflow
 
@@ -261,6 +262,7 @@ All of these environment variables are optional.
 | `MD_REDLINE_PORT` (or `PORT`) | `6373` | Port for the API server. It scans up to 10 ports upward from here if that one is taken. `MD_REDLINE_PORT` wins when both are set; a blank one defers to `PORT`. |
 | `MD_REDLINE_VITE_PORT` | `5188` | Port for the Vite dev client (development only). |
 | `MD_REDLINE_HOME` | your OS home directory | Base directory for md-redline's preferences file (`.md-redline.json`, which stores trusted roots and the update-check cache). |
+| `MD_REDLINE_CLIENT_ID` | a new ID for each `mdr mcp` process | Identifies one agent session to `mdr mcp`. Set it once per agent session when a tool starts a fresh `mdr mcp` for every call (for example [mcp2cli](https://github.com/nilslice/mcp2cli) or a shell loop), so reopening the same files reuses that agent's review instead of starting another. Don't set it machine-wide (in a shell profile, say): every agent would then share one review. At most 256 characters. |
 | `MD_REDLINE_REGISTRY_URL` | public npm registry | Registry base URL used for the background update check. |
 | `MD_REDLINE_ALLOWED_HOSTS` | unset | Comma-separated extra hostnames accepted by the Host-header check, so the loopback-bound server can sit behind a trusted reverse proxy. Read [Reaching md-redline from another device](#reaching-md-redline-from-another-device) before setting it. |
 | `NO_UPDATE_NOTIFIER` or `CI` | unset | If either is present (any value, including empty), the background update check is disabled. |

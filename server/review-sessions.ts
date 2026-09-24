@@ -12,6 +12,11 @@ import { buildAddressCommentsPrompt } from '../src/lib/agent-prompts';
  * is generous enough to ride out any realistic background-tab throttling.
  */
 const HEARTBEAT_TIMEOUT_MS = 30 * 60_000;
+/**
+ * Longest agent name kept on a session, the cap `mdr baseline` uses. The name
+ * goes to every open tab on every poll, so an overlong one is cut here.
+ */
+export const MAX_SESSION_AUTHOR_LEN = 64;
 
 /**
  * Maximum age of `lastHeartbeatAt` before `findOpenSession` will refuse to
@@ -123,12 +128,27 @@ export interface ReviewSession {
   lastHeartbeatAt: Date;
   /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
   lastAgentActivityAt: string | null;
+  /**
+   * The name the agent posts under, from the first batch that supplied one.
+   * The banner reads it here rather than mining it back out of comment
+   * markers, which missed reply-only sessions and files with no open tab
+   * (#113).
+   */
+  author?: string;
+  /**
+   * When each file added after creation arrived (#117), ISO strings keyed by
+   * path. A tab uses it to tell a file added after the tab loaded, which it
+   * opens, from one that was already there, which it leaves alone.
+   */
+  fileAddedAt?: Record<string, string>;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
   waitingForAgent: boolean;
 }
 
 interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
+  /** The files the session was created with, before any addFiles (#117). */
+  originalFilePaths: string[];
   resolver: (result: ReviewResult) => void;
   waiter: Promise<ReviewResult>;
   /**
@@ -237,6 +257,7 @@ export class ReviewSessionStore {
     const session: InternalSession = {
       id,
       filePaths: [...input.filePaths],
+      originalFilePaths: [...input.filePaths],
       enableResolve: input.enableResolve,
       origin: input.origin ?? 'user',
       clientId: input.clientId,
@@ -276,8 +297,9 @@ export class ReviewSessionStore {
 
   /**
    * Find an existing open session whose file paths match the given set
-   * (order-independent). Used to deduplicate when the tool is called twice
-   * for the same files. Requires a recent heartbeat so a crash-leaked
+   * (order-independent), either as they are now or as the session was created
+   * before any addFiles (#117). Used to deduplicate when the tool is called
+   * twice for the same files. Requires a recent heartbeat so a crash-leaked
    * session doesn't get reused — see FIND_OPEN_FRESHNESS_MS.
    *
    * The `origin` filter is mandatory: agent-origin and user-origin sessions
@@ -291,8 +313,12 @@ export class ReviewSessionStore {
     origin: SessionOrigin,
     clientId?: string,
   ): ReviewSession | undefined {
-    const sorted = [...filePaths].sort();
     const freshCutoff = Date.now() - FIND_OPEN_FRESHNESS_MS;
+    const requested = [...new Set(filePaths)].sort();
+    const sameSet = (paths: string[]) => {
+      const sorted = [...new Set(paths)].sort();
+      return sorted.length === requested.length && sorted.every((p, i) => p === requested[i]);
+    };
     for (const s of this.sessions.values()) {
       if (s.status !== 'open') continue;
       if (s.origin !== origin) continue;
@@ -302,12 +328,41 @@ export class ReviewSessionStore {
       // slot would serialize them, and one Done would resolve both waits.
       if ((s.clientId ?? null) !== (clientId ?? null)) continue;
       if (s.lastHeartbeatAt.getTime() < freshCutoff) continue;
-      const existing = [...s.filePaths].sort();
-      if (sorted.length === existing.length && sorted.every((p, i) => p === existing[i])) {
-        return this.toPublic(s);
-      }
+      // Matching the original files too closes #117's trap: once a session
+      // has grown, asking again for the files it started with would otherwise
+      // silently open a second review on them. A larger session is never
+      // reused for a smaller request that it did not start as.
+      if (sameSet(s.filePaths) || sameSet(s.originalFilePaths)) return this.toPublic(s);
     }
     return undefined;
+  }
+
+  /**
+   * Widen an open session with more files (#117). Paths must already be
+   * canonical and access-checked, which the route does. Returns the paths
+   * actually added, in request order, skipping any the session already
+   * covers; undefined when the session is unknown or no longer open.
+   */
+  addFiles(
+    sessionId: string,
+    filePaths: string[],
+    maxFiles = Infinity,
+  ): { session: ReviewSession; added: string[] } | 'too_many' | undefined {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.status !== 'open') return undefined;
+    const added: string[] = [];
+    for (const p of filePaths) {
+      if (!s.filePaths.includes(p) && !added.includes(p)) added.push(p);
+    }
+    // Checked here, on the live list, so two concurrent adds can't both pass.
+    if (s.filePaths.length + added.length > maxFiles) return 'too_many';
+    s.filePaths.push(...added);
+    if (added.length > 0) {
+      const at = new Date().toISOString();
+      s.fileAddedAt = { ...s.fileAddedAt };
+      for (const p of added) s.fileAddedAt[p] = at;
+    }
+    return { session: this.toPublic(s), added };
   }
 
   /**
@@ -753,10 +808,16 @@ export class ReviewSessionStore {
       }
     }
     const askId = `ask_${randomUUID()}`;
-    let resolver!: (result: AskResult) => void;
+    let settle!: (result: AskResult) => void;
     const waiter = new Promise<AskResult>((resolve) => {
-      resolver = resolve;
+      settle = resolve;
     });
+    // Every way an ask ends (reply, release, session abort) goes through this
+    // resolver, so the result is kept here for a poll that arrives after it.
+    const resolver = (result: AskResult) => {
+      this.rememberSettledAsk(askId, sessionId, result);
+      settle(result);
+    };
     this.pendingAsks.set(askId, {
       askId,
       sessionId,
@@ -765,6 +826,35 @@ export class ReviewSessionStore {
       waiter,
     });
     return { askId, waiter };
+  }
+
+  /**
+   * Final results of recent asks, kept after they leave pendingAsks. The agent
+   * long-polls with a timeout and re-polls (#131), so a reply can land while no
+   * request is parked; without this, the next poll would get "Ask not found"
+   * and the reply would be lost. A result holds the reply text, so it is kept
+   * only TERMINAL_RETENTION_MS (the agent re-polls within 90s) and the map is
+   * capped, and dispose() clears it.
+   */
+  private settledAsks = new Map<string, { sessionId: string; result: AskResult; at: number }>();
+  private static SETTLED_ASKS_CAP = 200;
+  private rememberSettledAsk(askId: string, sessionId: string, result: AskResult): void {
+    if (this.settledAsks.size >= ReviewSessionStore.SETTLED_ASKS_CAP) {
+      const oldest = this.settledAsks.keys().next().value;
+      if (oldest !== undefined) this.settledAsks.delete(oldest);
+    }
+    this.settledAsks.set(askId, { sessionId, result, at: Date.now() });
+  }
+
+  /** The ask's final result if it ended within TERMINAL_RETENTION_MS, scoped to its session. */
+  getSettledAsk(sessionId: string, askId: string): AskResult | undefined {
+    const settled = this.settledAsks.get(askId);
+    if (!settled) return undefined;
+    if (Date.now() - settled.at > TERMINAL_RETENTION_MS) {
+      this.settledAsks.delete(askId);
+      return undefined;
+    }
+    return settled.sessionId === sessionId ? settled.result : undefined;
   }
 
   waitForAsk(askId: string): Promise<AskResult> | undefined {
@@ -841,6 +931,20 @@ export class ReviewSessionStore {
     // for as long as it keeps posting, and the user's mdr_request_review poll
     // would never learn the review is dead.
     if (s.origin === 'agent') s.lastHeartbeatAt = now;
+  }
+
+  /**
+   * Name the session after the agent, from a batch that succeeded. The first
+   * name wins, so one stray batch under another name cannot relabel a session
+   * mid-review. 'Agent' is the markers' own fallback rather than a name, so it
+   * never claims the session and a real name can still arrive later.
+   */
+  recordAgentAuthor(sessionId: string, author: string | undefined): void {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.author || !author) return;
+    const name = author.trim().slice(0, MAX_SESSION_AUTHOR_LEN);
+    if (!name || name === 'Agent') return;
+    s.author = name;
   }
 
   /**
@@ -929,6 +1033,9 @@ export class ReviewSessionStore {
   private sweepStale(): void {
     this.gcSilentAgentSessions();
     const now = Date.now();
+    for (const [askId, settled] of this.settledAsks) {
+      if (now - settled.at > TERMINAL_RETENTION_MS) this.settledAsks.delete(askId);
+    }
     const heartbeatCutoff = now - HEARTBEAT_TIMEOUT_MS;
     const retentionCutoff = now - TERMINAL_RETENTION_MS;
     const agentTimeoutCutoff = now - WAITING_FOR_AGENT_TIMEOUT_MS;
@@ -985,18 +1092,21 @@ export class ReviewSessionStore {
     this.sessions.clear();
     this.pendingAsks.clear();
     this.recentlyDoneIds.clear();
+    this.settledAsks.clear();
   }
 
   private toPublic(s: InternalSession): ReviewSession {
     return {
       id: s.id,
       filePaths: [...s.filePaths],
+      fileAddedAt: s.fileAddedAt ? { ...s.fileAddedAt } : undefined,
       enableResolve: s.enableResolve,
       origin: s.origin,
       clientId: s.clientId,
       createdAt: s.createdAt,
       lastHeartbeatAt: s.lastHeartbeatAt,
       lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,
+      author: s.author,
       status: s.status,
       sentCommentIds: [...s.sentCommentIds],
       waitingForAgent: s.waitingForAgent,

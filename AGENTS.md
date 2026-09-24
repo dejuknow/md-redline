@@ -167,13 +167,14 @@ and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
-- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity (the MCP client sends a process-scoped UUID) that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own.
+- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own. Reuse needs an exact match on the requested file set, compared against both the session's current files and the files it started with, so a session widened by `mdr_add_files` is found again when its original files are asked for (#117). A larger session is never joined for a smaller request, since one Done would then end both reviews. The MCP client sends a process-scoped UUID, or `MD_REDLINE_CLIENT_ID` when set (`resolveClientId` in `server/mcp-stdio/client.ts`), for clients that start a fresh `mdr mcp` per tool call and would otherwise never match their own session. It must be at most 256 characters, checked when `mdr mcp` starts.
 - `GET /api/review-sessions` — list open sessions
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent
 - `POST /api/review-sessions/:id/finish` — send final batch and close session. Pending asks do not block finish: inline replies found in the markers are delivered to the agent first, and remaining unanswered asks close as `done_without_reply` with their markers preserved (flags cleared).
+- `POST /api/review-sessions/:id/files` — add files to an open session (`{ filePaths }`, #117). Paths go through the same checks as creating a session (`resolveReviewPaths`: canonical, allowed roots, `.md` only), at most 64 per call and 256 per session (the total is checked in `ReviewSessionStore.addFiles` on the live list, so concurrent adds can't overshoot). Records each added file's time in `fileAddedAt`. Returns `{ sessionId, filePaths, added }`; 404 for an unknown session, 409 for one that has ended. A tab showing the session opens each newly added file in the background and toasts "{author} added b.md to this review" (`useOpenAddedReviewFiles`). A file counts as added when it appears after the tab first saw the session, or, for the review the page's `?review=` link opened, when its `fileAddedAt` is after the page loaded (covers a file added before the first poll; other reviews skip this, so a long-lived tab that only now shows a review doesn't open its older additions). Each opens at most once per page, so a file the reader closed is never reopened.
 - `POST /api/review-sessions/:id/abort` — cancel session
-- `POST /api/review-sessions/:id/heartbeat` — keep session alive (browser sends every 10s)
+- `POST /api/review-sessions/:id/heartbeat` — keep session alive (each browser tab sends every 10s for sessions covering a file it has open)
 - `GET /api/review-sessions/:id/wait` — long-poll for the user-batch flow; agent blocks here until a batch or finish arrives. 409 on agent-origin sessions (use `/agent-wait`). Optional `?timeout=<seconds>` returns `{ status: 'pending' }` for re-polling clients.
 - `GET /api/review-sessions/:id/agent-wait` — long-poll for agent-origin sessions; resolves when the user clicks End review (`{ status: 'done' }`) or the session ends another way (`{ status: 'aborted', reason }`). Same `?timeout` contract as `/wait`. Backs the `mdr_wait` tool.
 - `POST /api/review-sessions/:id/agent-done` — the End review click. Delivers any inline replies sitting in the markers to a pending ask (partial delivery allowed), clears `expectsReply` on unanswered markers, then resolves the agent's `/agent-wait`. 409 on user-origin sessions.
@@ -185,7 +186,7 @@ chooses, not about every byte that can reach disk during a request.
   - Ask mode works on BOTH session origins; asking about the user's own review comments (a `mdr_request_review` handoff) is the flagship case.
   - Length caps enforced server-side: anchor and context 8 KB, text 64 KB.
   Response includes `failedComments[]` and `failedReplies[]`.
-- `GET /api/review-sessions/:id/asks/:askId/wait` — agent long-polls for the user's reply
+- `GET /api/review-sessions/:id/asks/:askId/wait?timeout=<seconds>` — agent long-polls for the user's reply. With `timeout` it returns `{ status: 'pending' }` when the time runs out, and the MCP handler re-polls every 90s until the ask ends; without it the request parks until the reply. An ask that already ended (reply, release, session abort) returns its result from `getSettledAsk`, even after its session ended, because the reply can land between two polls (#131). A settled result is only returned to its own session, and kept for `TERMINAL_RETENTION_MS` (the agent re-polls within 90s). `timeout` is capped at 240, below Node fetch's 300s header timeout, since a longer poll would fail on the client before the server answered `pending`. A client that drops mid-poll releases the request early; nothing is lost, since the result waits in `getSettledAsk`.
 - `POST /api/review-sessions/:id/asks/:askId/reply` — structured reply channel; resolves the ask. The web UI no longer uses it (users reply inline on the comment card; the file-save sweep resolves the ask), but it remains for programmatic callers.
 - `POST /api/review-sessions/:id/asks/:askId/release` — resolve the ask with `{ status: 'no_reply', reason: 'released' }`. Only producer today is the agent's own tool-call cancellation (no UI button).
 - `GET /api/review-sessions/:id/asks` — list pending asks for the session
@@ -207,6 +208,21 @@ disk. `GET /api/file` sweeps markers whose `expectsReply` flag references a
 session that is no longer open and clears the flag (marker preserved). A
 post-restart `mdr_wait` on an unknown session gets a graceful "re-read the
 file(s)" result instead of an error.
+A call that loses the server itself gets `ServerUnreachableError` from
+`server/mcp-stdio/client.ts` instead of Node's bare `fetch failed` (#116): either
+nothing is listening (`ECONNREFUSED`), or the connection dropped mid-request or
+mid-body (`UND_ERR_SOCKET`, `ECONNRESET` and the like). The message says which,
+that open reviews are gone, and to re-read the files before continuing.
+`guardServerErrors` wraps every client method, body reads included. Client-side
+timeouts, other network codes, a caller's abort and HTTP error responses pass
+through unchanged, so a long wait that times out is never reported as the server
+being gone. Only a failed post (`postAgentComments` in `mdr_ask`,
+`postReviewBatch` in `mdr_comment`) comes back as an `isError` tool result;
+everywhere else, including `mdr_ask`'s wait for the reply and `mdr_comment`
+opening a new session, it surfaces as the MCP error. The message is the same in
+both shapes. Known gap: under `npm run dev`
+the client talks to Vite, whose proxy answers a dead backend with an HTTP 500,
+so the dev setup still sees a plain HTTP error.
 
 **Config and system**
 - `GET /api/config` — initial file, directory, home dir
@@ -465,7 +481,7 @@ terminal update notice.
 
 ## MCP stdio server
 
-The MCP server exposes five tools.
+The MCP server exposes six tools.
 
 **`mdr_request_review`** — An AI agent calls it with `{ filePaths, enableResolve? }` to
 create a user-initiated review session. The server opens the browser with
@@ -572,6 +588,16 @@ see the caveat under `mdr_comment` above.
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.
 
+**`mdr_add_files`** — `{ sessionId, filePaths }`, at most 64 paths. Non-blocking. Widens an
+open session of either origin with more files (#117) through
+`POST /api/review-sessions/:id/files`, after granting access the same way the creating
+tools do. Files the session already covers are skipped, and the result says which were
+added. A session that has ended (409, or 404 with `Session not found`) can't grow: the tool says so and
+points at starting a new review. A bare 404 means the server predates the route, and the tool
+says to restart mdr. The reviewer's open tab opens the added files by itself (below), so the tool opens
+no browser. When `mdr_comment` or `mdr_ask` is rejected for a file outside the session, the
+error tells the agent to add it with `mdr_add_files` first (`withAddFilesHint`).
+
 **`mdr_baseline`** — `{ filePaths, agentName? }`, at most 64 paths. Non-blocking. Asks the
 server to store a copy of each file as it is now; the route checks allowed roots itself,
 so there is no separate grant-access call. Files the agent is about to create may be
@@ -594,7 +620,17 @@ The `AskWaitResult` type returned by `mdr_ask`'s wait:
 type AskWaitResult =
   | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
   | { status: 'no_reply'; reason: 'released' | 'tab_closed' | 'cancelled' | 'done_without_reply' | 'timeout' | 'agent_silent' }
+  | { status: 'pending' } // a bounded poll ran out; the handler polls again and never returns it
 ```
+
+`mdr_ask` polls in 90-second rounds rather than one request that parks until the
+reply: Node's `fetch` gives up on a response whose headers take more than 300
+seconds, so a reader who took over 5 minutes used to get `fetch failed` (#131). The
+loop stops on a cancelled call even if its `releaseAsk` failed, and releases the
+ask before rethrowing a failed poll, since an ask left pending blocks every later
+`mdr_ask` on the session with a 409. Hosts with their own per-call limit (Codex,
+120s) can still cut a long `mdr_ask` short: the tool blocks for the whole ask by
+design, unlike `mdr_wait`, which hands `pending` back to the agent.
 
 `no_reply` reasons: `released` = the agent cancelled its own tool call (no UI
 button produces this); `tab_closed` = browser disconnected; `cancelled` = user
@@ -606,13 +642,19 @@ to re-read the file(s) since the user may have replied inline or edited the doc.
 
 - `mdr baseline [--hook] [--agent NAME] [--no-start] [paths...]` — save a before copy of markdown files so a later review can show a diff. Built for a Claude Code PreToolUse hook: `--hook` reads the hook's JSON from stdin and takes `tool_input.file_path` out of it. Non-markdown paths are ignored. It posts with `onlyIfMissing`, so the copy from before the first edit of a session survives later edits. It starts a server when none is running unless `--no-start` is passed, and it always exits 0 so a failing capture never blocks the edit it runs in front of. A copy expires after 24 hours, so edits to one file that straddle a day boundary diff from the later copy.
 
+- `mdr sessions [--json] [--kill ID]` — list the review sessions the running server holds open, oldest first: id, origin, caller (the first 12 characters of `clientId`), age, time since the last heartbeat, and file paths with the home directory shortened to `~`. The caller column is how to tell one agent's sessions from per-process callers that each mint their own (#121). `--json` prints the `GET /api/review-sessions` array unchanged, for scripts. `--kill ID` ends one through `POST /api/review-sessions/:id/abort`, the same route as the banner's cancel button, and exits 1 for an unknown or already-ended ID. It never starts a server: with none running it says so and exits 0 (or prints `[]` under `--json`), except under `--kill`, which exits 1. Formatting lives in `bin/sessions.js`.
+
 Install commands:
 - `mdr mcp install` — install for Claude Code (writes to `.mcp.json`)
 - `mdr mcp install --claude-desktop` — install for Claude Desktop
 - `mdr mcp install --claude-code` — explicit Claude Code install
 
-Session lifecycle: browser heartbeats every 10s. Server sweeps abandoned sessions
-after 30s without a heartbeat. If the agent is waiting and the browser disconnects,
+Session lifecycle: each browser tab heartbeats every 10s, and only for sessions
+covering a file it has open, never every session the server lists (#114).
+The banner renders the same list (`shownSessions` from `useReviewSession`), so a
+tab never shows a review it is letting expire; `mdr sessions` sees them all.
+Server sweeps abandoned sessions after 30 minutes without a heartbeat
+(`HEARTBEAT_TIMEOUT_MS`). If the agent is waiting and the browser disconnects,
 the server waits 60s before clearing `waitingForAgent`.
 
 ## UI features
@@ -722,8 +764,12 @@ per session:
   confirmation: unanswered questions are reported back to the agent as unanswered.
 
 **End review** posts to `/agent-done`: inline replies in the markers are delivered
-to the agent, the session closes, and the banner clears. The agent's name comes
-from the first agent-initiated comment's author, falling back to "Agent".
+to the agent, the session closes, and the banner clears. The agent's name is
+the session's `author`: the server stores the first name any batch supplies,
+comments or replies (`recordAgentComments`), ignoring the "Agent" fallback the
+markers get. The banner shows "Agent" until then. It used to be read back out of
+comment markers in open tabs, which missed reply-only sessions and files with no
+open tab (#113).
 
 The browser tab title reflects the active file as "{filename} · md-redline" (just
 "md-redline" when no file is open), so multiple md-redline tabs are distinguishable.

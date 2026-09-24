@@ -208,6 +208,73 @@ export function registerReviewSessionRoutes(
       }
     }
   }
+  /**
+   * Canonicalize and access-check the markdown paths a session covers. Shared
+   * by creating a session and adding files to one (#117), so the two cannot
+   * drift on what a session may hold.
+   */
+  async function resolveReviewPaths(
+    filePaths: unknown,
+  ): Promise<{ ok: true; resolved: string[] } | { ok: false; error: string; status: 400 | 403 }> {
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+      return { ok: false, error: 'filePaths must be a non-empty array', status: 400 };
+    }
+    if (filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
+      return { ok: false, error: 'filePaths must contain non-empty strings', status: 400 };
+    }
+    const resolved: string[] = [];
+    for (const p of filePaths as string[]) {
+      try {
+        const r = await resolveAndValidate(p);
+        if (extname(r).toLowerCase() !== '.md') {
+          return { ok: false, error: `Not a .md file: ${p}`, status: 400 };
+        }
+        resolved.push(r);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'invalid path';
+        return { ok: false, error: msg, status: msg.startsWith('Access denied') ? 403 : 400 };
+      }
+    }
+    return { ok: true, resolved };
+  }
+
+  const MAX_ADD_FILES_PER_CALL = 64;
+  const MAX_SESSION_FILES = 256;
+
+  // Add files to an open session (#117): a reviewer mid-review asks for one
+  // more file, and the agent widens the session it is in instead of opening a
+  // new one and handing over a new URL.
+  app.post('/api/review-sessions/:id/files', async (c) => {
+    const id = c.req.param('id');
+    const session = reviewSessions.getSession(id);
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    if (session.status !== 'open') return c.json({ error: 'Session is not open' }, 409);
+
+    let body: { filePaths?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+    const { filePaths } = body;
+    const resolution = await resolveReviewPaths(filePaths);
+    if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+
+    // Bounded: the file list goes to every open tab on every 5s poll.
+    if (resolution.resolved.length > MAX_ADD_FILES_PER_CALL) {
+      return c.json(
+        { error: `filePaths must have at most ${MAX_ADD_FILES_PER_CALL} entries` },
+        400,
+      );
+    }
+    const result = reviewSessions.addFiles(id, resolution.resolved, MAX_SESSION_FILES);
+    if (result === 'too_many') {
+      return c.json({ error: `a session can cover at most ${MAX_SESSION_FILES} files` }, 400);
+    }
+    if (!result) return c.json({ error: 'Session is not open' }, 409);
+    return c.json({ sessionId: id, filePaths: result.session.filePaths, added: result.added });
+  });
+
   app.post('/api/review-sessions', async (c) => {
     let body: {
       filePaths?: unknown;
@@ -248,29 +315,9 @@ export function registerReviewSessionRoutes(
       }
       clientId = body.clientId;
     }
-    if (!Array.isArray(filePaths) || filePaths.length === 0) {
-      return c.json({ error: 'filePaths must be a non-empty array' }, 400);
-    }
-    if (filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
-      return c.json({ error: 'filePaths must contain non-empty strings' }, 400);
-    }
-
-    const resolved: string[] = [];
-    for (const p of filePaths) {
-      try {
-        const r = await resolveAndValidate(p as string);
-        if (extname(r).toLowerCase() !== '.md') {
-          return c.json({ error: `Not a .md file: ${p}` }, 400);
-        }
-        resolved.push(r);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'invalid path';
-        if (msg.startsWith('Access denied')) {
-          return c.json({ error: msg }, 403);
-        }
-        return c.json({ error: msg }, 400);
-      }
-    }
+    const resolution = await resolveReviewPaths(filePaths);
+    if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+    const resolved = resolution.resolved;
 
     // Deduplicate within the same origin: if a recent open session for the
     // same files already exists, return it instead of creating a new one.
@@ -619,7 +666,8 @@ export function registerReviewSessionRoutes(
       filePath: string;
       anchor: string;
       text: string;
-      author: string;
+      /** The name the agent supplied, trimmed. Markers fall back to 'Agent'. */
+      author?: string;
       contextBefore?: string;
       contextAfter?: string;
     };
@@ -667,7 +715,7 @@ export function registerReviewSessionRoutes(
         anchor: q.anchor,
         text: q.text,
         author:
-          typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : 'Agent',
+          typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : undefined,
         contextBefore: typeof q.contextBefore === 'string' ? q.contextBefore : undefined,
         contextAfter: typeof q.contextAfter === 'string' ? q.contextAfter : undefined,
       });
@@ -679,7 +727,7 @@ export function registerReviewSessionRoutes(
       filePath: string;
       commentId: string;
       text: string;
-      author: string;
+      author?: string;
     };
     const resolvedReplies: ResolvedReply[] = [];
     for (let i = 0; i < repliesArr.length; i++) {
@@ -716,7 +764,7 @@ export function registerReviewSessionRoutes(
         commentId: r.commentId,
         text: r.text,
         author:
-          typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : 'Agent',
+          typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : undefined,
       });
     }
 
@@ -847,7 +895,7 @@ export function registerReviewSessionRoutes(
               next,
               q.anchor,
               q.text,
-              q.author,
+              q.author ?? 'Agent',
               q.contextBefore,
               q.contextAfter,
               undefined,
@@ -868,7 +916,7 @@ export function registerReviewSessionRoutes(
             next = appendReply(next, r.commentId, {
               id: replyId,
               text: r.text,
-              author: r.author,
+              author: r.author ?? 'Agent',
               timestamp: new Date().toISOString(),
             });
             if (next === before) {
@@ -940,6 +988,15 @@ export function registerReviewSessionRoutes(
       reviewSessions.recordAgentComments(id, 0);
     }
 
+    // The session takes the agent's name only once the batch has succeeded,
+    // so a batch that rolls back below (addAsk failing) cannot leave its name
+    // behind to lock out the real one. Called before each success return.
+    const recordAuthor = () =>
+      reviewSessions.recordAgentAuthor(
+        id,
+        [...resolvedComments, ...resolvedReplies].find((e) => e.author)?.author,
+      );
+
     // If any of these replies target a pending mdr_ask's commentId, resolve
     // that ask so the agent's waitForAsk unblocks AND apply the same on-disk
     // cleanup the /asks/:askId/reply route uses: remove answered markers,
@@ -999,6 +1056,7 @@ export function registerReviewSessionRoutes(
 
     // When expectsReply=false (fire-and-forget mode), skip addAsk entirely.
     if (!expectsReply) {
+      recordAuthor();
       return c.json(
         {
           commentIds: resolvedComments.map((q) => q.commentId),
@@ -1040,6 +1098,7 @@ export function registerReviewSessionRoutes(
       }
       return c.json({ error: err instanceof Error ? err.message : 'addAsk failed' }, 409);
     }
+    recordAuthor();
     return c.json(
       {
         askId,
@@ -1053,6 +1112,10 @@ export function registerReviewSessionRoutes(
   app.get('/api/review-sessions/:id/asks/:askId/wait', async (c) => {
     const sessionId = c.req.param('id');
     const askId = c.req.param('askId');
+    // Before the session check: a re-poll can arrive after the ask ended, and
+    // after its session ended too, and must still get the result (#131).
+    const settled = reviewSessions.getSettledAsk(sessionId, askId);
+    if (settled) return c.json(settled);
     if (!reviewSessions.getSession(sessionId)) {
       return c.json({ error: 'Session not found' }, 404);
     }
@@ -1064,6 +1127,53 @@ export function registerReviewSessionRoutes(
     if (!waiter) {
       return c.json({ error: 'Ask not found' }, 404);
     }
+
+    // Optional ?timeout=<seconds>, as on /agent-wait: return {status:'pending'}
+    // when it elapses so the client re-polls. Without it the request parks
+    // until the reply, and Node's fetch gives up on a response whose headers
+    // take over 300s, so an answer slower than 5 minutes never arrived (#131).
+    // Capped below Node fetch's 300s header timeout: a longer poll would fail
+    // on the client before the server ever answered 'pending', which is the
+    // bug this parameter exists to avoid.
+    const MAX_ASK_POLL_SECONDS = 240;
+    const timeoutParam = c.req.query('timeout');
+    let timeoutMs = 0;
+    if (timeoutParam !== undefined) {
+      const parsedSec = parseInt(timeoutParam, 10);
+      if (!Number.isFinite(parsedSec) || parsedSec <= 0 || parsedSec > MAX_ASK_POLL_SECONDS) {
+        return c.json(
+          {
+            error: `timeout query parameter must be a positive integer of at most ${MAX_ASK_POLL_SECONDS} (seconds)`,
+          },
+          400,
+        );
+      }
+      timeoutMs = parsedSec * 1000;
+    }
+    if (timeoutMs > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const pending = new Promise<'pending'>((resolve) => {
+        timer = setTimeout(() => resolve('pending'), timeoutMs);
+        if (typeof timer === 'object' && 'unref' in timer) {
+          (timer as { unref: () => void }).unref();
+        }
+      });
+      // A client that went away stops the poll early. Nothing is lost: an ask
+      // that ends meanwhile is kept in getSettledAsk for the next poll.
+      const signal: AbortSignal | undefined = c.req.raw.signal;
+      const dropped = new Promise<'pending'>((resolve) => {
+        if (!signal) return;
+        if (signal.aborted) resolve('pending');
+        else signal.addEventListener('abort', () => resolve('pending'), { once: true });
+      });
+      try {
+        const winner = await Promise.race([waiter, pending, dropped]);
+        return c.json(winner === 'pending' ? { status: 'pending' } : winner);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     const result = await waiter;
     return c.json(result);
   });

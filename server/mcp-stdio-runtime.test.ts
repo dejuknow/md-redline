@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleRequestReviewToolCall } from './mcp-stdio';
 import type { AskWaitResult, MdrClient } from './mcp-stdio/types';
 import {
+  handleAddFilesToolCall,
   handleAskToolCall,
   handleBaselineToolCall,
   handleReviewToolCall,
@@ -151,6 +152,7 @@ describe('handleRequestReviewToolCall', () => {
       captureBaseline: vi.fn(),
       getSessionFilePaths: vi.fn().mockResolvedValue([]),
       listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      addSessionFiles: vi.fn(),
     };
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
 
@@ -185,6 +187,7 @@ describe('handleRequestReviewToolCall', () => {
       captureBaseline: vi.fn(),
       getSessionFilePaths: vi.fn().mockResolvedValue([]),
       listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      addSessionFiles: vi.fn(),
     };
     const openInBrowser = vi.fn();
 
@@ -586,9 +589,72 @@ describe('handleAskToolCall', () => {
     expect(client.postAgentComments).toHaveBeenCalledWith('rev_xyz', [
       { filePath: '/tmp/a.md', anchor: 'a', text: 'q?' },
     ]);
-    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
+    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test', 90);
     expect(result.content[0].text).toContain('the answer');
     expect(result.content[0].text).toContain('questionIndex');
+  });
+
+  it('keeps polling through pending until the reply arrives (#131)', async () => {
+    // Each poll is bounded at 90s so no single request outlasts Node's 300s
+    // header timeout; a slow reader just means more polls.
+    const waitForAsk = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'pending' })
+      .mockResolvedValueOnce({ status: 'pending' })
+      .mockResolvedValueOnce({
+        status: 'reply',
+        replies: [{ questionIndex: 0, text: 'slow answer' }],
+        totalQuestions: 1,
+      });
+    const client = makeMockClient({ waitForAsk });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+
+    expect(waitForAsk).toHaveBeenCalledTimes(3);
+    for (const call of waitForAsk.mock.calls) expect(call).toEqual(['rev_xyz', 'ask_test', 90]);
+    expect(result.content[0].text).toContain('slow answer');
+  });
+
+  it('stops polling once the call is cancelled, even if the release failed', async () => {
+    const controller = new AbortController();
+    // Answers on the fourth poll, so a loop that ignores the cancel fails the
+    // call-count assertion below instead of spinning forever.
+    let polls = 0;
+    const waitForAsk = vi.fn().mockImplementation(async () => {
+      polls += 1;
+      controller.abort();
+      return polls >= 4
+        ? { status: 'reply', replies: [], totalQuestions: 1 }
+        : { status: 'pending' };
+    });
+    const client = makeMockClient({
+      waitForAsk,
+      releaseAsk: vi.fn().mockRejectedValue(new Error('releaseAsk failed (HTTP 500)')),
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: controller.signal },
+    );
+
+    expect(waitForAsk).toHaveBeenCalledTimes(1);
+    expect(result.content[0].text).toContain('cancelled before the user could reply');
+  });
+
+  it('releases the ask before rethrowing when a poll fails, so the next mdr_ask is not blocked', async () => {
+    const releaseAsk = vi.fn().mockResolvedValue(undefined);
+    const client = makeMockClient({
+      waitForAsk: vi.fn().mockRejectedValue(new Error('waitForAsk failed (HTTP 500)')),
+      releaseAsk,
+    });
+    await expect(
+      handleAskToolCall(
+        { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+        { client, sendProgress: undefined, signal: undefined },
+      ),
+    ).rejects.toThrow('waitForAsk failed (HTTP 500)');
+    expect(releaseAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
   });
 
   it('returns a no_reply result when wait reports cancelled', async () => {
@@ -1033,5 +1099,118 @@ describe('handleBaselineToolCall', () => {
     await expect(handleBaselineToolCall({ filePaths: ['/abs/a.md'] }, { client })).rejects.toThrow(
       'File not found: /abs/a.md',
     );
+  });
+});
+
+describe('the mdr_add_files hint (#117)', () => {
+  it('tells an agent posting on a file outside the session to add it first', async () => {
+    const client = {
+      postReview: vi
+        .fn()
+        .mockRejectedValue(new Error('comment 0: filePath not part of this session')),
+    } as unknown as MdrClient;
+    const result = await handleReviewToolCall(
+      {
+        sessionId: 'rev_1',
+        comments: [{ filePath: '/d/b.md', anchor: 'x', text: 'y' }],
+      },
+      { client, openInBrowser: async () => {}, baseUrl: 'http://localhost:5188' },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain(
+      'Add the file to the session first with mdr_add_files',
+    );
+  });
+});
+
+describe('handleAddFilesToolCall (#117)', () => {
+  function client(addSessionFiles: MdrClient['addSessionFiles']) {
+    const calls: string[] = [];
+    const grantAccess = vi.fn(async () => {
+      calls.push('grant');
+    });
+    const add = vi.fn(async (...args: Parameters<MdrClient['addSessionFiles']>) => {
+      calls.push('add');
+      return addSessionFiles(...args);
+    });
+    return {
+      calls,
+      grantAccess,
+      add,
+      value: { grantAccess, addSessionFiles: add } as unknown as MdrClient,
+    };
+  }
+
+  it('grants access before adding, and tells the agent how to carry on', async () => {
+    const c = client(async () => ({
+      sessionId: 'rev_1',
+      filePaths: ['/d/a.md', '/d/b.md'],
+      added: ['/d/b.md'],
+    }));
+    const result = await handleAddFilesToolCall(
+      { sessionId: 'rev_1', filePaths: ['/d/b.md'] },
+      { client: c.value },
+    );
+
+    expect(c.calls).toEqual(['grant', 'add']);
+    expect(c.grantAccess).toHaveBeenCalledWith(['/d/b.md']);
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain('added /d/b.md to session rev_1');
+    expect(result.content[0].text).toContain('now covers 2 file(s)');
+    expect(result.content[0].text).toContain('Carry on with the same sessionId');
+  });
+
+  it('says nothing was added when the session already covers the files', async () => {
+    const c = client(async () => ({ sessionId: 'rev_1', filePaths: ['/d/a.md'], added: [] }));
+    const result = await handleAddFilesToolCall(
+      { sessionId: 'rev_1', filePaths: ['/d/a.md'] },
+      { client: c.value },
+    );
+    expect(result.content[0].text).toContain('already covers /d/a.md');
+    expect(result.content[0].text).toContain('Nothing was added');
+  });
+
+  it.each([
+    [404, 'Session not found'],
+    [409, 'Session is not open'],
+    [409, 'session closed'],
+  ])('points at a new review on HTTP %i ("%s")', async (status, message) => {
+    const c = client(async () => {
+      throw Object.assign(new Error(message), { status });
+    });
+    const result = await handleAddFilesToolCall(
+      { sessionId: 'rev_1', filePaths: ['/d/b.md'] },
+      { client: c.value },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('no longer open');
+    expect(result.content[0].text).toContain('Start a new review');
+  });
+
+  it('blames an older server, not the session, for a 404 with no session error', async () => {
+    // A server that predates the route 404s with a plain-text body, so the
+    // client's message is the generic one.
+    const c = client(async () => {
+      throw Object.assign(new Error('addSessionFiles failed (HTTP 404)'), { status: 404 });
+    });
+    const result = await handleAddFilesToolCall(
+      { sessionId: 'rev_1', filePaths: ['/d/b.md'] },
+      { client: c.value },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('older than this mdr mcp');
+    expect(result.content[0].text).not.toContain('no longer open');
+  });
+
+  it('passes any other failure through as the tool error', async () => {
+    const c = client(async () => {
+      throw new Error('Not a .md file: /d/notes.txt');
+    });
+    const result = await handleAddFilesToolCall(
+      { sessionId: 'rev_1', filePaths: ['/d/notes.txt'] },
+      { client: c.value },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe('mdr_add_files: Not a .md file: /d/notes.txt');
   });
 });

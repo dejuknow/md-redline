@@ -77,7 +77,9 @@ export type AskWaitResult =
       replies: Array<{ questionIndex: number; text: string }>;
       totalQuestions: number;
     }
-  | { status: 'no_reply'; reason: AskNoReplyReason };
+  | { status: 'no_reply'; reason: AskNoReplyReason }
+  /** The long-poll timeout elapsed with the ask still open; poll again. */
+  | { status: 'pending' };
 
 export interface PostAgentCommentsResult {
   askId: string;
@@ -140,6 +142,20 @@ export interface WaitInput {
   sessionId: string;
 }
 
+/** mdr_add_files: widen an open session with more files (#117). */
+export interface AddFilesInput {
+  sessionId: string;
+  filePaths: string[];
+}
+
+export interface AddFilesResult {
+  sessionId: string;
+  /** Every file the session covers now, in order. */
+  filePaths: string[];
+  /** The files this call added; empty when the session already covered them all. */
+  added: string[];
+}
+
 export interface BaselineInput {
   filePaths: string[];
   agentName?: string;
@@ -190,13 +206,15 @@ export interface MdrClient {
   abortSession(sessionId: string): Promise<void>;
   postAgentComments(sessionId: string, questions: AskQuestion[]): Promise<PostAgentCommentsResult>;
   /** Long-poll — intentionally not signal-aware; cancel via releaseAsk instead. */
-  waitForAsk(sessionId: string, askId: string): Promise<AskWaitResult>;
+  waitForAsk(sessionId: string, askId: string, timeoutSeconds?: number): Promise<AskWaitResult>;
   postReview(sessionId: string, args: PostReviewArgs): Promise<PostReviewResult>;
   releaseAsk(sessionId: string, askId: string): Promise<void>;
   /** Long-poll — server's 90s timeout bounds the wait; client doesn't abort the fetch. */
   waitForReview(sessionId: string, timeoutSeconds?: number): Promise<WaitForReviewResult>;
   /** POST /api/baselines. Returns immediately; the server reads the files itself. */
   captureBaseline(input: BaselineInput): Promise<CaptureBaselineResult>;
+  /** POST /api/review-sessions/:id/files. Paths must already be granted. */
+  addSessionFiles(sessionId: string, filePaths: string[]): Promise<AddFilesResult>;
   /** GET /api/baselines. Resolves { baselines: [] } on a non-ok response rather than throwing. */
   listBaselines(): Promise<ListBaselinesResult>;
   /**

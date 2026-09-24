@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { ReviewSessionStore } from './review-sessions';
+import { MAX_SESSION_AUTHOR_LEN, ReviewSessionStore } from './review-sessions';
 
 describe('ReviewSessionStore', () => {
   let store: ReviewSessionStore;
@@ -1057,5 +1057,151 @@ describe('ReviewSessionStore', () => {
       store.endWaitPark(session.id);
       expect(store.hasParkedWaiter(session.id)).toBe(false);
     });
+  });
+});
+
+describe('recordAgentAuthor (#113)', () => {
+  const open = () => {
+    const store = new ReviewSessionStore();
+    const { id } = store.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    return { store, id, author: () => store.getSession(id)?.author };
+  };
+
+  it('names the session from the first batch that supplies a name', () => {
+    const { store, id, author } = open();
+    store.recordAgentAuthor(id, undefined);
+    expect(author()).toBeUndefined();
+    store.recordAgentAuthor(id, '  Claude  ');
+    store.recordAgentAuthor(id, 'Codex');
+    expect(author()).toBe('Claude');
+  });
+
+  it("never lets 'Agent' or a blank claim the session, so a real name can still arrive", () => {
+    const { store, id, author } = open();
+    store.recordAgentAuthor(id, 'Agent');
+    store.recordAgentAuthor(id, '   ');
+    expect(author()).toBeUndefined();
+    store.recordAgentAuthor(id, 'Claude');
+    expect(author()).toBe('Claude');
+  });
+
+  it('cuts an overlong name, since every tab polls it', () => {
+    const { store, id, author } = open();
+    store.recordAgentAuthor(id, 'x'.repeat(MAX_SESSION_AUTHOR_LEN + 500));
+    expect(author()).toBe('x'.repeat(MAX_SESSION_AUTHOR_LEN));
+  });
+});
+
+describe('settled ask results (#131)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps a result for a later poll, then lets it expire after five minutes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-24T12:00:00Z'));
+    const store = new ReviewSessionStore();
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const { askId } = store.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    store.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'reply' }]);
+
+    expect(store.getSettledAsk(session.id, askId)?.status).toBe('reply');
+    expect(store.getSettledAsk('rev_other', askId)).toBeUndefined();
+
+    vi.setSystemTime(new Date('2026-09-24T12:05:01Z'));
+    expect(store.getSettledAsk(session.id, askId)).toBeUndefined();
+  });
+
+  it('records every way an ask ends, not only a reply', () => {
+    const store = new ReviewSessionStore();
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const first = store.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    store.releaseAsk(session.id, first.askId);
+    const second = store.addAsk(session.id, [
+      { commentId: 'c2', filePath: '/tmp/a.md', anchor: 'b', text: 'q2' },
+    ]);
+    store.abortAsks(session.id, 'session_cancelled');
+
+    expect(store.getSettledAsk(session.id, first.askId)).toEqual({
+      status: 'no_reply',
+      reason: 'released',
+    });
+    expect(store.getSettledAsk(session.id, second.askId)).toEqual({
+      status: 'no_reply',
+      reason: 'cancelled',
+    });
+  });
+
+  it('forgets everything on dispose', () => {
+    const store = new ReviewSessionStore();
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const { askId } = store.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    store.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'reply' }]);
+    store.dispose();
+    expect(store.getSettledAsk(session.id, askId)).toBeUndefined();
+  });
+});
+
+describe('adding files to an open session (#117)', () => {
+  it('adds new files, skipping ones it already covers and repeats', () => {
+    const store = new ReviewSessionStore();
+    const s = store.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
+    const result = store.addFiles(s.id, ['/d/a.md', '/d/b.md', '/d/b.md', '/d/c.md']);
+    expect(result !== 'too_many' && result?.added).toEqual(['/d/b.md', '/d/c.md']);
+    expect(store.getSession(s.id)?.filePaths).toEqual(['/d/a.md', '/d/b.md', '/d/c.md']);
+  });
+
+  it('refuses a session that is no longer open', () => {
+    const store = new ReviewSessionStore();
+    const s = store.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
+    store.abort(s.id, 'user_cancelled');
+    expect(store.addFiles(s.id, ['/d/b.md'])).toBeUndefined();
+    expect(store.addFiles('rev_missing', ['/d/b.md'])).toBeUndefined();
+  });
+
+  it('reuses a widened session for its original files as well as its current ones', () => {
+    const store = new ReviewSessionStore();
+    const s = store.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
+    store.addFiles(s.id, ['/d/b.md']);
+    expect(store.findOpenSession(['/d/a.md'], 'user')?.id).toBe(s.id);
+    expect(store.findOpenSession(['/d/b.md', '/d/a.md'], 'user')?.id).toBe(s.id);
+    // A file it does not cover still means a new session.
+    expect(store.findOpenSession(['/d/a.md', '/d/z.md'], 'user')).toBeUndefined();
+  });
+
+  it('never reuses a larger session for a smaller request it did not start as', () => {
+    // Narrowed on purpose: joining any covering session would merge a request
+    // for a.md into an unrelated review of a.md + b.md, where one Done ends both.
+    const store = new ReviewSessionStore();
+    store.createSession({ filePaths: ['/d/a.md', '/d/b.md'], enableResolve: false });
+    expect(store.findOpenSession(['/d/a.md'], 'user')).toBeUndefined();
+  });
+
+  it('refuses an add that would pass the cap, on the live list, and adds nothing', () => {
+    const store = new ReviewSessionStore();
+    const s = store.createSession({ filePaths: ['/d/a.md', '/d/b.md'], enableResolve: false });
+    expect(store.addFiles(s.id, ['/d/c.md'], 3)).not.toBe('too_many');
+    expect(store.addFiles(s.id, ['/d/a.md', '/d/d.md'], 3)).toBe('too_many');
+    expect(store.getSession(s.id)?.filePaths).toEqual(['/d/a.md', '/d/b.md', '/d/c.md']);
+  });
+
+  it('records when each added file arrived, and only for added files', () => {
+    const store = new ReviewSessionStore();
+    const s = store.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
+    expect(store.getSession(s.id)?.fileAddedAt).toBeUndefined();
+    store.addFiles(s.id, ['/d/b.md']);
+    const addedAt = store.getSession(s.id)?.fileAddedAt ?? {};
+    expect(Object.keys(addedAt)).toEqual(['/d/b.md']);
+    expect(Number.isNaN(Date.parse(addedAt['/d/b.md']))).toBe(false);
   });
 });

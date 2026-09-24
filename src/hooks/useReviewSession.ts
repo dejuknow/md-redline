@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 
 export interface ReviewSession {
   id: string;
@@ -12,6 +12,10 @@ export interface ReviewSession {
   createdAt: string;
   /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
   lastAgentActivityAt?: string | null;
+  /** The name the agent posts under, once a batch has supplied one. */
+  author?: string;
+  /** When each file added after creation arrived (#117), ISO, keyed by path. */
+  fileAddedAt?: Record<string, string>;
 }
 
 const POLL_INTERVAL_MS = 5_000;
@@ -30,6 +34,7 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
       x.enableResolve !== y.enableResolve ||
       x.waitingForAgent !== y.waitingForAgent ||
       x.lastAgentActivityAt !== y.lastAgentActivityAt ||
+      x.author !== y.author ||
       x.filePaths.length !== y.filePaths.length ||
       x.sentCommentIds.length !== y.sentCommentIds.length
     ) {
@@ -45,7 +50,13 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
   return true;
 }
 
-export function useReviewSession() {
+/**
+ * @param openFilePaths every file open in this browser tab. Heartbeats go only
+ *   to sessions covering one of them, so a tab no longer renews sessions it
+ *   has never shown (#114). The list is rebuilt on every edit (tabs carry
+ *   their text), so it is compared by contents, not identity.
+ */
+export function useReviewSession(openFilePaths: readonly string[]) {
   const [sessions, setSessions] = useState<ReviewSession[]>([]);
 
   const fetchSessions = useCallback(async () => {
@@ -70,7 +81,27 @@ export function useReviewSession() {
     return () => clearInterval(id);
   }, [fetchSessions]);
 
-  // Heartbeat for each open session. Content-Type header is required by the
+  // Stable across renders that leave the set of open files unchanged, so the
+  // heartbeat effect below does not restart (and fire) on every keystroke.
+  // NUL separates the paths because it is the one character a path cannot
+  // contain; a newline can appear in a macOS or Linux filename.
+  const openFilesKey = [...new Set(openFilePaths)].sort().join('\0');
+  // The sessions this tab shows and keeps alive: those covering a file open
+  // here. The banner renders this list, so a tab never shows a review it is
+  // letting expire.
+  const shownSessions = useMemo(() => {
+    const open = new Set(openFilesKey ? openFilesKey.split('\0') : []);
+    return sessions.filter((s) => s.filePaths.some((p) => open.has(p)));
+  }, [sessions, openFilesKey]);
+  // Keyed on ids, so a change to some other session (an agent posting to a
+  // review not open here) does not restart the heartbeat interval.
+  const shownIdsKey = shownSessions.map((s) => s.id).join('\0');
+
+  // Heartbeat for each session this tab is showing: one covering a file open
+  // here. Heartbeating every session the server lists let any one tab keep
+  // unrelated reviews alive for as long as it stayed open, then for another
+  // HEARTBEAT_TIMEOUT_MS (#114). A session with no open tab anywhere now ages
+  // out on its own. Content-Type header is required by the
   // CSRF middleware, which otherwise rejects body-less POSTs with 415.
   //
   // An immediate heartbeat fires on mount so the session stays alive even if
@@ -86,26 +117,27 @@ export function useReviewSession() {
   // they're alive again rather than wait up to HEARTBEAT_INTERVAL_MS.
   //
   // A 404/409 response means the session is gone server-side (swept or
-  // resolved in another tab). Refresh the session list immediately so the
-  // banner drops instead of waiting for the next 5s poll.
+  // resolved in another tab). Refresh the session list once the round is done
+  // so the banner drops instead of waiting for the next 5s poll, but keep
+  // renewing the rest: a gone session must not cost the others their lease.
   useEffect(() => {
-    if (sessions.length === 0) return;
+    if (!shownIdsKey) return;
+    const ids = shownIdsKey.split('\0');
     let cancelled = false;
     const sendHeartbeats = async () => {
-      for (const s of sessions) {
+      let anyGone = false;
+      for (const id of ids) {
         try {
-          const res = await fetch(`/api/review-sessions/${s.id}/heartbeat`, {
+          const res = await fetch(`/api/review-sessions/${id}/heartbeat`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
           });
-          if (!cancelled && (res.status === 404 || res.status === 409)) {
-            void fetchSessions();
-            break;
-          }
+          if (res.status === 404 || res.status === 409) anyGone = true;
         } catch {
           /* next tick will retry */
         }
       }
+      if (anyGone && !cancelled) void fetchSessions();
     };
     void sendHeartbeats();
     const id = setInterval(() => void sendHeartbeats(), HEARTBEAT_INTERVAL_MS);
@@ -118,11 +150,11 @@ export function useReviewSession() {
       clearInterval(id);
       window.removeEventListener('pageshow', onPageShow);
     };
-  }, [sessions, fetchSessions]);
+  }, [shownIdsKey, fetchSessions]);
 
   const refresh = useCallback(() => void fetchSessions(), [fetchSessions]);
 
-  return { sessions, refresh };
+  return { sessions, shownSessions, refresh };
 }
 
 /**

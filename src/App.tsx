@@ -82,6 +82,7 @@ import { getCopySelectionFallbackText } from './lib/copy-selection';
 import { rangeFromPaintedSelection, resolveSelectionMarkdown } from './lib/copy-as-markdown';
 import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
+import { useOpenAddedReviewFiles } from './hooks/useOpenAddedReviewFiles';
 import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import { selectAgentAsks } from './lib/agent-asks';
@@ -1248,7 +1249,15 @@ export default function App() {
     [captureReference, handleCopyAgentPrompt, activeFilePath, tabs],
   );
 
-  const { sessions: reviewSessions, refresh: refreshReviewSessions } = useReviewSession();
+  const {
+    sessions: reviewSessions,
+    shownSessions: shownReviewSessions,
+    refresh: refreshReviewSessions,
+  } = useReviewSession(
+    activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
+  );
+  // An agent can add files to a review this tab is showing (#117): open them.
+  useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
 
   // Mirrors the snapshot logic in handleHandoff so multi-file review sessions
   // get diff baselines for every involved tab, not just the active one.
@@ -1283,21 +1292,15 @@ export default function App() {
     [comments, activeSession?.id],
   );
 
-  // Derive per-session agent metadata from comment markers across all open
-  // tabs (not just the active file):
-  // - agentNamesBySession: first agent-initiated comment author. Used by
-  //   ReviewBanner for the agent-row label.
-  // - pendingAsksBySession: agent questions still awaiting a reply, for ANY
-  //   open session (mdr_ask works on both origins). Drives the banner's
-  //   awaiting-reply state, the toast, and the tab-title badge.
-  const { agentNamesBySession, pendingAsksBySession } = useMemo(() => {
-    const names = new Map<string, string>();
+  // Agent questions still awaiting a reply, per open session (mdr_ask works on
+  // both origins). Drives the banner's awaiting-reply state, the toast, and
+  // the tab-title badge.
+  const pendingAsksBySession = useMemo(() => {
     const pending = new Map<
       string,
       Array<{ commentId: string; filePath: string; author: string }>
     >();
-    if (reviewSessions.length === 0)
-      return { agentNamesBySession: names, pendingAsksBySession: pending };
+    if (reviewSessions.length === 0) return pending;
 
     const commentsByFile = new Map<string, typeof comments>();
     if (activeFilePath) commentsByFile.set(activeFilePath, comments);
@@ -1311,23 +1314,17 @@ export default function App() {
     }
 
     for (const session of reviewSessions) {
-      let firstAuthor: string | undefined;
       const sessionAsks: Array<{ commentId: string; filePath: string; author: string }> = [];
       for (const filePath of session.filePaths) {
         const fileParsedComments = commentsByFile.get(filePath);
         if (!fileParsedComments) continue;
-        for (const c of fileParsedComments) {
-          if (c.agentInitiated !== true || c.sessionId !== session.id) continue;
-          if (!firstAuthor && c.author) firstAuthor = c.author;
-        }
         for (const ask of selectAgentAsks(fileParsedComments, session.id)) {
           sessionAsks.push({ commentId: ask.id, filePath, author: ask.author ?? 'Agent' });
         }
       }
-      if (session.origin === 'agent') names.set(session.id, firstAuthor ?? 'Agent');
       if (sessionAsks.length > 0) pending.set(session.id, sessionAsks);
     }
-    return { agentNamesBySession: names, pendingAsksBySession: pending };
+    return pending;
   }, [reviewSessions, comments, tabs, activeFilePath]);
 
   // Jump to a session's first pending agent question, switching tabs first
@@ -3036,7 +3033,7 @@ export default function App() {
       {/* Main column: chrome row, document, status bar */}
       <div className="flex-1 min-w-0 flex flex-col">
         <ReviewBanner
-          sessions={reviewSessions}
+          sessions={shownReviewSessions}
           commentCounts={commentCounts}
           agentCommentCounts={agentCommentCounts}
           onHandoffSuccess={handleReviewHandoffSuccess}
@@ -3044,7 +3041,6 @@ export default function App() {
           onBatchSent={handleBatchSent}
           showToast={showToast}
           commentIdsByFile={commentIdsByFile}
-          agentNamesBySession={agentNamesBySession}
           pendingAskCountsBySession={pendingAskCountsBySession}
           onJumpToAsk={handleJumpToAsk}
         />
