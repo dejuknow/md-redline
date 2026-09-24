@@ -70,10 +70,13 @@ export class ServerUnreachableError extends Error {
         : `lost its connection to this call (${code}); it most likely stopped or restarted`;
     super(
       `The mdr server at ${baseUrl} ${what}. A restart often comes from another ` +
-        'mdr install of a different version starting up. The review may still be ' +
-        'there once it is back: call this tool again. Anything already written to ' +
-        'the files is still there too, so re-read them if you want to check. Open ' +
-        'a new review only if the next call says the session is gone.',
+        'mdr install of a different version starting up, and the review may still ' +
+        'be there once it is back. If this call was only waiting (mdr_wait, or ' +
+        'mdr_request_review / mdr_ask waiting for a reply), call it again to keep ' +
+        'waiting. If it was posting comments or questions (mdr_comment, or mdr_ask ' +
+        'posting its questions), the post may already have landed before the ' +
+        'connection dropped, so re-read the file(s) first rather than calling it ' +
+        'again, which risks posting the same thing twice.',
     );
     this.name = 'ServerUnreachableError';
     this.code = code;
@@ -132,8 +135,27 @@ const RECONNECT_POLL_INTERVAL_MS = 1_000;
  */
 export const RECONNECT_WINDOW_MS = 2 * 60 * 1000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Sleep for `ms`, or until `signal` aborts, whichever comes first. Used
+ * between reconnect attempts so a cancelled tool call does not sit through a
+ * full RECONNECT_POLL_INTERVAL_MS before withReconnect notices and stops.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
@@ -153,16 +175,21 @@ function sleep(ms: number): Promise<void> {
  * error response, a caller's own abort) is not this error's job and passes
  * straight through.
  *
- * None of the three long-poll methods take an AbortSignal today (waitForAsk
- * is cancelled via releaseAsk instead, and waitForSession/waitForReview rely
- * on the server's own timeout), so there is nothing to check between
- * retries yet. If one of them gains a signal later, this loop needs to stop
- * on it rather than keep sleeping.
+ * `signal`, when given, stops the retrying rather than letting it run out
+ * the clock: an already-aborted signal skips straight to rethrowing the
+ * last error, and an abort during the between-attempts sleep wakes it
+ * immediately instead of waiting out the rest of RECONNECT_POLL_INTERVAL_MS.
+ * A cancelled tool call has nobody left to hand a reconnected result to, so
+ * there is nothing to gain by continuing to retry. The signal is never
+ * passed into `poll` itself: aborting the fetch of a request already in
+ * flight is the caller's decision, not this loop's (see MdrClient's own
+ * doc comments on the three long-poll methods).
  */
 async function withReconnect<T>(
   poll: (timeoutSeconds?: number) => Promise<T>,
   timeoutSeconds: number | undefined,
   windowMs: number,
+  signal?: AbortSignal,
 ): Promise<T> {
   const pollDeadline = timeoutSeconds === undefined ? Infinity : Date.now() + timeoutSeconds * 1000;
   let giveUpAt: number | undefined;
@@ -172,10 +199,12 @@ async function withReconnect<T>(
       return await poll(attemptTimeout);
     } catch (err) {
       if (!(err instanceof ServerUnreachableError)) throw err;
+      if (signal?.aborted) throw err;
       const now = Date.now();
       giveUpAt ??= Math.min(now + windowMs, pollDeadline);
       if (now + RECONNECT_POLL_INTERVAL_MS >= giveUpAt) throw err;
-      await sleep(RECONNECT_POLL_INTERVAL_MS);
+      await sleep(RECONNECT_POLL_INTERVAL_MS, signal);
+      if (signal?.aborted) throw err;
       if (timeoutSeconds !== undefined) {
         attemptTimeout = Math.max(1, Math.ceil((pollDeadline - Date.now()) / 1000));
       }
@@ -196,12 +225,17 @@ async function withReconnect<T>(
 function withReconnectingPolls(client: MdrClient, windowMs: number): MdrClient {
   return {
     ...client,
-    waitForSession: (sessionId, timeoutSeconds) =>
-      withReconnect((t) => client.waitForSession(sessionId, t), timeoutSeconds, windowMs),
-    waitForAsk: (sessionId, askId, timeoutSeconds) =>
-      withReconnect((t) => client.waitForAsk(sessionId, askId, t), timeoutSeconds, windowMs),
-    waitForReview: (sessionId, timeoutSeconds) =>
-      withReconnect((t) => client.waitForReview(sessionId, t), timeoutSeconds, windowMs),
+    waitForSession: (sessionId, timeoutSeconds, signal) =>
+      withReconnect((t) => client.waitForSession(sessionId, t), timeoutSeconds, windowMs, signal),
+    waitForAsk: (sessionId, askId, timeoutSeconds, signal) =>
+      withReconnect(
+        (t) => client.waitForAsk(sessionId, askId, t),
+        timeoutSeconds,
+        windowMs,
+        signal,
+      ),
+    waitForReview: (sessionId, timeoutSeconds, signal) =>
+      withReconnect((t) => client.waitForReview(sessionId, t), timeoutSeconds, windowMs, signal),
   };
 }
 

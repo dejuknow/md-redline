@@ -32,10 +32,12 @@ import { parseComments, removeComment, transformCommentMarkers } from '../src/li
 import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
 import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
 import {
+  cleanStaleTempFiles,
   createSessionSaver,
   holdRequestsUntilOpen,
   loadPersistedState,
   sessionsFilePath,
+  startPeriodicSave,
 } from './session-persistence';
 
 const require = createRequire(import.meta.url);
@@ -1655,37 +1657,66 @@ if (isMainModule) {
       // /api/shutdown; see the 'exit' listener below) has nothing to flush
       // if persistence is off or restore hasn't gotten this far yet.
       let saver: ReturnType<typeof createSessionSaver> | null = null;
+      let periodicSave: ReturnType<typeof startPeriodicSave> | null = null;
       if (persistSessions) {
-        const sessionsPath = sessionsFilePath(resolveHomeDir(), port);
+        const homeDir = resolveHomeDir();
+        const sessionsPath = sessionsFilePath(homeDir, port);
+        // A temp file a write created but never got to rename into place
+        // (the process died mid-save) is otherwise silent debris; clear it
+        // out before anything else touches this port's saved state.
+        await cleanStaleTempFiles(homeDir, port);
         // Restore before writePortFile advertises this server: the port
         // file (and the CLI's port-scan fallback) is how a client finds a
         // server to talk to, so restoring first means nobody can observe
         // this process before its sessions are back (#116).
-        const persisted = await loadPersistedState(sessionsPath, new Date());
-        try {
-          if (persisted) reviewSessions.restoreState(persisted);
-        } catch (err) {
-          // A file that passed the shape check but still can't be restored
-          // must not keep the server from starting.
-          console.warn('[sessions] could not restore saved review sessions', err);
+        const loaded = await loadPersistedState(sessionsPath, new Date());
+        let restored = false;
+        if (loaded) {
+          try {
+            reviewSessions.restoreState(loaded.state, { now: new Date(), savedAt: loaded.savedAt });
+            restored = true;
+          } catch (err) {
+            // A file that passed the shape check but still can't be
+            // restored must not keep the server from starting.
+            console.warn('[sessions] could not restore saved review sessions', err);
+          }
         }
         saver = createSessionSaver({
           path: sessionsPath,
           getState: () => reviewSessions.exportState(),
         });
         reviewSessions.setOnChange(saver.schedule);
+        if (restored) {
+          // Heartbeats are now part of what gets saved, and restoreState
+          // just shifted every session's clock by the downtime; writing
+          // that shift to disk now means a crash before anything else
+          // changes still restores correctly next time, instead of losing
+          // the shift and treating the sessions as freshly seen again.
+          saver.schedule();
+        }
+        // onChange only fires on a state mutation, so an idle live review's
+        // savedAt would otherwise go stale forever; this refreshes it on a
+        // fixed cadence regardless of whether anything else changed (see
+        // startPeriodicSave's own doc comment).
+        periodicSave = startPeriodicSave({
+          saver,
+          hasOpenSessions: () => reviewSessions.listOpenSessions().length > 0,
+        });
       }
-      gate.open();
 
-      await writePortFile(PORT_FILE, port);
-      if (updatesEnabled) void updateChecker.start();
-      console.log(`md-redline server running on http://127.0.0.1:${port}`);
-      const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
-      if (initialArg) {
-        console.log(`Initial path: ${initialArg}`);
-      }
-
+      // Registered as early in the boot sequence as the saver's own
+      // existence allows: before the request gate opens and before
+      // writePortFile advertises this server, so a Ctrl-C in that narrow
+      // window still flushes whatever saver exists and removes the port
+      // file this process owns.
+      let cleanedUp = false;
       const cleanup = () => {
+        // Idempotent: SIGINT's handler below calls this and then
+        // process.exit, which itself re-enters the 'exit' listener. Without
+        // the flag, a plain Ctrl-C would flush the saved state twice.
+        if (cleanedUp) return;
+        cleanedUp = true;
+        periodicSave?.stop();
         removePortFileIfOwned(PORT_FILE, port);
         // flushSync is genuinely synchronous (see session-persistence.ts),
         // which is required here: Node only runs synchronous code in an
@@ -1703,6 +1734,16 @@ if (isMainModule) {
         cleanup();
         process.exit(0);
       });
+
+      gate.open();
+
+      await writePortFile(PORT_FILE, port);
+      if (updatesEnabled) void updateChecker.start();
+      console.log(`md-redline server running on http://127.0.0.1:${port}`);
+      const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
+      if (initialArg) {
+        console.log(`Initial path: ${initialArg}`);
+      }
     })
     .catch((err) => {
       gate.open();

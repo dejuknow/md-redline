@@ -1,15 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { PersistedSession, PersistedStoreState } from './review-sessions';
 import {
+  cleanStaleTempFiles,
   createSessionSaver,
   holdRequestsUntilOpen,
   loadPersistedState,
   sessionsFilePath,
+  startPeriodicSave,
 } from './session-persistence';
+
+// Fault injection for writeSyncNow's Windows-transient-error retry (#116,
+// fix 5): scoped to a `.tmp` path so it only ever catches the write this
+// module's own temp-file-then-rename dance makes, never an unrelated
+// writeFileSync elsewhere in this file's other tests. Hoisted because
+// vi.mock factories run before top-level `let`/`const` declarations exist.
+const fault = vi.hoisted(() => ({
+  writeFileSync: { failuresLeft: 0, code: 'EBUSY' as string },
+}));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
+      const [target] = args;
+      if (
+        typeof target === 'string' &&
+        target.endsWith('.tmp') &&
+        fault.writeFileSync.failuresLeft > 0
+      ) {
+        fault.writeFileSync.failuresLeft -= 1;
+        const err: NodeJS.ErrnoException = new Error(`simulated ${fault.writeFileSync.code}`);
+        err.code = fault.writeFileSync.code;
+        throw err;
+      }
+      return actual.writeFileSync(...args);
+    },
+  };
+});
 
 let testDir: string;
 
@@ -19,6 +51,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(testDir, { recursive: true, force: true });
+  fault.writeFileSync = { failuresLeft: 0, code: 'EBUSY' };
   vi.restoreAllMocks();
 });
 
@@ -41,6 +74,7 @@ function makeSession(overrides: Partial<PersistedSession> = {}): PersistedSessio
     clientId: 'client-1',
     author: 'Claude',
     createdAt: '2026-09-24T00:00:00.000Z',
+    lastHeartbeatAt: '2026-09-24T00:00:02.000Z',
     lastAgentActivityAt: '2026-09-24T00:00:01.000Z',
     status: 'open',
     sentCommentIds: ['c1'],
@@ -130,7 +164,7 @@ describe('loadPersistedState', () => {
     await writeRawFile(path, { version: 1, savedAt: now.getTime(), ...state });
 
     const result = await loadPersistedState(path, now);
-    expect(result).toEqual(state);
+    expect(result).toEqual({ state, savedAt: now.getTime() });
   });
 
   it('ignores a file whose savedAt is older than the restore window', async () => {
@@ -164,7 +198,7 @@ describe('loadPersistedState', () => {
     await writeRawFile(path, { version: 1, savedAt, ...emptyState() });
 
     const result = await loadPersistedState(path, now);
-    expect(result).toEqual(emptyState());
+    expect(result).toEqual({ state: emptyState(), savedAt });
   });
 
   it('ignores a file with an unknown version', async () => {
@@ -304,6 +338,144 @@ describe('createSessionSaver', () => {
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(join(testDir, 'nested')).mode & 0o777).toBe(0o700);
+  });
+
+  it('chmods a pre-existing, more permissive directory to 0700 too (POSIX only)', () => {
+    if (process.platform === 'win32') return;
+    const dir = join(testDir, 'nested');
+    // mkdir's mode option only takes effect for a directory it actually
+    // creates; simulate one that predates this feature (or was made by
+    // something else) with a permissive mode already set.
+    mkdirSync(dir, { mode: 0o755 });
+    const path = join(dir, 'sessions-1.json');
+    const saver = createSessionSaver({ path, getState: emptyState });
+
+    saver.flushSync();
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+
+  it('flushSync retries a transient EBUSY writing the temp file and still succeeds (Windows-only in practice)', () => {
+    // EBUSY on the temp-file write is exactly what a Windows AV scanner or
+    // sync client bounces a create with; retryTransientSync is what turns
+    // that into a short retry instead of an outright failure.
+    fault.writeFileSync = { failuresLeft: 2, code: 'EBUSY' };
+    const path = join(testDir, 'sessions-1.json');
+    const state: PersistedStoreState = {
+      sessions: [makeSession()],
+      pendingAsks: [],
+      settledAsks: [],
+    };
+    const saver = createSessionSaver({ path, getState: () => state });
+
+    expect(() => saver.flushSync()).not.toThrow();
+
+    expect(fault.writeFileSync.failuresLeft).toBe(0);
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written).toMatchObject({ version: 1, ...state });
+  });
+
+  it('a slow async write does not clobber a flushSync that lands first', async () => {
+    const path = join(testDir, 'sessions-1.json');
+    let state: PersistedStoreState = {
+      sessions: [makeSession({ id: 'first' })],
+      pendingAsks: [],
+      settledAsks: [],
+    };
+    const getState = () => state;
+
+    let releaseSlowWrite!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSlowWrite = resolve;
+    });
+    let asyncWriteCalls = 0;
+    const saver = createSessionSaver({
+      path,
+      getState,
+      debounceMs: 5,
+      writeFileAsync: async (p, content) => {
+        asyncWriteCalls += 1;
+        // Held open until the test releases it, so flushSync below runs
+        // while this write is still in flight.
+        await gate;
+        await writeFile(p, content, 'utf8');
+      },
+    });
+
+    saver.schedule();
+    // Let the debounce fire and the async write begin; it is now blocked on
+    // the gate, holding the "first" snapshot it captured before the state
+    // changed below.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(asyncWriteCalls).toBe(1);
+
+    // A newer state lands and is flushed synchronously, simulating a
+    // shutdown that interrupts the async write above mid-flight.
+    state = { sessions: [makeSession({ id: 'second' })], pendingAsks: [], settledAsks: [] };
+    saver.flushSync();
+    expect(JSON.parse(readFileSync(path, 'utf8')).sessions[0].id).toBe('second');
+
+    // Let the slow async write finish; its stale "first" snapshot must not
+    // overwrite what flushSync already wrote.
+    releaseSlowWrite();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const final = JSON.parse(await readFile(path, 'utf8'));
+    expect(final.sessions[0].id).toBe('second');
+  });
+});
+
+describe('startPeriodicSave (#116)', () => {
+  it('schedules a save on the interval only while sessions are open', () => {
+    vi.useFakeTimers();
+    try {
+      const schedule = vi.fn();
+      let open = false;
+      const { stop } = startPeriodicSave({
+        saver: { schedule },
+        hasOpenSessions: () => open,
+        intervalMs: 1_000,
+      });
+
+      vi.advanceTimersByTime(3_000);
+      expect(schedule).not.toHaveBeenCalled();
+
+      open = true;
+      vi.advanceTimersByTime(3_000);
+      expect(schedule).toHaveBeenCalledTimes(3);
+
+      open = false;
+      stop();
+      vi.advanceTimersByTime(5_000);
+      expect(schedule).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('cleanStaleTempFiles (#116)', () => {
+  it("removes only this port's leftover temp files, leaving other ports and unrelated files alone", async () => {
+    const dir = join(testDir, '.md-redline');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'sessions-6373.json.abc123.tmp'), '{}', 'utf8');
+    await writeFile(join(dir, 'sessions-6373.json.def456.tmp'), '{}', 'utf8');
+    await writeFile(join(dir, 'sessions-6374.json.zzz999.tmp'), '{}', 'utf8');
+    await writeFile(join(dir, 'sessions-6373.json'), '{}', 'utf8');
+    await writeFile(join(dir, 'preferences.json'), '{}', 'utf8');
+
+    await cleanStaleTempFiles(testDir, 6373);
+
+    expect(existsSync(join(dir, 'sessions-6373.json.abc123.tmp'))).toBe(false);
+    expect(existsSync(join(dir, 'sessions-6373.json.def456.tmp'))).toBe(false);
+    expect(existsSync(join(dir, 'sessions-6374.json.zzz999.tmp'))).toBe(true);
+    expect(existsSync(join(dir, 'sessions-6373.json'))).toBe(true);
+    expect(existsSync(join(dir, 'preferences.json'))).toBe(true);
+  });
+
+  it('never throws when the directory does not exist yet', async () => {
+    await expect(
+      cleanStaleTempFiles(join(testDir, 'never-created'), 6373),
+    ).resolves.toBeUndefined();
   });
 });
 

@@ -1213,7 +1213,7 @@ describe('adding files to an open session (#117)', () => {
 describe('persistence (#116)', () => {
   // Every test round-trips exportState() through JSON, the way the file on
   // disk actually stores it, so a test passing here means the real save/load
-  // path would behave the same way — not just the in-memory objects.
+  // path would behave the same way, not just the in-memory objects.
   function roundTrip(state: PersistedStoreState): PersistedStoreState {
     return JSON.parse(JSON.stringify(state)) as PersistedStoreState;
   }
@@ -1230,11 +1230,12 @@ describe('persistence (#116)', () => {
   it('an open user session receives a batch sent after restore', async () => {
     const before = new ReviewSessionStore();
     const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     after.beginWaitPark(session.id);
     const waiter = after.waitForSession(session.id);
     after.sendBatch(session.id, 'BATCH', ['c1']);
@@ -1251,11 +1252,12 @@ describe('persistence (#116)', () => {
     before.waitForSession(session.id);
     before.sendBatch(session.id, 'batch1', ['c1']); // sets waitingForAgent, so the next batch queues
     before.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     after.beginWaitPark(session.id);
     const result = await after.waitForSession(session.id);
     expect(result.status).toBe('batch');
@@ -1272,11 +1274,12 @@ describe('persistence (#116)', () => {
     before.beginWaitPark(session.id);
     before.waitForSession(session.id);
     before.finish(session.id, 'FINAL PROMPT', ['c1']);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     const result = await after.waitForSession(session.id);
     expect(result).toEqual({ status: 'done', prompt: 'FINAL PROMPT' });
     after.dispose();
@@ -1290,11 +1293,12 @@ describe('persistence (#116)', () => {
       origin: 'agent',
     });
     before.setSessionDone(session.id);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     await expect(after.waitForSessionDone(session.id)).resolves.toBeUndefined();
     after.dispose();
   });
@@ -1310,11 +1314,12 @@ describe('persistence (#116)', () => {
     const { askId } = before.addAsk(session.id, [
       { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
     ]);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     const waiter = after.waitForAsk(askId);
     expect(waiter).toBeDefined();
 
@@ -1340,11 +1345,12 @@ describe('persistence (#116)', () => {
       { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
     ]);
     before.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'answer' }]);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     expect(after.getSettledAsk(session.id, askId)).toEqual({
       status: 'reply',
       replies: [{ questionIndex: 0, text: 'answer' }],
@@ -1353,43 +1359,109 @@ describe('persistence (#116)', () => {
     after.dispose();
   });
 
-  it('resets lastHeartbeatAt to the restore moment', () => {
+  it('shifts lastHeartbeatAt forward by the downtime, rather than resetting it to the restore moment', () => {
     const before = new ReviewSessionStore();
     const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    // The heartbeat is already 5 minutes old at the moment the server saves.
     vi.advanceTimersByTime(5 * 60_000);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
+    // 2 more minutes pass before the relaunched server actually restores.
+    vi.advanceTimersByTime(2 * 60_000);
     const restoreTime = new Date();
     const after = new ReviewSessionStore();
-    after.restoreState(state, restoreTime);
-    expect(after.getSession(session.id)?.lastHeartbeatAt.getTime()).toBe(restoreTime.getTime());
+    after.restoreState(state, { now: restoreTime, savedAt });
+    // The heartbeat was 5 minutes stale when the file was saved; after a
+    // 2-minute downtime it must still read as 5 minutes stale relative to
+    // the restore moment, not as freshly seen just because the server came
+    // back (#116 follow-up).
+    expect(after.getSession(session.id)?.lastHeartbeatAt.getTime()).toBe(
+      restoreTime.getTime() - 5 * 60_000,
+    );
     after.dispose();
   });
 
-  it('a restored silent agent session is not GC-eligible right after restore, but is once AGENT_SILENT_TIMEOUT_MS has passed since the restore', () => {
+  it('a heartbeat already 20 minutes stale at save time is not reused by findOpenSession and is swept 10 minutes after restore', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    vi.advanceTimersByTime(20 * 60_000);
+    const savedAt = Date.now();
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    // FIND_OPEN_FRESHNESS_MS is 5 minutes; a heartbeat already 20 minutes
+    // stale at save time must not be treated as freshly seen after restore.
+    expect(after.findOpenSession(['/tmp/a.md'], 'user')).toBeUndefined();
+
+    // HEARTBEAT_TIMEOUT_MS is 30 minutes: 10 more minutes brings the total
+    // staleness to just past 30, which must trip the sweep.
+    vi.advanceTimersByTime(10 * 60_000 + 1000);
+    (after as unknown as { sweepStale: () => void }).sweepStale();
+    expect(after.getSession(session.id)?.status).toBe('aborted');
+    after.dispose();
+  });
+
+  it('a fresh heartbeat at save time survives a 2-minute downtime and stays reusable', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const savedAt = Date.now(); // heartbeat is brand new at save time
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    vi.advanceTimersByTime(2 * 60_000);
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    expect(after.findOpenSession(['/tmp/a.md'], 'user')?.id).toBe(session.id);
+    after.dispose();
+  });
+
+  it('a session already silent past AGENT_SILENT_TIMEOUT_MS before the restart is swept immediately after restore', () => {
     const before = new ReviewSessionStore();
     const session = before.createSession({
       filePaths: ['/tmp/a.md'],
       enableResolve: false,
       origin: 'agent',
     });
-    // createdAt ends up 10 minutes before the export, well past the 5-minute
-    // silent-agent timeout, simulating a session that sat through downtime.
+    // 10 minutes silent before the save, well past the 5-minute timeout.
     vi.advanceTimersByTime(10 * 60_000);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
+    after.gcSilentAgentSessions();
+    expect(after.getSession(session.id)?.status).toBe('aborted');
+    after.dispose();
+  });
 
-    // The 10 minutes of "silence" happened before the restore; livenessFloor
-    // must keep it from counting.
+  it('a session silent for 3 of its 5 minutes before the restart only keeps the 2 minutes it had left, not a fresh 5', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    vi.advanceTimersByTime(3 * 60_000);
+    const savedAt = Date.now();
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    // Restart completes instantly (zero downtime), so any extra grace this
+    // test finds can only come from mishandling the silence the session
+    // already had before the save, not from the restart's own gap.
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
     after.gcSilentAgentSessions();
     expect(after.getSession(session.id)?.status).toBe('open');
 
-    // AGENT_SILENT_TIMEOUT_MS measured from the RESTORE, not from createdAt.
-    vi.advanceTimersByTime(5 * 60 * 1000 + 1000);
+    // Only 2 of the 5-minute budget remained; a fresh budget would still be
+    // open here, but this must already be swept.
+    vi.advanceTimersByTime(2 * 60_000 + 1000);
     after.gcSilentAgentSessions();
     expect(after.getSession(session.id)?.status).toBe('aborted');
     after.dispose();
@@ -1399,11 +1471,12 @@ describe('persistence (#116)', () => {
     const before = new ReviewSessionStore();
     const session = before.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
     before.addFiles(session.id, ['/d/b.md']);
+    const savedAt = Date.now();
     const state = roundTrip(before.exportState());
     before.dispose();
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, new Date());
+    after.restoreState(state, { now: new Date(), savedAt });
     expect(after.findOpenSession(['/d/a.md'], 'user')?.id).toBe(session.id);
     expect(after.findOpenSession(['/d/b.md', '/d/a.md'], 'user')?.id).toBe(session.id);
     after.dispose();

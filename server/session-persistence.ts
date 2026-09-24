@@ -7,11 +7,17 @@
  * the design doc for the shape on disk and the write cadence this
  * implements.
  */
-import { chmod as chmodAsync, mkdir as mkdirAsync, readFile } from 'fs/promises';
+import {
+  chmod as chmodAsync,
+  mkdir as mkdirAsync,
+  readFile,
+  readdir,
+  unlink as unlinkAsync,
+} from 'fs/promises';
 import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { randomBytes } from 'crypto';
-import { atomicWriteFile } from './fs-retry';
+import { atomicWriteFile, retryTransientSync } from './fs-retry';
 import type { AskResult, PersistedStoreState } from './review-sessions';
 
 const PERSISTENCE_VERSION = 1;
@@ -128,6 +134,7 @@ function isPersistedSession(value: unknown): boolean {
     (value.clientId === undefined || typeof value.clientId === 'string') &&
     (value.author === undefined || typeof value.author === 'string') &&
     typeof value.createdAt === 'string' &&
+    typeof value.lastHeartbeatAt === 'string' &&
     isNullableString(value.lastAgentActivityAt) &&
     typeof value.status === 'string' &&
     STATUSES.has(value.status) &&
@@ -204,6 +211,15 @@ function isPersistedFileShape(value: unknown): value is PersistedFile {
   );
 }
 
+/** What loadPersistedState hands the caller: the state to restore plus the
+ * moment it was saved, so restoreState can shift each session's clocks by
+ * the actual downtime rather than resetting them to the restore moment
+ * (#116 follow-up). */
+export interface LoadedPersistedState {
+  state: PersistedStoreState;
+  savedAt: number;
+}
+
 /**
  * Read and validate the saved sessions file. Never throws: a missing file
  * (the common case, e.g. the first launch on a port) resolves to null with
@@ -217,7 +233,7 @@ function isPersistedFileShape(value: unknown): value is PersistedFile {
 export async function loadPersistedState(
   path: string,
   now: Date,
-): Promise<PersistedStoreState | null> {
+): Promise<LoadedPersistedState | null> {
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');
@@ -261,9 +277,12 @@ export async function loadPersistedState(
   }
 
   return {
-    sessions: parsed.sessions,
-    pendingAsks: parsed.pendingAsks,
-    settledAsks: parsed.settledAsks,
+    state: {
+      sessions: parsed.sessions,
+      pendingAsks: parsed.pendingAsks,
+      settledAsks: parsed.settledAsks,
+    },
+    savedAt: parsed.savedAt,
   };
 }
 
@@ -284,22 +303,45 @@ export interface SessionSaver {
 
 /**
  * Owns writing ReviewSessionStore snapshots to disk. `getState` is called
- * fresh on every write (sync or debounced), never cached, so a write always
- * reflects whatever changed most recently.
+ * fresh inside every write attempt (sync or async), never cached, so a
+ * write always reflects whatever changed most recently as of the moment it
+ * actually runs.
+ *
+ * Async writes are chained on one promise (`chain = chain.then(write,
+ * write)`) so two scheduled writes can never race each other or land
+ * out of order; passing `write` as both the fulfilled and rejected handler
+ * means a failed write does not break the chain for the one after it.
+ * `flushSync` bypasses that chain on purpose (it has to complete inside a
+ * synchronous `process.on('exit', ...)` handler, where there is no event
+ * loop left to await a promise on), so it can run while an async write from
+ * an earlier change is still in flight. `seq`/`lastCompletedSeq` are what
+ * keep that safe: every write attempt, sync or async, takes a ticket before
+ * doing anything else, and an async write skips its own write once it can
+ * see a later-numbered one has already completed, so a slow write from a
+ * stale snapshot can never rename over what flushSync (or a subsequent
+ * write) already put on disk.
  */
 export function createSessionSaver(opts: {
   path: string;
   getState: () => PersistedStoreState;
   debounceMs?: number;
+  /**
+   * Test seam: replaces the async write primitive (defaults to
+   * atomicWriteFile). A test uses this to hold an async write open long
+   * enough to deterministically race a synchronous flushSync against it;
+   * production never sets it.
+   */
+  writeFileAsync?: (path: string, content: string) => Promise<void>;
 }): SessionSaver {
-  const { path, getState, debounceMs = 250 } = opts;
+  const { path, getState, debounceMs = 250, writeFileAsync = atomicWriteFile } = opts;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let chain: Promise<void> = Promise.resolve();
+  let seq = 0;
+  let lastCompletedSeq = 0;
 
-  async function writeAsync(): Promise<void> {
+  async function writeCurrentState(): Promise<void> {
     const payload = toPersistedFile(getState(), Date.now());
-    const dir = dirname(path);
-    await mkdirIfNeeded(dir);
-    await atomicWriteFile(path, JSON.stringify(payload));
+    await writeFileAsync(path, JSON.stringify(payload));
     // atomicWriteFile inherits the destination's existing mode (or the
     // temp file's own default when there is none), so the 0600 this file
     // needs (it holds file paths and, in a terminal result, comment text)
@@ -308,14 +350,36 @@ export function createSessionSaver(opts: {
     await chmodAsync(path, 0o600).catch(() => {});
   }
 
+  async function write(): Promise<void> {
+    const mySeq = ++seq;
+    try {
+      await mkdirIfNeeded(dirname(path));
+      // A flushSync (or, in principle, a write further down the chain) may
+      // already have completed a newer save while this one was getting
+      // ready; writing this now-stale snapshot would only rename over it.
+      if (mySeq <= lastCompletedSeq) return;
+      await writeCurrentState();
+      if (mySeq < lastCompletedSeq) {
+        // A flushSync finished with newer state while writeCurrentState
+        // above was in flight, so the write it just did landed after
+        // flushSync's and clobbered it with what is now stale data.
+        // Re-render with whatever is current right now rather than leave
+        // the file holding something older than the last completed save.
+        await writeCurrentState();
+        return;
+      }
+      lastCompletedSeq = mySeq;
+    } catch (err) {
+      console.warn(`[session-persistence] failed to save sessions to ${path}:`, err);
+    }
+  }
+
   return {
     schedule() {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        void writeAsync().catch((err) => {
-          console.warn(`[session-persistence] failed to save sessions to ${path}:`, err);
-        });
+        chain = chain.then(write, write);
       }, debounceMs);
       // Don't hold the process open just to flush a debounced write; the
       // shutdown paths (SIGINT/SIGTERM/api-shutdown) call flushSync instead.
@@ -329,8 +393,10 @@ export function createSessionSaver(opts: {
         clearTimeout(timer);
         timer = null;
       }
+      const mySeq = ++seq;
       try {
         writeSyncNow(path, getState());
+        lastCompletedSeq = Math.max(lastCompletedSeq, mySeq);
       } catch (err) {
         // The shutdown path that called this must still exit; losing the
         // last few hundred ms of state is far better than hanging on exit.
@@ -340,13 +406,72 @@ export function createSessionSaver(opts: {
   };
 }
 
+/**
+ * Keeps a live review's saved file from going stale while nothing about it
+ * changes: `onChange` only fires on a state mutation, and heartbeats used to
+ * be excluded from what gets saved, so an idle review's `savedAt` could sit
+ * still for far longer than RESTORE_WINDOW_MS and a crash after that would
+ * lose it even though the review was still live. Now that heartbeats ARE
+ * saved (see PersistedSession.lastHeartbeatAt), a periodic resave carries a
+ * current one onto disk on a fixed cadence, independent of whether anything
+ * else changed. `.unref()`'d like the debounce timer: this must never be the
+ * reason the process stays alive. Cheap by design: `hasOpenSessions` is
+ * meant to be a fast check (e.g. `listOpenSessions().length > 0`), skipped
+ * entirely (no `schedule()` call, so no write) whenever nothing is open.
+ */
+export function startPeriodicSave(opts: {
+  saver: Pick<SessionSaver, 'schedule'>;
+  hasOpenSessions: () => boolean;
+  intervalMs?: number;
+}): { stop: () => void } {
+  const { saver, hasOpenSessions, intervalMs = 60_000 } = opts;
+  const timer = setInterval(() => {
+    if (hasOpenSessions()) saver.schedule();
+  }, intervalMs);
+  if (typeof timer === 'object' && 'unref' in timer) {
+    (timer as unknown as { unref: () => void }).unref();
+  }
+  return { stop: () => clearInterval(timer) };
+}
+
 async function mkdirIfNeeded(dir: string): Promise<void> {
   // A saved session holds file paths and, in a terminal result, the prompt
   // with comment text, so the directory (like the file) is kept private to
   // the user. mkdir's mode option only applies to directories it actually
-  // creates, which is exactly the case this guards: an existing directory
-  // is left with whatever mode it already had.
+  // creates, so it does nothing for one that already exists; the explicit
+  // chmod after it covers that case too, rather than trusting a directory
+  // that predates this feature (or was made by something else) to already
+  // be private. Best effort: a failure here must not block the save.
   await mkdirAsync(dir, { recursive: true, mode: 0o700 });
+  await chmodAsync(dir, 0o700).catch(() => {});
+}
+
+/**
+ * Remove leftover `sessions-<port>.json.<random>.tmp` files for this port:
+ * a temp file a write created but never got to rename into place, because
+ * the process died in between (a SIGKILL mid-save, say). Best effort and
+ * scoped to this port's own prefix, so a failure to list or remove one is
+ * logged and never stops boot, and this can never touch another port's
+ * saves or an unrelated file someone put in the directory.
+ */
+export async function cleanStaleTempFiles(homeDir: string, port: number): Promise<void> {
+  const dir = join(homeDir, '.md-redline');
+  const prefix = `sessions-${port}.json.`;
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      console.warn(`[session-persistence] could not list ${dir} to clean stale temp files:`, err);
+    }
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || !entry.endsWith('.tmp')) continue;
+    await unlinkAsync(join(dir, entry)).catch((err) => {
+      console.warn(`[session-persistence] could not remove stale temp file ${entry}:`, err);
+    });
+  }
 }
 
 /**
@@ -354,16 +479,29 @@ async function mkdirIfNeeded(dir: string): Promise<void> {
  * reuse atomicWriteFile (an async API): a graceful-shutdown flush has to
  * complete inside a `process.on('exit', ...)` handler, which Node only runs
  * synchronous code in, so this reimplements the same temp-file-then-rename
- * shape with the sync fs functions instead.
+ * shape with the sync fs functions instead, wrapped in retryTransientSync
+ * (the sync twin of the retry atomicWriteFile already gets) for the same
+ * reason atomicWriteFile needs it: on Windows, AV and sync clients bounce a
+ * create or a rename while they hold a handle on the path, and that is
+ * transient, not a real failure.
  */
 function writeSyncNow(path: string, state: PersistedStoreState): void {
   const payload = toPersistedFile(state, Date.now());
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tmpPath = `${path}.${randomBytes(6).toString('hex')}.tmp`;
   try {
-    writeFileSync(tmpPath, JSON.stringify(payload), { mode: 0o600 });
-    renameSync(tmpPath, path);
+    chmodSync(dir, 0o700);
+  } catch {
+    /* best effort; see mkdirIfNeeded's async twin for why this matters */
+  }
+  const tmpPath = `${path}.${randomBytes(6).toString('hex')}.tmp`;
+  const content = JSON.stringify(payload);
+  try {
+    // 'wx' (as atomicWriteFile uses for its own temp file) fails instead of
+    // following a symlink planted at tmpPath, rather than writeFileSync's
+    // default of creating-or-truncating whatever is already there.
+    retryTransientSync(() => writeFileSync(tmpPath, content, { mode: 0o600, flag: 'wx' }));
+    retryTransientSync(() => renameSync(tmpPath, path));
   } catch (err) {
     try {
       unlinkSync(tmpPath);

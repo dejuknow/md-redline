@@ -201,7 +201,14 @@ export async function handleRequestReviewToolCall(
 
   let result: WaitResult;
   try {
-    result = await ctx.client.waitForSession(session.sessionId, POLL_TIMEOUT_SECONDS);
+    // ctx.signal only steers the reconnect retry inside waitForSession
+    // (withReconnect in client.ts): if this call is cancelled while the
+    // client is retrying through a dropped connection, it stops retrying
+    // and returns right away instead of continuing for up to
+    // RECONNECT_WINDOW_MS. It is not handed to the underlying fetch, so a
+    // request already in flight still runs to the server's own timeout;
+    // cancellation here is handled by abortSession above instead.
+    result = await ctx.client.waitForSession(session.sessionId, POLL_TIMEOUT_SECONDS, ctx.signal);
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);
@@ -277,7 +284,9 @@ export async function handleContinueReviewToolCall(
 
   let result: WaitResult;
   try {
-    result = await ctx.client.waitForSession(sessionId, POLL_TIMEOUT_SECONDS);
+    // See the same call in handleRequestReviewToolCall: ctx.signal only
+    // stops the reconnect retry, never the underlying fetch.
+    result = await ctx.client.waitForSession(sessionId, POLL_TIMEOUT_SECONDS, ctx.signal);
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);
@@ -356,8 +365,10 @@ export async function handleAskToolCall(
   if (ctx.signal?.aborted) {
     void ctx.client.releaseAsk(input.sessionId, askId).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
-      // A server that is gone has already dropped the ask with the session,
-      // so there is nothing to release and nothing worth logging.
+      // The server being unreachable doesn't mean the ask is gone: sessions
+      // and pending asks now survive a restart (#116), so it may still be
+      // there once the server is back. Either way there is nothing more
+      // this handler can do about it right now, so it is not worth logging.
       if (!msg.includes('HTTP 404') && !(err instanceof ServerUnreachableError)) {
         console.warn(
           `[mcp] releaseAsk on early-cancel failed for ${input.sessionId}/${askId}:`,
@@ -400,8 +411,10 @@ export async function handleAskToolCall(
       // user may have answered just before cancel fired). Any other error
       // is a real failure worth surfacing on the server log.
       const msg = err instanceof Error ? err.message : String(err);
-      // A server that is gone has already dropped the ask with the session,
-      // so there is nothing to release and nothing worth logging.
+      // The server being unreachable doesn't mean the ask is gone: sessions
+      // and pending asks now survive a restart (#116), so it may still be
+      // there once the server is back. Either way there is nothing more
+      // this handler can do about it right now, so it is not worth logging.
       if (!msg.includes('HTTP 404') && !(err instanceof ServerUnreachableError)) {
         console.warn(`[mcp] releaseAsk on cancel failed for ${input.sessionId}/${askId}:`, err);
       }
@@ -415,11 +428,15 @@ export async function handleAskToolCall(
 
   let askResult: Exclude<AskWaitResult, { status: 'pending' }>;
   try {
-    // Intentionally NOT passing ctx.signal here. The cancelListener already
-    // fires releaseAsk on cancel, which resolves the server-side waiter and
-    // makes /asks/:askId/wait return {status:'released'}. Aborting the fetch
-    // would race with that resolution and cause an AbortError before the
-    // handler can return the graceful "released" payload.
+    // ctx.signal IS passed to waitForAsk now, but only so its reconnect
+    // retry (withReconnect in client.ts) stops promptly on cancel instead of
+    // running out RECONNECT_WINDOW_MS unattended; it is never handed to the
+    // underlying fetch. The cancelListener above already fires releaseAsk on
+    // cancel, which resolves the server-side waiter and makes
+    // /asks/:askId/wait return {status:'released'}: aborting the fetch of a
+    // request already in flight would race with that resolution and cause
+    // an AbortError before the handler can return the graceful "released"
+    // payload.
     // Bounded polls, re-issued until the ask ends: one unbounded request
     // could not outlast Node's 300s header timeout (#131).
     for (;;) {
@@ -431,11 +448,37 @@ export async function handleAskToolCall(
       }
       let polled: AskWaitResult;
       try {
-        polled = await ctx.client.waitForAsk(input.sessionId, askId, POLL_TIMEOUT_SECONDS);
+        polled = await ctx.client.waitForAsk(
+          input.sessionId,
+          askId,
+          POLL_TIMEOUT_SECONDS,
+          ctx.signal,
+        );
       } catch (err) {
         // Release before giving up: an ask left pending on the server blocks
         // every later mdr_ask on this session with a 409.
         void ctx.client.releaseAsk(input.sessionId, askId).catch(() => {});
+        if (err instanceof ServerUnreachableError) {
+          // Unlike the generic ServerUnreachableError message, this call is
+          // known to be a post, not a wait for the reader: postAgentComments
+          // above already succeeded, so the question is on record even
+          // though the reply never came back. Calling mdr_ask again for it
+          // would post a duplicate; the reader's eventual answer can only be
+          // picked up by re-reading the file.
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text:
+                  `mdr_ask: lost the connection while waiting for a reply and could not ` +
+                  `reconnect. The question is still in the file and may still be pending ` +
+                  `on the server: do not call mdr_ask again for the same question. ` +
+                  `Re-read the file later to pick up the reader's answer.`,
+              },
+            ],
+          };
+        }
         throw err;
       }
       if (polled.status !== 'pending') {
@@ -569,12 +612,15 @@ export async function handleWaitToolCall(
 
   let result: WaitForReviewResult;
   try {
-    // Intentionally NOT passing ctx.signal — the server-side long-poll has
-    // its own 90s timeout, so a cancelled mdr_wait returns to the handler
-    // within at most 90s without server-side cleanup. Aborting the fetch
-    // would throw AbortError before any state can be reported back; the
-    // existing 90s ceiling is the acceptable upper bound.
-    result = await ctx.client.waitForReview(input.sessionId, POLL_TIMEOUT_SECONDS);
+    // ctx.signal only stops waitForReview's reconnect retry on cancel (see
+    // withReconnect in client.ts); it is not handed to the underlying
+    // fetch. The server-side long-poll has its own 90s timeout, so a
+    // cancelled mdr_wait still returns to the handler within at most 90s
+    // without server-side cleanup either way: aborting the fetch of a
+    // request already in flight would throw AbortError before any state
+    // can be reported back, so the existing 90s ceiling stays the upper
+    // bound for that in-flight request.
+    result = await ctx.client.waitForReview(input.sessionId, POLL_TIMEOUT_SECONDS, ctx.signal);
   } catch (err) {
     if (progressTimer) clearInterval(progressTimer);
     ctx.signal?.removeEventListener('abort', cancelListener);
@@ -595,9 +641,10 @@ export async function handleWaitToolCall(
         ],
       };
     }
-    // 404 = the server does not know this session. Most likely the mdr
-    // server restarted (sessions are memory-only). The comments are still
-    // in the file; there is just no live session to wait on.
+    // 404 = the server does not know this session. Sessions survive a quick
+    // restart (#116), so this means it ended long enough ago to be cleaned
+    // up, or the server was down past the restore window. The comments are
+    // still in the file; there is just no live session to wait on.
     if (msg.includes('HTTP 404')) {
       return {
         content: [
@@ -605,7 +652,7 @@ export async function handleWaitToolCall(
             type: 'text',
             text:
               `mdr_wait: session ${input.sessionId} is unknown to the server ` +
-              '(it may have restarted; sessions do not survive restarts). ' +
+              '(it ended a while ago, or the server was down for more than a few minutes). ' +
               'Your comments are still in the file(s). Re-read them to pick up ' +
               'any replies or edits, then continue with your plan.',
           },

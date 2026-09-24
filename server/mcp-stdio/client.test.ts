@@ -75,8 +75,11 @@ describe('a server that is gone (#116)', () => {
     expect(err).toBeInstanceOf(ServerUnreachableError);
     expect((err as ServerUnreachableError).code).toBe('ECONNREFUSED');
     expect((err as Error).message).toContain(`The mdr server at ${base} is not running`);
-    expect((err as Error).message).toContain('call this tool again');
-    expect((err as Error).message).toContain('session is gone');
+    // The message no longer blanket-tells every caller to "call this tool
+    // again": that is wrong for a call that had already posted something,
+    // where the post may have landed before the connection dropped.
+    expect((err as Error).message).toContain('call it again');
+    expect((err as Error).message).toContain('re-read the file');
   });
 
   it('says the server stopped while a long poll was waiting', async () => {
@@ -267,6 +270,30 @@ describe('a server that is gone (#116)', () => {
       // request before asserting only one ever happened.
       await new Promise((resolve) => setTimeout(resolve, 1_200));
       expect(attempts).toBe(1);
+    }, 8_000);
+
+    it('stops retrying within ~100ms of the signal aborting, instead of sleeping out the poll interval', async () => {
+      let attempts = 0;
+      const base = await listen((req) => {
+        attempts += 1;
+        req.socket.destroy();
+      });
+
+      const controller = new AbortController();
+      // Aborts partway through the 1s sleep between the first failed
+      // attempt and the next retry (RECONNECT_POLL_INTERVAL_MS), so a fix
+      // that only checks the signal before sleeping, not during it, would
+      // still fail this.
+      setTimeout(() => controller.abort(), 30);
+
+      const started = Date.now();
+      const err = await createMdrClient(base)
+        .waitForReview('rev_x', 90, controller.signal)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ServerUnreachableError);
+      expect(Date.now() - started).toBeLessThan(200);
+      expect(attempts).toBeGreaterThanOrEqual(1);
     }, 8_000);
   });
 });

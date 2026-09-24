@@ -217,41 +217,68 @@ has a reply resolves immediately (the agent unblocks without any End review
 click). Partially answered asks stay pending until End review / Finish review,
 which deliver whatever replies exist.
 
-**Restart recovery** — review sessions survive a restart that comes back
-within a few minutes (#116). Each server saves its sessions, pending asks,
-recent ask results and queued batches to `<home>/.md-redline/sessions-<port>.json`
-(`server/session-persistence.ts`; directory `0700`, file `0600`), debounced
-250 ms after any change and synchronously on SIGINT, SIGTERM and
-`/api/shutdown`. At boot it restores the file only if it was saved within
-`RESTORE_WINDOW_MS` (5 minutes), so a reboot or a long outage starts clean, and
-it resets each open session's heartbeat clock (and the silent-agent clock, via
-`livenessFloor`) so the downtime never counts against a live tab or agent. The
-server listens before it knows its port, so every request is held until the
-restore finishes (`holdRequestsUntilOpen` in `server/session-persistence.ts`), or an early
+**Restart recovery**: review sessions survive a restart that comes back
+within a few minutes (#116). Each server saves its sessions (including each
+one's `lastHeartbeatAt`), pending asks, recent ask results and queued batches
+to `<home>/.md-redline/sessions-<port>.json` (`server/session-persistence.ts`;
+directory `0700`, file `0600`, chmod'd explicitly even when the directory
+already existed), debounced 250 ms after any change, on a 60-second timer
+while any session is open (an idle live review's `savedAt` would otherwise
+never move, since heartbeats do not go through `setOnChange` below), once
+right after a successful restore, and synchronously on SIGINT, SIGTERM and
+`/api/shutdown`. Async writes are chained on one promise so two scheduled
+writes can never race or land out of order, and a monotonically increasing
+sequence number lets a slow async write notice it has been superseded by a
+synchronous `flushSync` and skip its own write rather than rename stale state
+over what `flushSync` already put on disk. The shutdown handlers (`exit`,
+`SIGINT`, `SIGTERM`) are registered immediately after the saver is created,
+before the request gate opens or the port file is written, and cleanup is
+idempotent (a `cleanedUp` flag) so a plain Ctrl-C never flushes twice. At
+boot, leftover `sessions-<port>.json.*.tmp` files for that port are removed
+first (`cleanStaleTempFiles`: a write whose process died before its rename
+could run), then the saved file is restored only if it was saved within
+`RESTORE_WINDOW_MS` (5 minutes), so a reboot or a long outage starts clean.
+Restoring shifts every open session's heartbeat clock, and the silent-agent
+clock `gcSilentAgentSessions` checks it against, forward by the server's
+actual downtime (`now - savedAt`) rather than resetting them to `now`: the
+outage itself never counts against a live tab or agent, but whatever idling
+had already happened before the crash still counts against the budget it
+already used, so a session whose tab or agent was already gone before the
+restart is not revived with a fresh timeout. The server listens before it
+knows its port, so every request is held until the restore finishes
+(`holdRequestsUntilOpen` in `server/session-persistence.ts`), or an early
 heartbeat or reconnecting poll would 404 on a session about to exist. Nothing
 edits a markdown file at load. `ReviewSessionStore.exportState`/`restoreState`
-hold the serialization; `setOnChange` fires on every saved-state change except
-heartbeats and wait-park bookkeeping. `MD_REDLINE_PERSIST_SESSIONS=0` turns it
-off (the Playwright web server sets it, so one run never restores into the
-next). Accepted gap: a batch handed to a parked waiter at the instant the
-process dies is lost with the HTTP response, though `sentCommentIds` records it
-as sent. Baselines are still memory-only (#138). Markers persist on disk
-regardless. `GET /api/file` sweeps markers whose `expectsReply` flag references
-a session that is no longer open and clears the flag (marker preserved). A
-post-restart `mdr_wait` on an unknown session gets a graceful "re-read the
-file(s)" result instead of an error.
+hold the serialization; `setOnChange` fires on every saved-state change
+except heartbeats and wait-park bookkeeping. `MD_REDLINE_PERSIST_SESSIONS=0`
+turns it off (the Playwright web server sets it, so one run never restores
+into the next). Accepted gap: a batch handed to a parked waiter at the
+instant the process dies is lost with the HTTP response, though
+`sentCommentIds` records it as sent. Baselines are still memory-only (#138).
+Markers persist on disk regardless. `GET /api/file` sweeps markers whose
+`expectsReply` flag references a session that is no longer open and clears
+the flag (marker preserved). A post-restart `mdr_wait` on an unknown session
+gets a graceful "re-read the file(s)" result instead of an error.
 A call that loses the server itself gets `ServerUnreachableError` from
 `server/mcp-stdio/client.ts` instead of Node's bare `fetch failed` (#116): either
 nothing is listening (`ECONNREFUSED`), or the connection dropped mid-request or
 mid-body (`UND_ERR_SOCKET`, `ECONNRESET` and the like). The message says which,
-that the review may still be there once the server is back, and to call the
-tool again rather than assume it is gone (open a new review only if the next
-call says the session is gone). The three long-poll methods (`waitForSession`,
+and that the review may still be there once the server is back: if the call
+was only waiting for the reader, call it again to keep waiting; if it was
+posting comments or questions, the post may already have landed before the
+connection dropped, so re-read the file(s) first rather than risk posting the
+same thing twice. The three long-poll methods (`waitForSession`,
 `waitForReview`, `waitForAsk`) retry the same request every second on
 `ServerUnreachableError`, for up to `RECONNECT_WINDOW_MS` (2 minutes) from the
 first failure but never past the poll's own deadline, before this error ever
 reaches the caller, so a restart that comes back quickly is invisible to the
-agent. A retried request asks only for the seconds the poll had left, which
+agent. Each of the three takes an optional trailing `signal`, used only to
+stop that retry early (an already-aborted signal skips straight to
+rethrowing the last error, and an abort during the between-attempts sleep
+wakes it immediately) and never handed to the underlying fetch, so a request
+already in flight still runs to the server's own timeout; the MCP handler
+passes the tool call's own cancel signal through for this. A retried request
+asks only for the seconds the poll had left, which
 keeps one tool call within its usual length (MCP hosts cap a call; Codex at
 120 s). If the server is still down, the agent's next call relaunches it
 through `ensureServerRunning`. Every other client method still
@@ -263,8 +290,13 @@ through unchanged, so a long wait that times out is never reported as the server
 being gone. Only a failed post (`postAgentComments` in `mdr_ask`,
 `postReviewBatch` in `mdr_comment`) comes back as an `isError` tool result;
 everywhere else, including `mdr_ask`'s wait for the reply and `mdr_comment`
-opening a new session, it surfaces as the MCP error. The message is the same in
-both shapes. Known gap: under `npm run dev`
+opening a new session, it surfaces as the MCP error. `mdr_ask` is the one
+exception to "surfaces as the MCP error": when its wait for a reply gives up
+with `ServerUnreachableError`, the handler catches it and returns a specific
+result instead, since `postAgentComments` already succeeded (the question is
+on record even though the reply never arrived), calling `mdr_ask` again for
+it risks posting a duplicate, and the reader's eventual answer can only be
+picked up by re-reading the file. Known gap: under `npm run dev`
 the client talks to Vite, whose proxy answers a dead backend with an HTTP 500,
 so the dev setup still sees a plain HTTP error.
 

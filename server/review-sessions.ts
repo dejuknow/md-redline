@@ -233,6 +233,18 @@ interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
    * no production route awaits it.
    */
   terminalResult: ReviewResult | null;
+  /**
+   * Milliseconds to add to this session's recorded activity time before
+   * gcSilentAgentSessions compares it against AGENT_SILENT_TIMEOUT_MS. Set
+   * once by restoreState, to the server's downtime (`now - savedAt`), for a
+   * session that survived a restart; 0 for one created after boot, where the
+   * shift would have no correct meaning. Shifting rather than resetting to
+   * `now` means the outage itself never counts against the session, but
+   * whatever idling had already happened before the crash still does: a
+   * session already 3 minutes silent when the server went down only gets the
+   * 2 minutes it had left after restore, not a fresh 5 (#116 follow-up).
+   */
+  livenessShiftMs: number;
 }
 
 export interface CreateSessionInput {
@@ -260,6 +272,12 @@ export interface PersistedSession {
   clientId?: string;
   author?: string;
   createdAt: string;
+  /**
+   * ISO timestamp, saved so a restart can tell how stale a session already
+   * was rather than treating every open session as freshly seen (#116
+   * follow-up). See restoreState for how it is used on the way back in.
+   */
+  lastHeartbeatAt: string;
   lastAgentActivityAt: string | null;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
@@ -293,14 +311,6 @@ export class ReviewSessionStore {
   private onAsksClosedOnDone: ((sessionId: string, asks: PendingAsk[]) => void) | null = null;
   /** Notified after every method that changes state exportState() would save. */
   private onChange: (() => void) | null = null;
-  /**
-   * Set to the restart moment by restoreState, and consulted by
-   * gcSilentAgentSessions so the time the server was down never counts
-   * against an agent-origin session's silence timeout. Null outside of a
-   * restored store, where the check is a no-op (max() with null falls back
-   * to the recorded activity time).
-   */
-  private livenessFloor: Date | null = null;
 
   setOnSessionAborted(cb: (sessionId: string, asks: PendingAsk[]) => void): void {
     this.onSessionAborted = cb;
@@ -364,6 +374,7 @@ export class ReviewSessionStore {
       doneResolver: null,
       doneWaiter: null,
       terminalResult: null,
+      livenessShiftMs: 0,
     };
 
     this.sessions.set(id, session);
@@ -1090,13 +1101,11 @@ export class ReviewSessionStore {
       const lastActivity = s.lastAgentActivityAt
         ? s.lastAgentActivityAt.getTime()
         : s.createdAt.getTime();
-      // After a restart, livenessFloor pins "activity" to at least the
-      // restore moment, so the time the server was down is never counted as
-      // silence (#116). Outside of a restored store this is null and the
-      // check falls back to lastActivity unchanged.
-      const effectiveActivity = this.livenessFloor
-        ? Math.max(lastActivity, this.livenessFloor.getTime())
-        : lastActivity;
+      // Shifted forward by livenessShiftMs (0 outside of a restored
+      // session), so the server's downtime is invisible to the silence
+      // timer without erasing whatever idling had already happened before
+      // the crash. See livenessShiftMs's own doc comment on InternalSession.
+      const effectiveActivity = lastActivity + s.livenessShiftMs;
       if (now - effectiveActivity < AGENT_SILENT_TIMEOUT_MS) continue;
       this.abort(s.id, 'agent_silent');
     }
@@ -1211,18 +1220,20 @@ export class ReviewSessionStore {
 
   /**
    * A JSON-safe snapshot of everything the spec's "Saved" table calls out
-   * (#116): sessions, pending asks, and recent settled-ask results. Pure —
-   * no I/O, no clock reads beyond what each session already recorded — so
+   * (#116): sessions, pending asks, and recent settled-ask results. Pure:
+   * no I/O, no clock reads beyond what each session already recorded, so
    * session-persistence.ts can call it on whatever cadence it likes and the
    * store never has to know a file exists.
    *
    * Deliberately excluded, per the design doc's "not saved, rebuilt on
    * load" list: resolver/waiter/doneResolver/doneWaiter (promises don't
-   * survive JSON anyway), parkedWaitCount (always 0 on a fresh process) and
-   * lastHeartbeatAt (reset to the restart moment so downtime is never held
-   * against a session). recentlyDoneIds is also left out: it exists only to
-   * answer a late mdr_wait after in-memory GC, which restoreState already
-   * handles by keeping terminal sessions for TERMINAL_RETENTION_MS.
+   * survive JSON anyway) and parkedWaitCount (always 0 on a fresh process).
+   * lastHeartbeatAt IS saved (below): restoreState needs it to tell how
+   * stale a session already was, rather than treating every open session as
+   * freshly seen (#116 follow-up). recentlyDoneIds is also left out: it
+   * exists only to answer a late mdr_wait after in-memory GC, which
+   * restoreState already handles by keeping terminal sessions for
+   * TERMINAL_RETENTION_MS.
    */
   exportState(): PersistedStoreState {
     const sessions: PersistedSession[] = [];
@@ -1237,6 +1248,7 @@ export class ReviewSessionStore {
         clientId: s.clientId,
         author: s.author,
         createdAt: s.createdAt.toISOString(),
+        lastHeartbeatAt: s.lastHeartbeatAt.toISOString(),
         lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,
         status: s.status,
         sentCommentIds: [...s.sentCommentIds],
@@ -1281,24 +1293,36 @@ export class ReviewSessionStore {
   /**
    * Rebuild this store's state from a snapshot exportState() produced
    * elsewhere, after a round trip through JSON (#116). Only meaningful on a
-   * store that has never held a session — the server calls this once, right
-   * after it binds its port and before it starts listening, so nothing else
-   * can observe a half-restored store.
+   * store that has never held a session: the server calls this once, after
+   * it starts listening but before any request is allowed to run (every
+   * request is held open until the restore finishes, via
+   * holdRequestsUntilOpen in session-persistence.ts), so nothing else can
+   * observe a half-restored store.
    *
-   * `now` stands in for the restart moment (a parameter, not Date.now(),
-   * so tests can pick it). Every session's heartbeat clock and the store's
-   * silent-agent floor are pinned to it, and any session whose terminal
-   * state is older than TERMINAL_RETENTION_MS is dropped rather than
-   * restored, so a long-dead session doesn't reappear as if it just ended.
-   * Never touches a markdown file and never fires onSessionAborted /
-   * onAsksClosedOnDone — those callbacks exist to keep a file's markers in
+   * `now` stands in for the restart moment and `savedAt` for the file's own
+   * saved-at timestamp (both parameters, not Date.now() and the file's value
+   * read directly, so tests can pick them). Every session's heartbeat clock,
+   * and the silence clock gcSilentAgentSessions checks it against, are
+   * shifted forward by `now - savedAt` (the server's downtime) rather than
+   * reset to `now`: the outage itself must never count against a live tab or
+   * agent, but whatever idling had already happened before the crash must
+   * still count against the budget it already used. Any session whose
+   * terminal state is older than TERMINAL_RETENTION_MS is dropped rather
+   * than restored, so a long-dead session doesn't reappear as if it just
+   * ended. Never touches a markdown file and never fires onSessionAborted /
+   * onAsksClosedOnDone: those callbacks exist to keep a file's markers in
    * sync with a session ending just now, and nothing ended just now here.
    */
-  restoreState(state: PersistedStoreState, now: Date = new Date()): void {
+  restoreState(state: PersistedStoreState, opts: { now: Date; savedAt: number }): void {
     if (this.sessions.size > 0 || this.pendingAsks.size > 0) {
       throw new Error('restoreState must be called on a store that has not created a session yet');
     }
-    this.livenessFloor = now;
+    const { now, savedAt } = opts;
+    // Floored at 0: loadPersistedState already rejects a savedAt in the
+    // future before this ever runs, so a negative value here would only mean
+    // a caller passed inconsistent now/savedAt values directly (as a test
+    // might), not a real clock skew case this needs to handle gracefully.
+    const downtimeMs = Math.max(0, now.getTime() - savedAt);
 
     const retentionCutoff = now.getTime() - TERMINAL_RETENTION_MS;
     for (const persisted of state.sessions) {
@@ -1338,10 +1362,14 @@ export class ReviewSessionStore {
         clientId: persisted.clientId,
         author: persisted.author,
         createdAt: new Date(persisted.createdAt),
-        // Reset to the restore moment, not the saved value: the browser
-        // tab and any agent are still there (or about to reconnect), and
-        // the time the server was down must not count against them.
-        lastHeartbeatAt: now,
+        // Shifted forward by the downtime rather than reset to `now`: a
+        // heartbeat that was already 20 minutes old when the server saved
+        // its state must still read as 20 minutes old after restore, not as
+        // freshly seen. Resetting to `now` (the old behavior) revived
+        // sessions whose tab was already gone before the restart, reopening
+        // findOpenSession's dedupe pool and the 30-minute heartbeat sweep
+        // window as if the tab had just been seen (#116 follow-up).
+        lastHeartbeatAt: new Date(Date.parse(persisted.lastHeartbeatAt) + downtimeMs),
         lastAgentActivityAt: persisted.lastAgentActivityAt
           ? new Date(persisted.lastAgentActivityAt)
           : null,
@@ -1368,6 +1396,7 @@ export class ReviewSessionStore {
         doneResolver: null,
         doneWaiter,
         terminalResult: persisted.terminalResult,
+        livenessShiftMs: downtimeMs,
       };
 
       this.sessions.set(session.id, session);
