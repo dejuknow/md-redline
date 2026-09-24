@@ -1910,6 +1910,15 @@ auto-hide. Dismissal is per version, saved as `updateDismissedVersion` via
 equivalent notice as a line printed after opening the browser: `Update
 available: <current> -> <latest>. Run: npm install -g md-redline@latest`.
 
+The same pill also covers an upgrade under an open tab (#116): the server was
+restarted onto a new version while the tab kept running the old page code.
+`useUpdateNotice.ts` records the `version` from its first successful poll,
+and once a later poll reports a different one shows "mdr was updated. Reload
+to get the new version." with a Reload button (`location.reload()`) in place
+of the update-available content, since stale page code matters more than a
+pending release and reloading picks up either. This reload note is not
+dismissible.
+
 ## Parser API
 
 Key exports from `src/lib/comment-parser.ts`:
