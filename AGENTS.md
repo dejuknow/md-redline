@@ -226,8 +226,20 @@ A call that loses the server itself gets `ServerUnreachableError` from
 `server/mcp-stdio/client.ts` instead of Node's bare `fetch failed` (#116): either
 nothing is listening (`ECONNREFUSED`), or the connection dropped mid-request or
 mid-body (`UND_ERR_SOCKET`, `ECONNRESET` and the like). The message says which,
-that open reviews are gone, and to re-read the files before continuing.
-`guardServerErrors` wraps every client method, body reads included. Client-side
+that the review may still be there once the server is back, and to call the
+tool again rather than assume it is gone (open a new review only if the next
+call says the session is gone). The three long-poll methods (`waitForSession`,
+`waitForReview`, `waitForAsk`) retry the same request every second on
+`ServerUnreachableError`, for up to `RECONNECT_WINDOW_MS` (2 minutes) from the
+first failure but never past the poll's own deadline, before this error ever
+reaches the caller, so a restart that comes back quickly is invisible to the
+agent. A retried request asks only for the seconds the poll had left, which
+keeps one tool call within its usual length (MCP hosts cap a call; Codex at
+120 s). If the server is still down, the agent's next call relaunches it
+through `ensureServerRunning`. Every other client method still
+fails once and reports it. `guardServerErrors` wraps every client method, body
+reads included, and the retry sits on top of it, so a failure on a retry
+attempt is re-guarded the same way as the first one. Client-side
 timeouts, other network codes, a caller's abort and HTTP error responses pass
 through unchanged, so a long wait that times out is never reported as the server
 being gone. Only a failed post (`postAgentComments` in `mdr_ask`,

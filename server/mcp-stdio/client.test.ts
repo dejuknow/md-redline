@@ -3,6 +3,7 @@ import { createServer, type Server } from 'http';
 import type { AddressInfo } from 'net';
 import {
   MAX_CLIENT_ID_LENGTH,
+  RECONNECT_WINDOW_MS,
   ServerUnreachableError,
   createMdrClient,
   resolveClientId,
@@ -74,13 +75,17 @@ describe('a server that is gone (#116)', () => {
     expect(err).toBeInstanceOf(ServerUnreachableError);
     expect((err as ServerUnreachableError).code).toBe('ECONNREFUSED');
     expect((err as Error).message).toContain(`The mdr server at ${base} is not running`);
-    expect((err as Error).message).toContain('re-read them before continuing');
+    expect((err as Error).message).toContain('call this tool again');
+    expect((err as Error).message).toContain('session is gone');
   });
 
   it('says the server stopped while a long poll was waiting', async () => {
     // The mid-review case: mdr_wait is parked when the server goes down.
+    // reconnectWindowMs: 0 means the very first failure is already past the
+    // window, so this stays a single-attempt test of the error itself rather
+    // than a (#116) reconnect test.
     const base = await listen((req) => setTimeout(() => req.socket.destroy(), 20));
-    const err = await createMdrClient(base)
+    const err = await createMdrClient(base, { reconnectWindowMs: 0 })
       .waitForReview('rev_x', 90)
       .catch((e: unknown) => e);
 
@@ -98,7 +103,9 @@ describe('a server that is gone (#116)', () => {
     });
     // waitForReview reads the body without a catch; getSessionFilePaths would
     // swallow the failure by design and return [].
-    const err = await createMdrClient(base)
+    // reconnectWindowMs: 0, as above: this test is about the error shape, not
+    // the retry loop.
+    const err = await createMdrClient(base, { reconnectWindowMs: 0 })
       .waitForReview('rev_x', 90)
       .catch((e: unknown) => e);
 
@@ -143,5 +150,123 @@ describe('a server that is gone (#116)', () => {
 
     expect(err).not.toBeInstanceOf(ServerUnreachableError);
     expect((err as Error).message).toBe('waitForReview failed (HTTP 404): Session not found');
+  });
+
+  describe('reconnecting through a restart (#116)', () => {
+    it('exports a two-minute default window', () => {
+      expect(RECONNECT_WINDOW_MS).toBe(2 * 60 * 1000);
+    });
+
+    it('retries a long poll on ServerUnreachableError and returns once the server answers', async () => {
+      // The first two requests land on a server that has stopped responding
+      // (a restart in progress); the third lands after it is back up. A
+      // single handler serving every attempt is closer to the real restart
+      // than swapping servers mid-test, and avoids reusing a port.
+      let attempts = 0;
+      const base = await listen((req, res) => {
+        attempts += 1;
+        if (attempts <= 2) {
+          req.socket.destroy();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'done' }));
+      });
+
+      const result = await createMdrClient(base).waitForReview('rev_x', 90);
+
+      expect(result).toEqual({ status: 'done' });
+      expect(attempts).toBe(3);
+    }, 8_000);
+
+    it('retries an ask wait and a session wait the same way', async () => {
+      let askAttempts = 0;
+      const askBase = await listen((req, res) => {
+        askAttempts += 1;
+        if (askAttempts === 1) {
+          req.socket.destroy();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'no_reply', reason: 'released' }));
+      });
+      const askResult = await createMdrClient(askBase).waitForAsk('rev_x', 'ask_1', 90);
+      expect(askResult).toEqual({ status: 'no_reply', reason: 'released' });
+      expect(askAttempts).toBe(2);
+
+      let sessionAttempts = 0;
+      const sessionBase = await listen((req, res) => {
+        sessionAttempts += 1;
+        if (sessionAttempts === 1) {
+          req.socket.destroy();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'done' }));
+      });
+      const sessionResult = await createMdrClient(sessionBase).waitForSession('rev_x', 90);
+      expect(sessionResult).toEqual({ status: 'done' });
+      expect(sessionAttempts).toBe(2);
+    }, 8_000);
+
+    it('gives up and rethrows once the reconnect window has passed', async () => {
+      let attempts = 0;
+      const base = await listen((req) => {
+        attempts += 1;
+        req.socket.destroy();
+      });
+
+      // Short injected window (RECONNECT_WINDOW_MS is 2 minutes in
+      // production) so this test proves the give-up path without waiting it
+      // out for real.
+      const err = await createMdrClient(base, { reconnectWindowMs: 1_500 })
+        .waitForReview('rev_x', 90)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ServerUnreachableError);
+      // At least one retry happened before the window closed.
+      expect(attempts).toBeGreaterThanOrEqual(2);
+    }, 8_000);
+
+    it("never runs past the poll's own deadline, and retries ask only for the time left", async () => {
+      // A restart mid-poll used to stack a fresh full-length poll on a
+      // two-minute retry, so one tool call could outlast an MCP host's limit.
+      const urls: string[] = [];
+      const base = await listen((req) => {
+        urls.push(req.url ?? '');
+        req.socket.destroy();
+      });
+
+      const started = Date.now();
+      const err = await createMdrClient(base)
+        .waitForReview('rev_x', 3)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ServerUnreachableError);
+      expect(Date.now() - started).toBeLessThan(4_000);
+      expect(urls[0]).toContain('timeout=3');
+      const later = urls.slice(1).map((u) => Number(/timeout=(\d+)/.exec(u)?.[1]));
+      expect(later.length).toBeGreaterThan(0);
+      for (const t of later) expect(t).toBeLessThanOrEqual(2);
+    }, 8_000);
+
+    it('does not retry a non-poll method on ServerUnreachableError', async () => {
+      let attempts = 0;
+      const base = await listen((req) => {
+        attempts += 1;
+        req.socket.destroy();
+      });
+
+      const err = await createMdrClient(base)
+        .abortSession('rev_x')
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ServerUnreachableError);
+
+      // Give a wrongly-retrying implementation time to have made a second
+      // request before asserting only one ever happened.
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      expect(attempts).toBe(1);
+    }, 8_000);
   });
 });
