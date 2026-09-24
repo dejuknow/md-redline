@@ -300,6 +300,9 @@ function rehypeRenderHtmlComments(options: {
     visit(tree, 'comment', (node: Comment, index, parent) => {
       if (parent == null || typeof index !== 'number') return;
       if (node.value.startsWith(MDR_MARKER_PREFIX)) return;
+      // An empty comment is never a note. CommonMark itself uses `<!-- -->` to
+      // end a list, so rendering it would put a stray `<!-- -->` on the page.
+      if (node.value.trim() === '') return;
       if (isHiddenComment(node.value, options.hiddenCommentPrefixes)) return;
       shown.push({ node, index, parent });
     });
@@ -337,6 +340,8 @@ function rehypeRenderHtmlComments(options: {
  */
 function isHiddenComment(value: string, prefixes: string[]): boolean {
   if (prefixes.length === 0) return false;
+  // Case-sensitive on purpose: directives are lowercase or fixed-case, while a
+  // person's note starts with a capital ("More thought needed...").
   const body = value.trimStart();
   return prefixes.some(
     (prefix) =>

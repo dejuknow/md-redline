@@ -154,7 +154,7 @@ test.describe('HTML comments in the rendered view', () => {
     await expect(page.locator('.doc-html-comment').first()).toBeVisible();
   });
 
-  test('hides a directive comment by its shipped prefix, and renders it once switched off', async ({
+  test('hides a directive comment by its shipped prefix, and renders it once its tool is unticked', async ({
     page,
   }) => {
     writeFileSync(
@@ -168,12 +168,13 @@ test.describe('HTML comments in the rendered view', () => {
     await expect(page.locator('.doc-html-comment')).toHaveCount(1);
     await expect(page.locator('.doc-html-comment')).toHaveText('a genuine note');
 
-    // Switching the prefix off in Settings brings the directive back, which is
-    // what makes a false positive on a short prefix (`more`, `toc`) fixable.
+    // Unticking the tool in Settings brings the directive back, which is what
+    // makes a false positive on a short prefix (`more`, `toc`) fixable.
     await page.locator('button[title*="Settings"]').click();
     const panel = page.locator('.fixed.inset-0');
     await expect(panel.getByText('Settings').first()).toBeVisible({ timeout: 5000 });
-    await panel.getByRole('switch', { name: 'Toggle all Prettier prefixes' }).click();
+    await panel.getByRole('button', { name: /keep hidden: instructions for tools/i }).click();
+    await panel.getByRole('checkbox', { name: 'Keep Prettier comments hidden' }).click();
     await page.keyboard.press('Escape');
     await expect(panel).not.toBeVisible();
 
@@ -264,9 +265,16 @@ test.describe('HTML comment forms fixture', () => {
       'textlint-disable',
       'alex ignore',
       'vale off',
+      'vale Microsoft',
       'cSpell:ignore',
       'cspell:words',
       'doctoc generated',
+      "DON'T EDIT",
+      'TOC',
+      'markdown-link-check',
+      'truncate',
+      'ALL-CONTRIBUTORS',
+      'omit from toc',
     ]) {
       expect(shown(directive), directive).toBe(false);
     }
@@ -279,6 +287,11 @@ test.describe('HTML comment forms fixture', () => {
     expect(shown('more thought needed')).toBe(false);
     expect(shown('moreover, this paragraph')).toBe(true);
     expect(shown('tocopherol')).toBe(true);
+    // ...and matching is case-sensitive, so a capitalised note still renders.
+    expect(shown('More thought needed')).toBe(true);
+
+    // Section 12: an empty comment is never rendered as an empty note.
+    expect(bodies.some((b) => b.trim() === '')).toBe(false);
 
     // Section 10: a malformed marker never renders.
     expect(shown('comment-malformed')).toBe(false);

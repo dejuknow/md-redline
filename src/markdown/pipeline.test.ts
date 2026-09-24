@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderMarkdown } from './pipeline';
+import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 
 describe('renderMarkdown source positions', () => {
   const attrs = (html: string, tag: string) => {
@@ -325,8 +326,12 @@ describe('renderMarkdown HTML comments (rehypeRenderHtmlComments)', () => {
     expect(body(renderMarkdown('<!-- a note -->', undefined, on))).toBe(' a note ');
   });
 
-  it('emits the body verbatim: an empty comment', () => {
-    expect(body(renderMarkdown('<!---->', undefined, on))).toBe('');
+  it('hides an empty or whitespace-only comment, which is never a note', () => {
+    // CommonMark itself uses `<!-- -->` to end a list; it must not show up as a
+    // stray `<!-- -->` on the page.
+    for (const md of ['<!---->', '<!-- -->', '- a\n\n<!--   -->\n\n- b']) {
+      expect(renderMarkdown(md, undefined, on)).not.toContain('doc-html-comment');
+    }
   });
 
   it('emits the body verbatim: no surrounding spaces (<!--x-->)', () => {
@@ -533,6 +538,46 @@ describe('renderMarkdown HTML comments (rehypeRenderHtmlComments)', () => {
       expect(html).toContain('Real body.');
       expect(body(html)).toBe(' a genuine note ');
       expect(html).not.toContain('MD013');
+    });
+
+    describe('with the shipped defaults', () => {
+      const defaults = { ...on, hiddenCommentPrefixes: DEFAULT_HIDDEN_COMMENT_PREFIXES };
+      const shows = (md: string) =>
+        renderMarkdown(md, undefined, defaults).includes('doc-html-comment');
+
+      it.each([
+        ['a Vale rule switch', '<!-- vale Microsoft.Contractions = NO -->'],
+        ['a Vale style switch', '<!-- vale style = Microsoft -->'],
+        [
+          "doctoc's middle line",
+          "<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->",
+        ],
+        ['doctoc skip', '<!-- DOCTOC SKIP -->'],
+        ['an uppercase TOC marker', '<!-- TOC -->'],
+        ['its closing marker', '<!-- /TOC -->'],
+        ['markdown-link-check', '<!-- markdown-link-check-disable-next-line -->'],
+        ['a Docusaurus cut', '<!-- truncate -->'],
+        [
+          'all-contributors',
+          '<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->',
+        ],
+      ])('hides %s', (_, md) => {
+        expect(shows(md)).toBe(false);
+      });
+
+      it('hides a Markdown All in One marker at the end of a heading, keeping the heading', () => {
+        const html = renderMarkdown('## Setup <!-- omit from toc -->', undefined, defaults);
+        expect(html).not.toContain('doc-html-comment');
+        expect(html).toContain('Setup');
+      });
+
+      it("still shows a person's note that opens with a directive word, capitalised", () => {
+        // Why matching stays case-sensitive: `more` and `vale` are directives
+        // lowercase and ordinary words at the start of a sentence.
+        expect(shows('<!-- More thought needed on the caching strategy. -->')).toBe(true);
+        expect(shows('<!-- Vale flagged this paragraph; worth a second look. -->')).toBe(true);
+        expect(shows('<!-- more -->')).toBe(false);
+      });
     });
   });
 });

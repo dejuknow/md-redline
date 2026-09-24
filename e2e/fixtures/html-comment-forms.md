@@ -58,7 +58,8 @@ ASCII shapes only work if the column alignment holds:
 
 ## 7 · Shipped directives, all hidden
 
-One from each tool group in Settings. None of these should be visible.
+One from each tool in Settings, plus the other forms a tool writes. None of these should be
+visible.
 
 <!-- prettier-ignore -->
 <!--lint disable no-duplicate-headings-->
@@ -68,10 +69,19 @@ One from each tool group in Settings. None of these should be visible.
 <!-- textlint-disable -->
 <!-- alex ignore -->
 <!-- vale off -->
+<!-- vale Microsoft.Contractions = NO -->
 <!-- cSpell:ignore mdr rehype -->
 <!-- cspell:words redline -->
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
+<!-- TOC -->
+<!-- /TOC -->
+<!-- markdown-link-check-disable-next-line -->
+<!-- truncate -->
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+
+### A heading ending in a Markdown All in One marker <!-- omit from toc -->
 
 The second line has no space after `<!--`. The match runs after `trimStart`, so one entry covers
 both forms.
@@ -87,8 +97,8 @@ both forms.
 <!-- more -->
 <!-- toc -->
 
-A genuine note that opens with the same word is hidden too. That is the cost of shipping the short
-prefixes, and the per-prefix switches in Settings are where a reader resolves it:
+A genuine note that opens with the same lowercase word is hidden too. That is the cost of shipping
+the short prefixes, and unticking the tool in Settings is how a reader resolves it:
 
 <!-- more thought needed on the caching strategy here -->
 <!-- toc generation was disabled deliberately, see the build script -->
@@ -97,6 +107,11 @@ A prefix matches only as a whole word, so these two render:
 
 <!-- moreover, this paragraph was rewritten after review -->
 <!-- tocopherol is vitamin E, a note from the nutrition doc -->
+
+Matching is case-sensitive, because directives are lowercase or fixed-case and a note starts with a
+capital. So this one renders:
+
+<!-- More thought needed on the caching strategy. -->
 
 ## 10 · A malformed marker stays hidden
 
@@ -124,15 +139,22 @@ A prefix matches only as a whole word, so these two render:
 
 <!---->
 
-That last one was empty, and renders as nothing.
+That last one was empty, so it stays hidden: an empty comment is never a note. CommonMark uses one to
+separate two lists:
 
-## 13 · Settings: toggle, per-prefix switch, custom prefix
+- first list
+
+<!-- -->
+
+- second list, with nothing visible between it and the first
+
+## 13 · Settings: toggle, hidden tools, your own words
 
 Open Settings, then:
 
 1. Turn **Render HTML comments** off. Every comment in sections 1–12 disappears.
-2. Turn it back on. In the **Vale** group, switch `vale off` off. Its line in section 7 appears.
-3. Add a custom prefix `TODO`. This line vanishes:
+2. Turn it back on. Open **Keep hidden** and untick **Vale**. Both of its lines in section 7 appear.
+3. Add `TODO` to **Your own**. This line vanishes:
 
 <!-- TODO: wire the retry budget into the config -->
 
