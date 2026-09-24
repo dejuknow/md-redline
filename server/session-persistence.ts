@@ -381,3 +381,26 @@ function writeSyncNow(path: string, state: PersistedStoreState): void {
     /* best effort, e.g. a no-op on Windows */
   }
 }
+
+/**
+ * Wrap a fetch handler so every request waits until `open()` is called. The
+ * server listens before it knows its port, and the saved sessions are per
+ * port, so without this an agent reconnecting after a restart, or a tab's
+ * first heartbeat, could land before the restore, get a 404 for a session
+ * about to exist, and give it up for good.
+ */
+export function holdRequestsUntilOpen<A extends unknown[], R>(
+  handler: (...args: A) => R | Promise<R>,
+): { fetch: (...args: A) => Promise<R>; open: () => void } {
+  let open!: () => void;
+  const opened = new Promise<void>((done) => {
+    open = done;
+  });
+  return {
+    fetch: async (...args: A) => {
+      await opened;
+      return handler(...args);
+    },
+    open,
+  };
+}

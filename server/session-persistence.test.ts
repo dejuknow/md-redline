@@ -4,7 +4,12 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { PersistedSession, PersistedStoreState } from './review-sessions';
-import { createSessionSaver, loadPersistedState, sessionsFilePath } from './session-persistence';
+import {
+  createSessionSaver,
+  holdRequestsUntilOpen,
+  loadPersistedState,
+  sessionsFilePath,
+} from './session-persistence';
 
 let testDir: string;
 
@@ -299,5 +304,21 @@ describe('createSessionSaver', () => {
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(join(testDir, 'nested')).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe('holdRequestsUntilOpen (#116)', () => {
+  it('holds a request made before open, then answers it', async () => {
+    let handled = 0;
+    const gate = holdRequestsUntilOpen((n: number) => {
+      handled += 1;
+      return n * 2;
+    });
+    const pending = gate.fetch(21);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(handled).toBe(0);
+    gate.open();
+    await expect(pending).resolves.toBe(42);
+    await expect(gate.fetch(1)).resolves.toBe(2);
   });
 });

@@ -31,7 +31,12 @@ import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
 import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
-import { createSessionSaver, loadPersistedState, sessionsFilePath } from './session-persistence';
+import {
+  createSessionSaver,
+  holdRequestsUntilOpen,
+  loadPersistedState,
+  sessionsFilePath,
+} from './session-persistence';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION, name: PACKAGE_NAME } = require('../package.json') as {
@@ -1641,20 +1646,9 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
 const persistSessions = process.env.MD_REDLINE_PERSIST_SESSIONS !== '0';
 
 if (isMainModule) {
-  // The port is only known once it is bound, and the saved sessions are per
-  // port, so the server is listening before they are back. Hold every request
-  // until the restore is done (milliseconds): otherwise an agent reconnecting
-  // after a restart, or a tab's first heartbeat, can land in that gap, get a
-  // 404 for a session that is about to exist, and give it up for good.
-  let markRestored!: () => void;
-  const restored = new Promise<void>((done) => {
-    markRestored = done;
-  });
-  const fetchAfterRestore: typeof app.fetch = async (...args) => {
-    await restored;
-    return app.fetch(...args);
-  };
-  findAvailablePort(fetchAfterRestore)
+  // Requests wait for the restore below: see holdRequestsUntilOpen.
+  const gate = holdRequestsUntilOpen(app.fetch);
+  findAvailablePort(gate.fetch)
     .then(async (port) => {
       // Only set once persistence is actually wired up below, so cleanup()
       // (which runs on every exit, including a plain process.exit(0) from
@@ -1681,7 +1675,7 @@ if (isMainModule) {
         });
         reviewSessions.setOnChange(saver.schedule);
       }
-      markRestored();
+      gate.open();
 
       await writePortFile(PORT_FILE, port);
       if (updatesEnabled) void updateChecker.start();
@@ -1711,7 +1705,7 @@ if (isMainModule) {
       });
     })
     .catch((err) => {
-      markRestored();
+      gate.open();
       console.error(err.message);
       process.exit(1);
     });

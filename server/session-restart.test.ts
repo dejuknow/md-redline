@@ -86,7 +86,7 @@ function waitForPortOpen(port: number, timeoutMs: number): Promise<void> {
 
 /** Resolves once the server answers a real API request, which is later than
  * waitForPortOpen: a request that lands after the port is open but before
- * restore has finished is held open by index.ts's fetchAfterRestore gate,
+ * restore has finished is held open by index.ts's holdRequestsUntilOpen gate,
  * not refused. On timeout, the error carries the child's own stdout/stderr,
  * since "never became ready" otherwise gives no clue which boot step hung. */
 async function waitForServerReady(server: LaunchedServer, timeoutMs: number): Promise<void> {
@@ -285,7 +285,7 @@ describe('a review session survives a real server restart (#116)', () => {
     }
   }, 20_000);
 
-  it('the request gate: the first request after the port opens gets 200, not 404, while restore is still in flight', async () => {
+  it('the first request after the port opens finds the restored session', async () => {
     const { homeDir, docPath } = makeHomeDir();
     const port = await pickTestPort();
     const baseUrl = `http://127.0.0.1:${port}`;
@@ -301,11 +301,10 @@ describe('a review session survives a real server restart (#116)', () => {
     // as possible rather than wait for full readiness first.
     launchServer({ port, homeDir });
     // Fire the request the instant the port accepts a connection, not once
-    // the server is confirmed ready: index.ts's fetchAfterRestore is
-    // supposed to hold this request open until restore finishes rather
-    // than route it into a store that doesn't have the session back yet.
-    // Waiting for readiness first would never be able to catch a
-    // regression of that gate.
+    // the server is confirmed ready. The restore usually finishes within
+    // milliseconds, so this can't reliably land in the gap by itself; the
+    // gate that holds such a request is proven in session-persistence.test.ts
+    // (holdRequestsUntilOpen). This checks the end to end result.
     await waitForPortOpen(port, 10_000);
     const res = await fetch(`${baseUrl}/api/review-sessions/${sessionId}`);
 
