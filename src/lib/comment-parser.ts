@@ -6,6 +6,11 @@ import {
   type CommentReply,
 } from '../types';
 import { randomId } from './random-id';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkFrontmatter from 'remark-frontmatter';
+import remarkGfm from 'remark-gfm';
+import { visit } from 'unist-util-visit';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -168,38 +173,50 @@ function isInsideCodeBlock(offset: number, codeBlockRanges: CodeBlockRange[]): b
   return false;
 }
 
-// Inline code spans (`...`, ``...``, etc.) — opener and closer must be runs of
-// equal length, per CommonMark. A marker-shaped pattern inside a span whose
-// JSON fails to parse (e.g. `<!-- @comment{...} -->`) is treated as a
-// documentation placeholder and left as literal text. Real markers with
-// valid JSON still parse — insertComment places them inside the span when
-// the user anchors on code text.
-function getInlineCodeRanges(
-  rawMarkdown: string,
-  fencedRanges: CodeBlockRange[],
-): CodeBlockRange[] {
-  const tickRegex = /`+/g;
-  const runs: { start: number; len: number }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = tickRegex.exec(rawMarkdown)) !== null) {
-    if (isInsideCodeBlock(m.index, fencedRanges)) continue;
-    runs.push({ start: m.index, len: m[0].length });
-  }
+// The renderer's own parse (src/markdown/pipeline.ts), minus the plugins that
+// cannot change where a code span is.
+const inlineCodeParser = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ['yaml', 'toml'])
+  .use(remarkGfm);
 
+/**
+ * Inline code spans, taken from the parser the renderer uses rather than a
+ * scanner of our own (#123). Code spans interact with nearly everything
+ * inline: HTML tags and autolinks outrank them, they end at block boundaries
+ * (list items, headings, table cells, blockquote breaks), and a backslash
+ * cannot escape their closer. A hand-rolled scanner got several of those
+ * wrong and moved markers into URLs and other blocks. This is not the #30
+ * rewrite: #30 read BLOCK containers off node boundaries, which do not match
+ * the source. An inlineCode node's offsets are exactly its backticks, and a
+ * marker goes in front of them inline, with no line break.
+ */
+// A few recent results, keyed by the text. A batch of agent comments inserts
+// into the same clean text over and over, and one change is parsed by several
+// callers, so the parse (tens of ms on a large spec) runs once, not per call.
+const inlineCodeCache = new Map<string, CodeBlockRange[]>();
+// Sized for several open tabs: the tab badges re-parse every tab on each change.
+const INLINE_CODE_CACHE_SIZE = 16;
+
+function getInlineCodeRanges(markdown: string): CodeBlockRange[] {
+  if (!markdown.includes('`')) return [];
+  const cached = inlineCodeCache.get(markdown);
+  if (cached) return cached;
   const ranges: CodeBlockRange[] = [];
-  const consumed = new Set<number>();
-  for (let i = 0; i < runs.length; i++) {
-    if (consumed.has(i)) continue;
-    for (let j = i + 1; j < runs.length; j++) {
-      if (consumed.has(j)) continue;
-      if (runs[j].len === runs[i].len) {
-        ranges.push({ start: runs[i].start, end: runs[j].start + runs[j].len });
-        consumed.add(i);
-        consumed.add(j);
-        break;
-      }
+  // micromark drops a leading byte-order mark and counts offsets without it,
+  // as src/markdown/pipeline.ts also corrects for.
+  const bom = markdown.charCodeAt(0) === 0xfeff ? 1 : 0;
+  visit(inlineCodeParser.parse(markdown), 'inlineCode', (node) => {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start !== undefined && end !== undefined) {
+      ranges.push({ start: start + bom, end: end + bom });
     }
+  });
+  if (inlineCodeCache.size >= INLINE_CODE_CACHE_SIZE) {
+    inlineCodeCache.delete(inlineCodeCache.keys().next().value as string);
   }
+  inlineCodeCache.set(markdown, ranges);
   return ranges;
 }
 
@@ -243,18 +260,20 @@ function validReplies(replies: unknown[], commentId: string): CommentReply[] {
   return kept;
 }
 
-function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
+function collectCommentRegions(
+  rawMarkdown: string,
+  { warn = true }: { warn?: boolean } = {},
+): CommentMarkerRegion[] {
   const fencedRanges = getCodeBlockRanges(rawMarkdown);
-  const inlineRanges = getInlineCodeRanges(rawMarkdown, fencedRanges);
-  const regions: CommentMarkerRegion[] = [];
+  const found: (CommentMarkerRegion & { parseError: unknown })[] = [];
   const regex = new RegExp(COMMENT_PATTERN);
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(rawMarkdown)) !== null) {
     if (isInsideCodeBlock(match.index, fencedRanges)) continue;
-    const insideInlineCode = isInsideCodeBlock(match.index, inlineRanges);
 
     let parsedComment: MdComment | null = null;
+    let parseError: unknown = null;
     try {
       const data = JSON.parse(match[1]) as MdComment;
       if (
@@ -269,31 +288,119 @@ function collectCommentRegions(rawMarkdown: string): CommentMarkerRegion[] {
           : data;
       }
     } catch (err) {
-      // Inside inline code, a literal `{...}` placeholder is documentation
-      // about the format (e.g. README snippets), not a real marker someone
-      // hand-edited. Leave it as literal text and don't warn. Corrupted real
-      // markers inside inline code (any other malformed JSON) still fall
-      // through so parser-based cleanup can strip them.
-      if (insideInlineCode && /^\{\s*\.+\s*\}$/.test(match[1].trim())) continue;
-      // Malformed markers outside code blocks are still considered removable,
-      // but surface the parse failure so users notice when comment data is
-      // being silently dropped (e.g. after a hand-edit corrupted the JSON).
-      console.warn(
-        '[comment-parser] failed to parse comment marker JSON; marker will be treated as anonymous',
-        err,
-      );
+      parseError = err;
+    }
+
+    // A match that fails to parse and holds another marker's start is an
+    // unclosed example, like `<!-- @comment{` in a doc, that the lazy match ran
+    // on through the next real marker's `} -->`. Leave the example as text and
+    // look again from just inside it, or the real comment vanishes with it.
+    if (parsedComment === null && match[0].indexOf('<!-- @comment{', 1) !== -1) {
+      regex.lastIndex = match.index + 1;
+      continue;
     }
 
     const markerEnd = match.index + match[0].length;
-    regions.push({
+    found.push({
       rawStart: match.index,
       markerEnd,
       stripEnd: getStandaloneStripEnd(rawMarkdown, match.index, markerEnd),
       parsedComment,
+      parseError,
     });
   }
 
+  // Inside inline code, only a complete marker is one of mdr's own (#123).
+  // Anything else marker-shaped there is someone writing about the format,
+  // like `<!-- @comment{"id":"x","anchor":"y"} -->` in a README, and stays
+  // literal: stripping it would leave empty backticks, and cleanup would
+  // delete it from the file. mdr used to write complete markers inside code
+  // spans, and those still parse wherever they are.
+  const literal = findLiteralMarkers(rawMarkdown, found);
+
+  const regions: CommentMarkerRegion[] = [];
+  for (const { parseError, ...region } of found) {
+    if (literal.has(region.rawStart)) continue;
+    // Malformed markers outside code are still considered removable, but
+    // surface the parse failure so users notice when comment data is being
+    // silently dropped (e.g. after a hand-edit corrupted the JSON).
+    if (parseError !== null && warn) {
+      console.warn(
+        '[comment-parser] failed to parse comment marker JSON; marker will be treated as anonymous',
+        parseError,
+      );
+    }
+    regions.push(region);
+  }
   return regions;
+}
+
+/**
+ * Whether a marker could be inside a code span: that needs a backtick before
+ * it and after it, in the same paragraph.
+ */
+function paragraphHasBacktick(rawMarkdown: string, r: CommentMarkerRegion): boolean {
+  const blank = /\r?\n[ \t]*\r?\n/g;
+  let paraStart = 0;
+  let m: RegExpExecArray | null;
+  while ((m = blank.exec(rawMarkdown)) !== null && m.index < r.rawStart)
+    paraStart = blank.lastIndex;
+  blank.lastIndex = r.markerEnd;
+  const next = blank.exec(rawMarkdown);
+  const paraEnd = next ? next.index : rawMarkdown.length;
+  return (
+    rawMarkdown.slice(paraStart, r.rawStart).includes('`') &&
+    rawMarkdown.slice(r.markerEnd, paraEnd).includes('`')
+  );
+}
+
+/**
+ * Raw offsets of the incomplete markers that sit inside inline code. Asked of
+ * the text the renderer sees: the complete markers are stripped first, as
+ * cleanMarkdown strips them, and the parse runs only when an incomplete marker
+ * exists at all, so a document without one pays nothing.
+ */
+function findLiteralMarkers(rawMarkdown: string, found: CommentMarkerRegion[]): Set<number> {
+  const literal = new Set<number>();
+  // A corrupted marker in plain prose can't be in a code span, so it never
+  // costs a parse.
+  const candidates = found.filter(
+    (r) => r.parsedComment === null && paragraphHasBacktick(rawMarkdown, r),
+  );
+  if (candidates.length === 0) return literal;
+  let view = '';
+  let last = 0;
+  const incomplete: { rawStart: number; viewStart: number }[] = [];
+  for (const r of found) {
+    view += rawMarkdown.slice(last, r.rawStart);
+    if (r.parsedComment === null) {
+      if (candidates.includes(r)) incomplete.push({ rawStart: r.rawStart, viewStart: view.length });
+      last = r.rawStart;
+    } else {
+      last = r.stripEnd;
+    }
+  }
+  view += rawMarkdown.slice(last);
+  const spans = getInlineCodeRanges(view);
+  for (const { rawStart, viewStart } of incomplete) {
+    if (isInsideCodeBlock(viewStart, spans)) literal.add(rawStart);
+  }
+  return literal;
+}
+
+/**
+ * Where the markers are, as parseComments reads them: mdr's own markers,
+ * malformed ones included, but not marker-shaped text inside a code span that
+ * isn't a complete marker (#123). Views that style or strip markers use this
+ * rather than the bare regex, so they agree with the parser about what is one.
+ */
+export function getCommentMarkerRanges(rawMarkdown: string): { start: number; end: number }[] {
+  // Quiet: views call this on every keystroke, and parseComments already
+  // reports a malformed marker once per change.
+  return collectCommentRegions(rawMarkdown, { warn: false }).map((r) => ({
+    start: r.rawStart,
+    end: r.markerEnd,
+  }));
 }
 
 export function transformCommentMarkers(
@@ -880,11 +987,10 @@ export function insertComment(
   // anchor is unaffected: it stays the real text, so highlighting, orphan
   // detection, and agent handoff all keep working.
   //
-  // Before adding a fifth exclusion or special case here: don't. Four rounds
-  // have now taught one of these regexes about a case another already knew,
-  // and the fourth cost a silently lost comment. #30 replaces this whole
-  // computation with ranges derived from the parse, where the two consumers
-  // cannot disagree. The next container bug that lands here is the trigger.
+  // A fifth container, inline code (#123), extends these scanners rather than
+  // replacing them: #30 built the parse-derived rewrite and found it corrupts
+  // documents in six new ways. Each pass below can only move the offset to a
+  // position outside every container the passes before it protect.
   let ownLine = false;
   let leadingNewline = false;
   {
@@ -918,10 +1024,32 @@ export function insertComment(
     // the frontmatter, so it can never undo the two passes above. Reordering
     // these three, or dropping the exclusions, breaks that.
     const nonHtmlRegions = frontmatter ? [...fencedRanges, frontmatter] : fencedRanges;
-    for (const range of getHtmlCommentRanges(cleanMarkdown, nonHtmlRegions)) {
+    // Code spans are scanned first and excluded from the comment pass: a
+    // `<!--` inside backticks is text, not an unclosed comment running to EOF
+    // that would drag every later marker up to it.
+    const codeSpans = getInlineCodeRanges(cleanMarkdown);
+    const htmlComments = getHtmlCommentRanges(cleanMarkdown, [...nonHtmlRegions, ...codeSpans]);
+    for (const range of htmlComments) {
       if (insertionCleanOffset >= range.start && insertionCleanOffset < range.end) {
         insertionCleanOffset = range.start;
         ownLine = range.start === 0 || cleanMarkdown[range.start - 1] === '\n';
+      }
+    }
+    // Inline code: before the opening backticks (#123). Inside, the marker is
+    // literal code to every other renderer. Last, because the parser never
+    // starts a code span inside a fence, frontmatter or an HTML comment. The
+    // check below holds that even where our scanners and the parser disagree
+    // (an unclosed inline `<!--`, which only our scanner runs to EOF): a move
+    // that would land in a protected range is not made.
+    const protectedRanges = [...nonHtmlRegions, ...htmlComments];
+    for (const range of codeSpans) {
+      if (
+        insertionCleanOffset > range.start &&
+        insertionCleanOffset < range.end &&
+        !isInsideCodeBlock(range.start, protectedRanges)
+      ) {
+        insertionCleanOffset = range.start;
+        ownLine = false;
       }
     }
   }
@@ -1039,8 +1167,15 @@ export function updateCommentAnchor(
   let newContextBefore: string | undefined;
   let newContextAfter: string | undefined;
   if (target?.cleanOffset !== undefined) {
-    // The new anchor starts at the comment's existing position in clean markdown
-    const anchorIdx = target.cleanOffset;
+    // The new anchor starts at the comment's existing position in clean
+    // markdown, or just past the backticks when the marker sits in front of a
+    // code span (#123).
+    let anchorIdx = target.cleanOffset;
+    if (cleanMarkdown[anchorIdx] === '`' && !cleanMarkdown.startsWith(newAnchor, anchorIdx)) {
+      const span = getInlineCodeRanges(cleanMarkdown).find((r) => r.start === anchorIdx);
+      const inSpan = span ? cleanMarkdown.indexOf(newAnchor, anchorIdx) : -1;
+      if (span && inSpan !== -1 && inSpan + newAnchor.length <= span.end) anchorIdx = inSpan;
+    }
     const CONTEXT_LEN = 30;
     const beforeStart = Math.max(0, anchorIdx - CONTEXT_LEN);
     newContextBefore = cleanMarkdown.slice(beforeStart, anchorIdx);

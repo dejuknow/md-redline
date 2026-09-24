@@ -3552,3 +3552,177 @@ describe('insertComment — extraFields', () => {
     expect(comments[0].sessionId).toBeUndefined();
   });
 });
+
+describe('inline code spans (#123)', () => {
+  const at = (raw: string, anchor: string, hint?: number) =>
+    insertComment(raw, anchor, 'why?', 'A', undefined, undefined, hint, 'ID1');
+  const shape = (raw: string) => raw.replace(/<!-- @comment\{.*?\} -->/gs, '[M]');
+
+  describe('writing', () => {
+    it('puts a marker for code text in front of the backticks, not inside', () => {
+      const raw = 'Call `computeToken` first.\n';
+      const result = at(raw, 'computeToken');
+      expect(shape(result)).toBe('Call [M]`computeToken` first.\n');
+      const parsed = parseComments(result);
+      expect(parsed.comments.map((c) => c.id)).toEqual(['ID1']);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      expect(detectMissingAnchors(parsed.cleanMarkdown, parsed.comments).size).toBe(0);
+    });
+
+    it("handles the issue's example, an HTML comment written as code", () => {
+      const raw = 'The form `<!-- plain -->` is ordinary.\n';
+      const result = at(raw, '<!-- plain -->');
+      expect(shape(result)).toBe('The form [M]`<!-- plain -->` is ordinary.\n');
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('places correctly in a file that starts with a byte-order mark', () => {
+      const raw = '\uFEFFcall `foobar` here.\n';
+      expect(shape(at(raw, 'bar'))).toBe('\uFEFFcall [M]`foobar` here.\n');
+    });
+
+    it('pairs a double-backtick span by its own length', () => {
+      const raw = 'Use ``a ` b`` here.\n';
+      expect(shape(at(raw, 'a ` b'))).toBe('Use [M]``a ` b`` here.\n');
+    });
+
+    it('leaves a marker for plain text alone when the doc mentions <!-- in code', () => {
+      // `<!--` inside backticks used to read as an unclosed comment running to
+      // the end of the file, which dragged this marker up into the backticks,
+      // paragraphs away from the text it belongs to.
+      const raw = 'Use `<!--` to open a note.\n\nLater text here.\n';
+      expect(shape(at(raw, 'Later text'))).toBe(
+        'Use `<!--` to open a note.\n\n[M]Later text here.\n',
+      );
+    });
+
+    it('does not pair stray backticks across a blank line', () => {
+      const raw = 'Press the ` key.\n\nCall computeToken now.\n\nThen ` again.\n';
+      expect(shape(at(raw, 'computeToken'))).toBe(
+        'Press the ` key.\n\nCall [M]computeToken now.\n\nThen ` again.\n',
+      );
+    });
+
+    it('does not let an escaped backtick open a span', () => {
+      const raw = 'Type \\`, then computeToken, then `x`.\n';
+      expect(shape(at(raw, 'computeToken'))).toBe('Type \\`, then [M]computeToken, then `x`.\n');
+    });
+
+    it('ignores a backtick inside an HTML comment when pairing', () => {
+      // Same line, so only the comment winning keeps the ` in it from pairing
+      // with the one before x. Pairing would span computeToken, and the marker
+      // would be moved back INTO the HTML comment.
+      const raw = 'Note <!-- the ` key --> then computeToken and `x` here.\n';
+      const result = at(raw, 'computeToken');
+      expect(shape(result)).toBe('Note <!-- the ` key --> then [M]computeToken and `x` here.\n');
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    // Code spans come from the renderer's parser, which knows what outranks
+    // them and where they end. A stray backtick in any of these used to pair
+    // with a later one, and the marker moved into the tag, URL or other block.
+    it.each([
+      ['an HTML attribute', '<span title="`">hi</span> there `x` y.\n', 'there'],
+      ['an autolink', 'See <https://x.test/a`b> and then some prose then `code`.\n', 'prose'],
+      [
+        'another list item',
+        '- press the ` key\n- second item here\n- third `code` item\n',
+        'second',
+      ],
+      ['a heading above', '# Title with ` tick\n\nbody `x` text\n', 'body'],
+      ['a table cell', '| a | b |\n|---|---|\n| `x | y` |\n', 'y'],
+      ['a blockquote break', '> a `x\n>\n> y` b\n', 'y` b'],
+    ])('does not pair a stray backtick in %s', (_where, raw, anchor) => {
+      const result = at(raw, anchor);
+      const idx = result.indexOf('<!-- @comment');
+      expect(result.slice(idx).replace(/<!-- @comment\{.*?\} -->/s, '')).toBe(
+        raw.slice(raw.indexOf(anchor)),
+      );
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('keeps context right for an anchor in the middle of a code span', () => {
+      const raw = `${marker({ id: 'c1', anchor: 'Run' })}Run \`npm install foo\` now.\n`;
+      const moved = moveComment(raw, 'c1', 'foo');
+      expect(shape(moved)).toBe('Run [M]`npm install foo` now.\n');
+      const c = parseComments(moved).comments[0];
+      expect(c.contextBefore?.endsWith('`npm install ')).toBe(true);
+      expect(c.contextAfter?.startsWith('` now.')).toBe(true);
+    });
+
+    it('keeps the anchor context right when a comment is dragged onto code', () => {
+      const raw = `${marker({ id: 'c1', anchor: 'Call' })}Call \`computeToken\` first.\n`;
+      const moved = moveComment(raw, 'c1', 'computeToken');
+      expect(shape(moved)).toBe('Call [M]`computeToken` first.\n');
+      const c = parseComments(moved).comments[0];
+      expect(c.anchor).toBe('computeToken');
+      expect(c.contextBefore?.endsWith('`')).toBe(true);
+      expect(c.contextAfter?.startsWith('` first.')).toBe(true);
+    });
+  });
+
+  describe('reading', () => {
+    it('leaves a documentation example of the marker format as literal text', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const raw = 'Write `<!-- @comment{"id":"x","anchor":"y"} -->` to leave a note.\n';
+      const parsed = parseComments(raw);
+      expect(parsed.comments).toHaveLength(0);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('does not let an unclosed example swallow the real marker after it', () => {
+      // The lazy match ran from `<!-- @comment{` in the backticks to the real
+      // marker's `} -->`, and the comment vanished with the example.
+      const raw =
+        'Every marker begins with `<!-- @comment{` and holds JSON.\n\nSome anchor text here.\n';
+      const result = at(raw, 'anchor');
+      const parsed = parseComments(result);
+      expect(parsed.comments.map((c) => c.id)).toEqual(['ID1']);
+      expect(parsed.cleanMarkdown).toBe(raw);
+    });
+
+    it('still strips and reports a corrupted marker in plain prose', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const parsed = parseComments('Text <!-- @comment{not json} -->here.\n');
+      expect(parsed.cleanMarkdown).toBe('Text here.\n');
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
+
+    it('keeps the example after an unclosed <!-- earlier in the document', () => {
+      const raw = 'intro <!-- note\n\nthe `<!-- @comment{"id":"q"} -->` form\n';
+      expect(parseComments(raw).cleanMarkdown).toBe(raw);
+    });
+
+    it('never deletes that example when every comment is cleared', () => {
+      const raw = `Write \`<!-- @comment{"id":"x","anchor":"y"} -->\` to leave a note. ${marker({ anchor: 'note' })}note\n`;
+      expect(removeAllComments(raw)).toBe(
+        'Write `<!-- @comment{"id":"x","anchor":"y"} -->` to leave a note. note\n',
+      );
+    });
+
+    it('still reads a complete marker mdr wrote inside backticks before this fix', () => {
+      const raw = `Call \`${marker({ id: 'old', anchor: 'computeToken' })}computeToken\` first.\n`;
+      const parsed = parseComments(raw);
+      expect(parsed.comments.map((c) => c.id)).toEqual(['old']);
+      expect(parsed.cleanMarkdown).toBe('Call `computeToken` first.\n');
+    });
+
+    it('is not fooled by backticks in a marker that sits inside a code span', () => {
+      // A marker mdr wrote inside backticks, whose text has a backtick in it.
+      // The renderer never sees that JSON, so neither may the span check:
+      // pairing on it would shift every later span by one, and the
+      // documentation example after it would be stripped.
+      // One backtick, so it cannot pair off with another inside the JSON.
+      const m = marker({ id: 'old', anchor: 'computeToken', text: 'the ` key' });
+      const raw = `Call \`${m}computeToken\` and \`<!-- @comment{"id":"doc"} -->\` here.\n`;
+      const parsed = parseComments(raw);
+      expect(parsed.comments.map((c) => c.id)).toEqual(['old']);
+      expect(parsed.cleanMarkdown).toBe(
+        'Call `computeToken` and `<!-- @comment{"id":"doc"} -->` here.\n',
+      );
+    });
+  });
+});
