@@ -13,13 +13,32 @@ import type {
   WaitResult,
 } from './types';
 
+/** The server rejects a longer clientId (POST /api/review-sessions). */
+export const MAX_CLIENT_ID_LENGTH = 256;
+
 /**
- * Process-scoped caller identity. One MCP server process serves one agent
- * session (one Claude/Codex conversation), so a per-process UUID is exactly
- * "which agent is this." Sent on createSession so the server's dedupe never
- * merges two different agents reviewing the same files into one session.
+ * Caller identity, sent on createSession so the server's dedupe never merges
+ * two different agents reviewing the same files into one session.
+ *
+ * A registered MCP server is one process per agent session, so a per-process
+ * UUID is exactly "which agent is this." A client that starts a fresh
+ * `mdr mcp` for every tool call (mcp2cli, a shell loop) would get a new UUID
+ * each time and never reuse its own session, so it sets MD_REDLINE_CLIENT_ID
+ * once per agent session instead (#121). An overlong value throws here, at
+ * startup, rather than as a 400 on the first review.
  */
-const PROCESS_CLIENT_ID = `mcp_${randomUUID()}`;
+export function resolveClientId(env: NodeJS.ProcessEnv = process.env): string {
+  const set = env.MD_REDLINE_CLIENT_ID?.trim();
+  if (!set) return `mcp_${randomUUID()}`;
+  if (set.length > MAX_CLIENT_ID_LENGTH) {
+    throw new Error(
+      `MD_REDLINE_CLIENT_ID is ${set.length} characters; the limit is ${MAX_CLIENT_ID_LENGTH}.`,
+    );
+  }
+  return set;
+}
+
+const PROCESS_CLIENT_ID = resolveClientId();
 
 /**
  * HTTP client for the mdr web server. Used by the tool-call handler to
