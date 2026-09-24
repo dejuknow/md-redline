@@ -4,6 +4,11 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_TEMPLATES,
   DEFAULT_ENABLE_RESOLVE,
+  DEFAULT_HIDDEN_COMMENT_PREFIXES,
+  DEFAULT_HIDDEN_COMMENT_GROUPS,
+  mergeHiddenCommentPrefixEntries,
+  getEnabledHiddenCommentPrefixes,
+  hiddenCommentPrefixGroupFor,
 } from './settings';
 
 describe('parseSettings', () => {
@@ -105,8 +110,117 @@ describe('parseSettings', () => {
       docWidth: 'wide',
       proseSize: 'large',
       keepLineBreaks: true,
+      renderHtmlComments: false,
+      hiddenCommentPrefixes: [{ prefix: 'prettier-ignore', enabled: true }],
     };
     expect(parseSettings(full)).toEqual(full);
+  });
+
+  describe('HTML comment rendering', () => {
+    it('defaults to rendering, with the shipped directive list hidden', () => {
+      const parsed = parseSettings({});
+      expect(parsed.renderHtmlComments).toBe(true);
+      expect(parsed.hiddenCommentPrefixes).toEqual(DEFAULT_SETTINGS.hiddenCommentPrefixes);
+    });
+
+    it('keeps an explicitly EMPTY prefix list rather than restoring the defaults', () => {
+      // An empty stored list is a legitimate "nothing customized yet" state —
+      // falling back to the defaults here would make it impossible to persist.
+      // (Whether every default then renders as enabled is a Settings-rendering
+      // question, handled by mergeHiddenCommentPrefixEntries, not by parsing.)
+      expect(parseSettings({ hiddenCommentPrefixes: [] }).hiddenCommentPrefixes).toEqual([]);
+    });
+
+    it('drops entries that are not an object with a string prefix', () => {
+      expect(
+        parseSettings({
+          hiddenCommentPrefixes: [
+            'toc',
+            42,
+            null,
+            { enabled: false },
+            { prefix: 'more', enabled: false },
+            { prefix: 'toc' },
+          ],
+        }).hiddenCommentPrefixes,
+      ).toEqual([
+        { prefix: 'more', enabled: false },
+        { prefix: 'toc', enabled: true },
+      ]);
+    });
+
+    it('falls back to the defaults when the stored value is not an array', () => {
+      expect(parseSettings({ hiddenCommentPrefixes: 'toc' }).hiddenCommentPrefixes).toEqual(
+        DEFAULT_SETTINGS.hiddenCommentPrefixes,
+      );
+    });
+
+    it('passes through the current {prefix, enabled} shape unchanged', () => {
+      const input = {
+        hiddenCommentPrefixes: [
+          { prefix: 'prettier-ignore', enabled: false },
+          { prefix: 'my-custom-directive', enabled: true },
+        ],
+      };
+      expect(parseSettings(input).hiddenCommentPrefixes).toEqual(input.hiddenCommentPrefixes);
+    });
+
+    it('defaults a missing or invalid enabled field to true', () => {
+      expect(
+        parseSettings({
+          hiddenCommentPrefixes: [{ prefix: 'toc' }, { prefix: 'more', enabled: 'yes' }],
+        }).hiddenCommentPrefixes,
+      ).toEqual([
+        { prefix: 'toc', enabled: true },
+        { prefix: 'more', enabled: true },
+      ]);
+    });
+  });
+
+  describe('hidden comment prefix grouping and projection', () => {
+    it('derives the flat prefix list from the grouped defaults, in order', () => {
+      expect(DEFAULT_HIDDEN_COMMENT_PREFIXES).toEqual(
+        DEFAULT_HIDDEN_COMMENT_GROUPS.flatMap((g) => g.prefixes),
+      );
+    });
+
+    it('looks up the shipped group for a built-in prefix and finds none for a custom one', () => {
+      expect(hiddenCommentPrefixGroupFor('prettier-ignore')).toBe('Prettier');
+      expect(hiddenCommentPrefixGroupFor('more')).toBe('Excerpt marker (Jekyll / Hugo / Zola)');
+      expect(hiddenCommentPrefixGroupFor('my-custom-directive')).toBeUndefined();
+    });
+
+    it('unions a default the stored list has never seen in as enabled', () => {
+      const merged = mergeHiddenCommentPrefixEntries([
+        { prefix: 'prettier-ignore', enabled: false },
+      ]);
+      expect(merged.find((e) => e.prefix === 'prettier-ignore')).toEqual({
+        prefix: 'prettier-ignore',
+        enabled: false,
+      });
+      // 'toc' was never stored, so it renders as an enabled row.
+      expect(merged.find((e) => e.prefix === 'toc')).toEqual({ prefix: 'toc', enabled: true });
+    });
+
+    it('appends custom entries after the shipped defaults', () => {
+      const merged = mergeHiddenCommentPrefixEntries([
+        { prefix: 'my-custom-directive', enabled: true },
+      ]);
+      expect(merged.at(-1)).toEqual({ prefix: 'my-custom-directive', enabled: true });
+      expect(merged).toHaveLength(DEFAULT_HIDDEN_COMMENT_PREFIXES.length + 1);
+    });
+
+    it('projects only the enabled prefixes as a flat string[]', () => {
+      const stored = [
+        { prefix: 'prettier-ignore', enabled: false },
+        { prefix: 'my-custom-directive', enabled: true },
+      ];
+      const enabled = getEnabledHiddenCommentPrefixes(stored);
+      expect(enabled).not.toContain('prettier-ignore');
+      expect(enabled).toContain('my-custom-directive');
+      // Every other shipped default is still enabled by default.
+      expect(enabled).toContain('toc');
+    });
   });
 });
 

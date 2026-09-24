@@ -97,6 +97,7 @@ import { SectionBreadcrumb } from './components/SectionBreadcrumb';
 import { headingChain } from './lib/heading-chain';
 import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
+import { getEnabledHiddenCommentPrefixes } from './lib/settings';
 
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
@@ -325,6 +326,10 @@ export default function App() {
   const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const { settings, updateDocWidth, updateProseSize, updateKeepLineBreaks } = useSettings();
+  const enabledHiddenCommentPrefixes = useMemo(
+    () => getEnabledHiddenCommentPrefixes(settings.hiddenCommentPrefixes),
+    [settings.hiddenCommentPrefixes],
+  );
   const setTheme = useSetPersistedTheme();
   const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();
   const pageVisible = usePageVisible();
@@ -823,6 +828,8 @@ export default function App() {
     author,
     enableResolve: settings.enableResolve,
     keepLineBreaks: settings.keepLineBreaks,
+    renderHtmlComments: settings.renderHtmlComments,
+    hiddenCommentPrefixes: enabledHiddenCommentPrefixes,
     tabs,
     activeFilePath,
     viewerRef,
@@ -3227,6 +3234,8 @@ export default function App() {
                                 diffSnapshot={currentSnapshot}
                                 diffLines={diffLines}
                                 keepLineBreaks={settings.keepLineBreaks}
+                                renderHtmlComments={settings.renderHtmlComments}
+                                hiddenCommentPrefixes={enabledHiddenCommentPrefixes}
                               />
                             ) : (
                               <>

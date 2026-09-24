@@ -8,8 +8,10 @@ import {
   DOC_WIDTHS,
   PROSE_FONTS,
   PROSE_SIZES,
+  normalizeHiddenCommentPrefixEntry,
   type AppSettings as ClientAppSettings,
   type CommentTemplate,
+  type HiddenCommentPrefixEntry,
 } from '../src/lib/settings';
 
 const PREFS_FILENAME = '.md-redline.json';
@@ -97,6 +99,14 @@ const SETTING_SANITIZERS: {
   docWidth: (v) => sanitizeEnum(DOC_WIDTHS, v),
   proseSize: (v) => sanitizeEnum(PROSE_SIZES, v),
   keepLineBreaks: sanitizeBoolean,
+  renderHtmlComments: sanitizeBoolean,
+  // The same validator the client's parseSettings uses.
+  hiddenCommentPrefixes: (v) =>
+    Array.isArray(v)
+      ? v
+          .map(normalizeHiddenCommentPrefixEntry)
+          .filter((e): e is HiddenCommentPrefixEntry => e !== null)
+      : undefined,
 };
 
 function sanitizeSettings(value: unknown): AppSettings | undefined {

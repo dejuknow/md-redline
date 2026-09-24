@@ -28,6 +28,7 @@ import {
 import { randomId } from '../lib/random-id';
 import { getEffectiveStatus } from '../types';
 import { renderMarkdown } from '../markdown/pipeline';
+import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
@@ -62,6 +63,9 @@ export interface UseCommentsParams {
   enableResolve: boolean;
   /** Render single source newlines as line breaks (the Keep line breaks setting). */
   keepLineBreaks: boolean;
+  /** Render ordinary HTML comments, and the prefixes that keep one hidden. */
+  renderHtmlComments?: boolean;
+  hiddenCommentPrefixes?: string[];
   tabs: TabInfo[];
   activeFilePath: string | null;
   viewerRef: RefObject<MarkdownViewerHandle | null>;
@@ -81,6 +85,8 @@ export function useComments(params: UseCommentsParams) {
     author,
     enableResolve,
     keepLineBreaks,
+    renderHtmlComments = true,
+    hiddenCommentPrefixes = DEFAULT_HIDDEN_COMMENT_PREFIXES,
     tabs,
     activeFilePath,
     viewerRef,
@@ -103,9 +109,13 @@ export function useComments(params: UseCommentsParams) {
   const html = useMemo(
     () =>
       cleanMarkdown
-        ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined, { keepLineBreaks })
+        ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined, {
+            keepLineBreaks,
+            renderHtmlComments,
+            hiddenCommentPrefixes,
+          })
         : '',
-    [cleanMarkdown, activeFilePath, keepLineBreaks],
+    [cleanMarkdown, activeFilePath, keepLineBreaks, renderHtmlComments, hiddenCommentPrefixes],
   );
 
   // Detect missing anchors

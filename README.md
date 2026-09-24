@@ -231,6 +231,7 @@ This makes feedback:
 - Real-time reload via SSE when files change externally
 - Mermaid diagram rendering with commentable text
 - YAML and TOML frontmatter rendered as commentable content, not hidden
+- HTML comments rendered muted and monospaced in the rendered view (with visible `<!--`/`-->`), not dropped
 - Local image embeds and clickable links between markdown files
 - Customizable comment templates
 - 8 themes: Light, Dark, Sepia, Nord, Solarized, GitHub, Rosé Pine, Catppuccin

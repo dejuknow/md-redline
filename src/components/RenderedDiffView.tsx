@@ -11,6 +11,7 @@ import {
 import { type DiffLine } from '../lib/diff';
 import { renderMarkdown } from '../markdown/pipeline';
 import { getFrontmatterRange } from '../lib/comment-parser';
+import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 
 export type DiffSegmentType = 'same' | 'added' | 'removed';
 
@@ -285,6 +286,9 @@ interface Props {
   diffLines: DiffLine[];
   /** Render single source newlines as line breaks, matching the main view. */
   keepLineBreaks: boolean;
+  /** The same comment settings as the main rendered view. */
+  renderHtmlComments?: boolean;
+  hiddenCommentPrefixes?: string[];
 }
 
 function escapeHtmlAttr(s: string): string {
@@ -292,7 +296,14 @@ function escapeHtmlAttr(s: string): string {
 }
 
 export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(function RenderedDiffView(
-  { rawMarkdown, diffSnapshot, diffLines, keepLineBreaks },
+  {
+    rawMarkdown,
+    diffSnapshot,
+    diffLines,
+    keepLineBreaks,
+    renderHtmlComments = true,
+    hiddenCommentPrefixes = DEFAULT_HIDDEN_COMMENT_PREFIXES,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -320,6 +331,8 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(functi
       const inner = renderMarkdown(seg.text, undefined, {
         allowFrontmatter: segmentIsDocumentStart(segments, segIndex),
         keepLineBreaks,
+        renderHtmlComments,
+        hiddenCommentPrefixes,
       });
       if (seg.type === 'same') {
         parts.push(inner);
@@ -332,7 +345,7 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(functi
       }
     }
     return parts.join('');
-  }, [segments, keepLineBreaks]);
+  }, [segments, keepLineBreaks, renderHtmlComments, hiddenCommentPrefixes]);
 
   // Reset active chunk when the diff itself changes.
   useEffect(() => {
