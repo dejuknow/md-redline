@@ -11,6 +11,7 @@ import type {
   WaitInput,
   WaitResult,
 } from './types';
+import { ServerUnreachableError } from './client';
 
 const BATCH_PREAMBLE = (sessionId: string) =>
   `Review batch received (session ${sessionId}). Address ONLY the comments ` +
@@ -343,7 +344,9 @@ export async function handleAskToolCall(
   if (ctx.signal?.aborted) {
     void ctx.client.releaseAsk(input.sessionId, askId).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('HTTP 404')) {
+      // A server that is gone has already dropped the ask with the session,
+      // so there is nothing to release and nothing worth logging.
+      if (!msg.includes('HTTP 404') && !(err instanceof ServerUnreachableError)) {
         console.warn(
           `[mcp] releaseAsk on early-cancel failed for ${input.sessionId}/${askId}:`,
           err,
@@ -385,7 +388,9 @@ export async function handleAskToolCall(
       // user may have answered just before cancel fired). Any other error
       // is a real failure worth surfacing on the server log.
       const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('HTTP 404')) {
+      // A server that is gone has already dropped the ask with the session,
+      // so there is nothing to release and nothing worth logging.
+      if (!msg.includes('HTTP 404') && !(err instanceof ServerUnreachableError)) {
         console.warn(`[mcp] releaseAsk on cancel failed for ${input.sessionId}/${askId}:`, err);
       }
     });
