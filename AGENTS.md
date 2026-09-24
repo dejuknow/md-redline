@@ -173,7 +173,7 @@ chooses, not about every byte that can reach disk during a request.
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent
 - `POST /api/review-sessions/:id/finish` — send final batch and close session. Pending asks do not block finish: inline replies found in the markers are delivered to the agent first, and remaining unanswered asks close as `done_without_reply` with their markers preserved (flags cleared).
 - `POST /api/review-sessions/:id/abort` — cancel session
-- `POST /api/review-sessions/:id/heartbeat` — keep session alive (browser sends every 10s)
+- `POST /api/review-sessions/:id/heartbeat` — keep session alive (each browser tab sends every 10s for sessions covering a file it has open)
 - `GET /api/review-sessions/:id/wait` — long-poll for the user-batch flow; agent blocks here until a batch or finish arrives. 409 on agent-origin sessions (use `/agent-wait`). Optional `?timeout=<seconds>` returns `{ status: 'pending' }` for re-polling clients.
 - `GET /api/review-sessions/:id/agent-wait` — long-poll for agent-origin sessions; resolves when the user clicks End review (`{ status: 'done' }`) or the session ends another way (`{ status: 'aborted', reason }`). Same `?timeout` contract as `/wait`. Backs the `mdr_wait` tool.
 - `POST /api/review-sessions/:id/agent-done` — the End review click. Delivers any inline replies sitting in the markers to a pending ask (partial delivery allowed), clears `expectsReply` on unanswered markers, then resolves the agent's `/agent-wait`. 409 on user-origin sessions.
@@ -613,8 +613,12 @@ Install commands:
 - `mdr mcp install --claude-desktop` — install for Claude Desktop
 - `mdr mcp install --claude-code` — explicit Claude Code install
 
-Session lifecycle: browser heartbeats every 10s. Server sweeps abandoned sessions
-after 30s without a heartbeat. If the agent is waiting and the browser disconnects,
+Session lifecycle: each browser tab heartbeats every 10s, and only for sessions
+covering a file it has open, never every session the server lists (#114).
+The banner renders the same list (`shownSessions` from `useReviewSession`), so a
+tab never shows a review it is letting expire; `mdr sessions` sees them all.
+Server sweeps abandoned sessions after 30 minutes without a heartbeat
+(`HEARTBEAT_TIMEOUT_MS`). If the agent is waiting and the browser disconnects,
 the server waits 60s before clearing `waitingForAgent`.
 
 ## UI features

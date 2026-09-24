@@ -1248,7 +1248,13 @@ export default function App() {
     [captureReference, handleCopyAgentPrompt, activeFilePath, tabs],
   );
 
-  const { sessions: reviewSessions, refresh: refreshReviewSessions } = useReviewSession();
+  const {
+    sessions: reviewSessions,
+    shownSessions: shownReviewSessions,
+    refresh: refreshReviewSessions,
+  } = useReviewSession(
+    activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
+  );
 
   // Mirrors the snapshot logic in handleHandoff so multi-file review sessions
   // get diff baselines for every involved tab, not just the active one.
@@ -3024,7 +3030,7 @@ export default function App() {
       {/* Main column: chrome row, document, status bar */}
       <div className="flex-1 min-w-0 flex flex-col">
         <ReviewBanner
-          sessions={reviewSessions}
+          sessions={shownReviewSessions}
           commentCounts={commentCounts}
           agentCommentCounts={agentCommentCounts}
           onHandoffSuccess={handleReviewHandoffSuccess}
