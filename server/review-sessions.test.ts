@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { MAX_SESSION_AUTHOR_LEN, ReviewSessionStore } from './review-sessions';
+import {
+  MAX_SESSION_AUTHOR_LEN,
+  ReviewSessionStore,
+  type PersistedStoreState,
+} from './review-sessions';
 
 describe('ReviewSessionStore', () => {
   let store: ReviewSessionStore;
@@ -1203,5 +1207,226 @@ describe('adding files to an open session (#117)', () => {
     const addedAt = store.getSession(s.id)?.fileAddedAt ?? {};
     expect(Object.keys(addedAt)).toEqual(['/d/b.md']);
     expect(Number.isNaN(Date.parse(addedAt['/d/b.md']))).toBe(false);
+  });
+});
+
+describe('persistence (#116)', () => {
+  // Every test round-trips exportState() through JSON, the way the file on
+  // disk actually stores it, so a test passing here means the real save/load
+  // path would behave the same way — not just the in-memory objects.
+  function roundTrip(state: PersistedStoreState): PersistedStoreState {
+    return JSON.parse(JSON.stringify(state)) as PersistedStoreState;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-24T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('an open user session receives a batch sent after restore', async () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    after.beginWaitPark(session.id);
+    const waiter = after.waitForSession(session.id);
+    after.sendBatch(session.id, 'BATCH', ['c1']);
+
+    const result = await waiter;
+    expect(result).toEqual({ status: 'batch', prompt: 'BATCH', commentIds: ['c1'] });
+    after.dispose();
+  });
+
+  it('a queued batch is delivered on the first wait after restore', async () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    before.beginWaitPark(session.id);
+    before.waitForSession(session.id);
+    before.sendBatch(session.id, 'batch1', ['c1']); // sets waitingForAgent, so the next batch queues
+    before.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    after.beginWaitPark(session.id);
+    const result = await after.waitForSession(session.id);
+    expect(result.status).toBe('batch');
+    if (result.status === 'batch') {
+      expect(result.commentIds).toEqual(['c2']);
+    }
+    expect(after.getQueuedBatch(session.id)).toBeNull();
+    after.dispose();
+  });
+
+  it('a finished session resolves waitForSession immediately with the same terminal result', async () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    before.beginWaitPark(session.id);
+    before.waitForSession(session.id);
+    before.finish(session.id, 'FINAL PROMPT', ['c1']);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    const result = await after.waitForSession(session.id);
+    expect(result).toEqual({ status: 'done', prompt: 'FINAL PROMPT' });
+    after.dispose();
+  });
+
+  it('an agent session resolves waitForSessionDone after Done, across a restore', async () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    before.setSessionDone(session.id);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    await expect(after.waitForSessionDone(session.id)).resolves.toBeUndefined();
+    after.dispose();
+  });
+
+  it('a pending ask can still be settled after restore, unblocking waitForAsk', async () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    before.recordAgentComments(session.id, 1);
+    const { askId } = before.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    const waiter = after.waitForAsk(askId);
+    expect(waiter).toBeDefined();
+
+    after.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'answer' }]);
+    const result = await waiter!;
+    expect(result).toEqual({
+      status: 'reply',
+      replies: [{ questionIndex: 0, text: 'answer' }],
+      totalQuestions: 1,
+    });
+    after.dispose();
+  });
+
+  it('a settled ask from before the restart is still returned by getSettledAsk after restore', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    before.recordAgentComments(session.id, 1);
+    const { askId } = before.addAsk(session.id, [
+      { commentId: 'c1', filePath: '/tmp/a.md', anchor: 'a', text: 'q1' },
+    ]);
+    before.resolveReplies(session.id, askId, [{ commentId: 'c1', text: 'answer' }]);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    expect(after.getSettledAsk(session.id, askId)).toEqual({
+      status: 'reply',
+      replies: [{ questionIndex: 0, text: 'answer' }],
+      totalQuestions: 1,
+    });
+    after.dispose();
+  });
+
+  it('resets lastHeartbeatAt to the restore moment', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    vi.advanceTimersByTime(5 * 60_000);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const restoreTime = new Date();
+    const after = new ReviewSessionStore();
+    after.restoreState(state, restoreTime);
+    expect(after.getSession(session.id)?.lastHeartbeatAt.getTime()).toBe(restoreTime.getTime());
+    after.dispose();
+  });
+
+  it('a restored silent agent session is not GC-eligible right after restore, but is once AGENT_SILENT_TIMEOUT_MS has passed since the restore', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    // createdAt ends up 10 minutes before the export, well past the 5-minute
+    // silent-agent timeout, simulating a session that sat through downtime.
+    vi.advanceTimersByTime(10 * 60_000);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+
+    // The 10 minutes of "silence" happened before the restore; livenessFloor
+    // must keep it from counting.
+    after.gcSilentAgentSessions();
+    expect(after.getSession(session.id)?.status).toBe('open');
+
+    // AGENT_SILENT_TIMEOUT_MS measured from the RESTORE, not from createdAt.
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1000);
+    after.gcSilentAgentSessions();
+    expect(after.getSession(session.id)?.status).toBe('aborted');
+    after.dispose();
+  });
+
+  it('findOpenSession still finds a restored session by its current and original file sets', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
+    before.addFiles(session.id, ['/d/b.md']);
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, new Date());
+    expect(after.findOpenSession(['/d/a.md'], 'user')?.id).toBe(session.id);
+    expect(after.findOpenSession(['/d/b.md', '/d/a.md'], 'user')?.id).toBe(session.id);
+    after.dispose();
+  });
+
+  it('onChange fires after a mutation and not after heartbeat() or wait-park bookkeeping', () => {
+    const store = new ReviewSessionStore();
+    let calls = 0;
+    store.setOnChange(() => {
+      calls++;
+    });
+
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    expect(calls).toBeGreaterThan(0);
+
+    calls = 0;
+    store.heartbeat(session.id);
+    store.beginWaitPark(session.id);
+    store.endWaitPark(session.id);
+    expect(calls).toBe(0);
+
+    store.abort(session.id, 'user_cancelled');
+    expect(calls).toBeGreaterThan(0);
+    store.dispose();
   });
 });
