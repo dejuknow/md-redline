@@ -186,3 +186,51 @@ test.describe('Review session banner', () => {
     await expect(page.getByTestId('review-banner')).toHaveCount(0, { timeout: 8_000 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// #117: an agent adds a file to a review this tab is showing
+// ---------------------------------------------------------------------------
+
+test.describe('Adding a file to an open review', () => {
+  const ADDED_PATH = resolve(__dirname, 'fixtures/review-session-added.md');
+  const ADDED_BASENAME = basename(ADDED_PATH);
+  // The tab bar's own element: Explorer rows carry the same title but not
+  // this class, and the Explorer lists the file whether or not a tab opened.
+  const tabFor = (page: import('@playwright/test').Page, path: string) =>
+    page.locator(`[title="${path}"].rounded-t-md`);
+
+  test.beforeEach(async ({ request, baseURL }) => {
+    await abortAllSessions(baseURL!, request);
+    writeFileSync(ADDED_PATH, '# Added File\n\nAdded mid-review.\n');
+  });
+
+  test.afterEach(() => {
+    if (existsSync(ADDED_PATH)) unlinkSync(ADDED_PATH);
+  });
+
+  test('opens the added file in the background and says who added it', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    const sessionId = await createSession(baseURL!, request);
+    await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+    await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
+    await expect(tabFor(page, FIXTURE_PATH)).toBeVisible({ timeout: 5_000 });
+    await expect(tabFor(page, ADDED_PATH)).toHaveCount(0);
+
+    const add = await request.post(`${baseURL}/api/review-sessions/${sessionId}/files`, {
+      data: { filePaths: [ADDED_PATH] },
+    });
+    expect(add.status()).toBe(200);
+    expect(((await add.json()) as { added: string[] }).added).toEqual([ADDED_PATH]);
+
+    // Picked up on the next session poll (every 5s).
+    await expect(tabFor(page, ADDED_PATH)).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('status').filter({ hasText: 'added' })).toContainText(
+      `Agent added ${ADDED_BASENAME} to this review`,
+    );
+    // In the background: the reader stays on the file they were reading.
+    await expect(page.getByRole('heading', { name: 'Review Session Fixture' })).toBeVisible();
+  });
+});

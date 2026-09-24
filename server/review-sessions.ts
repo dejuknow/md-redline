@@ -135,12 +135,20 @@ export interface ReviewSession {
    * (#113).
    */
   author?: string;
+  /**
+   * When each file added after creation arrived (#117), ISO strings keyed by
+   * path. A tab uses it to tell a file added after the tab loaded, which it
+   * opens, from one that was already there, which it leaves alone.
+   */
+  fileAddedAt?: Record<string, string>;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
   waitingForAgent: boolean;
 }
 
 interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
+  /** The files the session was created with, before any addFiles (#117). */
+  originalFilePaths: string[];
   resolver: (result: ReviewResult) => void;
   waiter: Promise<ReviewResult>;
   /**
@@ -249,6 +257,7 @@ export class ReviewSessionStore {
     const session: InternalSession = {
       id,
       filePaths: [...input.filePaths],
+      originalFilePaths: [...input.filePaths],
       enableResolve: input.enableResolve,
       origin: input.origin ?? 'user',
       clientId: input.clientId,
@@ -288,8 +297,9 @@ export class ReviewSessionStore {
 
   /**
    * Find an existing open session whose file paths match the given set
-   * (order-independent). Used to deduplicate when the tool is called twice
-   * for the same files. Requires a recent heartbeat so a crash-leaked
+   * (order-independent), either as they are now or as the session was created
+   * before any addFiles (#117). Used to deduplicate when the tool is called
+   * twice for the same files. Requires a recent heartbeat so a crash-leaked
    * session doesn't get reused — see FIND_OPEN_FRESHNESS_MS.
    *
    * The `origin` filter is mandatory: agent-origin and user-origin sessions
@@ -303,8 +313,12 @@ export class ReviewSessionStore {
     origin: SessionOrigin,
     clientId?: string,
   ): ReviewSession | undefined {
-    const sorted = [...filePaths].sort();
     const freshCutoff = Date.now() - FIND_OPEN_FRESHNESS_MS;
+    const requested = [...new Set(filePaths)].sort();
+    const sameSet = (paths: string[]) => {
+      const sorted = [...new Set(paths)].sort();
+      return sorted.length === requested.length && sorted.every((p, i) => p === requested[i]);
+    };
     for (const s of this.sessions.values()) {
       if (s.status !== 'open') continue;
       if (s.origin !== origin) continue;
@@ -314,12 +328,41 @@ export class ReviewSessionStore {
       // slot would serialize them, and one Done would resolve both waits.
       if ((s.clientId ?? null) !== (clientId ?? null)) continue;
       if (s.lastHeartbeatAt.getTime() < freshCutoff) continue;
-      const existing = [...s.filePaths].sort();
-      if (sorted.length === existing.length && sorted.every((p, i) => p === existing[i])) {
-        return this.toPublic(s);
-      }
+      // Matching the original files too closes #117's trap: once a session
+      // has grown, asking again for the files it started with would otherwise
+      // silently open a second review on them. A larger session is never
+      // reused for a smaller request that it did not start as.
+      if (sameSet(s.filePaths) || sameSet(s.originalFilePaths)) return this.toPublic(s);
     }
     return undefined;
+  }
+
+  /**
+   * Widen an open session with more files (#117). Paths must already be
+   * canonical and access-checked, which the route does. Returns the paths
+   * actually added, in request order, skipping any the session already
+   * covers; undefined when the session is unknown or no longer open.
+   */
+  addFiles(
+    sessionId: string,
+    filePaths: string[],
+    maxFiles = Infinity,
+  ): { session: ReviewSession; added: string[] } | 'too_many' | undefined {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.status !== 'open') return undefined;
+    const added: string[] = [];
+    for (const p of filePaths) {
+      if (!s.filePaths.includes(p) && !added.includes(p)) added.push(p);
+    }
+    // Checked here, on the live list, so two concurrent adds can't both pass.
+    if (s.filePaths.length + added.length > maxFiles) return 'too_many';
+    s.filePaths.push(...added);
+    if (added.length > 0) {
+      const at = new Date().toISOString();
+      s.fileAddedAt = { ...s.fileAddedAt };
+      for (const p of added) s.fileAddedAt[p] = at;
+    }
+    return { session: this.toPublic(s), added };
   }
 
   /**
@@ -1056,6 +1099,7 @@ export class ReviewSessionStore {
     return {
       id: s.id,
       filePaths: [...s.filePaths],
+      fileAddedAt: s.fileAddedAt ? { ...s.fileAddedAt } : undefined,
       enableResolve: s.enableResolve,
       origin: s.origin,
       clientId: s.clientId,

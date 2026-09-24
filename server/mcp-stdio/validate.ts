@@ -1,5 +1,6 @@
 import type {
   AskInput,
+  AddFilesInput,
   BaselineInput,
   RequestReviewInput,
   ReviewInput,
@@ -314,6 +315,27 @@ export function validateAskInput(raw: unknown): ValidationResult<AskInput> {
       questions: obj.questions as AskInput['questions'],
     },
   };
+}
+
+/** Validate a raw mdr_add_files argument object: `{ sessionId, filePaths }` (#117). */
+export function validateAddFilesInput(raw: unknown): ValidationResult<AddFilesInput> {
+  if (typeof raw !== 'object' || raw === null) {
+    return { ok: false, error: 'input must be an object' };
+  }
+  const obj = raw as { sessionId?: unknown; filePaths?: unknown };
+  if (typeof obj.sessionId !== 'string' || obj.sessionId.length === 0) {
+    return { ok: false, error: 'sessionId must be a non-empty string' };
+  }
+  if (!Array.isArray(obj.filePaths) || obj.filePaths.length === 0) {
+    return { ok: false, error: 'filePaths must be a non-empty array' };
+  }
+  if (obj.filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
+    return { ok: false, error: 'filePaths must contain non-empty strings' };
+  }
+  if (obj.filePaths.length > 64) {
+    return { ok: false, error: 'filePaths must have at most 64 entries' };
+  }
+  return { ok: true, value: { sessionId: obj.sessionId, filePaths: obj.filePaths as string[] } };
 }
 
 /**

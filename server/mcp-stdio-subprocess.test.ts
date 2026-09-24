@@ -145,6 +145,7 @@ async function waitFor(
       const tools = (toolsResp?.result as { tools: Array<{ name: string }> }).tools;
       const names = tools.map((t) => t.name).sort();
       expect(names).toEqual([
+        'mdr_add_files',
         'mdr_ask',
         'mdr_baseline',
         'mdr_comment',

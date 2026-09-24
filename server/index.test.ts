@@ -3454,6 +3454,87 @@ describe('GET /api/review-sessions/:id/asks/:askId/wait', () => {
   });
 });
 
+describe('POST /api/review-sessions/:id/files (#117)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  async function openReview() {
+    const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-addfiles-')));
+    dirs.push(tmp);
+    for (const f of ['a.md', 'b.md']) await writeFile(join(tmp, f), `# ${f}\n`, 'utf8');
+    await writeFile(join(tmp, 'notes.txt'), 'x\n', 'utf8');
+    const { app, reviewSessions } = await buildTestApp({ allowedRoots: [tmp] });
+    const create = (filePaths: string[]) =>
+      app.request('/api/review-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePaths }),
+      });
+    const first = await create([join(tmp, 'a.md')]);
+    expect(first.ok).toBe(true);
+    const { sessionId } = (await first.json()) as { sessionId: string };
+    const add = (filePaths: string[], id = sessionId) =>
+      app.request(`/api/review-sessions/${id}/files`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePaths }),
+      });
+    return { tmp, sessionId, reviewSessions, create, add };
+  }
+
+  it('adds a file to the open session and reports what it added', async () => {
+    const { tmp, sessionId, add } = await openReview();
+    const res = await add([join(tmp, 'a.md'), join(tmp, 'b.md')]);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      sessionId,
+      filePaths: [join(tmp, 'a.md'), join(tmp, 'b.md')],
+      added: [join(tmp, 'b.md')],
+    });
+  });
+
+  it('reuses the widened session when its original files are asked for again', async () => {
+    // The issue's trap: with exact-set dedupe, asking for a.md again after the
+    // session grew to a.md + b.md silently opened a second review.
+    const { tmp, sessionId, add, create } = await openReview();
+    expect((await add([join(tmp, 'b.md')])).ok).toBe(true);
+    const again = await create([join(tmp, 'a.md')]);
+    expect(((await again.json()) as { sessionId: string }).sessionId).toBe(sessionId);
+  });
+
+  it('refuses an unknown session, an ended one, a non-markdown file, and a path outside the roots', async () => {
+    const { tmp, sessionId, reviewSessions, add } = await openReview();
+    expect((await add([join(tmp, 'b.md')], 'rev_missing')).status).toBe(404);
+    expect((await add([join(tmp, 'notes.txt')])).status).toBe(400);
+    expect((await add([])).status).toBe(400);
+    expect((await add(['/etc/hosts.md'])).status).toBe(403);
+
+    reviewSessions.abort(sessionId, 'user_cancelled');
+    expect((await add([join(tmp, 'b.md')])).status).toBe(409);
+  });
+
+  it('caps a call at 64 files and a session at 256, since every tab polls the list', async () => {
+    const { tmp, add } = await openReview();
+    const many = (n: number, prefix: string) =>
+      Array.from({ length: n }, (_, i) => join(tmp, `${prefix}${i}.md`));
+    for (const p of [...many(65, 'x'), ...many(192, 'y')]) await writeFile(p, '# f\n', 'utf8');
+
+    const tooMany = await add(many(65, 'x'));
+    expect(tooMany.status).toBe(400);
+    expect(await tooMany.text()).toContain('at most 64');
+
+    // 1 + 64 + 64 + 64 = 193 fits; one more batch of 64 would pass 256.
+    for (const batch of [many(64, 'x'), many(64, 'y').slice(0, 64), many(128, 'y').slice(64)]) {
+      expect((await add(batch)).ok).toBe(true);
+    }
+    const overCap = await add(many(192, 'y').slice(128));
+    expect(overCap.status).toBe(400);
+    expect(await overCap.text()).toContain('at most 256');
+  });
+});
+
 describe('ask wait as a bounded long-poll (#131)', () => {
   // The agent now polls with ?timeout= and re-polls, so the reply can land
   // while no request is parked. These pin that it is never lost.

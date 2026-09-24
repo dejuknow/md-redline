@@ -142,6 +142,20 @@ export interface WaitInput {
   sessionId: string;
 }
 
+/** mdr_add_files: widen an open session with more files (#117). */
+export interface AddFilesInput {
+  sessionId: string;
+  filePaths: string[];
+}
+
+export interface AddFilesResult {
+  sessionId: string;
+  /** Every file the session covers now, in order. */
+  filePaths: string[];
+  /** The files this call added; empty when the session already covered them all. */
+  added: string[];
+}
+
 export interface BaselineInput {
   filePaths: string[];
   agentName?: string;
@@ -199,6 +213,8 @@ export interface MdrClient {
   waitForReview(sessionId: string, timeoutSeconds?: number): Promise<WaitForReviewResult>;
   /** POST /api/baselines. Returns immediately; the server reads the files itself. */
   captureBaseline(input: BaselineInput): Promise<CaptureBaselineResult>;
+  /** POST /api/review-sessions/:id/files. Paths must already be granted. */
+  addSessionFiles(sessionId: string, filePaths: string[]): Promise<AddFilesResult>;
   /** GET /api/baselines. Resolves { baselines: [] } on a non-ok response rather than throwing. */
   listBaselines(): Promise<ListBaselinesResult>;
   /**

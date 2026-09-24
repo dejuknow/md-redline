@@ -208,6 +208,73 @@ export function registerReviewSessionRoutes(
       }
     }
   }
+  /**
+   * Canonicalize and access-check the markdown paths a session covers. Shared
+   * by creating a session and adding files to one (#117), so the two cannot
+   * drift on what a session may hold.
+   */
+  async function resolveReviewPaths(
+    filePaths: unknown,
+  ): Promise<{ ok: true; resolved: string[] } | { ok: false; error: string; status: 400 | 403 }> {
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+      return { ok: false, error: 'filePaths must be a non-empty array', status: 400 };
+    }
+    if (filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
+      return { ok: false, error: 'filePaths must contain non-empty strings', status: 400 };
+    }
+    const resolved: string[] = [];
+    for (const p of filePaths as string[]) {
+      try {
+        const r = await resolveAndValidate(p);
+        if (extname(r).toLowerCase() !== '.md') {
+          return { ok: false, error: `Not a .md file: ${p}`, status: 400 };
+        }
+        resolved.push(r);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'invalid path';
+        return { ok: false, error: msg, status: msg.startsWith('Access denied') ? 403 : 400 };
+      }
+    }
+    return { ok: true, resolved };
+  }
+
+  const MAX_ADD_FILES_PER_CALL = 64;
+  const MAX_SESSION_FILES = 256;
+
+  // Add files to an open session (#117): a reviewer mid-review asks for one
+  // more file, and the agent widens the session it is in instead of opening a
+  // new one and handing over a new URL.
+  app.post('/api/review-sessions/:id/files', async (c) => {
+    const id = c.req.param('id');
+    const session = reviewSessions.getSession(id);
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    if (session.status !== 'open') return c.json({ error: 'Session is not open' }, 409);
+
+    let body: { filePaths?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+    const { filePaths } = body;
+    const resolution = await resolveReviewPaths(filePaths);
+    if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+
+    // Bounded: the file list goes to every open tab on every 5s poll.
+    if (resolution.resolved.length > MAX_ADD_FILES_PER_CALL) {
+      return c.json(
+        { error: `filePaths must have at most ${MAX_ADD_FILES_PER_CALL} entries` },
+        400,
+      );
+    }
+    const result = reviewSessions.addFiles(id, resolution.resolved, MAX_SESSION_FILES);
+    if (result === 'too_many') {
+      return c.json({ error: `a session can cover at most ${MAX_SESSION_FILES} files` }, 400);
+    }
+    if (!result) return c.json({ error: 'Session is not open' }, 409);
+    return c.json({ sessionId: id, filePaths: result.session.filePaths, added: result.added });
+  });
+
   app.post('/api/review-sessions', async (c) => {
     let body: {
       filePaths?: unknown;
@@ -248,29 +315,9 @@ export function registerReviewSessionRoutes(
       }
       clientId = body.clientId;
     }
-    if (!Array.isArray(filePaths) || filePaths.length === 0) {
-      return c.json({ error: 'filePaths must be a non-empty array' }, 400);
-    }
-    if (filePaths.some((p) => typeof p !== 'string' || p.length === 0)) {
-      return c.json({ error: 'filePaths must contain non-empty strings' }, 400);
-    }
-
-    const resolved: string[] = [];
-    for (const p of filePaths) {
-      try {
-        const r = await resolveAndValidate(p as string);
-        if (extname(r).toLowerCase() !== '.md') {
-          return c.json({ error: `Not a .md file: ${p}` }, 400);
-        }
-        resolved.push(r);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'invalid path';
-        if (msg.startsWith('Access denied')) {
-          return c.json({ error: msg }, 403);
-        }
-        return c.json({ error: msg }, 400);
-      }
-    }
+    const resolution = await resolveReviewPaths(filePaths);
+    if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+    const resolved = resolution.resolved;
 
     // Deduplicate within the same origin: if a recent open session for the
     // same files already exists, return it instead of creating a new one.

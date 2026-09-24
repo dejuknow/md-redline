@@ -167,11 +167,12 @@ and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
-- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own. The MCP client sends a process-scoped UUID, or `MD_REDLINE_CLIENT_ID` when set (`resolveClientId` in `server/mcp-stdio/client.ts`), for clients that start a fresh `mdr mcp` per tool call and would otherwise never match their own session. It must be at most 256 characters, checked when `mdr mcp` starts.
+- `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own. Reuse needs an exact match on the requested file set, compared against both the session's current files and the files it started with, so a session widened by `mdr_add_files` is found again when its original files are asked for (#117). A larger session is never joined for a smaller request, since one Done would then end both reviews. The MCP client sends a process-scoped UUID, or `MD_REDLINE_CLIENT_ID` when set (`resolveClientId` in `server/mcp-stdio/client.ts`), for clients that start a fresh `mdr mcp` per tool call and would otherwise never match their own session. It must be at most 256 characters, checked when `mdr mcp` starts.
 - `GET /api/review-sessions` — list open sessions
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent
 - `POST /api/review-sessions/:id/finish` — send final batch and close session. Pending asks do not block finish: inline replies found in the markers are delivered to the agent first, and remaining unanswered asks close as `done_without_reply` with their markers preserved (flags cleared).
+- `POST /api/review-sessions/:id/files` — add files to an open session (`{ filePaths }`, #117). Paths go through the same checks as creating a session (`resolveReviewPaths`: canonical, allowed roots, `.md` only), at most 64 per call and 256 per session (the total is checked in `ReviewSessionStore.addFiles` on the live list, so concurrent adds can't overshoot). Records each added file's time in `fileAddedAt`. Returns `{ sessionId, filePaths, added }`; 404 for an unknown session, 409 for one that has ended. A tab showing the session opens each newly added file in the background and toasts "{author} added b.md to this review" (`useOpenAddedReviewFiles`). A file counts as added when it appears after the tab first saw the session, or, for the review the page's `?review=` link opened, when its `fileAddedAt` is after the page loaded (covers a file added before the first poll; other reviews skip this, so a long-lived tab that only now shows a review doesn't open its older additions). Each opens at most once per page, so a file the reader closed is never reopened.
 - `POST /api/review-sessions/:id/abort` — cancel session
 - `POST /api/review-sessions/:id/heartbeat` — keep session alive (each browser tab sends every 10s for sessions covering a file it has open)
 - `GET /api/review-sessions/:id/wait` — long-poll for the user-batch flow; agent blocks here until a batch or finish arrives. 409 on agent-origin sessions (use `/agent-wait`). Optional `?timeout=<seconds>` returns `{ status: 'pending' }` for re-polling clients.
@@ -480,7 +481,7 @@ terminal update notice.
 
 ## MCP stdio server
 
-The MCP server exposes five tools.
+The MCP server exposes six tools.
 
 **`mdr_request_review`** — An AI agent calls it with `{ filePaths, enableResolve? }` to
 create a user-initiated review session. The server opens the browser with
@@ -586,6 +587,16 @@ see the caveat under `mdr_comment` above.
 
 Server-side GC: if a session has `origin='agent'` and no comments are posted within
 5 minutes with no MCP heartbeat, the session is aborted with `reason='agent_silent'`.
+
+**`mdr_add_files`** — `{ sessionId, filePaths }`, at most 64 paths. Non-blocking. Widens an
+open session of either origin with more files (#117) through
+`POST /api/review-sessions/:id/files`, after granting access the same way the creating
+tools do. Files the session already covers are skipped, and the result says which were
+added. A session that has ended (409, or 404 with `Session not found`) can't grow: the tool says so and
+points at starting a new review. A bare 404 means the server predates the route, and the tool
+says to restart mdr. The reviewer's open tab opens the added files by itself (below), so the tool opens
+no browser. When `mdr_comment` or `mdr_ask` is rejected for a file outside the session, the
+error tells the agent to add it with `mdr_add_files` first (`withAddFilesHint`).
 
 **`mdr_baseline`** — `{ filePaths, agentName? }`, at most 64 paths. Non-blocking. Asks the
 server to store a copy of each file as it is now; the route checks allowed roots itself,
