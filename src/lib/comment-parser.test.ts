@@ -2512,6 +2512,49 @@ describe('insertComment inside fenced code blocks', () => {
       expect(parseComments(result).cleanMarkdown).toBe(raw);
     });
 
+    it('keeps the anchor verbatim when it resolves inside a comment body', () => {
+      // The rendered view emits the comment body byte-identical (AGENTS.md,
+      // "HTML comments"), so what the DOM hands insertComment is source text.
+      // Relocating the MARKER out of the block must not touch the ANCHOR: the
+      // anchor is what highlighting, orphan detection and agent handoff all
+      // search for, and a rewritten one matches nothing and fails silently.
+      const anchor = 'retry loop & <timeout> "budget"';
+      const raw = `# Notes\n\n<!-- TODO: ${anchor} -->\n\nBody.\n`;
+      const result = insertComment(raw, anchor, 'why?');
+      const [comment] = parseComments(result).comments;
+      expect(comment.anchor).toBe(anchor);
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('preserves contextBefore/contextAfter through relocation', () => {
+      // Context describes where the ANCHOR sits, not where the marker landed.
+      // Relocation moves only the marker, so a round trip that rewrote context
+      // to match the new position would disambiguate onto the wrong copy.
+      const raw = '# T\n\n<!-- first: shared -->\n\n<!-- second: shared -->\n';
+      const result = insertComment(raw, 'shared', 'note', 'Agent', 'second: ', ' -->');
+      const [comment] = parseComments(result).comments;
+      expect(comment.contextBefore).toBe('second: ');
+      expect(comment.contextAfter).toBe(' -->');
+      expect(parseComments(result).cleanMarkdown).toBe(raw);
+    });
+
+    it('round-trips a second comment on a body that already carries one', () => {
+      // The select -> comment -> reload -> select -> comment path. The first
+      // marker sits on its own line before the block; the second must resolve
+      // against the reparsed clean text and land beside it, not inside the
+      // block and not inside the first marker.
+      const raw = '# T\n\n<!-- TODO: decide the retry loop -->\n\nBody.\n';
+      const once = insertComment(raw, 'decide the retry loop', 'why?');
+      expect(parseComments(once).cleanMarkdown).toBe(raw);
+
+      const twice = insertComment(once, 'decide the retry loop', 'second pass');
+      const parsed = parseComments(twice);
+      expect(parsed.comments).toHaveLength(2);
+      expect(parsed.cleanMarkdown).toBe(raw);
+      expect(twice).not.toMatch(/<!-- TODO: <!--/);
+      expect(twice).not.toMatch(/@comment[^>]*@comment/);
+    });
+
     it('does not nest inside an UNCLOSED html comment', () => {
       // Every HTML parser reads an unclosed comment as running to EOF. A
       // marker placed inside would close it early with its own `-->` and spill

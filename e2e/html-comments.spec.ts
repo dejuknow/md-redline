@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { addComment } from './helpers/comments';
 import { resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,66 @@ test.describe('HTML comments in the rendered view', () => {
     await expect(inline).toHaveText('inline note');
   });
 
+  test('comments on a comment body without nesting the marker inside it', async ({ page }) => {
+    await openFixture(page);
+
+    await addComment(page, 'decide the <retry> loop', 'which budget?');
+
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('which budget?');
+
+    const content = readFileSync(fixturePath, 'utf-8');
+
+    // The marker sits on its own line BEFORE the block. Nested, the first
+    // `-->` would close the outer comment and spill the rest as visible text.
+    expect(content).not.toMatch(/<!-- TODO: <!--/);
+    const lines = content.split('\n');
+    const markerIndex = lines.findIndex((l) => l.includes('@comment'));
+    const blockIndex = lines.findIndex((l) => l === `<!-- ${BODY} -->`);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    expect(blockIndex).toBeGreaterThanOrEqual(0);
+    expect(markerIndex).toBeLessThan(blockIndex);
+    // The marker owns its own line rather than sharing one with the comment
+    // it annotates.
+    expect(lines[markerIndex].startsWith('<!-- @comment')).toBe(true);
+    expect(lines[markerIndex].endsWith('-->')).toBe(true);
+
+    // The anchor survived the escaping round trip intact. It lives in the
+    // marker's JSON, where `>` is escaped as \u003e to keep `-->` from closing
+    // the marker early, so read it back through the parser rather than by
+    // string match on the line.
+    const marker = JSON.parse(lines[markerIndex].slice('<!-- @comment'.length, -' -->'.length)) as {
+      anchor: string;
+    };
+    expect(marker.anchor).toBe('decide the <retry> loop');
+
+    // And the highlight paints on the body, not on the delimiters.
+    const mark = page.locator('.doc-html-comment mark');
+    await expect(mark).toHaveText('decide the <retry> loop');
+  });
+
+  test('reloads the commented document and comments on the same body again', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'decide the <retry> loop', 'first pass');
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('first pass');
+
+    await openFixture(page);
+    await addComment(page, 'its "budget"', 'second pass');
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('second pass');
+
+    const content = readFileSync(fixturePath, 'utf-8');
+    // Two markers, both outside the block, and the block itself unchanged.
+    expect(content.match(/@comment/g)).toHaveLength(2);
+    expect(content).toContain(`<!-- ${BODY} -->`);
+    expect(content).not.toMatch(/<!-- TODO: <!--/);
+    expect(content).not.toMatch(/@comment[^>]*@comment/);
+  });
+
   test('keeps a multi-line comment on its own lines', async ({ page }) => {
     // innerText reads the rendered text layer, where CSS decides whether the
     // newlines in the DOM are shown, and which a selection anchor is taken from.
@@ -83,6 +144,40 @@ test.describe('HTML comments in the rendered view', () => {
     // The delimiters are ::before/::after, so they are not in the text layer.
     expect(text).not.toContain('<!--');
     expect(text).not.toContain('-->');
+  });
+
+  test('anchors a comment on the first line of a multi-line body, whose leading space was trimmed', async ({
+    page,
+  }) => {
+    // The rendered first line drops the separator space after `<!--`, so this
+    // is the line where the trim could break anchoring.
+    writeFileSync(
+      fixturePath,
+      '# Notes\n\n<!-- open question\nwhich retry budget?\n-->\n\nBody.\n',
+    );
+    await page.goto(`/?file=${fixturePath}`);
+    await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible({ timeout: 10_000 });
+
+    const pre = page.locator('.doc-html-comment.doc-html-comment--pre');
+    await expect(pre).toHaveText(/^open question/);
+
+    await addComment(page, 'open question', 'which check?');
+
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('which check?');
+
+    const content = readFileSync(fixturePath, 'utf-8');
+    const lines = content.split('\n');
+    const markerIndex = lines.findIndex((l) => l.includes('@comment'));
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    const marker = JSON.parse(lines[markerIndex].slice('<!-- @comment'.length, -' -->'.length)) as {
+      anchor: string;
+    };
+    expect(marker.anchor).toBe('open question');
+    // The block itself is untouched, and the marker did not nest inside it.
+    expect(content).toContain('<!-- open question\nwhich retry budget?\n-->');
+    expect(content).not.toMatch(/<!-- open question[^\n]*<!--/);
   });
 
   test('does not render a leftover @comment marker as a note', async ({ page }) => {
