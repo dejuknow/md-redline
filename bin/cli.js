@@ -29,7 +29,7 @@ import { FALLBACK_PORT, isValidPort, resolveNamedApiPort } from './ports.js';
 import { checkServer, gracefulShutdown, killPort, serverProbeOrder } from './server-control.js';
 import { formatSessions } from './sessions.js';
 import { buildWindowsCommand } from './spawn-command.js';
-import { isNewerVersion } from './version-compare.js';
+import { isNewerVersion, readInstalledVersion } from './version-compare.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -543,8 +543,12 @@ async function ensureServerRunning() {
   const existing = await findServerPort();
   if (existing) {
     const info = await getServerVersionInfo(existing);
-    if (info && info.version !== CLI_VERSION) {
-      console.log(`Upgrading mdr ${info.version} → ${CLI_VERSION}...`);
+    // The installed version, not CLI_VERSION: see readInstalledVersion. When
+    // it can't be read (an install is rewriting the package), keep the
+    // running server rather than restart from half-replaced files.
+    const installed = readInstalledVersion(APP_DIR);
+    if (info && installed !== null && info.version !== installed) {
+      console.log(`Upgrading mdr ${info.version} → ${installed}...`);
       const stopped = await gracefulShutdown(existing);
       if (!stopped) await stopServer(true);
     } else {
@@ -1122,6 +1126,11 @@ async function runSessionsCommand(args) {
 }
 
 async function runMcpStdio() {
+  // stdout carries the MCP protocol, and a client reads every line of it as a
+  // message. Status lines from the shared startup path ("Upgrading mdr...",
+  // "mdr is ready.") go to stderr instead (#134). The SDK's transport writes
+  // to process.stdout directly, so it is unaffected.
+  console.log = (...args) => console.error(...args);
   const distMcp = join(APP_DIR, 'dist', 'mcp-stdio.js');
   if (!isProductionMode()) {
     throw new Error(
