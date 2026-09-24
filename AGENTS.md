@@ -1504,12 +1504,37 @@ the same constant.
 comments. The app's settings turn rendering on by default and pass both to
 `useComments` and `RenderedDiffView`, so the two views agree.
 
-A comment is hidden when its body, after `trimStart`, starts with an enabled
-prefix as a whole word. The shipped prefixes live in
-`DEFAULT_HIDDEN_COMMENT_GROUPS` in `settings.ts`, grouped by tool for Settings.
-The stored setting is a list of `{prefix, enabled}` entries, merged with the
-shipped defaults by `mergeHiddenCommentPrefixEntries`, so a default is switched
-off rather than removed and a custom prefix is added alongside them.
+A comment is hidden when its body is empty or whitespace (CommonMark's `<!-- -->`
+list separator is never a note), or when the body, after `trimStart`, starts
+with an enabled prefix as a whole word. Matching is case-sensitive on purpose:
+directives are lowercase or fixed-case while a person's note opens with a
+capital, so `more` hides `<!-- more -->` and not `<!-- More thought needed -->`.
+Each spelling a tool writes is listed instead (`toc` and `TOC`). The cost: a
+fixed-case directive (`TOC`) or a lowercase one (`no toc`) also hides a note
+opening with exactly those letters, which is what each tool's checkbox is for.
+
+The shipped prefixes live in `DEFAULT_HIDDEN_COMMENT_TOOLS` in `settings.ts`,
+one entry per tool with a stable `id`, in label order because Settings renders
+them in list order. The stored setting, `hiddenComments`, is per tool, not per
+word: `shownTools` (ids the reader unticked), `custom` (their own words), and
+`customEnabled`. A word added to or removed from a tool in a later release
+follows that tool's checkbox. `getEnabledHiddenCommentPrefixes` flattens it
+into the list `renderMarkdown` takes.
+
+#124's first version stored one `{prefix, enabled}` entry per word under
+`hiddenCommentPrefixes`. It reached main but no release, so only people running
+main have it. `migrateLegacyHiddenCommentPrefixes` converts it, erring toward
+showing where per-word choices do not fit per tool: a tool is shown if any of
+its words was off, and an own word that was off is dropped. Nothing that
+rendered before is hidden after. `storedHiddenCommentSettings` holds the one
+precedence rule (valid `hiddenComments`, else the converted legacy list), and
+both `parseSettings` and the server's `sanitizeSettings` call it. The server
+has to convert on read because its allowlist does not carry the old key and
+would drop it.
+
+Settings shows the list collapsed to one summary row under Render HTML
+comments, next to the other display settings. Expanded, it is one grid:
+a checkbox per tool, the tool's words beside it, and a final "Your own" row.
 
 ### Mermaid fullscreen view
 Click the expand button (top-right of any Mermaid diagram on hover) to open the

@@ -859,6 +859,31 @@ describe('cross-process file lock', () => {
     expect(result.settings).toEqual({ proseFont: 'sans', docWidth: 'wide' });
   });
 
+  it("converts #124's per-word hidden comments on read, and any write persists it", async () => {
+    const legacy = {
+      settings: {
+        keepLineBreaks: true,
+        hiddenCommentPrefixes: [
+          { prefix: 'vale off', enabled: false },
+          { prefix: 'vale on', enabled: false },
+          { prefix: 'prettier-ignore', enabled: true },
+          { prefix: 'TODO', enabled: true },
+        ],
+      },
+    };
+    await writeFile(join(testDir, '.md-redline.json'), JSON.stringify(legacy));
+    const converted = {
+      keepLineBreaks: true,
+      hiddenComments: { shownTools: ['vale'], custom: ['TODO'], customEnabled: true },
+    };
+    expect((await readPreferences(testDir)).settings).toEqual(converted);
+
+    // A write that never touches settings still rewrites them in the new form.
+    await writePreferences(testDir, { author: 'Reviewer' });
+    const onDisk = JSON.parse(await readFile(join(testDir, '.md-redline.json'), 'utf-8'));
+    expect(onDisk.settings).toEqual(converted);
+  });
+
   it('drops invalid proseFont and docWidth values', async () => {
     const result = await writePreferences(testDir, {
       settings: {

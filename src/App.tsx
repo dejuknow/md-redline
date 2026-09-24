@@ -327,8 +327,8 @@ export default function App() {
   const { author, setAuthor } = useAuthor();
   const { settings, updateDocWidth, updateProseSize, updateKeepLineBreaks } = useSettings();
   const enabledHiddenCommentPrefixes = useMemo(
-    () => getEnabledHiddenCommentPrefixes(settings.hiddenCommentPrefixes),
-    [settings.hiddenCommentPrefixes],
+    () => getEnabledHiddenCommentPrefixes(settings.hiddenComments),
+    [settings.hiddenComments],
   );
   const setTheme = useSetPersistedTheme();
   const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();

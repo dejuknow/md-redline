@@ -5,10 +5,10 @@ import {
   DEFAULT_TEMPLATES,
   DEFAULT_ENABLE_RESOLVE,
   DEFAULT_HIDDEN_COMMENT_PREFIXES,
-  DEFAULT_HIDDEN_COMMENT_GROUPS,
-  mergeHiddenCommentPrefixEntries,
+  DEFAULT_HIDDEN_COMMENT_TOOLS,
+  DEFAULT_HIDDEN_COMMENTS,
   getEnabledHiddenCommentPrefixes,
-  hiddenCommentPrefixGroupFor,
+  migrateLegacyHiddenCommentPrefixes,
 } from './settings';
 
 describe('parseSettings', () => {
@@ -111,115 +111,195 @@ describe('parseSettings', () => {
       proseSize: 'large',
       keepLineBreaks: true,
       renderHtmlComments: false,
-      hiddenCommentPrefixes: [{ prefix: 'prettier-ignore', enabled: true }],
+      hiddenComments: { shownTools: ['vale'], custom: ['TODO'], customEnabled: false },
     };
     expect(parseSettings(full)).toEqual(full);
   });
 
   describe('HTML comment rendering', () => {
-    it('defaults to rendering, with the shipped directive list hidden', () => {
+    it('defaults to rendering, with every shipped tool hidden and no words of your own', () => {
       const parsed = parseSettings({});
       expect(parsed.renderHtmlComments).toBe(true);
-      expect(parsed.hiddenCommentPrefixes).toEqual(DEFAULT_SETTINGS.hiddenCommentPrefixes);
+      expect(parsed.hiddenComments).toEqual(DEFAULT_HIDDEN_COMMENTS);
     });
 
-    it('keeps an explicitly EMPTY prefix list rather than restoring the defaults', () => {
-      // An empty stored list is a legitimate "nothing customized yet" state —
-      // falling back to the defaults here would make it impossible to persist.
-      // (Whether every default then renders as enabled is a Settings-rendering
-      // question, handled by mergeHiddenCommentPrefixEntries, not by parsing.)
-      expect(parseSettings({ hiddenCommentPrefixes: [] }).hiddenCommentPrefixes).toEqual([]);
-    });
-
-    it('drops entries that are not an object with a string prefix', () => {
+    it('trims, dedupes, and drops anything that is not a word', () => {
       expect(
         parseSettings({
-          hiddenCommentPrefixes: [
-            'toc',
-            42,
-            null,
-            { enabled: false },
-            { prefix: 'more', enabled: false },
-            { prefix: 'toc' },
-          ],
-        }).hiddenCommentPrefixes,
-      ).toEqual([
-        { prefix: 'more', enabled: false },
-        { prefix: 'toc', enabled: true },
-      ]);
+          hiddenComments: {
+            shownTools: ['vale', 3, 'vale'],
+            custom: [' TODO ', '', 'TODO', null, 'DRAFT'],
+            customEnabled: 'yes',
+          },
+        }).hiddenComments,
+      ).toEqual({ shownTools: ['vale'], custom: ['TODO', 'DRAFT'], customEnabled: true });
     });
 
-    it('falls back to the defaults when the stored value is not an array', () => {
-      expect(parseSettings({ hiddenCommentPrefixes: 'toc' }).hiddenCommentPrefixes).toEqual(
-        DEFAULT_SETTINGS.hiddenCommentPrefixes,
+    it('falls back to the defaults when hiddenComments is not an object', () => {
+      expect(parseSettings({ hiddenComments: ['vale'] }).hiddenComments).toEqual(
+        DEFAULT_HIDDEN_COMMENTS,
+      );
+      expect(parseSettings({ hiddenComments: 'vale' }).hiddenComments).toEqual(
+        DEFAULT_HIDDEN_COMMENTS,
       );
     });
 
-    it('passes through the current {prefix, enabled} shape unchanged', () => {
-      const input = {
-        hiddenCommentPrefixes: [
-          { prefix: 'prettier-ignore', enabled: false },
-          { prefix: 'my-custom-directive', enabled: true },
-        ],
-      };
-      expect(parseSettings(input).hiddenCommentPrefixes).toEqual(input.hiddenCommentPrefixes);
-    });
-
-    it('defaults a missing or invalid enabled field to true', () => {
+    it('prefers a stored hiddenComments over a legacy list stored beside it', () => {
       expect(
         parseSettings({
-          hiddenCommentPrefixes: [{ prefix: 'toc' }, { prefix: 'more', enabled: 'yes' }],
-        }).hiddenCommentPrefixes,
-      ).toEqual([
-        { prefix: 'toc', enabled: true },
-        { prefix: 'more', enabled: true },
-      ]);
+          hiddenComments: { shownTools: [], custom: ['TODO'], customEnabled: true },
+          hiddenCommentPrefixes: [{ prefix: 'vale off', enabled: false }],
+        }).hiddenComments,
+      ).toEqual({ shownTools: [], custom: ['TODO'], customEnabled: true });
     });
   });
 
-  describe('hidden comment prefix grouping and projection', () => {
-    it('derives the flat prefix list from the grouped defaults, in order', () => {
-      expect(DEFAULT_HIDDEN_COMMENT_PREFIXES).toEqual(
-        DEFAULT_HIDDEN_COMMENT_GROUPS.flatMap((g) => g.prefixes),
+  describe("converting #124's per-word list", () => {
+    // What #124 stored after a reader toggled groups: an explicit
+    // entry for every shipped word.
+    const EVERY_LEGACY_WORD = [
+      'prettier-ignore',
+      'markdownlint-disable',
+      'markdownlint-enable',
+      'markdownlint-capture',
+      'markdownlint-restore',
+      'markdownlint-configure-file',
+      'lint disable',
+      'lint enable',
+      'lint ignore',
+      'deno-fmt-ignore',
+      'textlint-disable',
+      'textlint-enable',
+      'alex ignore',
+      'alex disable',
+      'alex enable',
+      'vale off',
+      'vale on',
+      'cSpell:',
+      'cspell:',
+      'spell-checker:',
+      'spellchecker:',
+      'toc',
+      'tocstop',
+      'START doctoc',
+      'END doctoc',
+      'more',
+    ];
+
+    it('does not turn shipped words into your own, even ones the new list renamed', () => {
+      // The bug this format exists to fix: `vale off` and `vale on` are not in
+      // the new list, and must not resurface as the reader's own words.
+      const legacy = EVERY_LEGACY_WORD.map((prefix) => ({ prefix, enabled: true }));
+      expect(
+        migrateLegacyHiddenCommentPrefixes([...legacy, { prefix: 'asdf', enabled: true }]),
+      ).toEqual({ shownTools: [], custom: ['asdf'], customEnabled: true });
+    });
+
+    it('shows a tool if any of its words was switched off, so nothing that rendered is hidden', () => {
+      // The old fixture told readers to switch off just `vale off`.
+      const migrated = migrateLegacyHiddenCommentPrefixes([
+        { prefix: 'vale off', enabled: false },
+        { prefix: 'vale on', enabled: true },
+        { prefix: 'markdownlint-disable', enabled: true },
+        { prefix: 'markdownlint-enable', enabled: true },
+      ]);
+      expect(migrated?.shownTools).toEqual(['vale']);
+    });
+
+    it('splits the old TOC group into the toc and doctoc tools', () => {
+      const migrated = migrateLegacyHiddenCommentPrefixes([
+        { prefix: 'toc', enabled: false },
+        { prefix: 'tocstop', enabled: true },
+        { prefix: 'START doctoc', enabled: true },
+        { prefix: 'END doctoc', enabled: true },
+      ]);
+      expect(migrated?.shownTools).toEqual(['toc']);
+    });
+
+    it('drops an own word that was switched off, since it hid nothing', () => {
+      expect(
+        migrateLegacyHiddenCommentPrefixes([
+          { prefix: 'TODO', enabled: true },
+          { prefix: 'DRAFT', enabled: false },
+        ]),
+      ).toEqual({ shownTools: [], custom: ['TODO'], customEnabled: true });
+    });
+
+    it('keeps your own words with the switch off when every one of them was off', () => {
+      expect(
+        migrateLegacyHiddenCommentPrefixes([
+          { prefix: 'TODO', enabled: false },
+          { prefix: 'DRAFT', enabled: false },
+        ]),
+      ).toEqual({ shownTools: [], custom: ['TODO', 'DRAFT'], customEnabled: false });
+    });
+
+    it('treats an empty list as the defaults and skips entries without a string prefix', () => {
+      expect(migrateLegacyHiddenCommentPrefixes([])).toEqual(DEFAULT_HIDDEN_COMMENTS);
+      expect(
+        migrateLegacyHiddenCommentPrefixes(['toc', 42, null, { enabled: false }, { prefix: 'x' }]),
+      ).toEqual({ shownTools: [], custom: ['x'], customEnabled: true });
+    });
+
+    it('returns null for anything that is not a list, so parseSettings falls back', () => {
+      expect(migrateLegacyHiddenCommentPrefixes(undefined)).toBeNull();
+      expect(migrateLegacyHiddenCommentPrefixes('toc')).toBeNull();
+    });
+
+    it('is what parseSettings uses when only the legacy key is stored', () => {
+      expect(
+        parseSettings({
+          hiddenCommentPrefixes: [
+            { prefix: 'more', enabled: false },
+            { prefix: 'TODO', enabled: true },
+          ],
+        }).hiddenComments,
+      ).toEqual({ shownTools: ['read-more'], custom: ['TODO'], customEnabled: true });
+    });
+  });
+
+  describe('the shipped tool list', () => {
+    it('gives every tool a unique id', () => {
+      const ids = DEFAULT_HIDDEN_COMMENT_TOOLS.map((t) => t.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('is in label order, which is the order Settings shows', () => {
+      const labels = DEFAULT_HIDDEN_COMMENT_TOOLS.map((t) => t.label);
+      expect(labels).toEqual(
+        [...labels].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
       );
     });
 
-    it('looks up the shipped group for a built-in prefix and finds none for a custom one', () => {
-      expect(hiddenCommentPrefixGroupFor('prettier-ignore')).toBe('Prettier');
-      expect(hiddenCommentPrefixGroupFor('more')).toBe('Excerpt marker (Jekyll / Hugo / Zola)');
-      expect(hiddenCommentPrefixGroupFor('my-custom-directive')).toBeUndefined();
+    it('flattens to the default prefix list', () => {
+      expect(DEFAULT_HIDDEN_COMMENT_PREFIXES).toEqual(
+        DEFAULT_HIDDEN_COMMENT_TOOLS.flatMap((t) => t.prefixes),
+      );
+    });
+  });
+
+  describe('getEnabledHiddenCommentPrefixes', () => {
+    it('is every shipped prefix by default', () => {
+      expect(getEnabledHiddenCommentPrefixes(DEFAULT_HIDDEN_COMMENTS)).toEqual(
+        DEFAULT_HIDDEN_COMMENT_PREFIXES,
+      );
     });
 
-    it('unions a default the stored list has never seen in as enabled', () => {
-      const merged = mergeHiddenCommentPrefixEntries([
-        { prefix: 'prettier-ignore', enabled: false },
-      ]);
-      expect(merged.find((e) => e.prefix === 'prettier-ignore')).toEqual({
-        prefix: 'prettier-ignore',
-        enabled: false,
+    it("leaves out a shown tool's words and adds your own while they are on", () => {
+      const enabled = getEnabledHiddenCommentPrefixes({
+        shownTools: ['vale'],
+        custom: ['TODO'],
+        customEnabled: true,
       });
-      // 'toc' was never stored, so it renders as an enabled row.
-      expect(merged.find((e) => e.prefix === 'toc')).toEqual({ prefix: 'toc', enabled: true });
+      expect(enabled).not.toContain('vale');
+      expect(enabled).toContain('prettier-ignore');
+      expect(enabled.at(-1)).toBe('TODO');
     });
 
-    it('appends custom entries after the shipped defaults', () => {
-      const merged = mergeHiddenCommentPrefixEntries([
-        { prefix: 'my-custom-directive', enabled: true },
-      ]);
-      expect(merged.at(-1)).toEqual({ prefix: 'my-custom-directive', enabled: true });
-      expect(merged).toHaveLength(DEFAULT_HIDDEN_COMMENT_PREFIXES.length + 1);
-    });
-
-    it('projects only the enabled prefixes as a flat string[]', () => {
-      const stored = [
-        { prefix: 'prettier-ignore', enabled: false },
-        { prefix: 'my-custom-directive', enabled: true },
-      ];
-      const enabled = getEnabledHiddenCommentPrefixes(stored);
-      expect(enabled).not.toContain('prettier-ignore');
-      expect(enabled).toContain('my-custom-directive');
-      // Every other shipped default is still enabled by default.
-      expect(enabled).toContain('toc');
+    it('leaves out your own words while they are switched off', () => {
+      expect(
+        getEnabledHiddenCommentPrefixes({ shownTools: [], custom: ['TODO'], customEnabled: false }),
+      ).not.toContain('TODO');
     });
   });
 });

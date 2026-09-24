@@ -1,13 +1,8 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useThemePersistence } from '../hooks/useThemePersistence';
 import { useSettings } from '../contexts/SettingsContext';
-import type { CommentTemplate, HiddenCommentPrefixEntry } from '../lib/settings';
-import {
-  DEFAULT_TEMPLATES,
-  DEFAULT_HIDDEN_COMMENT_GROUPS,
-  mergeHiddenCommentPrefixEntries,
-  hiddenCommentPrefixGroupFor,
-} from '../lib/settings';
+import type { CommentTemplate } from '../lib/settings';
+import { DEFAULT_TEMPLATES, DEFAULT_HIDDEN_COMMENT_TOOLS } from '../lib/settings';
 import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
 import { ThemePreview } from './ThemePreview';
 
@@ -20,40 +15,29 @@ interface Props {
   onAuthorChange: (name: string) => void;
 }
 
-type SwitchState = boolean | 'mixed';
-
-/** Key for the "Custom" group in `expandedPrefixGroups`; not a tool name, so it cannot collide with one. */
-const CUSTOM_PREFIX_GROUP = '\u0000custom';
-
-/** The switch used across Settings. */
-function ToggleSwitch({
-  state,
-  onToggle,
-  ariaLabel,
-}: {
-  state: SwitchState;
-  onToggle: () => void;
-  ariaLabel: string;
-}) {
-  const on = state === true;
-  const mixed = state === 'mixed';
+/**
+ * A tool's words, each kept on one line, with a stem they all share written
+ * once: `markdownlint-disable, -enable, -capture`.
+ */
+function PrefixWords({ words }: { words: string[] }) {
+  // Longest prefix every word shares, cut back to its last hyphen.
+  let common = words[0];
+  for (const w of words) while (!w.startsWith(common)) common = common.slice(0, -1);
+  const lastDash = words.length > 1 ? common.lastIndexOf('-') : -1;
+  const stem = lastDash > 0 ? common.slice(0, lastDash) : '';
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={mixed ? 'mixed' : on}
-      aria-label={ariaLabel}
-      onClick={onToggle}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-        on ? 'bg-primary' : mixed ? 'bg-primary-bg' : 'bg-border'
-      }`}
-    >
-      <span
-        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-          on ? 'translate-x-[18px]' : mixed ? 'translate-x-[10px]' : 'translate-x-[3px]'
-        }`}
-      />
-    </button>
+    <code className="min-w-0 flex-1 text-[11px] leading-snug text-content-muted [font-variant-ligatures:none]">
+      {words.map((w, i) => {
+        const shown = i > 0 && stem && w.startsWith(stem + '-') ? w.slice(stem.length) : w;
+        // Separator outside the nowrap span, so the row can wrap between words.
+        return (
+          <span key={w}>
+            <span className="whitespace-nowrap">{shown}</span>
+            {i < words.length - 1 ? ', ' : ''}
+          </span>
+        );
+      })}
+    </code>
   );
 }
 
@@ -70,7 +54,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     updateProseSize,
     updateKeepLineBreaks,
     updateRenderHtmlComments,
-    updateHiddenCommentPrefixes,
+    updateHiddenComments,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -80,11 +64,8 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
   // Local draft state for templates editing
   const [draftTemplates, setDraftTemplates] = useState<CommentTemplate[]>(settings.templates);
   const [draftPrefix, setDraftPrefix] = useState('');
-  // Hidden-prefix groups start collapsed; expanded, they push the rest of the
-  // section off the panel. An empty set is "none expanded".
-  const [expandedPrefixGroups, setExpandedPrefixGroups] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
+  // Collapsed by default: most readers never change which directives hide.
+  const [showHiddenList, setShowHiddenList] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editText, setEditText] = useState('');
@@ -174,70 +155,45 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
     setAddingNew(false);
   }, [newLabel, newText, draftTemplates, updateTemplates]);
 
-  const togglePrefixGroupExpanded = useCallback((tool: string) => {
-    setExpandedPrefixGroups((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(tool)) next.add(tool);
-      return next;
-    });
-  }, []);
+  const hidden = settings.hiddenComments;
+  const hiddenToolCount = DEFAULT_HIDDEN_COMMENT_TOOLS.filter(
+    (tool) => !hidden.shownTools.includes(tool.id),
+  ).length;
+  const totalTools = DEFAULT_HIDDEN_COMMENT_TOOLS.length;
+  const hiddenSummary = [
+    hiddenToolCount === totalTools
+      ? `${totalTools} tools`
+      : `${hiddenToolCount} of ${totalTools} tools`,
+    hidden.customEnabled && hidden.custom.length > 0 ? `${hidden.custom.length} of your own` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
 
-  const mergedHiddenPrefixEntries = useMemo(
-    () => mergeHiddenCommentPrefixEntries(settings.hiddenCommentPrefixes),
-    [settings.hiddenCommentPrefixes],
-  );
-  const customHiddenPrefixEntries = useMemo(
-    () =>
-      mergedHiddenPrefixEntries.filter((e) => hiddenCommentPrefixGroupFor(e.prefix) === undefined),
-    [mergedHiddenPrefixEntries],
+  const toggleHiddenTool = useCallback(
+    (id: string) => {
+      const shownTools = hidden.shownTools.includes(id)
+        ? hidden.shownTools.filter((t) => t !== id)
+        : [...hidden.shownTools, id];
+      updateHiddenComments({ ...hidden, shownTools });
+    },
+    [hidden, updateHiddenComments],
   );
 
-  // Trimmed, since the match runs against a trimStart'd body; a duplicate is ignored.
-  const addHiddenPrefix = useCallback(() => {
-    const prefix = draftPrefix.trim();
-    if (!prefix) return;
-    if (!mergedHiddenPrefixEntries.some((e) => e.prefix === prefix)) {
-      updateHiddenCommentPrefixes([...settings.hiddenCommentPrefixes, { prefix, enabled: true }]);
-    }
+  // Trimmed, since the match runs against a trimStart'd body. Adding a word,
+  // even one already in the list, turns "Your own" back on: nobody adds a word
+  // they want ignored.
+  const addOwnWord = useCallback(() => {
+    const word = draftPrefix.trim();
+    if (!word) return;
     setDraftPrefix('');
-  }, [
-    draftPrefix,
-    mergedHiddenPrefixEntries,
-    settings.hiddenCommentPrefixes,
-    updateHiddenCommentPrefixes,
-  ]);
+    const custom = hidden.custom.includes(word) ? hidden.custom : [...hidden.custom, word];
+    updateHiddenComments({ ...hidden, custom, customEnabled: true });
+  }, [draftPrefix, hidden, updateHiddenComments]);
 
-  // Shipped prefixes are switched off, never removed. Toggling upserts an explicit entry.
-  const setHiddenPrefixEnabled = useCallback(
-    (prefix: string, enabled: boolean) => {
-      const next = settings.hiddenCommentPrefixes.filter((e) => e.prefix !== prefix);
-      next.push({ prefix, enabled });
-      updateHiddenCommentPrefixes(next);
-    },
-    [settings.hiddenCommentPrefixes, updateHiddenCommentPrefixes],
-  );
-
-  const deleteCustomHiddenPrefix = useCallback(
-    (prefix: string) => {
-      updateHiddenCommentPrefixes(
-        settings.hiddenCommentPrefixes.filter((e) => e.prefix !== prefix),
-      );
-    },
-    [settings.hiddenCommentPrefixes, updateHiddenCommentPrefixes],
-  );
-
-  // Group header: all on -> all off; all off or mixed -> all on.
-  const toggleHiddenPrefixGroup = useCallback(
-    (prefixes: string[], entries: HiddenCommentPrefixEntry[]) => {
-      const allOn = entries.every((e) => e.enabled);
-      const nextEnabled = !allOn;
-      const next = settings.hiddenCommentPrefixes.filter((e) => !prefixes.includes(e.prefix));
-      for (const prefix of prefixes) {
-        next.push({ prefix, enabled: nextEnabled });
-      }
-      updateHiddenCommentPrefixes(next);
-    },
-    [settings.hiddenCommentPrefixes, updateHiddenCommentPrefixes],
+  const removeOwnWord = useCallback(
+    (word: string) =>
+      updateHiddenComments({ ...hidden, custom: hidden.custom.filter((w) => w !== word) }),
+    [hidden, updateHiddenComments],
   );
 
   const handleResetTemplates = useCallback(() => {
@@ -864,6 +820,182 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                   </label>
                 </div>
 
+                {/* Render HTML comments. The list of tool directives that stay
+                  hidden collapses to one row, so it can sit with the other
+                  display settings without pushing the rest out of reach. */}
+                <div>
+                  <label className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-content">Render HTML comments</h3>
+                      <p className="text-xs text-content-muted mt-0.5">
+                        Show{' '}
+                        {/* Ligatures off: the code face draws <!-- and --> as arrow
+                          glyphs, so the sample stops showing the syntax it names. */}
+                        <code className="[font-variant-ligatures:none]">&lt;!-- notes --&gt;</code>{' '}
+                        in the page, muted.
+                      </p>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={settings.renderHtmlComments}
+                      onClick={() => updateRenderHtmlComments(!settings.renderHtmlComments)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                        settings.renderHtmlComments ? 'bg-primary' : 'bg-border'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                          settings.renderHtmlComments ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </button>
+                  </label>
+
+                  {settings.renderHtmlComments && (
+                    <div className="mt-3 rounded-lg border border-border-subtle">
+                      <button
+                        type="button"
+                        aria-expanded={showHiddenList}
+                        onClick={() => setShowHiddenList((v) => !v)}
+                        className="flex w-full items-center justify-between gap-4 rounded-lg px-3 py-2 text-left hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
+                      >
+                        <span className="text-xs font-semibold text-content">
+                          Keep hidden: instructions for tools
+                        </span>
+                        <span className="flex items-center gap-1 text-xs text-content-muted">
+                          {hiddenSummary} ·
+                          <span className="text-content-secondary">
+                            {showHiddenList ? 'Done' : 'Edit'}
+                          </span>
+                          <svg
+                            aria-hidden="true"
+                            className={`w-3 h-3 shrink-0 transition-transform ${
+                              showHiddenList ? 'rotate-90' : ''
+                            }`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </span>
+                      </button>
+
+                      {showHiddenList && (
+                        <div className="px-3 pb-3">
+                          <p className="text-xs text-content-muted">
+                            Comments that start with these words are instructions for a tool, not
+                            notes for you, so they stay hidden.
+                          </p>
+
+                          {/* One grid for every row, own words included: checkbox, a
+                            w-36 name column, then the words. */}
+                          <div className="mt-2">
+                            {DEFAULT_HIDDEN_COMMENT_TOOLS.map((tool) => (
+                              <label
+                                key={tool.id}
+                                className="flex cursor-pointer items-baseline gap-3 rounded-md px-1 py-1 hover:bg-tint"
+                              >
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Keep ${tool.label} comments hidden`}
+                                  checked={!hidden.shownTools.includes(tool.id)}
+                                  onChange={() => toggleHiddenTool(tool.id)}
+                                  className="relative top-[2px] h-3.5 w-3.5 shrink-0 accent-primary"
+                                />
+                                <span className="w-36 shrink-0 text-xs font-medium text-content">
+                                  {tool.label}
+                                </span>
+                                <PrefixWords words={tool.prefixes} />
+                              </label>
+                            ))}
+
+                            <div className="flex items-baseline gap-3 rounded-md px-1 py-1">
+                              {/* Hidden, not removed, while there are no words, so the
+                                row keeps the grid. */}
+                              <input
+                                type="checkbox"
+                                aria-label="Keep your own words hidden"
+                                checked={hidden.customEnabled}
+                                disabled={hidden.custom.length === 0}
+                                onChange={() =>
+                                  updateHiddenComments({
+                                    ...hidden,
+                                    customEnabled: !hidden.customEnabled,
+                                  })
+                                }
+                                className={`relative top-[2px] h-3.5 w-3.5 shrink-0 accent-primary ${
+                                  hidden.custom.length === 0 ? 'invisible' : ''
+                                }`}
+                              />
+                              <span className="w-36 shrink-0 text-xs font-medium text-content">
+                                Your own
+                              </span>
+                              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                                {hidden.custom.map((word) => (
+                                  <span
+                                    key={word}
+                                    className={`inline-flex items-center gap-1 rounded-full border border-border bg-surface py-0.5 pl-2 pr-1 ${
+                                      hidden.customEnabled ? '' : 'opacity-50'
+                                    }`}
+                                  >
+                                    <code className="text-[11px] text-content-secondary">
+                                      {word}
+                                    </code>
+                                    <button
+                                      aria-label={`Remove ${word}`}
+                                      onClick={() => removeOwnWord(word)}
+                                      className="flex h-3.5 w-3.5 items-center justify-center rounded-full text-content-muted hover:bg-tint hover:text-content"
+                                    >
+                                      <svg
+                                        aria-hidden="true"
+                                        className="h-2 w-2"
+                                        viewBox="0 0 10 10"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth={1.6}
+                                        strokeLinecap="round"
+                                      >
+                                        <path d="M2 2l6 6M8 2l-6 6" />
+                                      </svg>
+                                    </button>
+                                  </span>
+                                ))}
+                                <input
+                                  type="text"
+                                  value={draftPrefix}
+                                  aria-label="Add a word to keep hidden"
+                                  placeholder="+ Add a word, e.g. TODO"
+                                  onChange={(e) => setDraftPrefix(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return;
+                                    e.preventDefault();
+                                    addOwnWord();
+                                  }}
+                                  className="w-44 rounded-full border border-dashed border-border bg-transparent px-2.5 py-0.5 text-[11px] text-content placeholder:text-content-muted focus-visible:border-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
+                                />
+                                {/* Only Enter or this button adds a word. Leaving the field
+                                  keeps the draft instead of saving it, so a half-typed word
+                                  never starts hiding comments. */}
+                                {draftPrefix.trim() && (
+                                  <button
+                                    type="button"
+                                    onClick={addOwnWord}
+                                    className="rounded-full border border-border px-2.5 py-0.5 text-[11px] font-medium text-content-secondary hover:bg-tint"
+                                  >
+                                    Add
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Comment Max Length */}
                 <div>
                   <h3 className="text-sm font-semibold text-content mb-1">Comment Max Length</h3>
@@ -888,199 +1020,6 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                     className="w-32 text-sm px-3 py-1.5 rounded-md border border-border-subtle bg-surface text-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
                   <span className="text-xs text-content-muted ml-2">characters</span>
-                </div>
-
-                {/* Render HTML comments.
-
-                  Last in the section on purpose: the hidden-prefix list under it
-                  is long enough that anything below it is hard to reach. Groups
-                  start collapsed for the same reason. */}
-                <div>
-                  <label className="flex items-center justify-between gap-4">
-                    <div>
-                      <h3 className="text-sm font-semibold text-content">Render HTML comments</h3>
-                      <p className="text-xs text-content-muted mt-0.5">
-                        Show ordinary{' '}
-                        {/* Ligatures off: the code face renders <!-- and --> as arrow
-                          glyphs, so the sample stops showing the syntax it is naming. */}
-                        <code className="[font-variant-ligatures:none]">&lt;!-- ... --&gt;</code>{' '}
-                        comments in the rendered view.
-                      </p>
-                    </div>
-                    <button
-                      role="switch"
-                      aria-checked={settings.renderHtmlComments}
-                      onClick={() => updateRenderHtmlComments(!settings.renderHtmlComments)}
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                        settings.renderHtmlComments ? 'bg-primary' : 'bg-border'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-                          settings.renderHtmlComments ? 'translate-x-[18px]' : 'translate-x-[3px]'
-                        }`}
-                      />
-                    </button>
-                  </label>
-
-                  {settings.renderHtmlComments && (
-                    <div className="mt-3">
-                      <h4 className="text-xs font-semibold text-content">Hidden prefixes</h4>
-                      <p className="text-xs text-content-muted mt-0.5">
-                        A comment whose text starts with one of these stays hidden — they are
-                        addressed to tools, not to you.
-                      </p>
-
-                      <div className="mt-2">
-                        {DEFAULT_HIDDEN_COMMENT_GROUPS.map((group) => {
-                          const entries = group.prefixes.map(
-                            (prefix) => mergedHiddenPrefixEntries.find((e) => e.prefix === prefix)!,
-                          );
-                          const allOn = entries.every((e) => e.enabled);
-                          const allOff = entries.every((e) => !e.enabled);
-                          const groupState: SwitchState = allOn ? true : allOff ? false : 'mixed';
-                          const expanded = expandedPrefixGroups.has(group.tool);
-                          return (
-                            <div key={group.tool}>
-                              {/* Same pr-2 as the rows below it, so every switch in the
-                                section shares one right edge. Only the NAMES indent. */}
-                              <div className="flex h-8 items-center justify-between gap-4 pl-2 pr-2">
-                                <button
-                                  type="button"
-                                  aria-expanded={expanded}
-                                  onClick={() => togglePrefixGroupExpanded(group.tool)}
-                                  className="flex items-center gap-1 text-xs font-semibold text-content-secondary hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring rounded"
-                                >
-                                  <svg
-                                    aria-hidden="true"
-                                    className={`w-3 h-3 shrink-0 transition-transform ${
-                                      expanded ? 'rotate-90' : ''
-                                    }`}
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth={2.5}
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      d="M9 5l7 7-7 7"
-                                    />
-                                  </svg>
-                                  {group.tool}
-                                </button>
-                                <ToggleSwitch
-                                  state={groupState}
-                                  ariaLabel={`Toggle all ${group.tool} prefixes`}
-                                  onToggle={() => toggleHiddenPrefixGroup(group.prefixes, entries)}
-                                />
-                              </div>
-                              {expanded && (
-                                <div>
-                                  {entries.map((entry) => (
-                                    <div
-                                      key={entry.prefix}
-                                      className="flex h-8 items-center justify-between gap-4 rounded-lg pl-6 pr-2 hover:bg-tint"
-                                    >
-                                      <code className="text-xs text-content-secondary">
-                                        {entry.prefix}
-                                      </code>
-                                      <ToggleSwitch
-                                        state={entry.enabled}
-                                        ariaLabel={`Toggle ${entry.prefix}`}
-                                        onToggle={() =>
-                                          setHiddenPrefixEnabled(entry.prefix, !entry.enabled)
-                                        }
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        {customHiddenPrefixEntries.length > 0 && (
-                          <div>
-                            <div className="flex h-8 items-center justify-between gap-4 pl-2 pr-2">
-                              <button
-                                type="button"
-                                aria-expanded={expandedPrefixGroups.has(CUSTOM_PREFIX_GROUP)}
-                                onClick={() => togglePrefixGroupExpanded(CUSTOM_PREFIX_GROUP)}
-                                className="flex items-center gap-1 text-xs font-semibold text-content-secondary hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring rounded"
-                              >
-                                <svg
-                                  aria-hidden="true"
-                                  className={`w-3 h-3 shrink-0 transition-transform ${
-                                    expandedPrefixGroups.has(CUSTOM_PREFIX_GROUP) ? 'rotate-90' : ''
-                                  }`}
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2.5}
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M9 5l7 7-7 7"
-                                  />
-                                </svg>
-                                Custom
-                              </button>
-                            </div>
-                            {expandedPrefixGroups.has(CUSTOM_PREFIX_GROUP) && (
-                              <div>
-                                {customHiddenPrefixEntries.map((entry) => (
-                                  <div
-                                    key={entry.prefix}
-                                    className="flex h-8 items-center justify-between gap-4 rounded-lg pl-6 pr-2 hover:bg-tint"
-                                  >
-                                    <code className="text-xs text-content-secondary">
-                                      {entry.prefix}
-                                    </code>
-                                    {/* w-9 matches ToggleSwitch, so the remove button sits on
-                                      the same right edge as every switch above it. */}
-                                    <span className="flex w-9 shrink-0 justify-center">
-                                      <button
-                                        aria-label={`Remove ${entry.prefix}`}
-                                        onClick={() => deleteCustomHiddenPrefix(entry.prefix)}
-                                        className="text-content-muted hover:text-content"
-                                      >
-                                        &times;
-                                      </button>
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex gap-2 mt-3">
-                        <input
-                          type="text"
-                          value={draftPrefix}
-                          aria-label="Add a hidden prefix"
-                          placeholder="prettier-ignore"
-                          onChange={(e) => setDraftPrefix(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key !== 'Enter') return;
-                            e.preventDefault();
-                            addHiddenPrefix();
-                          }}
-                          className="flex-1 rounded-lg border border-border bg-surface px-2 py-1 text-xs text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
-                        />
-                        <button
-                          onClick={addHiddenPrefix}
-                          disabled={!draftPrefix.trim()}
-                          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-content-secondary hover:bg-tint disabled:opacity-50"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             )}

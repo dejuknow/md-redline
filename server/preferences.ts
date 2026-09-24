@@ -8,10 +8,10 @@ import {
   DOC_WIDTHS,
   PROSE_FONTS,
   PROSE_SIZES,
-  normalizeHiddenCommentPrefixEntry,
+  normalizeHiddenCommentSettings,
+  storedHiddenCommentSettings,
   type AppSettings as ClientAppSettings,
   type CommentTemplate,
-  type HiddenCommentPrefixEntry,
 } from '../src/lib/settings';
 
 const PREFS_FILENAME = '.md-redline.json';
@@ -101,12 +101,7 @@ const SETTING_SANITIZERS: {
   keepLineBreaks: sanitizeBoolean,
   renderHtmlComments: sanitizeBoolean,
   // The same validator the client's parseSettings uses.
-  hiddenCommentPrefixes: (v) =>
-    Array.isArray(v)
-      ? v
-          .map(normalizeHiddenCommentPrefixEntry)
-          .filter((e): e is HiddenCommentPrefixEntry => e !== null)
-      : undefined,
+  hiddenComments: (v) => normalizeHiddenCommentSettings(v) ?? undefined,
 };
 
 function sanitizeSettings(value: unknown): AppSettings | undefined {
@@ -116,6 +111,12 @@ function sanitizeSettings(value: unknown): AppSettings | undefined {
     if (!(key in value)) continue;
     const sanitized = SETTING_SANITIZERS[key](value[key]);
     if (sanitized !== undefined) out[key] = sanitized;
+  }
+  // #124's first version stored hidden comments per word, under a key this
+  // allowlist does not carry. Convert it here, on read, or it is dropped.
+  if (out.hiddenComments === undefined) {
+    const stored = storedHiddenCommentSettings(value);
+    if (stored) out.hiddenComments = stored;
   }
   return out as AppSettings;
 }
