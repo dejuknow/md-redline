@@ -41,8 +41,9 @@ describe('review tool disambiguation', () => {
     expect(d).toMatch(/USER/);
   });
 
-  it('still advertises all five tools', () => {
+  it('advertises all six tools', () => {
     expect(MDR_TOOLS.map((t) => t.name).sort()).toEqual([
+      'mdr_add_files',
       'mdr_ask',
       'mdr_baseline',
       'mdr_comment',

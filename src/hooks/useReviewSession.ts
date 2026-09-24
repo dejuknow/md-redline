@@ -14,6 +14,8 @@ export interface ReviewSession {
   lastAgentActivityAt?: string | null;
   /** The name the agent posts under, once a batch has supplied one. */
   author?: string;
+  /** When each file added after creation arrived (#117), ISO, keyed by path. */
+  fileAddedAt?: Record<string, string>;
 }
 
 const POLL_INTERVAL_MS = 5_000;

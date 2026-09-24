@@ -9,6 +9,7 @@ import {
 import { createMdrClient } from './client';
 import {
   handleAskToolCall,
+  handleAddFilesToolCall,
   handleBaselineToolCall,
   handleRequestReviewToolCall,
   handleReviewToolCall,
@@ -17,6 +18,7 @@ import {
 import type { RunMcpServerOptions } from './types';
 import {
   validateAskInput,
+  validateAddFilesInput,
   validateBaselineInput,
   validateRequestReviewInput,
   validateReviewInput,
@@ -253,6 +255,35 @@ export const MDR_TOOLS = [
     },
   },
   {
+    name: 'mdr_add_files',
+    description:
+      'Add markdown files to a review session that is already open in mdr ' +
+      '(md-redline), without starting a new one. Use it when the reviewer asks ' +
+      'for another file mid-review, or when you need to comment on a file the ' +
+      'session does not cover yet. Works for sessions from mdr_request_review and ' +
+      "mdr_comment alike. The reviewer's mdr tab opens the new files. Returns " +
+      'immediately; carry on with the same sessionId as before. A session that ' +
+      'has ended cannot take more files: start a new review instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'The open session to add the files to.',
+        },
+        filePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 64,
+          description:
+            'Absolute paths to the markdown files to add. Files the session already covers are skipped.',
+        },
+      },
+      required: ['sessionId', 'filePaths'],
+    },
+  },
+  {
     name: 'mdr_baseline',
     description:
       'Call this BEFORE you edit markdown files the user will later review in mdr ' +
@@ -373,6 +404,13 @@ export async function runMcpServer(opts: RunMcpServerOptions): Promise<void> {
       const validation = validateWaitInput(request.params.arguments);
       if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
       const result = await handleWaitToolCall(validation.value, { client, sendProgress, signal });
+      return result as CallToolResult;
+    }
+
+    if (request.params.name === 'mdr_add_files') {
+      const validation = validateAddFilesInput(request.params.arguments);
+      if (!validation.ok) throw new Error(`Invalid input: ${validation.error}`);
+      const result = await handleAddFilesToolCall(validation.value, { client });
       return result as CallToolResult;
     }
 

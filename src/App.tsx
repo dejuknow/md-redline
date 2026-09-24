@@ -82,6 +82,7 @@ import { getCopySelectionFallbackText } from './lib/copy-selection';
 import { rangeFromPaintedSelection, resolveSelectionMarkdown } from './lib/copy-as-markdown';
 import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
+import { useOpenAddedReviewFiles } from './hooks/useOpenAddedReviewFiles';
 import { ReviewBanner } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import { selectAgentAsks } from './lib/agent-asks';
@@ -1255,6 +1256,8 @@ export default function App() {
   } = useReviewSession(
     activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
   );
+  // An agent can add files to a review this tab is showing (#117): open them.
+  useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
 
   // Mirrors the snapshot logic in handleHandoff so multi-file review sessions
   // get diff baselines for every involved tab, not just the active one.

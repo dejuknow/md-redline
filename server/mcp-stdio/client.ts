@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import type {
   AskQuestion,
   AskWaitResult,
+  AddFilesResult,
   BaselineInput,
   CaptureBaselineResult,
   CreateSessionInput,
@@ -176,6 +177,24 @@ export function createMdrClient(baseUrl: string): MdrClient {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `abort failed for ${sessionId} (HTTP ${res.status})`);
         }
+      },
+
+      async addSessionFiles(sessionId: string, filePaths: string[]) {
+        const res = await request(`/api/review-sessions/${sessionId}/files`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ filePaths }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          // The status rides along so the handler can tell an ended session
+          // from other failures without matching the message text.
+          throw Object.assign(
+            new Error(body.error ?? `addSessionFiles failed (HTTP ${res.status})`),
+            { status: res.status },
+          );
+        }
+        return (await res.json()) as AddFilesResult;
       },
 
       async captureBaseline(input: BaselineInput) {
