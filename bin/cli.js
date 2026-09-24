@@ -27,6 +27,7 @@ import { resolveHomeDir } from './home-dir.js';
 import { FALLBACK_PORT, isValidPort, resolveNamedApiPort } from './ports.js';
 
 import { checkServer, gracefulShutdown, killPort, serverProbeOrder } from './server-control.js';
+import { formatSessions } from './sessions.js';
 import { buildWindowsCommand } from './spawn-command.js';
 import { isNewerVersion } from './version-compare.js';
 
@@ -55,10 +56,11 @@ const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
 const UPDATE_CHECK_WAIT_MS = 6_000;
 const UPDATE_CHECK_POLL_MS = 100;
+const SESSIONS_REQUEST_TIMEOUT_MS = 5_000;
 // Every subcommand name, so a positional-file guard can check against the
 // whole set instead of one name at a time and a new subcommand cannot repeat
 // the bug where its name got forwarded to the server as a path.
-const SUBCOMMANDS = new Set(['mcp', 'baseline']);
+const SUBCOMMANDS = new Set(['mcp', 'baseline', 'sessions']);
 
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
@@ -83,6 +85,9 @@ function printHelp() {
   console.log('  baseline [--hook] [--agent NAME] [--no-start] [paths...]');
   console.log('                    Save a before copy of markdown files so a later review');
   console.log('                    can show a diff (for a PreToolUse hook).');
+  console.log('  sessions [--json] [--kill ID]');
+  console.log('                    List the review sessions the running server has open,');
+  console.log('                    or end one by ID.');
   console.log('');
   console.log('Alias: md-redline');
 }
@@ -1017,6 +1022,105 @@ async function runBaselineCommand(args) {
   }
 }
 
+/**
+ * `mdr sessions [--json] [--kill ID]`
+ *
+ * Lists the review sessions the running server considers open, or ends one.
+ * Never starts a server: the question is about the one already running, and a
+ * freshly booted one would always answer "none".
+ *
+ * @param {string[]} args
+ */
+async function runSessionsCommand(args) {
+  let json = false;
+  let kill = false;
+  /** @type {string | undefined} */
+  let killId;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--json') json = true;
+    else if (arg === '--kill') {
+      kill = true;
+      // A following flag is not an ID: `--kill --json` must report the
+      // missing ID, not try to end a session called "--json".
+      if (args[i + 1] !== undefined && !args[i + 1].startsWith('-')) killId = args[++i];
+    } else if (arg.startsWith('--kill=')) {
+      kill = true;
+      killId = arg.slice('--kill='.length);
+    } else {
+      console.error(`mdr sessions: unknown argument '${arg}'`);
+      console.error('Usage: mdr sessions [--json] [--kill ID]');
+      process.exitCode = 1;
+      return;
+    }
+  }
+  if (kill && !killId) {
+    console.error('mdr sessions: --kill needs a session ID (see `mdr sessions`)');
+    process.exitCode = 1;
+    return;
+  }
+
+  const port = await findServerPort();
+  if (!port) {
+    if (kill) {
+      console.error("mdr sessions: mdr isn't running, so there is nothing to end.");
+      process.exitCode = 1;
+    } else if (json) {
+      console.log('[]');
+    } else {
+      console.log("mdr isn't running, so no review sessions are open.");
+    }
+    return;
+  }
+  const base = `http://127.0.0.1:${port}`;
+  // checkServer only proves /api/config answers; a server that then stalls
+  // must not hang the command.
+  const signal = AbortSignal.timeout(SESSIONS_REQUEST_TIMEOUT_MS);
+
+  try {
+    if (killId) {
+      // The server refuses any POST that is not application/json (its CSRF
+      // guard in server/index.ts), even one with no body to speak of.
+      const res = await fetch(`${base}/api/review-sessions/${encodeURIComponent(killId)}/abort`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+        signal,
+      });
+      if (res.ok) {
+        console.log(`Ended ${killId}.`);
+        return;
+      }
+      const body = /** @type {{ error?: string } | null} */ (await res.json().catch(() => null));
+      const reason =
+        res.status === 404
+          ? `no session ${killId}`
+          : res.status === 409
+            ? `${killId} has already ended`
+            : (body?.error ?? `HTTP ${res.status}`);
+      console.error(`mdr sessions: ${reason}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const res = await fetch(`${base}/api/review-sessions`, { signal });
+    if (!res.ok) {
+      console.error(`mdr sessions: HTTP ${res.status}`);
+      process.exitCode = 1;
+      return;
+    }
+    const body = /** @type {{ sessions?: import('./sessions.js').SessionRow[] }} */ (
+      await res.json()
+    );
+    const sessions = body.sessions ?? [];
+    if (json) console.log(JSON.stringify(sessions, null, 2));
+    else console.log(formatSessions(sessions, { now: Date.now(), homeDir: resolveHomeDir() }));
+  } catch (err) {
+    console.error(`mdr sessions: ${errorMessage(err)}`);
+    process.exitCode = 1;
+  }
+}
+
 async function runMcpStdio() {
   const distMcp = join(APP_DIR, 'dist', 'mcp-stdio.js');
   if (!isProductionMode()) {
@@ -1184,6 +1288,11 @@ async function main() {
 
   if (process.argv[2] === 'baseline') {
     await runBaselineCommand(process.argv.slice(3));
+    return;
+  }
+
+  if (process.argv[2] === 'sessions') {
+    await runSessionsCommand(process.argv.slice(3));
     return;
   }
 

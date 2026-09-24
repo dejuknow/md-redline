@@ -139,7 +139,7 @@ describe('choosing which running server to act on', () => {
   });
 
   it('reports none when the named port is dead and nothing is recorded', async () => {
-    const deadPort = await unusedPort();
+    const deadPort = await deadPortBlock();
 
     expect(await findServer({ MD_REDLINE_PORT: String(deadPort) })).toBe('none');
   });
@@ -168,4 +168,29 @@ async function unusedPort(): Promise<number> {
   });
   await new Promise((r) => server.close(r));
   return port;
+}
+
+/**
+ * A port to name where nothing answers, on it or on the nine above it that
+ * findServerPort also scans. Picked below every OS's ephemeral range (Linux
+ * starts at 32768, macOS and Windows at 49152) because the fake servers other
+ * test files start in parallel bind port 0 and land inside it. A free port
+ * from inside that range failed on macOS CI: another file's fake server took a
+ * neighbour, the scan found it, and the command reported it instead of "none".
+ */
+async function deadPortBlock(): Promise<number> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const base = 20_000 + Math.floor(Math.random() * 12_000);
+    const free = await Promise.all(Array.from({ length: 10 }, (_, i) => portIsFree(base + i)));
+    if (free.every(Boolean)) return base;
+  }
+  throw new Error('no free port block below the ephemeral range');
+}
+
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const server = createServer();
+    server.once('error', () => resolvePromise(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolvePromise(true)));
+  });
 }
