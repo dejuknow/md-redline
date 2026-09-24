@@ -34,6 +34,94 @@ export interface AppSettings {
   proseSize: ProseSize;
   /** Render a single newline in the source as a line break instead of a space. Off follows CommonMark. */
   keepLineBreaks: boolean;
+  /** Render ordinary (non-@comment) HTML comments as muted content in the rendered view. */
+  renderHtmlComments: boolean;
+  /**
+   * Comment bodies opening with an enabled prefix stay hidden. A shipped
+   * prefix is switched off with `enabled`, never removed; only custom
+   * prefixes are removed.
+   */
+  hiddenCommentPrefixes: HiddenCommentPrefixEntry[];
+}
+
+/** One stored hidden-comment-prefix preference: the prefix text and whether it is active. */
+export interface HiddenCommentPrefixEntry {
+  prefix: string;
+  enabled: boolean;
+}
+
+/** A tool's shipped prefixes, grouped for display in Settings (one section per tool). */
+export interface HiddenCommentPrefixGroup {
+  tool: string;
+  prefixes: string[];
+}
+
+/**
+ * Comment bodies addressed to a tool rather than a reader, grouped by tool for
+ * Settings. Matched after `trimStart` and as a whole word, so one entry covers
+ * `<!--lint disable-->` and `<!-- lint disable -->`. The short entries (`more`,
+ * `toc`, `tocstop`) also hide a note that opens with the same word; a reader
+ * switches them off in Settings.
+ */
+export const DEFAULT_HIDDEN_COMMENT_GROUPS: HiddenCommentPrefixGroup[] = [
+  { tool: 'Prettier', prefixes: ['prettier-ignore'] },
+  {
+    tool: 'markdownlint',
+    prefixes: [
+      'markdownlint-disable',
+      'markdownlint-enable',
+      'markdownlint-capture',
+      'markdownlint-restore',
+      'markdownlint-configure-file',
+    ],
+  },
+  { tool: 'remark-lint', prefixes: ['lint disable', 'lint enable', 'lint ignore'] },
+  { tool: 'Deno fmt', prefixes: ['deno-fmt-ignore'] },
+  { tool: 'textlint', prefixes: ['textlint-disable', 'textlint-enable'] },
+  { tool: 'alex', prefixes: ['alex ignore', 'alex disable', 'alex enable'] },
+  { tool: 'Vale', prefixes: ['vale off', 'vale on'] },
+  {
+    tool: 'cSpell / Code Spell Checker',
+    prefixes: ['cSpell:', 'cspell:', 'spell-checker:', 'spellchecker:'],
+  },
+  { tool: 'TOC generators', prefixes: ['toc', 'tocstop', 'START doctoc', 'END doctoc'] },
+  { tool: 'Excerpt marker (Jekyll / Hugo / Zola)', prefixes: ['more'] },
+];
+
+export const DEFAULT_HIDDEN_COMMENT_PREFIXES: string[] = DEFAULT_HIDDEN_COMMENT_GROUPS.flatMap(
+  (group) => group.prefixes,
+);
+
+/**
+ * The tool a shipped prefix belongs to, for grouping stored/rendered rows.
+ * Undefined for a custom (user-added) prefix — those get their own group.
+ */
+export function hiddenCommentPrefixGroupFor(prefix: string): string | undefined {
+  return DEFAULT_HIDDEN_COMMENT_GROUPS.find((g) => g.prefixes.includes(prefix))?.tool;
+}
+
+/**
+ * The rows Settings renders: every shipped default — as an enabled row if
+ * the stored list has never seen it, per AppSettings.hiddenCommentPrefixes —
+ * unioned with whatever is actually stored, in shipped order followed by any
+ * custom entries in their stored order.
+ */
+export function mergeHiddenCommentPrefixEntries(
+  stored: HiddenCommentPrefixEntry[],
+): HiddenCommentPrefixEntry[] {
+  const byPrefix = new Map(stored.map((entry) => [entry.prefix, entry]));
+  const defaults = DEFAULT_HIDDEN_COMMENT_PREFIXES.map(
+    (prefix) => byPrefix.get(prefix) ?? { prefix, enabled: true },
+  );
+  const custom = stored.filter((entry) => !DEFAULT_HIDDEN_COMMENT_PREFIXES.includes(entry.prefix));
+  return [...defaults, ...custom];
+}
+
+/** The enabled prefixes, as the plain list the rendering pipeline takes. */
+export function getEnabledHiddenCommentPrefixes(stored: HiddenCommentPrefixEntry[]): string[] {
+  return mergeHiddenCommentPrefixEntries(stored)
+    .filter((entry) => entry.enabled)
+    .map((entry) => entry.prefix);
 }
 
 /**
@@ -118,7 +206,28 @@ export const DEFAULT_SETTINGS: AppSettings = {
   docWidth: 'default',
   proseSize: 'default',
   keepLineBreaks: false,
+  renderHtmlComments: true,
+  hiddenCommentPrefixes: DEFAULT_HIDDEN_COMMENT_PREFIXES.map((prefix) => ({
+    prefix,
+    enabled: true,
+  })),
 };
+
+/**
+ * Validate one stored hiddenCommentPrefixes element: an object with a string
+ * `prefix`, and `enabled` defaulting to true when it is not a boolean.
+ * Anything else is dropped. Shared with the server's persistence allowlist
+ * (server/preferences.ts).
+ */
+export function normalizeHiddenCommentPrefixEntry(value: unknown): HiddenCommentPrefixEntry | null {
+  if (typeof value === 'object' && value !== null) {
+    const v = value as Record<string, unknown>;
+    if (typeof v.prefix === 'string') {
+      return { prefix: v.prefix, enabled: typeof v.enabled === 'boolean' ? v.enabled : true };
+    }
+  }
+  return null;
+}
 
 /**
  * Parse and validate settings from an arbitrary input (e.g. the server's
@@ -181,5 +290,17 @@ export function parseSettings(input: unknown): AppSettings {
       typeof parsed.keepLineBreaks === 'boolean'
         ? parsed.keepLineBreaks
         : DEFAULT_SETTINGS.keepLineBreaks,
+    renderHtmlComments:
+      typeof parsed.renderHtmlComments === 'boolean'
+        ? parsed.renderHtmlComments
+        : DEFAULT_SETTINGS.renderHtmlComments,
+    // An empty stored list does not mean "render every comment":
+    // mergeHiddenCommentPrefixEntries unions it with the shipped defaults. Hiding
+    // nothing is stored as every default present with enabled: false.
+    hiddenCommentPrefixes: Array.isArray(parsed.hiddenCommentPrefixes)
+      ? parsed.hiddenCommentPrefixes
+          .map(normalizeHiddenCommentPrefixEntry)
+          .filter((e): e is HiddenCommentPrefixEntry => e !== null)
+      : DEFAULT_SETTINGS.hiddenCommentPrefixes,
   };
 }

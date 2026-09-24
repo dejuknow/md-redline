@@ -1499,8 +1499,17 @@ well-formed marker never reaches the renderer; a malformed one that survived
 stripping stays hidden. RawView's `.raw-html-comment` lookahead is built from
 the same constant.
 
-`renderMarkdown` takes `renderHtmlComments` (default false), so an option-less
-caller keeps dropping comments. `useComments` and `RenderedDiffView` turn it on.
+`renderMarkdown` takes `renderHtmlComments` (default false) and
+`hiddenCommentPrefixes` (default empty), so an option-less caller keeps dropping
+comments. The app's settings turn rendering on by default and pass both to
+`useComments` and `RenderedDiffView`, so the two views agree.
+
+A comment is hidden when its body, after `trimStart`, starts with an enabled
+prefix as a whole word. The shipped prefixes live in
+`DEFAULT_HIDDEN_COMMENT_GROUPS` in `settings.ts`, grouped by tool for Settings.
+The stored setting is a list of `{prefix, enabled}` entries, merged with the
+shipped defaults by `mergeHiddenCommentPrefixEntries`, so a default is switched
+off rather than removed and a custom prefix is added alongside them.
 
 ### Mermaid fullscreen view
 Click the expand button (top-right of any Mermaid diagram on hover) to open the

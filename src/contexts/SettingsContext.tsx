@@ -11,6 +11,7 @@ import {
   type AppSettings,
   type CommentTemplate,
   type DocWidth,
+  type HiddenCommentPrefixEntry,
   type ProseSize,
   DEFAULT_SETTINGS,
   DEFAULT_TEMPLATES,
@@ -31,6 +32,8 @@ interface SettingsContextValue {
   updateDocWidth: (width: DocWidth) => void;
   updateProseSize: (size: ProseSize) => void;
   updateKeepLineBreaks: (keep: boolean) => void;
+  updateRenderHtmlComments: (render: boolean) => void;
+  updateHiddenCommentPrefixes: (prefixes: HiddenCommentPrefixEntry[]) => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -136,6 +139,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
+  const updateRenderHtmlComments = useCallback(
+    (renderHtmlComments: boolean) => update({ renderHtmlComments }),
+    [update],
+  );
+
+  const updateHiddenCommentPrefixes = useCallback(
+    (hiddenCommentPrefixes: HiddenCommentPrefixEntry[]) => update({ hiddenCommentPrefixes }),
+    [update],
+  );
+
   const resetTemplates = useCallback(() => update({ templates: DEFAULT_TEMPLATES }), [update]);
 
   const resetAll = useCallback(() => {
@@ -163,6 +176,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDocWidth,
         updateProseSize,
         updateKeepLineBreaks,
+        updateRenderHtmlComments,
+        updateHiddenCommentPrefixes,
         resetTemplates,
         resetAll,
       }}

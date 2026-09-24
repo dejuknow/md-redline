@@ -445,6 +445,96 @@ describe('renderMarkdown HTML comments (rehypeRenderHtmlComments)', () => {
     const html = renderMarkdown('<!-- a note -->', undefined, { renderHtmlComments: false });
     expect(html).not.toContain('doc-html-comment');
   });
+
+  describe('hiddenCommentPrefixes', () => {
+    it('hides a comment whose body starts with a listed prefix', () => {
+      const html = renderMarkdown('<!-- prettier-ignore -->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: ['prettier-ignore'],
+      });
+      expect(html).not.toContain('doc-html-comment');
+    });
+
+    it('matches after trimStart, so the unspaced writer form is caught too', () => {
+      // remark-lint writes `<!--lint disable-->`; prettier writes
+      // `<!-- prettier-ignore -->`. One prefix has to cover both.
+      const spaced = renderMarkdown('<!-- lint disable -->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: ['lint disable'],
+      });
+      const unspaced = renderMarkdown('<!--lint disable-->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: ['lint disable'],
+      });
+      expect(spaced).not.toContain('doc-html-comment');
+      expect(unspaced).not.toContain('doc-html-comment');
+    });
+
+    it('still renders a comment that merely CONTAINS a listed prefix', () => {
+      // Prefix-only, deliberately: a note discussing a directive is still a
+      // note, and substring matching would swallow it.
+      const html = renderMarkdown('<!-- we should add prettier-ignore here -->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: ['prettier-ignore'],
+      });
+      expect(body(html)).toBe(' we should add prettier-ignore here ');
+    });
+
+    it('matches a prefix only as a whole word', () => {
+      const opts = { ...on, hiddenCommentPrefixes: ['more', 'toc'] };
+      expect(renderMarkdown('<!-- more -->', undefined, opts)).not.toContain('doc-html-comment');
+      expect(renderMarkdown('<!-- more on this later -->', undefined, opts)).not.toContain(
+        'doc-html-comment',
+      );
+      expect(body(renderMarkdown('<!-- moreover, a note -->', undefined, opts))).toBe(
+        ' moreover, a note ',
+      );
+      expect(body(renderMarkdown('<!-- tocopherol -->', undefined, opts))).toBe(' tocopherol ');
+    });
+
+    it('treats a hyphen as a word boundary', () => {
+      const html = renderMarkdown('<!-- markdownlint-disable-next-line MD033 -->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: ['markdownlint-disable'],
+      });
+      expect(html).not.toContain('doc-html-comment');
+    });
+
+    it('lets a prefix ending in punctuation match whatever follows it', () => {
+      const html = renderMarkdown('<!-- cSpell:ignore mdr -->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: ['cSpell:'],
+      });
+      expect(html).not.toContain('doc-html-comment');
+    });
+
+    it('renders every comment when the list is empty', () => {
+      const html = renderMarkdown('<!-- prettier-ignore -->', undefined, {
+        ...on,
+        hiddenCommentPrefixes: [],
+      });
+      expect(html).toContain('doc-html-comment');
+    });
+
+    it('ignores the list when rendering is off', () => {
+      const html = renderMarkdown('<!-- a note -->', undefined, {
+        renderHtmlComments: false,
+        hiddenCommentPrefixes: ['a note'],
+      });
+      expect(html).not.toContain('doc-html-comment');
+    });
+
+    it('hides a directive but not the prose beside it', () => {
+      const html = renderMarkdown(
+        '<!-- markdownlint-disable MD013 -->\n\nReal body.\n\n<!-- a genuine note -->',
+        undefined,
+        { ...on, hiddenCommentPrefixes: ['markdownlint-disable'] },
+      );
+      expect(html).toContain('Real body.');
+      expect(body(html)).toBe(' a genuine note ');
+      expect(html).not.toContain('MD013');
+    });
+  });
 });
 
 describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {

@@ -286,17 +286,21 @@ export function buildHtmlCommentElement(
 /**
  * Replace each ordinary HTML comment with a span, between `rehypeRaw` (which
  * creates comment nodes) and `rehypeSanitize` (which drops them). A comment left
- * as a node is still dropped, which is how option-off comments stay
+ * as a node is still dropped, which is how hidden and option-off comments stay
  * invisible. A value starting with `MDR_MARKER_PREFIX` is a malformed marker
  * that `parseComments` could not strip, and stays hidden.
  */
-function rehypeRenderHtmlComments(options: { renderHtmlComments: boolean }) {
+function rehypeRenderHtmlComments(options: {
+  renderHtmlComments: boolean;
+  hiddenCommentPrefixes: string[];
+}) {
   return (tree: Root) => {
     if (!options.renderHtmlComments) return;
     const shown: { node: Comment; index: number; parent: Root | Element }[] = [];
     visit(tree, 'comment', (node: Comment, index, parent) => {
       if (parent == null || typeof index !== 'number') return;
       if (node.value.startsWith(MDR_MARKER_PREFIX)) return;
+      if (isHiddenComment(node.value, options.hiddenCommentPrefixes)) return;
       shown.push({ node, index, parent });
     });
     // Classify every comment before replacing any, so a converted comment's
@@ -325,14 +329,38 @@ function rehypeRenderHtmlComments(options: { renderHtmlComments: boolean }) {
   };
 }
 
+/**
+ * True when the body, after `trimStart`, starts with a prefix. A prefix ending
+ * in a letter or digit must end on a word boundary, so `more` does not hide
+ * `moreover`; a hyphen is a boundary, so `markdownlint-disable` covers
+ * `markdownlint-disable-next-line`.
+ */
+function isHiddenComment(value: string, prefixes: string[]): boolean {
+  if (prefixes.length === 0) return false;
+  const body = value.trimStart();
+  return prefixes.some(
+    (prefix) =>
+      body.startsWith(prefix) &&
+      !(WORD_CHAR.test(prefix.slice(-1)) && WORD_CHAR.test(body.charAt(prefix.length))),
+  );
+}
+
+const WORD_CHAR = /^[\p{L}\p{N}]$/u;
+
 interface ProcessorOptions {
   allowFrontmatter?: boolean;
   keepLineBreaks?: boolean;
   renderHtmlComments?: boolean;
+  hiddenCommentPrefixes?: string[];
 }
 
 function buildProcessor(filePath?: string, options: ProcessorOptions = {}) {
-  const { allowFrontmatter = true, keepLineBreaks = false, renderHtmlComments = false } = options;
+  const {
+    allowFrontmatter = true,
+    keepLineBreaks = false,
+    renderHtmlComments = false,
+    hiddenCommentPrefixes = [],
+  } = options;
   const processor = unified().use(remarkParse);
   // Frontmatter is defined as being at offset 0 of the DOCUMENT. A caller
   // rendering a fragment (the diff overlay renders one segment at a time) has
@@ -355,7 +383,7 @@ function buildProcessor(filePath?: string, options: ProcessorOptions = {}) {
       })
       .use(rehypeRaw)
       .use(rewriteLocalUrls, { filePath })
-      .use(rehypeRenderHtmlComments, { renderHtmlComments })
+      .use(rehypeRenderHtmlComments, { renderHtmlComments, hiddenCommentPrefixes })
       .use(rehypeSanitize, sanitizeSchema)
       // AFTER rehypeSanitize, for the reason rehypeAnnotateSource's own docstring
       // gives: a document cannot forge data-src-* through raw HTML if the real
@@ -380,6 +408,8 @@ export interface RenderOptions {
   keepLineBreaks?: boolean;
   /** Render ordinary HTML comments. Off by default, so option-less callers drop them. */
   renderHtmlComments?: boolean;
+  /** Hide comments whose body starts with one of these prefixes. */
+  hiddenCommentPrefixes?: string[];
 }
 
 export function renderMarkdown(
@@ -387,11 +417,17 @@ export function renderMarkdown(
   filePath?: string,
   options: RenderOptions = {},
 ): string {
-  const { allowFrontmatter = true, keepLineBreaks = false, renderHtmlComments = false } = options;
+  const {
+    allowFrontmatter = true,
+    keepLineBreaks = false,
+    renderHtmlComments = false,
+    hiddenCommentPrefixes = [],
+  } = options;
   const file = buildProcessor(filePath, {
     allowFrontmatter,
     keepLineBreaks,
     renderHtmlComments,
+    hiddenCommentPrefixes,
   }).processSync(markdown);
   return String(file);
 }

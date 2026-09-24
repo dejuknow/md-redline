@@ -41,6 +41,19 @@ test.afterEach(async () => {
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
+/** Flip the "Render HTML comments" switch in the Settings panel. */
+async function toggleRenderHtmlComments(page: Page) {
+  await page.locator('button[title*="Settings"]').click();
+  const panel = page.locator('.fixed.inset-0');
+  await expect(panel.getByText('Settings').first()).toBeVisible({ timeout: 5000 });
+  await panel
+    .locator('label', { hasText: 'Render HTML comments' })
+    .locator('button[role="switch"]')
+    .click();
+  await page.keyboard.press('Escape');
+  await expect(panel).not.toBeVisible();
+}
+
 async function openFixture(page: Page) {
   await page.goto(`/?file=${fixturePath}`);
   await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible({ timeout: 10_000 });
@@ -128,6 +141,43 @@ test.describe('HTML comments in the rendered view', () => {
     expect(content).toContain(`<!-- ${BODY} -->`);
     expect(content).not.toMatch(/<!-- TODO: <!--/);
     expect(content).not.toMatch(/@comment[^>]*@comment/);
+  });
+
+  test('the Settings toggle turns rendering off and back on', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('.doc-html-comment').first()).toBeVisible();
+
+    await toggleRenderHtmlComments(page);
+    await expect(page.locator('.doc-html-comment')).toHaveCount(0);
+
+    await toggleRenderHtmlComments(page);
+    await expect(page.locator('.doc-html-comment').first()).toBeVisible();
+  });
+
+  test('hides a directive comment by its shipped prefix, and renders it once switched off', async ({
+    page,
+  }) => {
+    writeFileSync(
+      fixturePath,
+      '# Notes\n\n<!-- prettier-ignore -->\n\n<!-- a genuine note -->\n\nBody.\n',
+    );
+    await page.goto(`/?file=${fixturePath}`);
+    await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible({ timeout: 10_000 });
+
+    // Only the reader-addressed one renders; the formatter directive does not.
+    await expect(page.locator('.doc-html-comment')).toHaveCount(1);
+    await expect(page.locator('.doc-html-comment')).toHaveText('a genuine note');
+
+    // Switching the prefix off in Settings brings the directive back, which is
+    // what makes a false positive on a short prefix (`more`, `toc`) fixable.
+    await page.locator('button[title*="Settings"]').click();
+    const panel = page.locator('.fixed.inset-0');
+    await expect(panel.getByText('Settings').first()).toBeVisible({ timeout: 5000 });
+    await panel.getByRole('switch', { name: 'Toggle all Prettier prefixes' }).click();
+    await page.keyboard.press('Escape');
+    await expect(panel).not.toBeVisible();
+
+    await expect(page.locator('.doc-html-comment')).toHaveCount(2);
   });
 
   test('keeps a multi-line comment on its own lines', async ({ page }) => {
