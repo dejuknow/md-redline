@@ -74,22 +74,29 @@ function startFakeServer(): Promise<{ port: number; aborted: string[] }> {
   });
 }
 
-/** A port nothing is listening on, same helper as find-server-cli.test.ts. */
-async function unusedPort(): Promise<number> {
-  const server = createServer();
-  const port = await new Promise<number>((resolvePromise, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
-        reject(new Error('no port assigned'));
-        return;
-      }
-      resolvePromise(address.port);
-    });
+/**
+ * A port to name where nothing answers, on it or on the nine above it that
+ * findServerPort also scans. Picked below every OS's ephemeral range (Linux
+ * starts at 32768, macOS and Windows at 49152) because the fake servers other
+ * test files start in parallel bind port 0 and land inside it. A free port
+ * from inside that range failed on macOS CI: another file's fake server took a
+ * neighbour, the scan found it, and the command reported it instead of "none".
+ */
+async function deadPortBlock(): Promise<number> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const base = 20_000 + Math.floor(Math.random() * 12_000);
+    const free = await Promise.all(Array.from({ length: 10 }, (_, i) => portIsFree(base + i)));
+    if (free.every(Boolean)) return base;
+  }
+  throw new Error('no free port block below the ephemeral range');
+}
+
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const server = createServer();
+    server.once('error', () => resolvePromise(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => resolvePromise(true)));
   });
-  await new Promise((r) => server.close(r));
-  return port;
 }
 
 function runSessions(
@@ -150,7 +157,7 @@ describe('mdr sessions', () => {
   });
 
   it('reports that mdr is not running instead of starting it', async () => {
-    const port = await unusedPort();
+    const port = await deadPortBlock();
 
     const plain = await runSessions([], port);
     expect(plain.code).toBe(0);
