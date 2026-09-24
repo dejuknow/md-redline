@@ -207,6 +207,21 @@ disk. `GET /api/file` sweeps markers whose `expectsReply` flag references a
 session that is no longer open and clears the flag (marker preserved). A
 post-restart `mdr_wait` on an unknown session gets a graceful "re-read the
 file(s)" result instead of an error.
+A call that loses the server itself gets `ServerUnreachableError` from
+`server/mcp-stdio/client.ts` instead of Node's bare `fetch failed` (#116): either
+nothing is listening (`ECONNREFUSED`), or the connection dropped mid-request or
+mid-body (`UND_ERR_SOCKET`, `ECONNRESET` and the like). The message says which,
+that open reviews are gone, and to re-read the files before continuing.
+`guardServerErrors` wraps every client method, body reads included. Client-side
+timeouts, other network codes, a caller's abort and HTTP error responses pass
+through unchanged, so a long wait that times out is never reported as the server
+being gone. Only a failed post (`postAgentComments` in `mdr_ask`,
+`postReviewBatch` in `mdr_comment`) comes back as an `isError` tool result;
+everywhere else, including `mdr_ask`'s wait for the reply and `mdr_comment`
+opening a new session, it surfaces as the MCP error. The message is the same in
+both shapes. Known gap: under `npm run dev`
+the client talks to Vite, whose proxy answers a dead backend with an HTTP 500,
+so the dev setup still sees a plain HTTP error.
 
 **Config and system**
 - `GET /api/config` — initial file, directory, home dir
