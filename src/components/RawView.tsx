@@ -14,7 +14,11 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { highlightSearchMatches } from './MarkdownViewer';
-import { createCommentMarkerRegex, createFrontmatterRegex } from '../lib/comment-parser';
+import {
+  createCommentMarkerRegex,
+  createFrontmatterRegex,
+  MDR_MARKER_PREFIX,
+} from '../lib/comment-parser';
 import { uniqueSlugs } from '../lib/heading-slugs';
 import { type DiffLine } from '../lib/diff';
 
@@ -53,8 +57,11 @@ const SYNTAX_RULES: SyntaxRule[] = [
   // and the renderer cannot disagree about what counts: `+++` as well as
   // `---`, CRLF, and trailing whitespace on the fence line.
   { pattern: createFrontmatterRegex('g'), className: 'raw-frontmatter' },
-  // HTML comments (non-@comment ones)
-  { pattern: /<!--(?! @comment)[\s\S]*?-->/g, className: 'raw-html-comment' },
+  // HTML comments that are not @comment markers.
+  {
+    pattern: new RegExp(`<!--(?!${MDR_MARKER_PREFIX})[\\s\\S]*?-->`, 'g'),
+    className: 'raw-html-comment',
+  },
 ];
 
 export interface RawViewHandle {

@@ -757,6 +757,7 @@ body {
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   color: var(--theme-text);
   background-color: var(--theme-bg-inset);
+  font-variant-ligatures: none;
 }
 
 /* Links are content, not review chrome: ink text with a quiet accent
@@ -827,6 +828,48 @@ body {
 .doc-frontmatter__key {
   color: var(--theme-text);
   font-weight: 500;
+}
+
+/* Ordinary (non-@comment) HTML comments in the rendered view. The <!-- and -->
+   delimiters are generated content, so the span's textContent is the comment
+   body byte for byte, which is what comment anchoring searches the source for. */
+.doc-html-comment {
+  color: color-mix(in srgb, var(--theme-text-secondary) 80%, var(--theme-text-faint));
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: 0.875em;
+}
+
+.doc-html-comment::before {
+  content: "<!--";
+}
+
+.doc-html-comment::after {
+  content: "-->";
+}
+
+.doc-html-comment::before,
+.doc-html-comment::after {
+  color: var(--theme-text-faint);
+}
+
+.doc-html-comment--block {
+  display: block;
+  margin: 0.4em 0;
+}
+
+/* A body that spans lines keeps its line breaks and alignment, with the
+   delimiters on their own lines. */
+.doc-html-comment--pre {
+  display: block;
+  white-space: pre-wrap;
+  line-height: 1.7143;
+  margin: 1.7143em 0;
+}
+
+.doc-html-comment--pre::before,
+.doc-html-comment--pre::after {
+  display: block;
 }
 
 /* Image sizing.
@@ -1288,6 +1331,7 @@ body {
 
 .raw-view-table {
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: 0.8125rem;
   line-height: 1.625;
 }

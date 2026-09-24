@@ -71,6 +71,8 @@
     "@hono/node-server": "^1.19.11",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dompurify": "^3.3.3",
+    "hast-util-phrasing": "^3.0.1",
+    "hast-util-whitespace": "^3.0.0",
     "hono": "^4.12.8",
     "mermaid": "^11.13.0",
     "panzoom": "^9.4.4",

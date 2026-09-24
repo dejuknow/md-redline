@@ -9,8 +9,11 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 import { visit, SKIP } from 'unist-util-visit';
 import { visitParents } from 'unist-util-visit-parents';
-import type { Root, Element } from 'hast';
+import { phrasing } from 'hast-util-phrasing';
+import { whitespace } from 'hast-util-whitespace';
+import type { Root, Element, Comment } from 'hast';
 import { rewriteLocalUrls } from './rewriteLocalUrls';
+import { MDR_MARKER_PREFIX } from '../lib/comment-parser';
 
 // Allow mark elements (used for comment highlights) and the data-mdr-* attrs
 // that the local-link rewriter emits on <a> tags. Note what is NOT here: a
@@ -257,7 +260,79 @@ function frontmatterHandler(_state: unknown, node: { value: string }): Element |
   };
 }
 
-function buildProcessor(filePath?: string, allowFrontmatter = true, keepLineBreaks = false) {
+/**
+ * Build the span for one ordinary HTML comment. Its only text is the comment
+ * body; the `<!--` / `-->` delimiters are `::before` / `::after`. The body must
+ * stay a contiguous substring of the source, because `insertComment` anchors by
+ * searching the raw markdown for the text the DOM hands it. Always a `<span>`,
+ * so it is valid in both phrasing and flow context.
+ */
+export function buildHtmlCommentElement(
+  value: string,
+  opts: { block: boolean; pre: boolean },
+): Element {
+  const className = ['doc-html-comment'];
+  // `pre` already owns its line, so it replaces `block` rather than adding to it.
+  if (opts.pre) className.push('doc-html-comment--pre');
+  else if (opts.block) className.push('doc-html-comment--block');
+  return {
+    type: 'element',
+    tagName: 'span',
+    properties: { className },
+    children: [{ type: 'text', value }],
+  };
+}
+
+/**
+ * Replace each ordinary HTML comment with a span, between `rehypeRaw` (which
+ * creates comment nodes) and `rehypeSanitize` (which drops them). A comment left
+ * as a node is still dropped, which is how option-off comments stay
+ * invisible. A value starting with `MDR_MARKER_PREFIX` is a malformed marker
+ * that `parseComments` could not strip, and stays hidden.
+ */
+function rehypeRenderHtmlComments(options: { renderHtmlComments: boolean }) {
+  return (tree: Root) => {
+    if (!options.renderHtmlComments) return;
+    const shown: { node: Comment; index: number; parent: Root | Element }[] = [];
+    visit(tree, 'comment', (node: Comment, index, parent) => {
+      if (parent == null || typeof index !== 'number') return;
+      if (node.value.startsWith(MDR_MARKER_PREFIX)) return;
+      shown.push({ node, index, parent });
+    });
+    // Classify every comment before replacing any, so a converted comment's
+    // <span> does not count as a phrasing sibling of the next one.
+    const layouts = shown.map(({ node, parent }) => ({
+      // Inline when it flows with its siblings: non-blank text or a phrasing
+      // element. Otherwise it owns its line.
+      block: !parent.children.some(
+        (sibling) =>
+          sibling !== node && (sibling.type === 'text' ? !whitespace(sibling) : phrasing(sibling)),
+      ),
+      // A body that spans lines keeps its line breaks and alignment.
+      pre: node.value.includes('\n'),
+    }));
+    shown.forEach(({ node, index, parent }, i) => {
+      const { block, pre } = layouts[i];
+      // With the delimiters on their own lines, the separator whitespace after
+      // `<!--` and before `-->` would show as a stray indent and a blank line.
+      // Trimming only those edges keeps the text a contiguous substring of the
+      // source, which is what anchoring needs.
+      const value = pre
+        ? node.value.replace(/^[ \t]*\n?/, '').replace(/\n?[ \t]*$/, '')
+        : node.value;
+      parent.children[index] = buildHtmlCommentElement(value, { block, pre });
+    });
+  };
+}
+
+interface ProcessorOptions {
+  allowFrontmatter?: boolean;
+  keepLineBreaks?: boolean;
+  renderHtmlComments?: boolean;
+}
+
+function buildProcessor(filePath?: string, options: ProcessorOptions = {}) {
+  const { allowFrontmatter = true, keepLineBreaks = false, renderHtmlComments = false } = options;
   const processor = unified().use(remarkParse);
   // Frontmatter is defined as being at offset 0 of the DOCUMENT. A caller
   // rendering a fragment (the diff overlay renders one segment at a time) has
@@ -272,17 +347,23 @@ function buildProcessor(filePath?: string, allowFrontmatter = true, keepLineBrea
   // "\n" text node, so the DOM text that comment anchoring searches reads the
   // same with the setting on or off.
   if (keepLineBreaks) processor.use(remarkBreaks);
-  return processor
-    .use(remarkRehype, {
-      allowDangerousHtml: true,
-      handlers: { yaml: frontmatterHandler, toml: frontmatterHandler },
-    })
-    .use(rehypeRaw)
-    .use(rewriteLocalUrls, { filePath })
-    .use(rehypeSanitize, sanitizeSchema)
-    .use(rehypeAnnotateSource)
-    .use(rehypeWrapTables)
-    .use(rehypeStringify);
+  return (
+    processor
+      .use(remarkRehype, {
+        allowDangerousHtml: true,
+        handlers: { yaml: frontmatterHandler, toml: frontmatterHandler },
+      })
+      .use(rehypeRaw)
+      .use(rewriteLocalUrls, { filePath })
+      .use(rehypeRenderHtmlComments, { renderHtmlComments })
+      .use(rehypeSanitize, sanitizeSchema)
+      // AFTER rehypeSanitize, for the reason rehypeAnnotateSource's own docstring
+      // gives: a document cannot forge data-src-* through raw HTML if the real
+      // attributes are written once sanitize has already stripped the fakes.
+      .use(rehypeAnnotateSource)
+      .use(rehypeWrapTables)
+      .use(rehypeStringify)
+  );
 }
 
 export interface RenderOptions {
@@ -297,6 +378,8 @@ export interface RenderOptions {
    * space. Off by default, which is CommonMark and what GitHub's file view does.
    */
   keepLineBreaks?: boolean;
+  /** Render ordinary HTML comments. Off by default, so option-less callers drop them. */
+  renderHtmlComments?: boolean;
 }
 
 export function renderMarkdown(
@@ -304,7 +387,11 @@ export function renderMarkdown(
   filePath?: string,
   options: RenderOptions = {},
 ): string {
-  const { allowFrontmatter = true, keepLineBreaks = false } = options;
-  const file = buildProcessor(filePath, allowFrontmatter, keepLineBreaks).processSync(markdown);
+  const { allowFrontmatter = true, keepLineBreaks = false, renderHtmlComments = false } = options;
+  const file = buildProcessor(filePath, {
+    allowFrontmatter,
+    keepLineBreaks,
+    renderHtmlComments,
+  }).processSync(markdown);
   return String(file);
 }

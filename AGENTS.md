@@ -1474,6 +1474,34 @@ The plain-text offset drift is a red herring here: the two `---` fences stay in
 plain space and are absent from the DOM, and the creation path resolves
 correctly either way.
 
+### HTML comments
+Ordinary (non-`@comment`) HTML comments render in the rendered view as muted
+content (`.doc-html-comment`) instead of being dropped: in a review tool a
+comment is often the thing a reviewer needs to answer. `rehypeSanitize` drops
+comment nodes, so `rehypeRenderHtmlComments` in `pipeline.ts` runs between
+`rehypeRaw` and sanitize and replaces each one with a `<span>`.
+
+The `<!--` / `-->` delimiters are `::before` / `::after`, so the span's
+`textContent` is the comment body byte for byte. That is the same requirement
+`.doc-frontmatter` has: `insertComment` anchors by searching the raw markdown
+for the text the DOM hands it, and any transformation of the emitted text makes
+the comment vanish with no marker and no error.
+
+A comment renders inline when a sibling is non-blank text or a phrasing element
+(`hast-util-phrasing`); otherwise it gets `doc-html-comment--block` and its own
+line. A body containing a newline also gets `doc-html-comment--pre`, which keeps
+its line breaks and puts the delimiters on their own lines. For that variant the
+plugin trims only the whitespace next to the delimiters, so the emitted text is
+still a contiguous substring of the source.
+
+The plugin skips a comment whose value starts with `MDR_MARKER_PREFIX`. A
+well-formed marker never reaches the renderer; a malformed one that survived
+stripping stays hidden. RawView's `.raw-html-comment` lookahead is built from
+the same constant.
+
+`renderMarkdown` takes `renderHtmlComments` (default false), so an option-less
+caller keeps dropping comments. `useComments` and `RenderedDiffView` turn it on.
+
 ### Mermaid fullscreen view
 Click the expand button (top-right of any Mermaid diagram on hover) to open the
 diagram in a fullscreen modal with pan/zoom and a docked comment panel. The modal

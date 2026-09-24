@@ -285,6 +285,8 @@ interface Props {
   diffLines: DiffLine[];
   /** Render single source newlines as line breaks, matching the main view. */
   keepLineBreaks: boolean;
+  /** Render ordinary HTML comments, as the main rendered view does. */
+  renderHtmlComments?: boolean;
 }
 
 function escapeHtmlAttr(s: string): string {
@@ -292,7 +294,7 @@ function escapeHtmlAttr(s: string): string {
 }
 
 export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(function RenderedDiffView(
-  { rawMarkdown, diffSnapshot, diffLines, keepLineBreaks },
+  { rawMarkdown, diffSnapshot, diffLines, keepLineBreaks, renderHtmlComments = true },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -320,6 +322,7 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(functi
       const inner = renderMarkdown(seg.text, undefined, {
         allowFrontmatter: segmentIsDocumentStart(segments, segIndex),
         keepLineBreaks,
+        renderHtmlComments,
       });
       if (seg.type === 'same') {
         parts.push(inner);
@@ -332,7 +335,7 @@ export const RenderedDiffView = forwardRef<RenderedDiffViewHandle, Props>(functi
       }
     }
     return parts.join('');
-  }, [segments, keepLineBreaks]);
+  }, [segments, keepLineBreaks, renderHtmlComments]);
 
   // Reset active chunk when the diff itself changes.
   useEffect(() => {

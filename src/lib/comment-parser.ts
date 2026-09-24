@@ -22,6 +22,13 @@ export function createCommentMarkerRegex(): RegExp {
   return /<!-- @comment\{.*?\} -->/gs;
 }
 
+/**
+ * How the inner text of one of mdr's own `<!-- @comment{...} -->` markers
+ * begins. The render pipeline and RawView both tell markers from ordinary HTML
+ * comments with it.
+ */
+export const MDR_MARKER_PREFIX = ' @comment';
+
 interface CodeBlockRange {
   start: number;
   end: number;

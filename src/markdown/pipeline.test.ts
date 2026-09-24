@@ -289,6 +289,164 @@ describe('renderMarkdown', () => {
   });
 });
 
+describe('renderMarkdown HTML comments (rehypeRenderHtmlComments)', () => {
+  // Decode the handful of entities rehype-stringify emits in text content, so a
+  // rendered body can be compared byte-for-byte against the source inner text.
+  const decode = (s: string): string =>
+    s
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&');
+
+  // The wrapper's real content is the comment body; the <!-- / --> delimiters
+  // are CSS chrome and never appear in the HTML. Pull the span's text back out
+  // and decode it to recover the verbatim body.
+  const body = (html: string): string => {
+    const m = /<span class="doc-html-comment[^"]*">([\s\S]*?)<\/span>/.exec(html);
+    if (!m) throw new Error(`no .doc-html-comment span in: ${html}`);
+    return decode(m[1]);
+  };
+
+  const on = { renderHtmlComments: true } as const;
+
+  it('renders an ordinary comment as a muted span, delimiters as CSS chrome', () => {
+    const html = renderMarkdown('<!-- a note to the next reader -->', undefined, on);
+    expect(html).toContain('class="doc-html-comment');
+    // Delimiters are never text — they come from ::before / ::after.
+    expect(html).not.toContain('&lt;!--');
+    expect(html).not.toContain('-->');
+  });
+
+  it('emits the body verbatim: leading and trailing spaces', () => {
+    // Source inner value is ` a note ` (a space each side of the text).
+    expect(body(renderMarkdown('<!-- a note -->', undefined, on))).toBe(' a note ');
+  });
+
+  it('emits the body verbatim: an empty comment', () => {
+    expect(body(renderMarkdown('<!---->', undefined, on))).toBe('');
+  });
+
+  it('emits the body verbatim: no surrounding spaces (<!--x-->)', () => {
+    expect(body(renderMarkdown('<!--x-->', undefined, on))).toBe('x');
+  });
+
+  it('strips only the delimiter-adjacent whitespace from a multi-line body', () => {
+    // The space after `<!--` and the newline before `-->` are separators, not
+    // content. With the delimiters rendered on their own lines they would show
+    // as a stray indent on line one and a blank line at the foot -- breaking
+    // exactly the column alignment this variant exists to preserve.
+    expect(body(renderMarkdown('<!-- line one\nline two -->', undefined, on))).toBe(
+      'line one\nline two',
+    );
+  });
+
+  it('strips a leading newline when the body opens on its own line', () => {
+    expect(body(renderMarkdown('<!--\nline one\nline two\n-->', undefined, on))).toBe(
+      'line one\nline two',
+    );
+  });
+
+  it('leaves interior indentation of a multi-line body untouched', () => {
+    // Only the edges are separators. Anything a writer aligned inside the block
+    // is content, and losing it would defeat the point.
+    expect(body(renderMarkdown('<!-- $ cmd\n    indented\n\ttabbed -->', undefined, on))).toBe(
+      '$ cmd\n    indented\n\ttabbed',
+    );
+  });
+
+  it('emits the body verbatim: a literal <!-- inside the body', () => {
+    // The first --> closes the comment, so `<!--` inside is just body text.
+    expect(body(renderMarkdown('<!-- a <!-- b -->', undefined, on))).toBe(' a <!-- b ');
+  });
+
+  it('marks a standalone comment (parent root) as a block', () => {
+    const html = renderMarkdown('<!-- standalone -->', undefined, on);
+    expect(html).toContain('class="doc-html-comment doc-html-comment--block"');
+    // A block comment is not wrapped in a paragraph.
+    // `<p[^>]*>` rather than `<p>`: rehypeAnnotateSource (0.9.0) writes
+    // data-src-start/data-src-end onto block elements, so a literal `<p>` no
+    // longer appears. On a NEGATIVE assertion that difference is silent — the
+    // pattern stops matching anything and the test passes vacuously.
+    expect(html).not.toMatch(/<p[^>]*>[^<]*<span class="doc-html-comment/);
+  });
+
+  it('renders an inline comment (parent <p>) as an inline span, no --block', () => {
+    const html = renderMarkdown('Text before <!-- inline note --> text after.', undefined, on);
+    expect(html).toMatch(/<p[^>]*>Text before <span class="doc-html-comment">/);
+    expect(html).not.toContain('doc-html-comment--block');
+    // The former double-space is gone: single spaces flank the visible comment.
+    expect(html).toContain('Text before <span');
+    expect(html).toContain('</span> text after.');
+  });
+
+  it('renders a comment after text in a tight list item inline', () => {
+    const html = renderMarkdown('- An item. <!-- a note -->', undefined, on);
+    expect(html).toContain('<span class="doc-html-comment">');
+    expect(html).not.toContain('doc-html-comment--block');
+  });
+
+  it('marks consecutive standalone comments as blocks', () => {
+    const html = renderMarkdown('<!-- first -->\n<!-- second -->', undefined, on);
+    expect(html.match(/doc-html-comment--block/g)).toHaveLength(2);
+  });
+
+  it('marks a multi-line comment as preformatted', () => {
+    // A comment whose body spans lines carries meaning in its line breaks and
+    // column alignment -- a command over its output, a table. Rendered as
+    // prose those collapse to single spaces and the signal is gone.
+    const html = renderMarkdown('<!-- line one\nline two -->', undefined, on);
+    expect(html).toContain('doc-html-comment--pre');
+  });
+
+  it('leaves a single-line standalone comment as an ordinary block', () => {
+    const html = renderMarkdown('<!-- standalone -->', undefined, on);
+    expect(html).not.toContain('doc-html-comment--pre');
+  });
+
+  it('marks a multi-line comment inside a paragraph as preformatted', () => {
+    // Phrasing context does not make the line breaks meaningless.
+    const html = renderMarkdown('Text before <!-- one\ntwo --> after.', undefined, on);
+    expect(html).toContain('doc-html-comment--pre');
+  });
+
+  it('keeps every source line of a multi-line comment separate in the output', () => {
+    // The regression this guards: the newlines are in the DOM but CSS collapses
+    // them, so what the reader sees -- and what a selection anchor records -- is
+    // one joined line. The markup half of the fix is asserted here; the
+    // white-space rule that makes it visible lives in index.css.
+    const source = '<!-- $ echo hi\nhi -->';
+    expect(body(renderMarkdown(source, undefined, on))).toBe('$ echo hi\nhi');
+  });
+
+  it('keeps a malformed @comment marker hidden', () => {
+    // A well-formed marker never reaches the renderer (parseComments strips it);
+    // a malformed one that survived stripping must not render as a note.
+    const html = renderMarkdown('<!-- @comment{"id":"x" -->', undefined, on);
+    expect(html).not.toContain('doc-html-comment');
+    expect(html).not.toContain('@comment');
+  });
+
+  it('keeps a well-formed @comment marker hidden', () => {
+    const marker = '<!-- @comment{"id":"1","anchor":"a","text":"b"} -->';
+    const html = renderMarkdown(marker, undefined, on);
+    expect(html).not.toContain('doc-html-comment');
+    expect(html).not.toContain('@comment');
+  });
+
+  it('drops ordinary comments by default (option off), leaving callers unchanged', () => {
+    expect(renderMarkdown('<!-- a note -->')).not.toContain('doc-html-comment');
+    expect(renderMarkdown('Text <!-- a note --> more')).not.toContain('doc-html-comment');
+  });
+
+  it('drops ordinary comments when the option is explicitly false', () => {
+    const html = renderMarkdown('<!-- a note -->', undefined, { renderHtmlComments: false });
+    expect(html).not.toContain('doc-html-comment');
+  });
+});
+
 describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {
   it('wraps a table in div.table-scroll > div.table-scroll__viewport > table', () => {
     const md = '| A | B |\n| --- | --- |\n| 1 | 2 |';
