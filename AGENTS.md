@@ -217,9 +217,27 @@ has a reply resolves immediately (the agent unblocks without any End review
 click). Partially answered asks stay pending until End review / Finish review,
 which deliver whatever replies exist.
 
-**Restart recovery** — sessions and asks are memory-only; markers persist on
-disk. `GET /api/file` sweeps markers whose `expectsReply` flag references a
-session that is no longer open and clears the flag (marker preserved). A
+**Restart recovery** — review sessions survive a restart that comes back
+within a few minutes (#116). Each server saves its sessions, pending asks,
+recent ask results and queued batches to `<home>/.md-redline/sessions-<port>.json`
+(`server/session-persistence.ts`; directory `0700`, file `0600`), debounced
+250 ms after any change and synchronously on SIGINT, SIGTERM and
+`/api/shutdown`. At boot it restores the file only if it was saved within
+`RESTORE_WINDOW_MS` (5 minutes), so a reboot or a long outage starts clean, and
+it resets each open session's heartbeat clock (and the silent-agent clock, via
+`livenessFloor`) so the downtime never counts against a live tab or agent. The
+server listens before it knows its port, so every request is held until the
+restore finishes (`holdRequestsUntilOpen` in `server/session-persistence.ts`), or an early
+heartbeat or reconnecting poll would 404 on a session about to exist. Nothing
+edits a markdown file at load. `ReviewSessionStore.exportState`/`restoreState`
+hold the serialization; `setOnChange` fires on every saved-state change except
+heartbeats and wait-park bookkeeping. `MD_REDLINE_PERSIST_SESSIONS=0` turns it
+off (the Playwright web server sets it, so one run never restores into the
+next). Accepted gap: a batch handed to a parked waiter at the instant the
+process dies is lost with the HTTP response, though `sentCommentIds` records it
+as sent. Baselines are still memory-only (#138). Markers persist on disk
+regardless. `GET /api/file` sweeps markers whose `expectsReply` flag references
+a session that is no longer open and clears the flag (marker preserved). A
 post-restart `mdr_wait` on an unknown session gets a graceful "re-read the
 file(s)" result instead of an error.
 A call that loses the server itself gets `ServerUnreachableError` from

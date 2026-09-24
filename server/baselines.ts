@@ -9,7 +9,8 @@
  *
  * Pure in-memory store. Reading files, checking sizes, and validating
  * paths belong to the route layer. Nothing survives a server restart,
- * which matches review sessions.
+ * unlike review sessions, which are saved to disk (#116); #138 tracks
+ * persisting these too.
  */
 
 export interface Baseline {
