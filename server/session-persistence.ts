@@ -317,9 +317,12 @@ export interface SessionSaver {
  * an earlier change is still in flight. `seq`/`lastCompletedSeq` are what
  * keep that safe: every write attempt, sync or async, takes a ticket before
  * doing anything else, and an async write skips its own write once it can
- * see a later-numbered one has already completed, so a slow write from a
- * stale snapshot can never rename over what flushSync (or a subsequent
- * write) already put on disk.
+ * see a later-numbered one has already completed, and one that finishes
+ * after a newer save writes the current state again. That covers a running
+ * server. It cannot cover the moment of exit: an async rename already handed
+ * to the thread pool can still land after flushSync's and before the process
+ * ends, and no JavaScript runs afterwards to correct it. The window is a few
+ * milliseconds at shutdown, and the loss is one debounce interval of state.
  */
 export function createSessionSaver(opts: {
   path: string;

@@ -474,7 +474,9 @@ export async function handleAskToolCall(
                   `mdr_ask: lost the connection while waiting for a reply and could not ` +
                   `reconnect. The question is still in the file and may still be pending ` +
                   `on the server: do not call mdr_ask again for the same question. ` +
-                  `Re-read the file later to pick up the reader's answer.`,
+                  `Until the reader answers it or the review ends, this session can't ` +
+                  `take a new mdr_ask either. Re-read the file later to pick up the ` +
+                  `reader's answer.`,
               },
             ],
           };

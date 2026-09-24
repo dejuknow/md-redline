@@ -289,6 +289,13 @@ export interface PersistedSession {
   terminalAt: string | null;
   terminalResult: ReviewResult | null;
   queuedBatch: { commentIds: string[]; commentCountsByPath: [string, number][] } | null;
+  /**
+   * Downtime credit the silent-agent clock already carries from earlier
+   * restarts. Saved so a second crash adds to it instead of dropping it,
+   * which would count the first outage as silence. Optional: files written
+   * before it existed restore with none.
+   */
+  livenessShiftMs?: number;
 }
 
 /**
@@ -1030,6 +1037,9 @@ export class ReviewSessionStore {
     s.agentCommentCount += count;
     const now = new Date();
     s.lastAgentActivityAt = now;
+    // Real activity starts the silence clock over, so any downtime credit
+    // from a restart no longer applies.
+    s.livenessShiftMs = 0;
     // Treat an agent POST as a heartbeat so subsequent batched calls keep
     // finding this session via findOpenSession even if the browser tab is
     // backgrounded and Chrome throttles its setInterval-based heartbeats.
@@ -1255,6 +1265,7 @@ export class ReviewSessionStore {
         waitingForAgent: s.waitingForAgent,
         waitingForAgentSince: s.waitingForAgentSince ? s.waitingForAgentSince.toISOString() : null,
         agentCommentCount: s.agentCommentCount,
+        livenessShiftMs: s.livenessShiftMs,
         sessionDoneAt: s.sessionDoneAt ? s.sessionDoneAt.toISOString() : null,
         terminalReason: s.terminalReason,
         terminalAt: s.terminalAt ? s.terminalAt.toISOString() : null,
@@ -1396,7 +1407,9 @@ export class ReviewSessionStore {
         doneResolver: null,
         doneWaiter,
         terminalResult: persisted.terminalResult,
-        livenessShiftMs: downtimeMs,
+        livenessShiftMs:
+          (Number.isFinite(persisted.livenessShiftMs) ? (persisted.livenessShiftMs as number) : 0) +
+          downtimeMs,
       };
 
       this.sessions.set(session.id, session);

@@ -1467,6 +1467,61 @@ describe('persistence (#116)', () => {
     after.dispose();
   });
 
+  it('keeps the first outage credited across a second crash', () => {
+    // Created at 0, crash at 1 min, back at 5 (4 min credit, 1 min silent).
+    // Saved again at 6, crash, back at 6.2: real silence is about 2 min, so
+    // the session must stay open. Dropping the first credit read ~6 min.
+    const first = new ReviewSessionStore();
+    const session = first.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    vi.advanceTimersByTime(60_000);
+    const savedAt1 = Date.now();
+    const state1 = roundTrip(first.exportState());
+    first.dispose();
+    vi.advanceTimersByTime(4 * 60_000);
+
+    const second = new ReviewSessionStore();
+    second.restoreState(state1, { now: new Date(), savedAt: savedAt1 });
+    vi.advanceTimersByTime(60_000);
+    const savedAt2 = Date.now();
+    const state2 = roundTrip(second.exportState());
+    second.dispose();
+    vi.advanceTimersByTime(12_000);
+
+    const third = new ReviewSessionStore();
+    third.restoreState(state2, { now: new Date(), savedAt: savedAt2 });
+    third.gcSilentAgentSessions();
+    expect(third.getSession(session.id)?.status).toBe('open');
+    third.dispose();
+  });
+
+  it('drops the downtime credit once the agent is active again', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    const savedAt = Date.now();
+    const state = roundTrip(before.exportState());
+    before.dispose();
+    vi.advanceTimersByTime(4 * 60_000);
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    // A reply-only batch: activity, but no comments counted.
+    after.recordAgentComments(session.id, 0);
+    // Five real minutes of silence after that activity is the whole budget;
+    // a leftover 4-minute credit would keep it open until nine.
+    vi.advanceTimersByTime(5 * 60_000 + 1000);
+    after.gcSilentAgentSessions();
+    expect(after.getSession(session.id)?.status).toBe('aborted');
+    after.dispose();
+  });
+
   it('findOpenSession still finds a restored session by its current and original file sets', () => {
     const before = new ReviewSessionStore();
     const session = before.createSession({ filePaths: ['/d/a.md'], enableResolve: false });
