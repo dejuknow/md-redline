@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { ReviewSessionStore } from './review-sessions';
+import { MAX_SESSION_AUTHOR_LEN, ReviewSessionStore } from './review-sessions';
 
 describe('ReviewSessionStore', () => {
   let store: ReviewSessionStore;
@@ -1057,5 +1057,41 @@ describe('ReviewSessionStore', () => {
       store.endWaitPark(session.id);
       expect(store.hasParkedWaiter(session.id)).toBe(false);
     });
+  });
+});
+
+describe('recordAgentAuthor (#113)', () => {
+  const open = () => {
+    const store = new ReviewSessionStore();
+    const { id } = store.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    return { store, id, author: () => store.getSession(id)?.author };
+  };
+
+  it('names the session from the first batch that supplies a name', () => {
+    const { store, id, author } = open();
+    store.recordAgentAuthor(id, undefined);
+    expect(author()).toBeUndefined();
+    store.recordAgentAuthor(id, '  Claude  ');
+    store.recordAgentAuthor(id, 'Codex');
+    expect(author()).toBe('Claude');
+  });
+
+  it("never lets 'Agent' or a blank claim the session, so a real name can still arrive", () => {
+    const { store, id, author } = open();
+    store.recordAgentAuthor(id, 'Agent');
+    store.recordAgentAuthor(id, '   ');
+    expect(author()).toBeUndefined();
+    store.recordAgentAuthor(id, 'Claude');
+    expect(author()).toBe('Claude');
+  });
+
+  it('cuts an overlong name, since every tab polls it', () => {
+    const { store, id, author } = open();
+    store.recordAgentAuthor(id, 'x'.repeat(MAX_SESSION_AUTHOR_LEN + 500));
+    expect(author()).toBe('x'.repeat(MAX_SESSION_AUTHOR_LEN));
   });
 });

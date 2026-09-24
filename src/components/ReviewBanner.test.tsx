@@ -605,6 +605,7 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
     origin: 'agent',
     createdAt: '2026-01-01T00:00:00.000Z',
     lastAgentActivityAt: null,
+    author: 'Claude',
   };
 
   // Helper for rendering an agent-origin session banner
@@ -616,7 +617,6 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
       onHandoffSuccess: () => {},
       onResolved: () => {},
       commentIdsByFile: new Map([['/tmp/spec-a.md', []]]),
-      agentNamesBySession: new Map([['rev_agent', 'Claude']]),
     };
     return render(<ReviewBanner {...{ ...defaultProps, ...overrides }} />);
   }
@@ -786,8 +786,16 @@ describe('ReviewBanner — unified agent-reviewing banner (wait-mode and fire-an
 
   // ─── Agent name ─────────────────────────────────────────────────────────
 
-  it('uses "Agent" fallback name when agentNamesBySession is absent', () => {
-    renderAgentBanner({ agentNamesBySession: undefined });
+  it('names the agent from the session, not from comment markers', () => {
+    // No comment markers are passed in at all: the name comes from the session
+    // the server returns, so a reply-only session, or one on a file with no
+    // open tab, is still labelled (#113).
+    renderAgentBanner();
+    expect(screen.getByTestId('review-banner').textContent).toContain('Claude is reviewing');
+  });
+
+  it('uses "Agent" until a batch has supplied a name', () => {
+    renderAgentBanner({ sessions: [{ ...agentSession, author: undefined }] });
     const banner = screen.getByTestId('review-banner');
     expect(banner.textContent?.toLowerCase()).toContain('agent is reviewing');
   });
@@ -879,16 +887,15 @@ describe('Agent session Done button', () => {
     expect(onResolved).toHaveBeenCalled();
   });
 
-  it('Done button shows correct agent name from agentNamesBySession', () => {
+  it('Done button shows the agent name stored on the session', () => {
     render(
       <ReviewBanner
-        sessions={[agentSession]}
+        sessions={[{ ...agentSession, author: 'Codex' }]}
         commentCounts={new Map([['/tmp/prd.md', 0]])}
         onHandoffSuccess={() => {}}
         onResolved={() => {}}
         commentIdsByFile={new Map([['/tmp/prd.md', []]])}
         agentCommentCounts={new Map([['/tmp/prd.md', 3]])}
-        agentNamesBySession={new Map([['rev_agent_1', 'Codex']])}
       />,
     );
     expect(screen.getByText(/Codex is reviewing/)).not.toBeNull();

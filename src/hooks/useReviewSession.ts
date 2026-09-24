@@ -12,6 +12,8 @@ export interface ReviewSession {
   createdAt: string;
   /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
   lastAgentActivityAt?: string | null;
+  /** The name the agent posts under, once a batch has supplied one. */
+  author?: string;
 }
 
 const POLL_INTERVAL_MS = 5_000;
@@ -30,6 +32,7 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
       x.enableResolve !== y.enableResolve ||
       x.waitingForAgent !== y.waitingForAgent ||
       x.lastAgentActivityAt !== y.lastAgentActivityAt ||
+      x.author !== y.author ||
       x.filePaths.length !== y.filePaths.length ||
       x.sentCommentIds.length !== y.sentCommentIds.length
     ) {

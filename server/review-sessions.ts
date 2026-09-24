@@ -12,6 +12,11 @@ import { buildAddressCommentsPrompt } from '../src/lib/agent-prompts';
  * is generous enough to ride out any realistic background-tab throttling.
  */
 const HEARTBEAT_TIMEOUT_MS = 30 * 60_000;
+/**
+ * Longest agent name kept on a session, the cap `mdr baseline` uses. The name
+ * goes to every open tab on every poll, so an overlong one is cut here.
+ */
+export const MAX_SESSION_AUTHOR_LEN = 64;
 
 /**
  * Maximum age of `lastHeartbeatAt` before `findOpenSession` will refuse to
@@ -123,6 +128,13 @@ export interface ReviewSession {
   lastHeartbeatAt: Date;
   /** ISO timestamp of the last time the agent posted comments. Null until the first batch. */
   lastAgentActivityAt: string | null;
+  /**
+   * The name the agent posts under, from the first batch that supplied one.
+   * The banner reads it here rather than mining it back out of comment
+   * markers, which missed reply-only sessions and files with no open tab
+   * (#113).
+   */
+  author?: string;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
   waitingForAgent: boolean;
@@ -844,6 +856,20 @@ export class ReviewSessionStore {
   }
 
   /**
+   * Name the session after the agent, from a batch that succeeded. The first
+   * name wins, so one stray batch under another name cannot relabel a session
+   * mid-review. 'Agent' is the markers' own fallback rather than a name, so it
+   * never claims the session and a real name can still arrive later.
+   */
+  recordAgentAuthor(sessionId: string, author: string | undefined): void {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.author || !author) return;
+    const name = author.trim().slice(0, MAX_SESSION_AUTHOR_LEN);
+    if (!name || name === 'Agent') return;
+    s.author = name;
+  }
+
+  /**
    * Inverse of recordAgentComments — used by the agent-comments route when
    * a write succeeds but a subsequent step (addAsk, downstream validation)
    * fails and rolls back the markers. Without this, agentCommentCount stays
@@ -997,6 +1023,7 @@ export class ReviewSessionStore {
       createdAt: s.createdAt,
       lastHeartbeatAt: s.lastHeartbeatAt,
       lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,
+      author: s.author,
       status: s.status,
       sentCommentIds: [...s.sentCommentIds],
       waitingForAgent: s.waitingForAgent,

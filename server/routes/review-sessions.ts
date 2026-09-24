@@ -619,7 +619,8 @@ export function registerReviewSessionRoutes(
       filePath: string;
       anchor: string;
       text: string;
-      author: string;
+      /** The name the agent supplied, trimmed. Markers fall back to 'Agent'. */
+      author?: string;
       contextBefore?: string;
       contextAfter?: string;
     };
@@ -667,7 +668,7 @@ export function registerReviewSessionRoutes(
         anchor: q.anchor,
         text: q.text,
         author:
-          typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : 'Agent',
+          typeof q.author === 'string' && q.author.trim().length > 0 ? q.author.trim() : undefined,
         contextBefore: typeof q.contextBefore === 'string' ? q.contextBefore : undefined,
         contextAfter: typeof q.contextAfter === 'string' ? q.contextAfter : undefined,
       });
@@ -679,7 +680,7 @@ export function registerReviewSessionRoutes(
       filePath: string;
       commentId: string;
       text: string;
-      author: string;
+      author?: string;
     };
     const resolvedReplies: ResolvedReply[] = [];
     for (let i = 0; i < repliesArr.length; i++) {
@@ -716,7 +717,7 @@ export function registerReviewSessionRoutes(
         commentId: r.commentId,
         text: r.text,
         author:
-          typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : 'Agent',
+          typeof r.author === 'string' && r.author.trim().length > 0 ? r.author.trim() : undefined,
       });
     }
 
@@ -847,7 +848,7 @@ export function registerReviewSessionRoutes(
               next,
               q.anchor,
               q.text,
-              q.author,
+              q.author ?? 'Agent',
               q.contextBefore,
               q.contextAfter,
               undefined,
@@ -868,7 +869,7 @@ export function registerReviewSessionRoutes(
             next = appendReply(next, r.commentId, {
               id: replyId,
               text: r.text,
-              author: r.author,
+              author: r.author ?? 'Agent',
               timestamp: new Date().toISOString(),
             });
             if (next === before) {
@@ -940,6 +941,15 @@ export function registerReviewSessionRoutes(
       reviewSessions.recordAgentComments(id, 0);
     }
 
+    // The session takes the agent's name only once the batch has succeeded,
+    // so a batch that rolls back below (addAsk failing) cannot leave its name
+    // behind to lock out the real one. Called before each success return.
+    const recordAuthor = () =>
+      reviewSessions.recordAgentAuthor(
+        id,
+        [...resolvedComments, ...resolvedReplies].find((e) => e.author)?.author,
+      );
+
     // If any of these replies target a pending mdr_ask's commentId, resolve
     // that ask so the agent's waitForAsk unblocks AND apply the same on-disk
     // cleanup the /asks/:askId/reply route uses: remove answered markers,
@@ -999,6 +1009,7 @@ export function registerReviewSessionRoutes(
 
     // When expectsReply=false (fire-and-forget mode), skip addAsk entirely.
     if (!expectsReply) {
+      recordAuthor();
       return c.json(
         {
           commentIds: resolvedComments.map((q) => q.commentId),
@@ -1040,6 +1051,7 @@ export function registerReviewSessionRoutes(
       }
       return c.json({ error: err instanceof Error ? err.message : 'addAsk failed' }, 409);
     }
+    recordAuthor();
     return c.json(
       {
         askId,
