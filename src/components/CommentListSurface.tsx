@@ -24,6 +24,14 @@ interface Props {
   comments: MdComment[];
   activeCommentId: string | null;
   missingAnchors: Set<string>;
+  /** Open comments an authoritative highlight pass tried to paint and could not
+   * find in the render: anchored to text the file has but the render dropped.
+   * Kept OUT of "Needs re-anchoring": that section means the anchor is
+   * genuinely wrong and needs a human to fix it, and there is nothing to fix
+   * here. Instead these render the quiet "Not shown" badge alongside the
+   * ordinary anchored comments (see ThreadCard's anchorHidden). Optional so a
+   * caller with nothing to report can omit it. */
+  unpaintedAnchors?: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
@@ -80,6 +88,7 @@ export function CommentListSurface({
   comments,
   activeCommentId,
   missingAnchors,
+  unpaintedAnchors,
   onActivate,
   onResolve,
   onUnresolve,
@@ -285,6 +294,9 @@ export function CommentListSurface({
   const activeCommentsAll = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
     : filtered;
+  // Unpainted comments stay OUT of this bucket on purpose: the anchor itself
+  // is fine, the render just does not show it, and "Needs re-anchoring" would
+  // tell the reader to go fix something that isn't broken.
   const orphanActiveComments = activeCommentsAll.filter((c) => missingAnchors.has(c.id));
   const activeComments = activeCommentsAll.filter((c) => !missingAnchors.has(c.id));
   const resolvedComments = resolveEnabled
@@ -435,6 +447,7 @@ export function CommentListSurface({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            anchorHidden={unpaintedAnchors?.has(comment.id) ?? false}
             onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             answered={answeredCommentIds?.has(comment.id) ?? false}
@@ -480,6 +493,7 @@ export function CommentListSurface({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            anchorHidden={unpaintedAnchors?.has(comment.id) ?? false}
             onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             answered={answeredCommentIds?.has(comment.id) ?? false}

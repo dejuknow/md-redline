@@ -252,3 +252,28 @@ describe('CommentListSurface - answered count', () => {
     expect(footer.textContent).not.toMatch(/answered/);
   });
 });
+
+describe('CommentListSurface - unpainted anchors get their own quiet badge, not Needs re-anchoring (#99 follow-up)', () => {
+  // Unpainted means "the file has this text, the render just does not show
+  // it": nothing is broken, so it must not steer the reader toward
+  // "Needs re-anchoring", which promises the opposite: an anchor that is
+  // actually gone and needs a human to fix it.
+  it('does not bucket an unpainted-only comment under Needs re-anchoring', async () => {
+    renderSurface({ unpaintedAnchors: new Set([OPEN_COMMENT.id]) });
+    await screen.findByText(OPEN_COMMENT.text);
+    expect(screen.queryByText(/Needs re-anchoring/)).toBeNull();
+  });
+
+  it('shows the quiet "Not shown" badge on that comment instead', async () => {
+    renderSurface({ unpaintedAnchors: new Set([OPEN_COMMENT.id]) });
+    await screen.findByText(OPEN_COMMENT.text);
+    expect(screen.getByText('Not shown')).toBeTruthy();
+  });
+
+  it('shows neither badge when unpaintedAnchors has nothing to report', async () => {
+    renderSurface({ unpaintedAnchors: new Set<string>() });
+    await screen.findByText(OPEN_COMMENT.text);
+    expect(screen.queryByText('Not shown')).toBeNull();
+    expect(screen.queryByText(/Needs re-anchoring/)).toBeNull();
+  });
+});

@@ -15,8 +15,9 @@ export interface MarginLayout {
    * Necessary but not sufficient for showing a card: a comment whose anchor has
    * not painted yet has no `anchorTops` entry, which resolveCollisions reads as
    * an orphan and stacks from 0. Pair this with `anchorTops` and the caller's
-   * own missing-anchor set, which comes from the document text rather than from
-   * paint timing.
+   * own missing-anchor and unpainted-anchor sets: the first comes from the
+   * document text, the second from the paint pass itself, and either settles
+   * the question without waiting on more paint timing.
    */
   measuredIds: ReadonlySet<string>;
   anchorTops: Map<string, number>;

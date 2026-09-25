@@ -2,7 +2,7 @@
 
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useMermaidRenderer } from './useMermaidRenderer';
+import { useMermaidRenderer, extractMermaidSources } from './useMermaidRenderer';
 
 const renderMermaidBlock = vi.fn();
 const hasMermaidBlocks = vi.fn();
@@ -90,5 +90,51 @@ describe('useMermaidRenderer', () => {
       expect(result.current.size).toBe(0);
     });
     expect(renderMermaidBlock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('extractMermaidSources', () => {
+  // MarkdownViewer's unpainted-anchor report (#99 follow-up) needs to know
+  // exactly which fences this function will ever produce a result for, so
+  // its own detection has to match this shape precisely, not approximate it.
+  it('extracts a well-formed fence, trimmed', () => {
+    const markdown = '# Doc\n\n```mermaid\n  flowchart TD\n  A --> B\n```\n';
+    expect(extractMermaidSources(markdown)).toEqual(['flowchart TD\n  A --> B']);
+  });
+
+  it('extracts more than one fence, in order', () => {
+    const markdown = '```mermaid\nA\n```\n\nSome text.\n\n```mermaid\nB\n```\n';
+    expect(extractMermaidSources(markdown)).toEqual(['A', 'B']);
+  });
+
+  it('does not extract a fence indented inside a blockquote', () => {
+    // Each line carries a "> " prefix, so the fence marker never sits at
+    // column 0 and the regex's ^ anchor never matches it.
+    const markdown = '> ```mermaid\n> flowchart TD\n>   A --> B\n> ```\n';
+    expect(extractMermaidSources(markdown)).toEqual([]);
+  });
+
+  it('does not extract a fence indented inside a list item', () => {
+    const markdown = '- item\n  ```mermaid\n  flowchart TD\n  ```\n';
+    expect(extractMermaidSources(markdown)).toEqual([]);
+  });
+
+  it('does not extract a ~~~ fence', () => {
+    const markdown = '~~~mermaid\nflowchart TD\n~~~\n';
+    expect(extractMermaidSources(markdown)).toEqual([]);
+  });
+
+  it('does not extract a fence with trailing text after "mermaid"', () => {
+    const markdown = '```mermaid title="flow"\nflowchart TD\n```\n';
+    expect(extractMermaidSources(markdown)).toEqual([]);
+  });
+
+  it('does not extract an unclosed fence', () => {
+    const markdown = '```mermaid\nflowchart TD\nA --> B\n';
+    expect(extractMermaidSources(markdown)).toEqual([]);
+  });
+
+  it('returns an empty array for a document with no mermaid fences', () => {
+    expect(extractMermaidSources('# Doc\n\nJust text.\n')).toEqual([]);
   });
 });

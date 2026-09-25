@@ -102,6 +102,10 @@ import { getEnabledHiddenCommentPrefixes } from './lib/settings';
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
 
+/** Shared empty result for when the rendered viewer's highlight pass is not
+ * the thing currently on screen (raw view, the diff overlay). */
+const NO_UNPAINTED_ANCHORS: ReadonlySet<string> = new Set<string>();
+
 /**
  * How long a timestamp backfill waits before writing.
  *
@@ -504,7 +508,18 @@ export default function App() {
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
   const [highlightPaintTick, setHighlightPaintTick] = useState(0);
-  const handleHighlightsPainted = useCallback(() => setHighlightPaintTick((t) => t + 1), []);
+  // Ids of open comments the last authoritative highlight pass tried to paint
+  // and could not find in the render: anchored to text the file has but the
+  // render dropped (see CommentsRail's `placed` gate). A non-authoritative
+  // pass (a Mermaid block still loading) reports null and leaves this alone,
+  // so a comment on a diagram never flashes as unpainted while it settles.
+  const [unpaintedAnchors, setUnpaintedAnchors] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const handleHighlightsPainted = useCallback((unpaintedIds: ReadonlySet<string> | null) => {
+    setHighlightPaintTick((t) => t + 1);
+    if (unpaintedIds !== null) setUnpaintedAnchors(unpaintedIds);
+  }, []);
   const [requestedCommentFocus, setRequestedCommentFocus] = useState<{
     commentId: string;
     token: number;
@@ -1443,13 +1458,29 @@ export default function App() {
   const mermaidFullscreen = useMermaidFullscreen();
   const openMermaidFullscreenState = mermaidFullscreen.open;
   const renderedDiffVisible = Boolean(diffEnabled && currentSnapshot != null && diffLines);
-  const mermaidRendererEnabled =
-    mermaidFullscreen.isOpen || (viewMode === 'rendered' && !renderedDiffVisible);
+  // Whether MarkdownViewer's own highlight pass is the thing currently
+  // painting the document: raw view and the diff overlay (RenderedDiffView)
+  // both replace it with a component that never calls onHighlightsPainted, so
+  // unpaintedAnchors would otherwise keep answering for a pass that is not
+  // running any more.
+  const renderedViewerActive = viewMode === 'rendered' && !renderedDiffVisible;
+  const mermaidRendererEnabled = mermaidFullscreen.isOpen || renderedViewerActive;
   const mermaidSvgMap = useMermaidRenderer(
     cleanMarkdown,
     persistedTheme || 'light',
     mermaidRendererEnabled,
   );
+
+  // Leaving the rendered view stops the highlight pass; the last unpainted set
+  // it produced belongs to a paint that may no longer even describe the
+  // current document (a file-watcher reload or an agent edit can land while
+  // away). Clear it so a later return starts from "nothing flagged yet"
+  // rather than replaying a stale answer before the next pass completes.
+  useEffect(() => {
+    if (!renderedViewerActive) {
+      setUnpaintedAnchors((prev) => (prev.size === 0 ? prev : NO_UNPAINTED_ANCHORS));
+    }
+  }, [renderedViewerActive]);
 
   // Bridge useMermaidFullscreen into the modal-state machine so Escape / palette
   // guards that key on activeModal also work for the fullscreen modal.
@@ -3302,6 +3333,9 @@ export default function App() {
                               allComments={comments}
                               activeCommentId={activeCommentId}
                               missingAnchors={missingAnchors}
+                              unpaintedAnchors={
+                                renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS
+                              }
                               sentCommentIds={sentCommentIds}
                               answeredCommentIds={answeredCommentIds}
                               onActivate={handleSidebarActivate}
@@ -3411,6 +3445,7 @@ export default function App() {
           comments={comments}
           activeCommentId={activeCommentId}
           missingAnchors={missingAnchors}
+          unpaintedAnchors={renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS}
           selectionText={selection?.text ?? null}
           selectionOffset={selection?.offset ?? null}
           onReanchorToSelection={handleReanchorToSelection}

@@ -22,6 +22,11 @@ interface CommentsRailProps {
   allComments: MdComment[];
   activeCommentId: string | null;
   missingAnchors: Set<string>;
+  /** Open comments an authoritative highlight pass tried to paint and could
+   * not find in the render: anchored to text the file has but the render
+   * dropped (see the `placed` gate in AnchoredCards below). Distinct from
+   * `missingAnchors`, which reads the file's own text rather than the DOM. */
+  unpaintedAnchors: ReadonlySet<string>;
   sentCommentIds: string[];
   answeredCommentIds?: ReadonlySet<string>;
   onActivate: (id: string) => void;
@@ -95,6 +100,7 @@ export function CommentsRail(props: CommentsRailProps) {
               comments={props.allComments}
               activeCommentId={props.activeCommentId}
               missingAnchors={props.missingAnchors}
+              unpaintedAnchors={props.unpaintedAnchors}
               onActivate={props.onActivate}
               onResolve={props.onResolve}
               onUnresolve={props.onUnresolve}
@@ -324,6 +330,7 @@ function AnchoredCards({
   anchoredComments,
   activeCommentId,
   missingAnchors,
+  unpaintedAnchors,
   sentCommentIds,
   answeredCommentIds,
   onActivate,
@@ -456,17 +463,40 @@ function AnchoredCards({
         if (top === undefined) return null;
         const active = comment.id === activeCommentId;
         // Safe to show once BOTH questions are answered: the height is
-        // measured, and the anchor is either resolved or known to be missing.
-        // A comment whose mark has not painted yet has neither, and
+        // measured, and the anchor is settled one of three ways. A comment
+        // whose mark has not painted yet has none of them, and
         // resolveCollisions reads that as an orphan and stacks it from 0, so
         // showing it puts a card at the top of the rail that then jumps to its
         // anchor. `missingAnchors` comes from detectMissingAnchors over the
         // document TEXT, so a real orphan is known at once and never waits on
         // paint. Deriving this from tick ordering instead produced three wrong
         // fixes in a row.
+        //
+        // A third case sits between those two: the anchor is IN the file but
+        // MarkdownViewer's own paint pass could not find it in the render (a
+        // dropped HTML comment, for instance; see #99). `missingAnchors`
+        // reads the file and calls this attached, and no mark ever paints to
+        // satisfy `anchorTops`, so without `unpaintedAnchors` the card would
+        // wait forever on a paint that is never coming. `unpaintedAnchors`
+        // comes from that same paint pass, so it is authoritative the moment
+        // it reports (see MarkdownViewer's mermaid-loading guard for the one
+        // case it defers instead of reporting).
         const placed =
           layout.measuredIds.has(comment.id) &&
-          (layout.anchorTops.has(comment.id) || missingAnchors.has(comment.id));
+          (layout.anchorTops.has(comment.id) ||
+            missingAnchors.has(comment.id) ||
+            unpaintedAnchors.has(comment.id));
+        // Genuinely missing (detectMissingAnchors, reads the file text) gets
+        // the loud "Changed" treatment. Unpainted-but-present gets its own
+        // quiet "Not shown" treatment instead (see ThreadCard's anchorHidden):
+        // there is nothing wrong with the anchor, the render just does not
+        // show it right now, and calling that "modified or removed" would be
+        // false. `layout.orphanIds` (no painted mark at all) is deliberately
+        // NOT part of this: it agrees with missingAnchors for every card that
+        // was ever visible before unpaintedAnchors existed, and now also
+        // covers this new unpainted case, which needs its own answer.
+        const anchorMissingValue = missingAnchors.has(comment.id);
+        const anchorHiddenValue = !anchorMissingValue && unpaintedAnchors.has(comment.id);
         return (
           <div
             key={comment.id}
@@ -491,9 +521,8 @@ function AnchoredCards({
               active={active}
               compact={!active}
               unreadReplyIds={unreadReplyIds}
-              anchorMissing={
-                layout.orphanIds.includes(comment.id) || missingAnchors.has(comment.id)
-              }
+              anchorMissing={anchorMissingValue}
+              anchorHidden={anchorHiddenValue}
               sent={sentCommentIds.includes(comment.id)}
               answered={answeredCommentIds?.has(comment.id) ?? false}
               onReanchorToSelection={onReanchorToSelection}

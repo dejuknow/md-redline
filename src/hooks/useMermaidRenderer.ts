@@ -9,6 +9,26 @@ export interface MermaidResult {
 const MERMAID_RENDER_DEBOUNCE_MS = 80;
 
 /**
+ * The one definition of what counts as a fenced Mermaid block this renderer
+ * will ever produce an SVG for: a ```mermaid fence that opens at column 0
+ * with nothing else on that line, and closes the same way. A fence inside a
+ * blockquote or list item, a ~~~ fence, four backticks, a fence with trailing
+ * text after "mermaid", or one left unclosed never matches, and MarkdownViewer
+ * needs this exact list too: it renders those as plain code blocks, whose
+ * text the comment painter already searches directly, so they must not be
+ * treated as "waiting for a diagram to load" (see #99 follow-up).
+ */
+export function extractMermaidSources(cleanMarkdown: string): string[] {
+  const sources: string[] = [];
+  const regex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(cleanMarkdown)) !== null) {
+    sources.push(match[1].trim());
+  }
+  return sources;
+}
+
+/**
  * Pre-renders mermaid code blocks found in the clean markdown.
  * Returns a Map from trimmed source text → rendered SVG (or error).
  * Results are cached and only re-rendered when source or theme changes.
@@ -33,13 +53,7 @@ export function useMermaidRenderer(
       return;
     }
 
-    // Extract mermaid blocks
-    const blocks: string[] = [];
-    const regex = /^```mermaid\s*\n([\s\S]*?)^```\s*$/gm;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(cleanMarkdown)) !== null) {
-      blocks.push(match[1].trim());
-    }
+    const blocks = extractMermaidSources(cleanMarkdown);
     if (blocks.length === 0) {
       setSvgMap((prev) => (prev.size > 0 ? new Map() : prev));
       return;

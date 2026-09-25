@@ -74,6 +74,7 @@ function renderRail(props: Partial<React.ComponentProps<typeof CommentsRail>> = 
     allComments: comments,
     activeCommentId: null,
     missingAnchors: new Set(['c2']),
+    unpaintedAnchors: new Set<string>(),
     sentCommentIds: [],
     onActivate: vi.fn(),
     onReply: vi.fn(),
@@ -142,6 +143,48 @@ describe('CommentsRail - a card is hidden until its height is measured', () => {
       missingAnchors: new Set(['c1']),
     });
     expect(cardEl(container, 'c1')?.style.visibility).toBe('');
+  });
+
+  it('shows a card whose anchor is in the file but the render never painted it (#99)', () => {
+    // Neither anchorTops (nothing painted) nor missingAnchors (the file really
+    // has the text, and detectMissingAnchors reads cleanMarkdown, not the DOM)
+    // covers this case. unpaintedAnchors comes from the paint pass itself, so
+    // it is the only signal that settles it instead of waiting forever.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set<string>(),
+      unpaintedAnchors: new Set(['c1']),
+    });
+    expect(cardEl(container, 'c1')?.style.visibility).toBe('');
+  });
+
+  it('gives an unpainted card its own quiet "Not shown" treatment, not the red anchorMissing badge', () => {
+    // Nothing is wrong with this anchor: it is intact in the file, the render
+    // just does not show it. "Changed" ("Anchor text was modified or
+    // removed") would be a false claim, so unpaintedAnchors must not feed
+    // anchorMissing.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set<string>(),
+      unpaintedAnchors: new Set(['c1']),
+    });
+    const text = cardEl(container, 'c1')?.textContent;
+    expect(text).toContain('Not shown');
+    expect(text).not.toContain('Changed');
+  });
+
+  it('gives a genuinely missing card the red anchorMissing treatment, not "Not shown"', () => {
+    // missingAnchors always wins: it is the more actionable, more severe
+    // signal, and unpaintedAnchors and missingAnchors are mutually exclusive
+    // at the call site so the two badges never collide.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set(['c1']),
+      unpaintedAnchors: new Set<string>(),
+    });
+    const text = cardEl(container, 'c1')?.textContent;
+    expect(text).toContain('Changed');
+    expect(text).not.toContain('Not shown');
   });
 
   it('shows it once measured', () => {
