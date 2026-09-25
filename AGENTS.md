@@ -1049,10 +1049,14 @@ the native menu for a menu that never appears would leave the reader with no
 menu at all, no Copy, no spellcheck, no Inspect, and nothing on screen saying
 why. Falling back to the browser's menu is the correct answer there.
 
-Precedence is unchanged: the comment-highlight branch runs first, so a selection
-that overlaps an existing anchor opens the comment menu (Edit / Reply / Delete),
-not the selection menu. A right-click on text with nothing selected also reaches
-the browser's menu, since neither branch matches.
+Precedence (#88): a selection wins over a comment it overlaps. The painted
+selection mark is checked first, then a live native range the click actually
+lands inside, then the comment highlight, then a live range anywhere. Before,
+the comment branch ran first, so Copy and Comment were unreachable on text that
+already carried a comment, the text reviewers re-select most. The comment's own
+menu (Edit / Reply / Delete) stays one right-click away on its highlight with
+nothing selected, and a selection elsewhere never takes it over. A right-click
+on text with nothing selected and no comment reaches the browser's menu.
 
 ### Copy as Markdown
 
