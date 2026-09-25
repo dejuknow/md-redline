@@ -193,4 +193,28 @@ test.describe('Comments anchor cleanly across markdown constructs', () => {
       .poll(() => readFileSync(fixturePath, 'utf8'))
       .toMatch(/\n\n<!-- @comment\{.*?\} -->Later text here\.\n$/);
   });
+
+  test('a selection from a heading through a table anchors where it started (#93)', async ({
+    page,
+  }) => {
+    // A table renders as cells, not as its | source |, so an anchor crossing
+    // one used to be a string the file did not contain, and the comment was
+    // silently re-anchored, sometimes mid-word. The selection text now
+    // separates cells with tabs, which the matcher finds.
+    writeFileSync(
+      fixturePath,
+      '# Anchor Edge Cases\n\n## 2. Onboarding events\n\nFired during the wizard.\n\n| Event | Priority |\n|---|---|\n| signup | high |\n| invite | low |\n\nAfter the table.\n',
+    );
+    await openFixture(page);
+    await selectFromTo(page, '2. Onboarding events', 'low');
+    await submitCommentForm(page, 'covers the whole table');
+
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf8'))
+      .toMatch(/## <!-- @comment\{.*?\} -->2\. Onboarding events/s);
+    await expect(page.getByText(/Needs re-anchoring/)).not.toBeVisible();
+    await expect(page.getByText(/re-anchored/i)).toHaveCount(0);
+    const marked = await page.locator('mark.comment-highlight').allTextContents();
+    expect(marked).toEqual(expect.arrayContaining(['2. Onboarding events', 'Event', 'low']));
+  });
 });
