@@ -253,18 +253,27 @@ describe('CommentListSurface - answered count', () => {
   });
 });
 
-describe('CommentListSurface - unpainted anchors bucket alongside missing ones', () => {
-  // The reader cannot see the anchor text either way, whether the file
-  // dropped it (missingAnchors) or the render did (unpaintedAnchors), so both
-  // land in "Needs re-anchoring" for consistency with the rail's orphan
-  // treatment (see #99).
-  it('buckets a comment flagged only in unpaintedAnchors under Needs re-anchoring', async () => {
+describe('CommentListSurface - unpainted anchors get their own quiet badge, not Needs re-anchoring (#99 follow-up)', () => {
+  // Unpainted means "the file has this text, the render just does not show
+  // it": nothing is broken, so it must not steer the reader toward
+  // "Needs re-anchoring", which promises the opposite: an anchor that is
+  // actually gone and needs a human to fix it.
+  it('does not bucket an unpainted-only comment under Needs re-anchoring', async () => {
     renderSurface({ unpaintedAnchors: new Set([OPEN_COMMENT.id]) });
-    expect(await screen.findByText('Needs re-anchoring (1)')).toBeTruthy();
+    await screen.findByText(OPEN_COMMENT.text);
+    expect(screen.queryByText(/Needs re-anchoring/)).toBeNull();
   });
 
-  it('keeps a comment out of Needs re-anchoring when neither set flags it', async () => {
+  it('shows the quiet "Not shown" badge on that comment instead', async () => {
+    renderSurface({ unpaintedAnchors: new Set([OPEN_COMMENT.id]) });
+    await screen.findByText(OPEN_COMMENT.text);
+    expect(screen.getByText('Not shown')).toBeTruthy();
+  });
+
+  it('shows neither badge when unpaintedAnchors has nothing to report', async () => {
     renderSurface({ unpaintedAnchors: new Set<string>() });
+    await screen.findByText(OPEN_COMMENT.text);
+    expect(screen.queryByText('Not shown')).toBeNull();
     expect(screen.queryByText(/Needs re-anchoring/)).toBeNull();
   });
 });

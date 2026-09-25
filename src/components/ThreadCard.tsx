@@ -10,6 +10,13 @@ export interface ThreadCardProps {
   divRef?: (node: HTMLDivElement | null) => void;
   /** If the anchor text is missing from the document (orphan state). */
   anchorMissing?: boolean;
+  /** If the anchor text is present in the document but not shown in the
+   * current view (a dropped HTML comment, for instance). Distinct from
+   * `anchorMissing`: there is nothing wrong with the anchor, just nothing to
+   * point at on screen right now. Mutually exclusive with `anchorMissing` in
+   * every caller: a comment that is genuinely missing or stale gets that
+   * treatment instead, since it is the more actionable of the two. */
+  anchorHidden?: boolean;
   /** Whether this comment has already been sent to the reviewing agent. */
   sent?: boolean;
   /** Whether an agent has replied to it. See CommentCard's `answered`. */
@@ -53,6 +60,7 @@ export function ThreadCard({
   active,
   divRef,
   anchorMissing,
+  anchorHidden,
   sent,
   answered,
   editor: externalEditor,
@@ -113,6 +121,7 @@ export function ThreadCard({
         comment={thread}
         isActive={active}
         anchorMissing={anchorMissing}
+        anchorHidden={anchorHidden}
         sent={sent}
         answered={answered}
         onActivate={onSelect}

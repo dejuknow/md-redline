@@ -4,7 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { insertComment } from '../src/lib/comment-parser';
 import { resetTestAppState } from './helpers/test-state';
-import { addComment } from './helpers/comments';
+import { addComment, commentsDrawer, openCommentsDrawer } from './helpers/comments';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -88,6 +88,11 @@ async function toggleSetting(page: Page, settingName: string) {
   await expect(panel).not.toBeVisible();
 }
 
+async function switchToRaw(page: Page) {
+  await page.locator('button[title="View raw markdown"]').click();
+  await expect(page.locator('.raw-view-table')).toBeVisible();
+}
+
 test.describe('A margin card whose anchor is in the file but not the render (#99)', () => {
   test('the anchored rail reveals the card, with the anchor-missing treatment, instead of hiding it forever', async ({
     page,
@@ -107,13 +112,41 @@ test.describe('A margin card whose anchor is in the file but not the render (#99
     await expect(card).toBeVisible();
     await expect(card).toContainText('Confirm this still applies before merging.');
 
-    // Same orphan treatment a genuinely missing anchor gets, so the reader
-    // knows to go find and re-anchor it rather than assuming it is fine.
-    await expect(card.getByText('Changed')).toBeVisible();
+    // Its own quiet treatment, not the red "Changed" badge: nothing is wrong
+    // with this anchor, the render just does not show it.
+    await expect(card.getByText('Not shown')).toBeVisible();
+    await expect(card.getByText('Changed')).not.toBeVisible();
 
     // No mark ever painted for this anchor (that is the whole bug), so the
     // rail has nothing to connect the card to.
     await expect(page.locator('mark.comment-highlight')).toHaveCount(0);
+  });
+
+  test('the comments drawer in raw view does not flag it under Needs re-anchoring', async ({
+    page,
+  }) => {
+    writeOrphanFixture();
+    await openFixture(page);
+    await toggleSetting(page, 'Render HTML comments');
+
+    // Confirm the rendered view treats it as unpainted first, so the point of
+    // this test is specifically about what happens after leaving that view.
+    await expect(page.locator('[data-margin-card-id]')).toBeVisible();
+
+    await switchToRaw(page);
+    // Raw view has no rail; the drawer is the comment surface there, and it
+    // shows the marker's literal text, delimiters included, so this comment
+    // is exactly as visible here as any other.
+    await openCommentsDrawer(page);
+
+    await expect(page.getByText(/Needs re-anchoring/)).not.toBeVisible();
+    const card = commentsDrawer(page).locator('.group.rounded-lg', {
+      hasText: 'Confirm this still applies before merging.',
+    });
+    await expect(card).toBeVisible();
+    // The rendered-view-only badge must not follow the comment into raw view
+    // either: unpaintedAnchors describes a pass that is not running there.
+    await expect(card.getByText('Not shown')).not.toBeVisible();
   });
 
   test('a normal comment still reveals its card at its anchor, not at the top of the rail first', async ({

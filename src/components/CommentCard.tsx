@@ -20,6 +20,10 @@ interface Props {
   comment: MdComment;
   isActive: boolean;
   anchorMissing?: boolean;
+  /** The anchor text is intact in the file but not shown in this view (a
+   * dropped HTML comment, for instance): a lighter-weight badge than
+   * `anchorMissing`, since there is nothing to fix here. */
+  anchorHidden?: boolean;
   sent?: boolean;
   /** Carries a reply from someone other than whoever raised it, i.e. it has
    *  been answered. Surfaced in BOTH resolve modes, on any comment that is not
@@ -108,6 +112,7 @@ export const CommentCard = memo(function CommentCard({
   comment,
   isActive,
   anchorMissing,
+  anchorHidden,
   sent,
   answered,
   onActivate,
@@ -291,15 +296,17 @@ export const CommentCard = memo(function CommentCard({
     onCloseEditor();
   };
 
-  // Three states, and they are not interchangeable. A recovered anchor still
+  // Four states, and they are not interchangeable. A recovered anchor still
   // points somewhere, so it reads quietly and only invites a check. A stale
   // anchor with no recovery on an open comment is the loud case: the reviewer
   // has to re-anchor it by hand. The same on a resolved comment is history
-  // that came loose, worth showing but not worth alarming over.
+  // that came loose, worth showing but not worth alarming over. An anchor
+  // that is merely hidden from the current view is the quiet, non-actionable
+  // case: the text is fine, there is just nothing on screen to point at.
   //
-  // Which of the last two applies is read off the comment's own status, never
-  // off `anchorMissing` being absent. Surfaces differ in whether they wire
-  // that prop at all — MermaidThreadPanel does not — so treating "no
+  // Which of the middle two applies is read off the comment's own status,
+  // never off `anchorMissing` being absent. Surfaces differ in whether they
+  // wire that prop at all — MermaidThreadPanel does not — so treating "no
   // anchorMissing" as "resolved" tells an open, actionable orphan that it was
   // resolved, and only on the surfaces that forgot to pass the prop.
   const QUIET_BADGE = 'bg-surface-secondary text-content-muted border border-border-subtle';
@@ -328,7 +335,14 @@ export const CommentCard = memo(function CommentCard({
               className: 'bg-danger-bg text-danger-text',
               title: 'Anchor text was modified or removed',
             }
-        : null;
+        : anchorHidden
+          ? {
+              label: 'Not shown',
+              className: QUIET_BADGE,
+              title:
+                'The anchored text is in the file but not shown in this view, for example inside a hidden HTML comment.',
+            }
+          : null;
 
   return (
     <div

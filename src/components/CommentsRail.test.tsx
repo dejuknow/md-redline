@@ -158,13 +158,33 @@ describe('CommentsRail - a card is hidden until its height is measured', () => {
     expect(cardEl(container, 'c1')?.style.visibility).toBe('');
   });
 
-  it('gives an unpainted card the same anchor-missing treatment as a genuine orphan', () => {
+  it('gives an unpainted card its own quiet "Not shown" treatment, not the red anchorMissing badge', () => {
+    // Nothing is wrong with this anchor: it is intact in the file, the render
+    // just does not show it. "Changed" ("Anchor text was modified or
+    // removed") would be a false claim, so unpaintedAnchors must not feed
+    // anchorMissing.
     const { container } = renderRail({
       layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
       missingAnchors: new Set<string>(),
       unpaintedAnchors: new Set(['c1']),
     });
-    expect(cardEl(container, 'c1')?.textContent).toContain('Changed');
+    const text = cardEl(container, 'c1')?.textContent;
+    expect(text).toContain('Not shown');
+    expect(text).not.toContain('Changed');
+  });
+
+  it('gives a genuinely missing card the red anchorMissing treatment, not "Not shown"', () => {
+    // missingAnchors always wins: it is the more actionable, more severe
+    // signal, and unpaintedAnchors and missingAnchors are mutually exclusive
+    // at the call site so the two badges never collide.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set(['c1']),
+      unpaintedAnchors: new Set<string>(),
+    });
+    const text = cardEl(container, 'c1')?.textContent;
+    expect(text).toContain('Changed');
+    expect(text).not.toContain('Not shown');
   });
 
   it('shows it once measured', () => {

@@ -486,6 +486,17 @@ function AnchoredCards({
           (layout.anchorTops.has(comment.id) ||
             missingAnchors.has(comment.id) ||
             unpaintedAnchors.has(comment.id));
+        // Genuinely missing (detectMissingAnchors, reads the file text) gets
+        // the loud "Changed" treatment. Unpainted-but-present gets its own
+        // quiet "Not shown" treatment instead (see ThreadCard's anchorHidden):
+        // there is nothing wrong with the anchor, the render just does not
+        // show it right now, and calling that "modified or removed" would be
+        // false. `layout.orphanIds` (no painted mark at all) is deliberately
+        // NOT part of this: it agrees with missingAnchors for every card that
+        // was ever visible before unpaintedAnchors existed, and now also
+        // covers this new unpainted case, which needs its own answer.
+        const anchorMissingValue = missingAnchors.has(comment.id);
+        const anchorHiddenValue = !anchorMissingValue && unpaintedAnchors.has(comment.id);
         return (
           <div
             key={comment.id}
@@ -510,11 +521,8 @@ function AnchoredCards({
               active={active}
               compact={!active}
               unreadReplyIds={unreadReplyIds}
-              anchorMissing={
-                layout.orphanIds.includes(comment.id) ||
-                missingAnchors.has(comment.id) ||
-                unpaintedAnchors.has(comment.id)
-              }
+              anchorMissing={anchorMissingValue}
+              anchorHidden={anchorHiddenValue}
               sent={sentCommentIds.includes(comment.id)}
               answered={answeredCommentIds?.has(comment.id) ?? false}
               onReanchorToSelection={onReanchorToSelection}

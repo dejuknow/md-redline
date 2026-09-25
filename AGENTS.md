@@ -1311,12 +1311,30 @@ on `--theme-bg-inset`), never the crimson accent:
   in the container has no SVG yet — that diagram's labels cannot match
   anything, so the pass is not authoritative and reports `null` instead of a
   partial set; App's `handleHighlightsPainted` keeps the previous
-  `unpaintedAnchors` value in that case rather than clearing it. A card
-  revealed through `unpaintedAnchors` gets the same anchor-missing (orphan)
-  treatment as a genuine `missingAnchors` card, and List density's "Needs
-  re-anchoring" bucket (`CommentListSurface.tsx`) includes it too, for the
-  same reason the rail does: the reader cannot see the anchor text either
-  way. Resolved comments get no card in this density (App's
+  `unpaintedAnchors` value in that case rather than clearing it. Only a
+  diagram source `extractMermaidSources` (`src/hooks/useMermaidRenderer.ts`)
+  actually recognizes counts as "loading" for this purpose — a fence outside
+  its shape (nested in a blockquote or list item, `~~~` fenced, four
+  backticks, trailing text after "mermaid", unclosed) renders as a plain code
+  block and never gets a `mermaidSvgMap` entry, so waiting on it would freeze
+  every report at `null` forever. `unpaintedAnchors` only means anything while
+  `MarkdownViewer`'s own pass is what is painting the document: App zeroes it
+  out (and resets the underlying state) whenever raw view or the diff overlay
+  is showing instead, since neither calls `onHighlightsPainted` and a stale
+  set would otherwise file a comment raw view can plainly show under "Needs
+  re-anchoring".
+
+  A card revealed through `unpaintedAnchors` gets its own `anchorHidden`
+  treatment, not `anchorMissing`: a quiet, neutral "Not shown" badge
+  (`ThreadCard`/`CommentCard`, same muted token as "Re-anchored") rather than
+  the red "Changed" badge, because nothing about the anchor is wrong, the
+  render just does not show it right now. `missingAnchors` and
+  `unpaintedAnchors` are mutually exclusive by construction at the call site:
+  a genuinely missing anchor always wins the louder `anchorMissing` treatment.
+  List density's "Needs re-anchoring" bucket (`CommentListSurface.tsx`) does
+  NOT include `unpaintedAnchors` comments — there is nothing to re-anchor —
+  they render with the ordinary anchored comments, carrying the "Not shown"
+  badge instead. Resolved comments get no card in this density (App's
   `marginComments` filters them out); their thread lives in List density's /
   the drawer's Resolved filter. Their anchor still paints a faint dotted
   underline in the prose (`mark.comment-highlight-resolved`) so a passage that

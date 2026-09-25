@@ -12,7 +12,11 @@ import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
 import { assignHeadingIds } from '../lib/heading-slugs';
 import { sanitizeRenderedMarkdown } from '../lib/sanitize-html';
-import { useMermaidRenderer, type MermaidResult } from '../hooks/useMermaidRenderer';
+import {
+  useMermaidRenderer,
+  extractMermaidSources,
+  type MermaidResult,
+} from '../hooks/useMermaidRenderer';
 import { collectVisibleTextNodes } from '../lib/visible-text';
 import {
   applyMermaidHighlightStyles,
@@ -174,6 +178,19 @@ export const MarkdownViewer = memo(
     );
     const mermaidSvgMap = mermaidSvgMapProp ?? localSvgMap;
 
+    // What extractMermaidSources recognizes as a fenced Mermaid block, over
+    // the REAL cleanMarkdown regardless of whether SVG rendering itself is
+    // hoisted to App or done locally above: this only asks "does the
+    // renderer's own extraction regex see this fence at all", which does not
+    // depend on that. A fence outside its recognized shape (nested in a
+    // blockquote or list item, ~~~ fenced, four backticks, trailing text
+    // after "mermaid", unclosed) never gets a mermaidSvgMap entry and never
+    // will, so the loading guard below must not wait on it forever.
+    const extractableMermaidSources = useMemo(
+      () => new Set(extractMermaidSources(cleanMarkdown)),
+      [cleanMarkdown],
+    );
+
     // Build a mapping from clean markdown offsets to rendered/plain text offsets.
     // cleanOffset lives in clean-markdown space (with ** ## etc), but DOM text is
     // in rendered space (formatting stripped). We need to convert before matching.
@@ -319,9 +336,14 @@ export const MarkdownViewer = memo(
           pre.replaceWith(errDiv);
         } else {
           // No result yet (loading): leave the code block as-is until SVGs
-          // are ready, and remember that this pass cannot yet speak for any
-          // comment anchored inside it.
-          mermaidLoading = true;
+          // are ready. Only count that against the unpainted-anchor report's
+          // authority when this source is one the renderer will actually
+          // resolve one day; a fence it never extracts renders as a plain
+          // code block forever, and its text is already in the comment
+          // painter's search space like any other paragraph.
+          if (extractableMermaidSources.has(source)) {
+            mermaidLoading = true;
+          }
         }
       }
 
@@ -639,6 +661,7 @@ export const MarkdownViewer = memo(
       searchQuery,
       searchActiveIndex,
       mermaidSvgMap,
+      extractableMermaidSources,
     ]);
 
     const handleClick = (e: React.MouseEvent) => {

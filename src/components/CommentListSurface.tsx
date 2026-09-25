@@ -26,9 +26,11 @@ interface Props {
   missingAnchors: Set<string>;
   /** Open comments an authoritative highlight pass tried to paint and could not
    * find in the render: anchored to text the file has but the render dropped.
-   * Bucketed into "Needs re-anchoring" alongside `missingAnchors`, for the same
-   * reason CommentsRail treats the two alike: the reader cannot see the text
-   * either way. Optional so a caller with nothing to report can omit it. */
+   * Kept OUT of "Needs re-anchoring": that section means the anchor is
+   * genuinely wrong and needs a human to fix it, and there is nothing to fix
+   * here. Instead these render the quiet "Not shown" badge alongside the
+   * ordinary anchored comments (see ThreadCard's anchorHidden). Optional so a
+   * caller with nothing to report can omit it. */
   unpaintedAnchors?: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
@@ -292,13 +294,11 @@ export function CommentListSurface({
   const activeCommentsAll = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
     : filtered;
-  // Unpainted joins missingAnchors in the same bucket: both mean the reader
-  // has no way to see the anchor text, whether the file dropped it or the
-  // render did.
-  const isOrphan = (c: MdComment) =>
-    missingAnchors.has(c.id) || (unpaintedAnchors?.has(c.id) ?? false);
-  const orphanActiveComments = activeCommentsAll.filter(isOrphan);
-  const activeComments = activeCommentsAll.filter((c) => !isOrphan(c));
+  // Unpainted comments stay OUT of this bucket on purpose: the anchor itself
+  // is fine, the render just does not show it, and "Needs re-anchoring" would
+  // tell the reader to go fix something that isn't broken.
+  const orphanActiveComments = activeCommentsAll.filter((c) => missingAnchors.has(c.id));
+  const activeComments = activeCommentsAll.filter((c) => !missingAnchors.has(c.id));
   const resolvedComments = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved')
     : [];
@@ -447,6 +447,7 @@ export function CommentListSurface({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            anchorHidden={unpaintedAnchors?.has(comment.id) ?? false}
             onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             answered={answeredCommentIds?.has(comment.id) ?? false}
@@ -492,6 +493,7 @@ export function CommentListSurface({
               }
             }}
             anchorMissing={missingAnchors.has(comment.id)}
+            anchorHidden={unpaintedAnchors?.has(comment.id) ?? false}
             onReanchorToSelection={onReanchorToSelection}
             sent={sentCommentIds?.includes(comment.id) ?? false}
             answered={answeredCommentIds?.has(comment.id) ?? false}

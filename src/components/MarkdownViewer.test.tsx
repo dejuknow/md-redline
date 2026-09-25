@@ -350,6 +350,57 @@ describe('MarkdownViewer onHighlightsPainted: unpainted anchors (#99)', () => {
     await waitFor(() => expect(onHighlightsPainted).toHaveBeenCalled());
     expect(onHighlightsPainted).toHaveBeenLastCalledWith(null);
   });
+
+  it('still reports authoritatively when a fence useMermaidRenderer will never extract has no SVG (#99 follow-up)', async () => {
+    // A ```mermaid fence indented inside a blockquote never matches
+    // extractMermaidSources's ^-anchored regex (the fence marker is not at
+    // column 0), so mermaidSvgMap will never get an entry for it no matter
+    // how long the pass waits. It still becomes a <pre><code
+    // class="language-mermaid"> in the DOM, so MarkdownViewer's mermaid loop
+    // sees it and must not mistake "no entry" for "still loading" here: that
+    // would freeze every report at null forever, hiding an unrelated
+    // unpainted anchor (the dropped HTML comment below) permanently.
+    const markdown = [
+      '# Notes',
+      '',
+      '> ```mermaid',
+      '> flowchart TD',
+      '>   A --> B',
+      '> ```',
+      '',
+      '<!-- todo: fix this later -->',
+      '',
+      'Body text.',
+    ].join('\n');
+    const html = renderMarkdown(markdown);
+    const comment: MdComment = {
+      id: 'c-unrelated-hidden',
+      anchor: 'todo: fix this later',
+      text: 'flag before merging',
+      author: 'Agent',
+      timestamp: new Date().toISOString(),
+    };
+    const onHighlightsPainted = vi.fn();
+
+    render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+        onHighlightsPainted={onHighlightsPainted}
+        mermaidSvgMap={new Map()}
+      />,
+    );
+
+    await waitFor(() => expect(onHighlightsPainted).toHaveBeenCalled());
+    const reported = onHighlightsPainted.mock.calls.at(-1)?.[0] as Set<string> | null;
+    expect(reported).not.toBeNull();
+    expect(reported?.has('c-unrelated-hidden')).toBe(true);
+  });
 });
 
 describe('MarkdownViewer comment highlights — markdown-formatted anchor fallback', () => {
