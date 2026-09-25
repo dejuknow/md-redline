@@ -25,7 +25,11 @@ import {
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import type { SelectionInfo } from './types';
-import { MarkdownViewer, type MarkdownViewerHandle } from './components/MarkdownViewer';
+import {
+  MarkdownViewer,
+  type MarkdownViewerHandle,
+  type ViewerContextMenuInfo,
+} from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentPopover } from './components/CommentPopover';
 import { computeAnsweredCommentIds } from './lib/answered-comments';
@@ -1728,6 +1732,10 @@ export default function App() {
       // snapshot; a background tab has only its snapshot. Either way, content
       // that hasn't loaded yet is not a baseline to diff against.
       const priorContent = isActiveTab ? rawMarkdownRef.current : (snapshot?.rawMarkdown ?? '');
+      // An open menu holds a selection captured in the text being replaced, so
+      // it would act on words that may have moved or gone (#87). A tab switch
+      // closes it for the same reason.
+      if (isActiveTab && content !== priorContent) closeViewerMenu();
       const priorLoaded = snapshot ? !snapshot.isLoading : priorContent.length > 0;
 
       // Detect comment changes before updating so we can show toast/diff hints.
@@ -1827,6 +1835,7 @@ export default function App() {
     [
       activeFilePath,
       applyExternalContent,
+      closeViewerMenu,
       getTabSnapshot,
       scheduleBackfillWrite,
       setDiffEnabled,
@@ -2140,6 +2149,16 @@ export default function App() {
     tabCtxMenu,
     sidebarCtxMenu,
   });
+
+  // The effect that closes every context menu fires when an overlay OPENS, so
+  // a menu opened while one is already up (search, which leaves the document
+  // clickable) would sit over it (#87). Refusing here hands the right-click to
+  // the browser's own menu instead, as any refused request does.
+  const handleViewerContextMenuUnlessOverlay = useCallback(
+    (info: ViewerContextMenuInfo): boolean =>
+      activeModal !== null || drawerOpen ? false : handleViewerContextMenu(info),
+    [activeModal, drawerOpen, handleViewerContextMenu],
+  );
 
   // --- Keyboard shortcuts ---
   useEffect(() => {
@@ -3293,7 +3312,7 @@ export default function App() {
                                     // Fragment arg is intentionally ignored in v1; openTab
                                     // takes only the path. See spec §3 non-goals.
                                     onLocalLinkClick={openTab}
-                                    onContextMenu={handleViewerContextMenu}
+                                    onContextMenu={handleViewerContextMenuUnlessOverlay}
                                     enableResolve={settings.enableResolve}
                                     searchQuery={showSearch ? searchQuery : undefined}
                                     searchActiveIndex={activeSearchIndex}
@@ -3316,7 +3335,7 @@ export default function App() {
                                     // Fragment arg is intentionally ignored in v1; openTab
                                     // takes only the path. See spec §3 non-goals.
                                     onLocalLinkClick={openTab}
-                                    onContextMenu={handleViewerContextMenu}
+                                    onContextMenu={handleViewerContextMenuUnlessOverlay}
                                     enableResolve={settings.enableResolve}
                                     searchQuery={showSearch ? searchQuery : undefined}
                                     searchActiveIndex={activeSearchIndex}

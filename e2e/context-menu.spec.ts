@@ -677,3 +677,37 @@ test.describe('Context menu on a rail comment card', () => {
     await expect(menu.getByText('Scroll to Highlight')).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #87: the menu must not act on a selection that no longer matches what it
+// sits over.
+// ---------------------------------------------------------------------------
+
+test.describe('Context menu over a stale selection (#87)', () => {
+  // A second copy of the same locked words is covered by a unit test of the
+  // offset guard (useContextMenuItems.test.ts): end to end, the scroll needed
+  // to reach it clears the native range before the right-click lands.
+
+  test('an external edit to the file closes an open menu', async ({ page }) => {
+    await openFixture(page);
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await expect(menu).toBeVisible();
+
+    // What an agent saving the open file looks like to the viewer.
+    writeFileSync(FIXTURE_1, FIXTURE_1_ORIGINAL.replace('valid credentials', 'good credentials'));
+
+    await expect(page.locator('.context-menu-enter')).toHaveCount(0, { timeout: 10_000 });
+  });
+
+  test('no menu of ours opens over search that is already open', async ({ page }) => {
+    await openFixture(page);
+    await selectText(page, 'valid credentials');
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+    await page.keyboard.press(withMod('f'));
+    await expect(page.getByPlaceholder('Find...')).toBeVisible();
+
+    await page.locator('mark.selection-highlight').first().click({ button: 'right' });
+
+    await expect(page.locator('.context-menu-enter')).toHaveCount(0);
+  });
+});

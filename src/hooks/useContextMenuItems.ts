@@ -211,7 +211,10 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         // painted mark, that range has to BE the committed selection. While a
         // selection is locked a fresh drag never reaches the app, so the two
         // hold different text and every item here would act on the wrong one.
+        // Text is not enough: two copies of the same words match (#87), so a
+        // drag over a second occurrence would open a menu bound to the first.
         if (info.liveText && info.liveText !== sel.text) return false;
+        if (info.liveOffset !== undefined && info.liveOffset !== sel.offset) return false;
 
         const items: ContextMenuEntry[] = [
           {
