@@ -323,7 +323,7 @@ so the dev setup still sees a plain HTTP error.
 - `POST /api/grant-access` — grant filesystem access to a new path
 - `POST /api/reveal` — open file location in OS file explorer
 - `POST /api/shutdown` — graceful server shutdown
-- `GET /__mdr__` — health check
+- `GET /__mdr__` — dev client health check (Vite only); answers `mdr` with an `x-mdr-api-port` header naming the API port it proxies to
 
 Security defaults in `server/index.ts`: path validation against allowed roots, localhost-only CORS, 10 MB body limit.
 
@@ -404,11 +404,23 @@ against the code they described.
 **Which running server a command acts on is `serverProbeOrder`** (in
 `bin/server-control.js`, with the rest of finding and acting on a running
 server, rather than in `ports.js`, which resolves what port to bind)**, and the
-order is a correctness property.** A port the user NAMED (`MD_REDLINE_PORT`, or the
-`PORT` alias) is probed before the one in the port file, then the scan ranges,
-deduped. The port file records whichever server started last, so consulting it
-first meant a command aimed at one instance acted on another and said it
-succeeded: `--stop` killed the wrong server, and a plain `mdr` attached to it.
+order is a correctness property.** A port `MD_REDLINE_PORT` names is the ONLY
+candidate (#58): `findServerPort` probes it and nothing else, so with nothing
+there `mdr` starts a server on it, `mdr mcp` does the same, and `--stop` says
+"mdr is not running on port N" and stops nothing. Falling back to the recorded
+server (what #36 first specified) opened files inside a different instance and
+could shut it down to "upgrade" a server nobody named. That port is also bound
+exactly: the server does not scan upward from it, since the CLI would never look
+there, and if another program holds it the CLI fails at once with "port N
+(MD_REDLINE_PORT) is in use by another program" rather than waiting out the
+start. Only mdr's own variable is strict (`resolveStrictApiPort`): the `PORT`
+alias is a generic name other apps export (Next.js reads it), so a port it names
+is probed first but keeps the fallback and the upward scan. With nothing named,
+the port file comes first, then the
+scan ranges, deduped. The port file records whichever server started last, so
+consulting it before a named port meant a command aimed at one instance acted on
+another and said it succeeded: `--stop` killed the wrong server, and a plain
+`mdr` attached to it.
 Deciding this needs `resolveNamedApiPort`, not `resolveApiPort`, because that
 one answers 6373 both to an explicit `MD_REDLINE_PORT=6373` and to nothing set
 at all. With nothing named the port file still comes first, and has to: it is
@@ -477,7 +489,14 @@ argument-passing mechanism rather than configuration. `RELEASE_SKIP_CI_CHECK` an
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
 (`127.0.0.1`), default port 6373 ("MDR" on a phone keypad; overridable via
 `MD_REDLINE_PORT`), scanning up to 10 ports from there if taken. The Vite dev
-client uses 5188 (`MD_REDLINE_VITE_PORT`), same scan. The CLI (`bin/cli.js`)
+client uses 5188 (`MD_REDLINE_VITE_PORT`, resolved in `bin/ports.js` so the CLI
+and `vite.config.ts` agree), same scan. A dev client's `/__mdr__` answer carries
+an `x-mdr-api-port` header naming the API server it proxies to, and the CLI only
+opens or stops a client whose header matches the server it chose
+(`findClientPort(apiPort)`), and never looks for one in production, where the
+server serves its own page (#58). Before that, `mdr file.md` opened whichever
+dev client answered first, which could show another instance's files, and
+`--stop` swept another instance's dev server. The CLI (`bin/cli.js`)
 probes, kills, and opens browser URLs with `127.0.0.1`, never `localhost`:
 `localhost` resolves to `::1` first, so when another app holds the same port
 number on IPv6 (Next.js/Nest commonly squat 3000-3010), a localhost probe
@@ -508,7 +527,9 @@ would act on (or `none`) and touches nothing, which is the only way to observe
 that choice: every other command that makes it then either kills the server or
 opens a browser at it, and neither is something a test can do to a developer's
 machine. `bin/find-server-cli.test.ts` drives it against fake servers with the
-port file redirected via `TMPDIR`.
+port file redirected via `TMPDIR`. `mdr __find-client <apiPort> [--dev]` does the
+same for the dev client (`--dev` forces dev-mode scanning, since a checkout with
+`dist/` built counts as production).
 
 The undocumented `mdr __first-launch` prints which trust disclosure this
 invocation would print (`seeded`, `unreadable` or `configured`) and exits, for

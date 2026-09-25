@@ -12,6 +12,7 @@
  * this. `npm run build` never touches it.
  */
 
+import { connect } from 'net';
 import { spawn } from 'child_process';
 import { readdirSync, statSync } from 'fs';
 import { mkdir, readFile, stat, unlink } from 'fs/promises';
@@ -24,7 +25,13 @@ import { createRequire } from 'module';
 import { acquireFileLock, LOCK_MAX_WAIT_MS, LockContentionError } from './file-lock.js';
 import { atomicWriteFile, errorCode, retryTransient } from './fs-atomic.js';
 import { resolveHomeDir } from './home-dir.js';
-import { FALLBACK_PORT, isValidPort, resolveNamedApiPort } from './ports.js';
+import {
+  FALLBACK_PORT,
+  isValidPort,
+  resolveNamedApiPort,
+  resolveStrictApiPort,
+  resolveVitePort,
+} from './ports.js';
 
 import { checkServer, gracefulShutdown, killPort, serverProbeOrder } from './server-control.js';
 import { formatSessions } from './sessions.js';
@@ -41,6 +48,8 @@ const DIST_SERVER = join(APP_DIR, 'dist', 'server.js');
 // Asked for once, not once per reader: `resolvePort` warns on a value it cannot
 // use, and calling it twice would say so twice for a single typo.
 const NAMED_SERVER_PORT = resolveNamedApiPort();
+// Only MD_REDLINE_PORT makes a named port strict; see resolveStrictApiPort.
+const STRICT_SERVER_PORT = resolveStrictApiPort();
 const DEFAULT_SERVER_PORT = NAMED_SERVER_PORT ?? FALLBACK_PORT;
 // Pre-0.7 servers bound 3001+. 0.7.0 (2026-07-18) moved the default to 6373, and
 // 0.6.0 shipped four days before it, so a machine that has not rebooted since can
@@ -49,7 +58,6 @@ const DEFAULT_SERVER_PORT = NAMED_SERVER_PORT ?? FALLBACK_PORT;
 // migration. Drop this at 0.8.0 or after 2026-11-01, whichever is later: these are
 // local servers, so one reboot cycle clears every one of them.
 const LEGACY_SERVER_PORT = 3001;
-const DEFAULT_CLIENT_PORT = 5188;
 const MAX_PORT_SCAN = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 const START_TIMEOUT_MS = 15_000;
@@ -195,6 +203,13 @@ async function readPortFile() {
  * @returns {Promise<number | null>} The first port answering as mdr, or null.
  */
 async function findServerPort() {
+  // A named port means that instance and no other (#58). Falling back to the
+  // recorded or scanned server opened files inside a different instance, and
+  // could shut that one down to "upgrade" a server the user never named. With
+  // nothing on the named port, callers start one there instead.
+  if (STRICT_SERVER_PORT !== null) {
+    return (await checkServer(STRICT_SERVER_PORT)) ? STRICT_SERVER_PORT : null;
+  }
   // No guard against the two being equal: serverProbeOrder dedupes, so a
   // repeated base contributes nothing and shifts nothing.
   const order = serverProbeOrder({
@@ -209,19 +224,58 @@ async function findServerPort() {
   return null;
 }
 
-async function findClientPort() {
-  for (let p = DEFAULT_CLIENT_PORT; p < DEFAULT_CLIENT_PORT + MAX_PORT_SCAN; p++) {
+/**
+ * The Vite dev client that proxies to `apiPort`, or null. A client says which
+ * API it proxies to in the `x-mdr-api-port` header of its `/__mdr__` answer,
+ * and only a match counts, so another instance's client is never opened or
+ * stopped (#58); one without the header (an older dev server) never matches.
+ * Not gated on production mode: a checkout with dist/ built still runs
+ * `npm run dev`, and its API server has no page of its own to open.
+ *
+ * @param {number} apiPort
+ * @returns {Promise<number | null>}
+ */
+async function findClientPort(apiPort) {
+  const base = resolveVitePort();
+  for (let p = base; p < base + MAX_PORT_SCAN; p++) {
     try {
       const response = await fetch(`http://127.0.0.1:${p}/__mdr__`, {
         signal: AbortSignal.timeout(1_000),
       });
-      if (response.ok && (await response.text()) === 'mdr') return p;
+      if (
+        response.ok &&
+        response.headers.get('x-mdr-api-port') === String(apiPort) &&
+        (await response.text()) === 'mdr'
+      ) {
+        return p;
+      }
     } catch {
       // Nothing listening, something that is not us, or a timeout. This is a
       // scan: every failure just means try the next port.
     }
   }
   return null;
+}
+
+/**
+ * Whether anything accepts a TCP connection on `port`. Used only to tell
+ * "nothing there" from "something that is not mdr" before starting a server.
+ *
+ * @param {number} port
+ * @returns {Promise<boolean>}
+ */
+function portAcceptsConnections(port) {
+  return new Promise((resolveProbe) => {
+    const socket = connect({ port, host: '127.0.0.1' });
+    socket.setTimeout(1_000);
+    const done = (/** @type {boolean} */ open) => {
+      socket.destroy();
+      resolveProbe(open);
+    };
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+    socket.once('timeout', () => done(false));
+  });
 }
 
 /**
@@ -370,15 +424,21 @@ function openWithWindowsShell(url) {
 async function stopServer(quiet = false) {
   const serverPort = await findServerPort();
   if (!serverPort) {
-    if (!quiet) console.log('mdr is not running.');
+    if (!quiet) {
+      console.log(
+        STRICT_SERVER_PORT !== null
+          ? `mdr is not running on port ${STRICT_SERVER_PORT}.`
+          : 'mdr is not running.',
+      );
+    }
     return;
   }
 
-  if (!quiet) console.log('Stopping mdr...');
+  if (!quiet) console.log(`Stopping mdr on port ${serverPort}...`);
+  // Found before the kill, while it can still say which server it proxies to,
+  // so the sweep only ever takes this server's own dev client (#58).
+  const clientPort = await findClientPort(serverPort);
   killPort(serverPort);
-
-  // Also kill the Vite client if running (only kill ports that respond)
-  const clientPort = await findClientPort();
   if (clientPort) {
     killPort(clientPort);
   }
@@ -397,7 +457,7 @@ async function stopServer(quiet = false) {
     }
   }
 
-  if (!quiet) console.log('mdr stopped.');
+  if (!quiet) console.log(`mdr stopped (port ${serverPort}).`);
 }
 
 async function enableRestrictedMode() {
@@ -573,6 +633,20 @@ async function ensureServerRunning() {
     console.log('Trusting your home directory for this session until it can be read again.');
   }
 
+  // A port MD_REDLINE_PORT names is bound exactly (#58), so if another
+  // program holds it the server can only fail to start. Say so now instead of
+  // waiting out the start timeout, which in dev mode also orphaned Vite.
+  if (
+    !existing &&
+    STRICT_SERVER_PORT !== null &&
+    (await portAcceptsConnections(STRICT_SERVER_PORT))
+  ) {
+    throw new Error(
+      `port ${STRICT_SERVER_PORT} (MD_REDLINE_PORT) is in use by another program. ` +
+        'Free it, or set MD_REDLINE_PORT to another port.',
+    );
+  }
+
   if (!existing) console.log('Starting mdr...');
   let childExited = false;
   let child;
@@ -620,8 +694,9 @@ async function ensureServerRunning() {
     return null;
   }
   // Also wait for Vite client to be ready
+  const startedPort = await findServerPort();
   while (Date.now() < deadline) {
-    if (await findClientPort()) {
+    if (startedPort && (await findClientPort(startedPort))) {
       console.log('mdr is ready.');
       return null;
     }
@@ -638,9 +713,12 @@ async function ensureServerRunning() {
  * @returns {Promise<string>}
  */
 async function buildUrl(file, dir) {
-  const clientPort = await findClientPort();
   const serverPort = await findServerPort();
-  const port = clientPort ?? serverPort ?? DEFAULT_CLIENT_PORT;
+  // This server's own dev client when there is one, else the server itself:
+  // a client found by scanning alone can belong to another instance and show
+  // that instance's files (#58).
+  const clientPort = serverPort ? await findClientPort(serverPort) : null;
+  const port = clientPort ?? serverPort ?? DEFAULT_SERVER_PORT;
   // 127.0.0.1 rather than localhost: browsers prefer ::1 too, so a
   // localhost URL can land on whatever app squats the port on IPv6.
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -1220,13 +1298,15 @@ async function runMcpStdio() {
   // Bin owns the baseUrl state so there's no module-level mutable in the
   // mcp-stdio module. runMcpServer reads it via getBaseUrl() on every tool
   // call, after ensureServerRunning() has had a chance to refresh it.
-  let currentBaseUrl = `http://127.0.0.1:${DEFAULT_CLIENT_PORT}`;
+  let currentBaseUrl = `http://127.0.0.1:${DEFAULT_SERVER_PORT}`;
   await mod.runMcpServer({
     getBaseUrl: () => currentBaseUrl,
     openInBrowser,
     ensureServerRunning: async () => {
       await ensureServerRunning();
-      const port = (await findClientPort()) ?? (await findServerPort()) ?? DEFAULT_CLIENT_PORT;
+      const serverPort = await findServerPort();
+      const clientPort = serverPort ? await findClientPort(serverPort) : null;
+      const port = clientPort ?? serverPort ?? DEFAULT_SERVER_PORT;
       currentBaseUrl = `http://127.0.0.1:${port}`;
     },
   });
@@ -1292,6 +1372,13 @@ async function main() {
     // it, and everything else opens a browser at it. Neither is something a
     // test can do to a developer's machine.
     console.log((await findServerPort()) ?? 'none');
+    return;
+  }
+
+  if (process.argv[2] === '__find-client') {
+    // The same kind of seam for the dev client: which one this invocation
+    // would open or stop for a given API port (#58).
+    console.log((await findClientPort(Number(process.argv[3]))) ?? 'none');
     return;
   }
 
