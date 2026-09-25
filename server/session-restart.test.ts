@@ -100,7 +100,9 @@ async function waitForServerReady(server: LaunchedServer, timeoutMs: number): Pr
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `server at ${server.baseUrl} never became ready within ${timeoutMs}ms; output:\n${server.output()}`,
+        `server at ${server.baseUrl} never became ready within ${timeoutMs}ms ` +
+          `(pid ${server.child.pid}, exitCode ${server.child.exitCode}, ` +
+          `signal ${server.child.signalCode}); output:\n${server.output()}`,
       );
     }
     await sleep(20);
@@ -196,7 +198,19 @@ async function stopServer(
   signal: NodeJS.Signals = 'SIGTERM',
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   const exited = waitForExit(server.child);
-  server.child.kill(signal);
+  if (signal === 'SIGTERM' && process.platform === 'win32') {
+    // Windows has no SIGTERM: child.kill('SIGTERM') is TerminateProcess, a
+    // hard kill that runs no handler, so the shutdown save never happens.
+    // mdr itself stops a server on Windows through /api/shutdown (see
+    // gracefulShutdown in bin/server-control.js), which exits through the
+    // same 'exit' listener that flushes, so the graceful case uses that.
+    await fetch(`${server.baseUrl}/api/shutdown`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    }).catch(() => {});
+  } else {
+    server.child.kill(signal);
+  }
   return exited;
 }
 
