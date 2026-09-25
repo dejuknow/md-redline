@@ -1058,6 +1058,17 @@ menu (Edit / Reply / Delete) stays one right-click away on its highlight with
 nothing selected, and a selection elsewhere never takes it over. A right-click
 on text with nothing selected and no comment reaches the browser's menu.
 
+**A menu never acts on a stale selection (#87).** The menu carries a
+`SelectionInfo` captured when it opened, so three guards keep that snapshot
+honest. A live range must match the committed selection by `offset` as well as
+text (`liveOffset`, from the same `resolveSelection` the commit uses), since
+two copies of the same words match by text alone. An external change to the
+active tab's content closes the menu, as a tab switch does, because an agent
+saving the open file can move or remove the passage. And the menu refuses to
+open while an overlay is up (`handleViewerContextMenuUnlessOverlay` in App):
+the effect that closes menus fires only when an overlay opens, and search
+leaves the document clickable, so a menu opened afterwards sat over it.
+
 ### Copy as Markdown
 
 The selection menu carries a second copy action that hands back markdown rather

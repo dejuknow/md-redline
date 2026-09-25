@@ -7,6 +7,7 @@ import {
   useMemo,
   useEffect,
 } from 'react';
+import { resolveSelection } from '../lib/selection-resolver';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
 import { stripInlineFormatting } from '../lib/comment-parser';
@@ -40,6 +41,13 @@ export interface ViewerContextMenuInfo {
    * sit over one passage while acting on another.
    */
   liveText?: string;
+  /**
+   * Where that live range starts, in the same visible-text coordinates as a
+   * committed selection's `offset`. Text alone cannot tell two copies of the
+   * same words apart (#87): a locked selection and a fresh drag over a second
+   * occurrence hold the same string.
+   */
+  liveOffset?: number;
   /** Screen coordinates for the menu */
   x: number;
   y: number;
@@ -727,7 +735,10 @@ export const MarkdownViewer = memo(
         liveRange.intersectsNode(target);
       if (liveOnTarget) {
         const liveText = liveSel!.toString().trim();
-        if (onCtxMenu({ type: 'selection', liveText, x: e.clientX, y: e.clientY })) {
+        const liveOffset = containerRef.current
+          ? resolveSelection(containerRef.current)?.offset
+          : undefined;
+        if (onCtxMenu({ type: 'selection', liveText, liveOffset, x: e.clientX, y: e.clientY })) {
           e.preventDefault();
         }
         return;
@@ -751,7 +762,8 @@ export const MarkdownViewer = memo(
       const sel = window.getSelection();
       const liveText = sel?.toString().trim() ?? '';
       if (sel && liveText.length > 0 && containerRef.current?.contains(sel.anchorNode)) {
-        if (onCtxMenu({ type: 'selection', liveText, x: e.clientX, y: e.clientY })) {
+        const liveOffset = resolveSelection(containerRef.current)?.offset;
+        if (onCtxMenu({ type: 'selection', liveText, liveOffset, x: e.clientX, y: e.clientY })) {
           e.preventDefault();
         }
         return;
