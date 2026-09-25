@@ -252,3 +252,19 @@ describe('CommentListSurface - answered count', () => {
     expect(footer.textContent).not.toMatch(/answered/);
   });
 });
+
+describe('CommentListSurface - unpainted anchors bucket alongside missing ones', () => {
+  // The reader cannot see the anchor text either way, whether the file
+  // dropped it (missingAnchors) or the render did (unpaintedAnchors), so both
+  // land in "Needs re-anchoring" for consistency with the rail's orphan
+  // treatment (see #99).
+  it('buckets a comment flagged only in unpaintedAnchors under Needs re-anchoring', async () => {
+    renderSurface({ unpaintedAnchors: new Set([OPEN_COMMENT.id]) });
+    expect(await screen.findByText('Needs re-anchoring (1)')).toBeTruthy();
+  });
+
+  it('keeps a comment out of Needs re-anchoring when neither set flags it', async () => {
+    renderSurface({ unpaintedAnchors: new Set<string>() });
+    expect(screen.queryByText(/Needs re-anchoring/)).toBeNull();
+  });
+});

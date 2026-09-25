@@ -1288,7 +1288,35 @@ on `--theme-bg-inset`), never the crimson accent:
   down by the residual instead of lifting other cards further. Comments
   whose anchor text can't be found in the document (orphans) stack in a
   block at the top of the rail, above the
-  anchored cards. Resolved comments get no card in this density (App's
+  anchored cards.
+
+  **Reveal gate.** A card only becomes visible (`placed` in
+  `AnchoredCards`, `CommentsRail.tsx`) once its height is measured AND its
+  anchor is settled one of three ways: painted (`layout.anchorTops`),
+  confirmed missing from the document text (`missingAnchors`, from
+  `detectMissingAnchors`), or confirmed unpainted by the highlight pass
+  itself (`unpaintedAnchors`). A card that is measured but has none of the
+  three is held back rather than shown at its 0px orphan-stack position,
+  which would otherwise jump once the real anchor resolves — three
+  timing-based fixes for that shipped and broke before this gate. The third
+  set exists because the first two can both miss: an anchor can be present
+  in the file (so `missingAnchors` calls it attached) and still absent from
+  the render (so no mark ever paints to satisfy `anchorTops`) — a dropped
+  HTML comment is the common case (#99). `MarkdownViewer`'s highlight pass
+  tracks this directly: `wrapText` (in `MarkdownViewer.tsx`) returns whether
+  it actually painted a mark or handed a match to an SVG label, and the pass
+  collects the ids of OPEN comments (not resolved-only traces, which have no
+  margin card to withhold) whose group came back false. It reports that set
+  through `onHighlightsPainted(unpaintedIds)`, except when a Mermaid diagram
+  in the container has no SVG yet — that diagram's labels cannot match
+  anything, so the pass is not authoritative and reports `null` instead of a
+  partial set; App's `handleHighlightsPainted` keeps the previous
+  `unpaintedAnchors` value in that case rather than clearing it. A card
+  revealed through `unpaintedAnchors` gets the same anchor-missing (orphan)
+  treatment as a genuine `missingAnchors` card, and List density's "Needs
+  re-anchoring" bucket (`CommentListSurface.tsx`) includes it too, for the
+  same reason the rail does: the reader cannot see the anchor text either
+  way. Resolved comments get no card in this density (App's
   `marginComments` filters them out); their thread lives in List density's /
   the drawer's Resolved filter. Their anchor still paints a faint dotted
   underline in the prose (`mark.comment-highlight-resolved`) so a passage that

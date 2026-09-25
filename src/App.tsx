@@ -504,7 +504,18 @@ export default function App() {
   // Auto-expand comment form state (Feature 3)
   const [autoExpandForm, setAutoExpandForm] = useState(false);
   const [highlightPaintTick, setHighlightPaintTick] = useState(0);
-  const handleHighlightsPainted = useCallback(() => setHighlightPaintTick((t) => t + 1), []);
+  // Ids of open comments the last authoritative highlight pass tried to paint
+  // and could not find in the render: anchored to text the file has but the
+  // render dropped (see CommentsRail's `placed` gate). A non-authoritative
+  // pass (a Mermaid block still loading) reports null and leaves this alone,
+  // so a comment on a diagram never flashes as unpainted while it settles.
+  const [unpaintedAnchors, setUnpaintedAnchors] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const handleHighlightsPainted = useCallback((unpaintedIds: ReadonlySet<string> | null) => {
+    setHighlightPaintTick((t) => t + 1);
+    if (unpaintedIds !== null) setUnpaintedAnchors(unpaintedIds);
+  }, []);
   const [requestedCommentFocus, setRequestedCommentFocus] = useState<{
     commentId: string;
     token: number;
@@ -3302,6 +3313,7 @@ export default function App() {
                               allComments={comments}
                               activeCommentId={activeCommentId}
                               missingAnchors={missingAnchors}
+                              unpaintedAnchors={unpaintedAnchors}
                               sentCommentIds={sentCommentIds}
                               answeredCommentIds={answeredCommentIds}
                               onActivate={handleSidebarActivate}
@@ -3411,6 +3423,7 @@ export default function App() {
           comments={comments}
           activeCommentId={activeCommentId}
           missingAnchors={missingAnchors}
+          unpaintedAnchors={unpaintedAnchors}
           selectionText={selection?.text ?? null}
           selectionOffset={selection?.offset ?? null}
           onReanchorToSelection={handleReanchorToSelection}

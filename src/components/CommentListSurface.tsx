@@ -24,6 +24,12 @@ interface Props {
   comments: MdComment[];
   activeCommentId: string | null;
   missingAnchors: Set<string>;
+  /** Open comments an authoritative highlight pass tried to paint and could not
+   * find in the render: anchored to text the file has but the render dropped.
+   * Bucketed into "Needs re-anchoring" alongside `missingAnchors`, for the same
+   * reason CommentsRail treats the two alike: the reader cannot see the text
+   * either way. Optional so a caller with nothing to report can omit it. */
+  unpaintedAnchors?: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onResolve?: (id: string) => void;
   onUnresolve?: (id: string) => void;
@@ -80,6 +86,7 @@ export function CommentListSurface({
   comments,
   activeCommentId,
   missingAnchors,
+  unpaintedAnchors,
   onActivate,
   onResolve,
   onUnresolve,
@@ -285,8 +292,13 @@ export function CommentListSurface({
   const activeCommentsAll = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
     : filtered;
-  const orphanActiveComments = activeCommentsAll.filter((c) => missingAnchors.has(c.id));
-  const activeComments = activeCommentsAll.filter((c) => !missingAnchors.has(c.id));
+  // Unpainted joins missingAnchors in the same bucket: both mean the reader
+  // has no way to see the anchor text, whether the file dropped it or the
+  // render did.
+  const isOrphan = (c: MdComment) =>
+    missingAnchors.has(c.id) || (unpaintedAnchors?.has(c.id) ?? false);
+  const orphanActiveComments = activeCommentsAll.filter(isOrphan);
+  const activeComments = activeCommentsAll.filter((c) => !isOrphan(c));
   const resolvedComments = resolveEnabled
     ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved')
     : [];

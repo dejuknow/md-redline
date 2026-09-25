@@ -60,8 +60,17 @@ interface Props {
   theme?: string;
   mermaidSvgMap?: Map<string, MermaidResult>;
   onOpenMermaidFullscreen?: (source: string, blockIndex: number) => void;
-  /** Called after each imperative highlight paint so overlays can re-measure anchors. */
-  onHighlightsPainted?: () => void;
+  /**
+   * Called after each imperative highlight paint so overlays can re-measure
+   * anchors. Carries the ids of OPEN comments whose anchor this pass tried to
+   * paint and could not find in the rendered DOM: present in the file, but
+   * missing from the render (a dropped HTML comment, for instance). `null`
+   * means the pass is not authoritative and the caller should keep whatever
+   * it already had: a Mermaid block still loading has no text for its labels
+   * to match against yet, so a comment anchored inside it would otherwise
+   * flash as unpainted for one pass before the diagram catches up.
+   */
+  onHighlightsPainted?: (unpaintedIds: ReadonlySet<string> | null) => void;
 }
 
 export interface TocHeading {
@@ -261,6 +270,12 @@ export const MarkdownViewer = memo(
       assignHeadingIds(container);
 
       // --- Mermaid blocks ---
+      // Tracks whether any diagram in this pass has no SVG yet, which makes
+      // the pass non-authoritative for the unpainted-anchor report below: a
+      // label inside that diagram cannot match anything until the SVG lands,
+      // so a comment anchored on it would otherwise flag as unpainted for one
+      // pass and then clear itself, flashing as an orphan.
+      let mermaidLoading = false;
       const mermaidPres = container.querySelectorAll('pre');
       let mermaidBlockIndex = 0;
       for (const pre of mermaidPres) {
@@ -302,8 +317,12 @@ export const MarkdownViewer = memo(
           errDiv.className = 'mermaid-block mermaid-error';
           errDiv.textContent = `Mermaid error: ${result.error}`;
           pre.replaceWith(errDiv);
+        } else {
+          // No result yet (loading): leave the code block as-is until SVGs
+          // are ready, and remember that this pass cannot yet speak for any
+          // comment anchored inside it.
+          mermaidLoading = true;
         }
-        // If no result yet (loading), leave the code block as-is until SVGs are ready
       }
 
       // --- Comment highlights ---
@@ -386,6 +405,13 @@ export const MarkdownViewer = memo(
 
       const mermaidTheme = getMermaidHighlightTheme(getComputedStyle(document.documentElement));
 
+      // Open comments whose group never painted a mark this pass: present in
+      // the file (the group exists at all), absent from the render. A group
+      // with any open member is keyed by its open ids only (see below), so a
+      // resolved-only group's trace going unpainted is not reported here,
+      // since it has no margin card to withhold in the first place.
+      const unpaintedOpenIds = new Set<string>();
+
       for (const {
         anchor,
         openIds,
@@ -404,7 +430,7 @@ export const MarkdownViewer = memo(
           sentCommentIds &&
           sentCommentIds.length > 0 &&
           ids.every((id) => sentCommentIds.includes(id));
-        wrapText(
+        const painted = wrapText(
           container,
           anchor,
           (mark) => {
@@ -460,6 +486,9 @@ export const MarkdownViewer = memo(
             );
           },
         );
+        if (!painted && !allResolved) {
+          for (const id of ids) unpaintedOpenIds.add(id);
+        }
       }
 
       // IMPORTANT: Mermaid highlight quirks (do NOT refactor to class-based styles):
@@ -533,7 +562,11 @@ export const MarkdownViewer = memo(
         '.comment-highlight-active, .mermaid-comment-highlight-active',
       ) as HTMLElement | null;
 
-      highlightsPaintedCb.current?.();
+      // A diagram still loading makes this pass's unpainted report unreliable
+      // for any comment anchored inside it, so report nothing rather than a
+      // set missing the entries that diagram would have cleared once it
+      // rendered. The caller keeps whatever it already had.
+      highlightsPaintedCb.current?.(mermaidLoading ? null : unpaintedOpenIds);
 
       // --- Wide-table scroll cues ---
       // Show an edge fade only when a table overflows, and only on the side(s)
@@ -700,8 +733,12 @@ export const MarkdownViewer = memo(
  *  primary disambiguation (more reliable than offset across coordinate spaces).
  *  `exactHint` marks a hint measured over these same text nodes, so a match
  *  starting exactly there is taken before any other disambiguation.
- *  Handles text that spans multiple DOM elements. */
-function wrapText(
+ *  Handles text that spans multiple DOM elements.
+ *  Returns whether it actually painted something: true if it wrapped at least
+ *  one <mark> or handed a match to `onSvgText`, false on every early "no
+ *  match" return. Callers use this to tell a real miss (the text is not in
+ *  the render at all) apart from paint timing, which nothing here guesses at. */
+export function wrapText(
   container: HTMLElement,
   text: string,
   configure: (mark: HTMLElement) => void,
@@ -710,10 +747,10 @@ function wrapText(
   contextAfter?: string,
   onSvgText?: (textEl: SVGElement, matchStart: number, matchEnd: number) => void,
   exactHint = false,
-) {
+): boolean {
   // Collect ALL text nodes — include those inside marks to support overlapping highlights
   const allTextNodes = collectVisibleTextNodes(container);
-  if (allTextNodes.length === 0) return;
+  if (allTextNodes.length === 0) return false;
 
   // Build concatenated text with position tracking (all nodes, for offset-based matching)
   const allNodeInfo: { node: Text; globalStart: number; length: number }[] = [];
@@ -739,7 +776,7 @@ function wrapText(
     exactHint && hintOffset !== undefined && fullText.startsWith(text, hintOffset)
       ? { start: hintOffset, end: hintOffset + text.length }
       : findMatchRange(fullText, text, hintOffset, contextBefore, contextAfter);
-  if (!matchRange) return;
+  if (!matchRange) return false;
   const matchStart = matchRange.start;
   const matchEnd = matchRange.end;
 
@@ -754,7 +791,7 @@ function wrapText(
       wraps.push({ node: info.node, start: localStart, end: localEnd });
     }
   }
-  if (wraps.length === 0) return;
+  if (wraps.length === 0) return false;
 
   // Filter out whitespace-only portions
   const nonEmptyWraps = wraps.filter(({ node: tn, start, end }) => {
@@ -793,7 +830,9 @@ function wrapText(
   if (onSvgText) {
     for (const [el, range] of svgTextRanges) onSvgText(el, range.start, range.end);
   }
-  if (visibleWraps.length === 0) return;
+  // A match entirely inside SVG <text> content has nothing left to wrap in an
+  // HTML <mark>, but it was still found and handed off, so it counts as painted.
+  if (visibleWraps.length === 0) return svgTextRanges.size > 0;
 
   // Group wraps by block parent so we merge wraps within the same block
   // (e.g. text nodes split by <strong>) into a single <mark>, while creating
@@ -859,6 +898,7 @@ function wrapText(
   }
 
   pruneEmptyInlineFormatting(container);
+  return true;
 }
 
 const BLOCK_TAGS = new Set([

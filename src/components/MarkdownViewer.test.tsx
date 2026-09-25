@@ -7,10 +7,12 @@ import {
   isInsideSvgTextContent,
   computeTableOverflow,
   matchTableScroll,
+  wrapText,
 } from './MarkdownViewer';
 import { renderMarkdown } from '../markdown/pipeline';
 import { insertComment, parseComments } from '../lib/comment-parser';
 import { getVisibleTextOffset } from '../lib/visible-text';
+import type { MdComment } from '../types';
 
 describe('matchTableScroll', () => {
   it('restores offsets to the same tables when nothing changed', () => {
@@ -165,6 +167,188 @@ describe('isInsideSvgTextContent', () => {
     document.body.appendChild(p);
     expect(isInsideSvgTextContent(tn)).toBe(false);
     p.remove();
+  });
+});
+
+describe('wrapText return value', () => {
+  // The unpainted-anchor report (#99) hinges on this: the highlight pass
+  // reads wrapText's return value to tell a real miss (the text is not in the
+  // render) apart from a mark it successfully painted, so every "no match"
+  // path has to report false and every path that actually marks something,
+  // false or not, has to report true.
+  it('returns true and wraps a <mark> when the text is found', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Hello world</p>';
+    const result = wrapText(container, 'world', (mark) => {
+      mark.className = 'comment-highlight';
+    });
+    expect(result).toBe(true);
+    expect(container.querySelector('mark.comment-highlight')?.textContent).toBe('world');
+  });
+
+  it('returns false when the text has no match anywhere in the container', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Hello world</p>';
+    const result = wrapText(container, 'a phrase that is not in the document', () => {});
+    expect(result).toBe(false);
+    expect(container.querySelector('mark')).toBeNull();
+  });
+
+  it('returns false for a container with no text nodes at all', () => {
+    const container = document.createElement('div');
+    const result = wrapText(container, 'anything', () => {});
+    expect(result).toBe(false);
+  });
+
+  it('returns true when the match lands in an SVG <text> label, even though no HTML <mark> is created', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<div class="mermaid-block"><svg><text>POST /auth/login</text></svg></div>';
+    const onSvgText = vi.fn();
+    const result = wrapText(
+      container,
+      'auth',
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      onSvgText,
+    );
+    expect(result).toBe(true);
+    expect(onSvgText).toHaveBeenCalledTimes(1);
+    // SVG <text> cannot hold an HTML <mark> child, so the redirect to
+    // onSvgText must be the only thing that happened.
+    expect(container.querySelector('mark')).toBeNull();
+  });
+});
+
+describe('MarkdownViewer onHighlightsPainted: unpainted anchors (#99)', () => {
+  it('reports the id of an open comment whose anchor is in the file but not the render', async () => {
+    // renderMarkdown defaults renderHtmlComments to false, so the HTML
+    // comment's body never reaches the DOM: exactly the render gap #99 is
+    // about. The anchor is still real text in cleanMarkdown, so
+    // detectMissingAnchors would not flag it either; only the paint pass
+    // itself knows this one failed to find a home.
+    const markdown = '# Notes\n\n<!-- todo: fix this later -->\n\nBody text.\n';
+    const html = renderMarkdown(markdown);
+    const comment: MdComment = {
+      id: 'c-hidden',
+      anchor: 'todo: fix this later',
+      text: 'flag before merging',
+      author: 'Agent',
+      timestamp: new Date().toISOString(),
+    };
+    const onHighlightsPainted = vi.fn();
+
+    render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+        onHighlightsPainted={onHighlightsPainted}
+      />,
+    );
+
+    await waitFor(() => expect(onHighlightsPainted).toHaveBeenCalled());
+    const reported = onHighlightsPainted.mock.calls.at(-1)?.[0] as Set<string> | null;
+    expect(reported).not.toBeNull();
+    expect(reported?.has('c-hidden')).toBe(true);
+  });
+
+  it('reports an empty (non-null) set once every anchor paints', async () => {
+    const markdown = '# Notes\n\nHello world.\n';
+    const html = renderMarkdown(markdown);
+    const comment: MdComment = {
+      id: 'c-ok',
+      anchor: 'Hello world',
+      text: 'nice',
+      author: 'Agent',
+      timestamp: new Date().toISOString(),
+    };
+    const onHighlightsPainted = vi.fn();
+
+    render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+        onHighlightsPainted={onHighlightsPainted}
+      />,
+    );
+
+    await waitFor(() => expect(onHighlightsPainted).toHaveBeenCalled());
+    const reported = onHighlightsPainted.mock.calls.at(-1)?.[0] as Set<string> | null;
+    expect(reported).not.toBeNull();
+    expect(reported?.size).toBe(0);
+  });
+
+  it('does not report a resolved-only group, even when its anchor fails to paint', async () => {
+    // Only OPEN comments count: a resolved-only group paints no mark and
+    // therefore has no margin card to withhold in the first place.
+    const markdown = '# Notes\n\n<!-- todo: fix this later -->\n\nBody text.\n';
+    const html = renderMarkdown(markdown);
+    const comment: MdComment = {
+      id: 'c-resolved-hidden',
+      anchor: 'todo: fix this later',
+      text: 'already handled',
+      author: 'Agent',
+      timestamp: new Date().toISOString(),
+      status: 'resolved',
+    };
+    const onHighlightsPainted = vi.fn();
+
+    render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[comment]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+        onHighlightsPainted={onHighlightsPainted}
+        enableResolve
+      />,
+    );
+
+    await waitFor(() => expect(onHighlightsPainted).toHaveBeenCalled());
+    const reported = onHighlightsPainted.mock.calls.at(-1)?.[0] as Set<string> | null;
+    expect(reported?.has('c-resolved-hidden')).toBe(false);
+  });
+
+  it('reports null (not authoritative) while a Mermaid diagram in the document has not rendered yet', async () => {
+    // No SVG for the block yet means no label text to match against, so any
+    // report this pass makes would be a guess. mermaidSvgMap is passed as an
+    // empty Map so the diagram source has no entry, matching the "still
+    // loading" branch in the highlight effect's Mermaid pass.
+    const markdown = '# Notes\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\nSome paragraph.\n';
+    const html = renderMarkdown(markdown);
+    const onHighlightsPainted = vi.fn();
+
+    render(
+      <MarkdownViewer
+        html={html}
+        cleanMarkdown={markdown}
+        comments={[]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+        onHighlightsPainted={onHighlightsPainted}
+        mermaidSvgMap={new Map()}
+      />,
+    );
+
+    await waitFor(() => expect(onHighlightsPainted).toHaveBeenCalled());
+    expect(onHighlightsPainted).toHaveBeenLastCalledWith(null);
   });
 });
 

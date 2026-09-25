@@ -74,6 +74,7 @@ function renderRail(props: Partial<React.ComponentProps<typeof CommentsRail>> = 
     allComments: comments,
     activeCommentId: null,
     missingAnchors: new Set(['c2']),
+    unpaintedAnchors: new Set<string>(),
     sentCommentIds: [],
     onActivate: vi.fn(),
     onReply: vi.fn(),
@@ -142,6 +143,28 @@ describe('CommentsRail - a card is hidden until its height is measured', () => {
       missingAnchors: new Set(['c1']),
     });
     expect(cardEl(container, 'c1')?.style.visibility).toBe('');
+  });
+
+  it('shows a card whose anchor is in the file but the render never painted it (#99)', () => {
+    // Neither anchorTops (nothing painted) nor missingAnchors (the file really
+    // has the text, and detectMissingAnchors reads cleanMarkdown, not the DOM)
+    // covers this case. unpaintedAnchors comes from the paint pass itself, so
+    // it is the only signal that settles it instead of waiting forever.
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set<string>(),
+      unpaintedAnchors: new Set(['c1']),
+    });
+    expect(cardEl(container, 'c1')?.style.visibility).toBe('');
+  });
+
+  it('gives an unpainted card the same anchor-missing treatment as a genuine orphan', () => {
+    const { container } = renderRail({
+      layout: layout({ measuredIds: new Set(['c1', 'c2']), anchorTops: new Map() }),
+      missingAnchors: new Set<string>(),
+      unpaintedAnchors: new Set(['c1']),
+    });
+    expect(cardEl(container, 'c1')?.textContent).toContain('Changed');
   });
 
   it('shows it once measured', () => {
