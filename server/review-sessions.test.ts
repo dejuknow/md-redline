@@ -1383,6 +1383,36 @@ describe('persistence (#116)', () => {
     after.dispose();
   });
 
+  it('does not count the downtime against an agent still owed a pickup of a sent batch', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    before.beginWaitPark(session.id);
+    before.waitForSession(session.id);
+    before.sendBatch(session.id, 'batch1', ['c1']);
+    // The batch went out 30 seconds before the save.
+    vi.advanceTimersByTime(30_000);
+    const savedAt = Date.now();
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    // 2 minutes of downtime, then the relaunched server restores.
+    vi.advanceTimersByTime(2 * 60_000);
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    after.heartbeat(session.id);
+    (after as unknown as { sweepStale: () => void }).sweepStale();
+    // 30 seconds of the agent's 60 were used before the crash, so the
+    // reviewer still sees the agent as working...
+    expect(after.getSession(session.id)?.waitingForAgent).toBe(true);
+
+    // ...until the remaining 30 run out.
+    vi.advanceTimersByTime(31_000);
+    after.heartbeat(session.id);
+    (after as unknown as { sweepStale: () => void }).sweepStale();
+    expect(after.getSession(session.id)?.waitingForAgent).toBe(false);
+    after.dispose();
+  });
+
   it('a heartbeat already 20 minutes stale at save time is not reused by findOpenSession and is swept 10 minutes after restore', () => {
     const before = new ReviewSessionStore();
     const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });

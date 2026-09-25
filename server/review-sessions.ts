@@ -1387,8 +1387,11 @@ export class ReviewSessionStore {
         status: persisted.status,
         sentCommentIds: [...persisted.sentCommentIds],
         waitingForAgent: persisted.waitingForAgent,
+        // Shifted like lastHeartbeatAt: the agent's 60 seconds to pick up a
+        // sent batch cannot run while the server is down, or the banner
+        // stops showing the agent at work before it could re-poll.
         waitingForAgentSince: persisted.waitingForAgentSince
-          ? new Date(persisted.waitingForAgentSince)
+          ? new Date(Date.parse(persisted.waitingForAgentSince) + downtimeMs)
           : null,
         resolver,
         waiter,
