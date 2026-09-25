@@ -377,12 +377,18 @@ test.describe('Context menu on a text selection', () => {
     await selectText(page, 'valid credentials');
     const mark = page.locator('mark.selection-highlight').first();
     await expect(mark).toBeVisible({ timeout: 5000 });
-    const box = await mark.boundingBox();
+    // The first line box, not the bounding box: when the selection wraps, the
+    // bounding box's center lands on the paragraph between the two lines, and
+    // a click off the selection correctly opens no selection menu.
+    const box = await mark.evaluate((el) => {
+      const r = el.getClientRects()[0];
+      return { x: r.left, y: r.top, width: r.width, height: r.height };
+    });
 
     // macOS sends contextmenu with button 0 and ctrlKey set, so a guard that
     // tests the button alone misses the platform's own secondary click.
     await page.keyboard.down('Control');
-    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await page.keyboard.up('Control');
 
     await expect(page.locator('.context-menu-enter')).toBeVisible();
