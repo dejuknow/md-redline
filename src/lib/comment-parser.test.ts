@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkFrontmatter from 'remark-frontmatter';
+import remarkGfm from 'remark-gfm';
 import {
   parseComments,
   insertComment,
@@ -3724,5 +3728,219 @@ describe('inline code spans (#123)', () => {
         'Call `computeToken` and `<!-- @comment{"id":"doc"} -->` here.\n',
       );
     });
+  });
+});
+
+describe('code blocks the fence regex misses (#136)', () => {
+  const at = (raw: string, anchor: string) =>
+    insertComment(raw, anchor, 'why?', 'A', undefined, undefined, undefined, 'ID1');
+  const shape = (raw: string) => raw.replace(/<!-- @comment\{.*?\} -->/gs, '[M]');
+  const roundTrips = (raw: string, result: string) => {
+    const parsed = parseComments(result);
+    expect(parsed.comments.map((c) => c.id)).toEqual(['ID1']);
+    expect(parsed.cleanMarkdown).toBe(raw);
+  };
+
+  it('does not write into a real block after a backtick line that only looks like a fence', () => {
+    const raw = 'Intro\n\n```js `x` inline\n\nprose A\n\n```\nreal code\n```\n\nprose B\n';
+    const result = at(raw, 'prose B');
+    expect(shape(result)).toBe(
+      'Intro\n\n```js `x` inline\n\nprose A\n\n```\nreal code\n```\n\n[M]prose B\n',
+    );
+    roundTrips(raw, result);
+  });
+
+  it('keeps a comment on text inside such a real block out of it', () => {
+    const raw = 'Intro\n\n```js `x` inline\n\nprose A\n\n```\nreal code\n```\n\nprose B\n';
+    const result = at(raw, 'real code');
+    // Before the look-alike line, not the real fence: detection's looser
+    // regex still pairs that line with the real opener, so a marker right
+    // above the real fence would sit where detection skips it.
+    expect(shape(result)).toBe(
+      'Intro\n\n[M]\n```js `x` inline\n\nprose A\n\n```\nreal code\n```\n\nprose B\n',
+    );
+    roundTrips(raw, result);
+  });
+
+  it('moves a marker out of a fence inside a list item, to before the list', () => {
+    const raw = 'Intro.\n\n1. item\n\n    ```\n    some `code` here\n    ```\n\nAfter.\n';
+    const result = at(raw, 'some');
+    expect(shape(result)).toBe(
+      'Intro.\n\n[M]\n1. item\n\n    ```\n    some `code` here\n    ```\n\nAfter.\n',
+    );
+    roundTrips(raw, result);
+  });
+
+  it('moves a marker out of a fence inside a blockquote, to before the quote', () => {
+    const raw = 'Intro.\n\n> ```\n> `x` inside fence\n> ```\n\nAfter.\n';
+    const result = at(raw, 'inside fence');
+    expect(shape(result)).toBe('Intro.\n\n[M]\n> ```\n> `x` inside fence\n> ```\n\nAfter.\n');
+    roundTrips(raw, result);
+  });
+
+  it('moves a marker out of an indented code block', () => {
+    const raw = 'Intro.\n\n    const secret = computeToken();\n\nAfter.\n';
+    const result = at(raw, 'computeToken');
+    expect(shape(result)).toBe('Intro.\n\n[M]\n    const secret = computeToken();\n\nAfter.\n');
+    roundTrips(raw, result);
+  });
+
+  it('keeps moving until the marker is outside every range, whichever finds it', () => {
+    // The loose regex pairs the look-alike first line with the list's first
+    // fence, so its range covers the list's start. The parser's move for the
+    // deep code block lands exactly there, and one more pass has to carry it
+    // out, or detection skips the marker and the comment is lost.
+    const raw = '```js `x` inline\n\n- a\n\n  ```\n  c1\n  ```\n\n- b\n\n      deep code\n';
+    const result = at(raw, 'deep code');
+    expect(shape(result).startsWith('[M]\n```js `x` inline')).toBe(true);
+    roundTrips(raw, result);
+  });
+
+  it('leaves a comment on list prose where it was, even when the list holds code', () => {
+    const raw = '1. first item\n\n    ```\n    code\n    ```\n\n2. second item\n';
+    expect(shape(at(raw, 'second item'))).toBe(
+      '1. first item\n\n    ```\n    code\n    ```\n\n2. [M]second item\n',
+    );
+  });
+
+  it('still puts a marker for an ordinary fence right before it', () => {
+    const raw = 'Intro.\n\n```js\nconst x = computeToken();\n```\n';
+    expect(shape(at(raw, 'computeToken'))).toBe(
+      'Intro.\n\n[M]\n```js\nconst x = computeToken();\n```\n',
+    );
+  });
+});
+
+describe('placing a marker never changes how the document renders (#136)', () => {
+  // What GitHub, an editor preview or an agent reading the raw file sees: the
+  // renderer's tree, with mdr's own markers taken out. A marker line that
+  // splits a list or paragraph, or that turns later text into code, changes
+  // this even when mdr itself still round-trips the file.
+  const parser = unified().use(remarkParse).use(remarkFrontmatter, ['yaml', 'toml']).use(remarkGfm);
+  type Node = { type: string; value?: string; children?: Node[] };
+  const shapeOf = (md: string): unknown => {
+    const strip = (node: Node): unknown => ({
+      type: node.type,
+      ...(node.type === 'code' || node.type === 'inlineCode' ? { value: node.value } : {}),
+      ...(node.children
+        ? {
+            children: node.children
+              .filter((c) => !(c.type === 'html' && c.value?.includes('@comment')))
+              .map(strip)
+              // An inline marker splits one text node into two; the rendered
+              // text is the same, so neighbouring text nodes count as one.
+              .filter(
+                (c, i, all) =>
+                  !(i > 0 && (c as Node).type === 'text' && (all[i - 1] as Node).type === 'text'),
+              ),
+          }
+        : {}),
+    });
+    return strip(parser.parse(md) as unknown as Node);
+  };
+  const at = (raw: string, anchor: string) =>
+    insertComment(raw, anchor, 'why?', 'A', undefined, undefined, undefined, 'ID1');
+  const unchanged = (raw: string, anchor: string) => {
+    const result = at(raw, anchor);
+    expect(result).toContain('@comment');
+    expect(shapeOf(result)).toEqual(shapeOf(raw));
+    const parsed = parseComments(result);
+    expect(parsed.comments.map((c) => c.id)).toEqual(['ID1']);
+    expect(parsed.cleanMarkdown).toBe(raw);
+    return result;
+  };
+
+  it.each([
+    [
+      'a fence two spaces under a list item',
+      '- item\n\n  ```\n  code here\n  ```\n\n- b\n',
+      'code here',
+    ],
+    [
+      'a fence under the second numbered item',
+      '1. a\n\n2. b\n\n   ```\n   code here\n   ```\n',
+      'code here',
+    ],
+    ['a fence one space into a list', ' - item\n\n   ```\n   code here\n   ```\n', 'code here'],
+    [
+      // Anchored mid-line: a marker at the very start of a paragraph line
+      // opens an HTML block in CommonMark, which predates #136.
+      'prose after an unclosed fence in a list item',
+      'Intro\n\n- a\n\n  ```\n  code here\n\nAfter para\n',
+      'para',
+    ],
+    [
+      'a look-alike fence line inside a paragraph',
+      'Para line one\n```js `x` inline\nstill para\n\n```\nreal code\n```\n',
+      'real code',
+    ],
+    [
+      'a look-alike fence line inside a list',
+      '- item one\n  ```js `x` inline\n- item two\n\n```\nreal code\n```\n',
+      'real code',
+    ],
+    ['a fence in a blockquote', 'Intro.\n\n> ```\n> `x` inside fence\n> ```\n', 'inside fence'],
+    ['an indented code block', 'Intro.\n\n    const secret = computeToken();\n', 'computeToken'],
+  ])('%s', (_name, raw, anchor) => {
+    unchanged(raw, anchor);
+  });
+
+  it('keeps a byte-order mark first, ahead of the marker', () => {
+    const result = unchanged('\uFEFF```js\ncode here\n```\n', 'code here');
+    expect(result.charCodeAt(0)).toBe(0xfeff);
+  });
+
+  it("ends a marker line with the document's own CRLF", () => {
+    const result = at('Intro\r\n\r\n> ```\r\n> code here\r\n> ```\r\n', 'code here');
+    expect(result).toMatch(/--> ?\r\n> ```/);
+    expect(result).not.toMatch(/-->\n/);
+  });
+
+  it('round-trips a CRLF file through repeated add and remove', () => {
+    const raw = 'Intro\r\n\r\n```\r\ncode here\r\n```\r\n';
+    let doc = raw;
+    for (let i = 0; i < 3; i++) {
+      doc = at(doc, 'code here');
+      expect(parseComments(doc).cleanMarkdown).toBe(raw);
+      doc = removeComment(doc, 'ID1');
+      expect(doc).toBe(raw);
+    }
+  });
+
+  it('parses a document whose only code is indented inside a quote', () => {
+    // No backtick anywhere, and no line that starts with four spaces.
+    unchanged('Intro\n\n>     const secret = computeToken();\n', 'computeToken');
+  });
+
+  it('does not recover an anchor after a marker was carried past a look-alike fence', () => {
+    const raw = 'Para line number one\n```js `x` inline\nstill para\n\n```\nreal code here\n```\n';
+    const placed = at(raw, 'real code here');
+    const [comment] = parseComments(placed.replace('real code here', 'totally new stuff')).comments;
+    expect(comment.recoveredAnchor).toBeUndefined();
+  });
+
+  it('orders a comment on code by where the code is, not where its marker went', () => {
+    const raw = '1. first item text\n\n2. second item\n\n    ```\n    retries = 3\n    ```\n';
+    let doc = at(raw, 'retries = 3');
+    doc = insertComment(doc, 'first item text', 'n', 'A', undefined, undefined, undefined, 'ID2');
+    const parsed = parseComments(doc);
+    const ordered = orderCommentsByAnchor(parsed.cleanMarkdown, parsed.comments);
+    expect(ordered.map((c) => c.id)).toEqual(['ID2', 'ID1']);
+  });
+
+  it('does not recover an anchor for a marker moved out of code', () => {
+    const raw = '1. Configure the retry policy\n\n    ```\n    retries = 3\n    ```\n';
+    const placed = at(raw, 'retries = 3');
+    const edited = placed.replace('retries = 3', 'retries = 5');
+    const [comment] = parseComments(edited).comments;
+    expect(comment.recoveredAnchor).toBeUndefined();
+  });
+
+  it('records the context of code a comment is dragged onto, not of the list start', () => {
+    const raw = `${marker({ id: 'c1', anchor: 'Intro' })}Intro.\n\n1. first\n\n    \`\`\`\n    retries = 3\n    \`\`\`\n`;
+    const moved = moveComment(raw, 'c1', 'retries = 3');
+    const c = parseComments(moved).comments[0];
+    expect(c.contextBefore?.endsWith('```\n    ')).toBe(true);
+    expect(c.contextAfter?.startsWith('\n    ```')).toBe(true);
   });
 });
