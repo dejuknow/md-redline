@@ -74,3 +74,34 @@ describe('computeAnsweredCommentIds', () => {
     expect(computeAnsweredCommentIds.length).toBe(1);
   });
 });
+
+describe('the agent stamp on a reply (#102)', () => {
+  it("does not count a colleague's reply, which mdr's own UI stamps as a person's", () => {
+    const withColleague = comment({ replies: [{ ...reply('Priya'), agent: false }] });
+    expect(computeAnsweredCommentIds([withColleague]).has('c1')).toBe(false);
+  });
+
+  it('does not count your own follow-up after a rename', () => {
+    const afterRename = comment({ replies: [{ ...reply('Dennis J'), agent: false }] });
+    expect(computeAnsweredCommentIds([afterRename]).has('c1')).toBe(false);
+  });
+
+  it("counts an agent's reply, even one that happens to share the comment's author name", () => {
+    const sameName = comment({ replies: [{ ...reply('Dennis'), agent: true }] });
+    expect(computeAnsweredCommentIds([sameName]).has('c1')).toBe(true);
+  });
+
+  it('falls back to comparing names for a reply written before the stamp existed', () => {
+    expect(computeAnsweredCommentIds([comment({ replies: [reply('Claude')] })]).has('c1')).toBe(
+      true,
+    );
+    expect(computeAnsweredCommentIds([comment({ replies: [reply('Dennis')] })]).has('c1')).toBe(
+      false,
+    );
+  });
+
+  it('falls back to names when a hand-edited stamp is not a boolean', () => {
+    const odd = { ...reply('Claude'), agent: 'true' } as unknown as CommentReply;
+    expect(computeAnsweredCommentIds([comment({ replies: [odd] })]).has('c1')).toBe(true);
+  });
+});

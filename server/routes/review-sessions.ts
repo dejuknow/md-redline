@@ -918,6 +918,8 @@ export function registerReviewSessionRoutes(
               text: r.text,
               author: r.author ?? 'Agent',
               timestamp: new Date().toISOString(),
+              // Posted through the agent API, so an agent's (#102).
+              agent: true,
             });
             if (next === before) {
               // appendReply returns input unchanged when commentId is not found.
