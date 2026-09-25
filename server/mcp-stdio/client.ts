@@ -52,10 +52,13 @@ const DROPPED_CODES = new Set(['UND_ERR_SOCKET', 'UND_ERR_CLOSED', 'ECONNRESET',
 /**
  * The mdr server was not running, or dropped a request in flight. Thrown in
  * place of Node's bare `fetch failed`, which told the agent nothing (#116).
- * Sessions live in server memory, so a stopped or restarted server has lost
- * every review that was open on it, while whatever was already written to the
- * files is still there. A restart often comes from an `mdr` of a different
- * version starting up, which stops the running server as an upgrade step.
+ * A restart often comes from an `mdr` of a different version starting up,
+ * which stops the running server as an upgrade step. Sessions now survive a
+ * restart that comes back within a few minutes, so this no longer means the
+ * review is gone: the long-poll methods retry through a restart on their own
+ * (see `withReconnect` below), and this error only reaches a caller once
+ * that retry has given up, or from a non-poll method, where the caller
+ * decides whether to call again.
  */
 export class ServerUnreachableError extends Error {
   readonly code: string;
@@ -66,11 +69,14 @@ export class ServerUnreachableError extends Error {
         ? 'is not running (connection refused)'
         : `lost its connection to this call (${code}); it most likely stopped or restarted`;
     super(
-      `The mdr server at ${baseUrl} ${what}. A stopped or restarted server ends ` +
-        'any review that was open on it; another mdr install of a different ' +
-        'version starting up is a common cause. Anything already written to the ' +
-        'files is still there: re-read them before continuing, and open a new ' +
-        'review if you had one open.',
+      `The mdr server at ${baseUrl} ${what}. A restart often comes from another ` +
+        'mdr install of a different version starting up, and the review may still ' +
+        'be there once it is back. If this call was only waiting (mdr_wait, or ' +
+        'mdr_request_review / mdr_ask waiting for a reply), call it again to keep ' +
+        'waiting. If it was posting comments or questions (mdr_comment, or mdr_ask ' +
+        'posting its questions), the post may already have landed before the ' +
+        'connection dropped, so re-read the file(s) first rather than calling it ' +
+        'again, which risks posting the same thing twice.',
     );
     this.name = 'ServerUnreachableError';
     this.code = code;
@@ -116,16 +122,140 @@ function guardServerErrors<T extends object>(client: T, baseUrl: string): T {
   return guarded as T;
 }
 
+/** How often a long-poll re-issues its request while the server is unreachable. */
+const RECONNECT_POLL_INTERVAL_MS = 1_000;
+
+/**
+ * How long a long-poll keeps retrying a ServerUnreachableError before giving
+ * up and rethrowing (#116). A restart from a version switch or a crash
+ * relaunch is usually back within a second or two; the window covers a
+ * slower relaunch too, without leaving an agent parked forever on a server
+ * that is really gone. Exported so tests can inject a short window instead
+ * of waiting out the real one.
+ */
+export const RECONNECT_WINDOW_MS = 2 * 60 * 1000;
+
+/**
+ * Sleep for `ms`, or until `signal` aborts, whichever comes first. Used
+ * between reconnect attempts so a cancelled tool call does not sit through a
+ * full RECONNECT_POLL_INTERVAL_MS before withReconnect notices and stops.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Retry `poll` on ServerUnreachableError, on a fixed interval, until
+ * `windowMs` has passed since the first failure, then rethrow that error.
+ *
+ * Never past the poll's own deadline, though: a retried request asks only for
+ * the seconds the original poll had left, and the retrying stops when they
+ * run out. Without that, a restart mid-poll stacked a fresh 90 s poll on a
+ * two-minute retry, and one tool call could run for several minutes, past
+ * the limits some MCP hosts put on a call (Codex allows 120 s). An agent that
+ * gets the error calls again, and that call's own startup check relaunches a
+ * server that is still missing, which reloads the saved reviews.
+ * `poll` must already be wrapped by guardServerErrors, so any network
+ * failure it raises on a retry attempt arrives here as a
+ * ServerUnreachableError too, not a raw fetch error; anything else (an HTTP
+ * error response, a caller's own abort) is not this error's job and passes
+ * straight through.
+ *
+ * `signal`, when given, stops the retrying rather than letting it run out
+ * the clock: an already-aborted signal skips straight to rethrowing the
+ * last error, and an abort during the between-attempts sleep wakes it
+ * immediately instead of waiting out the rest of RECONNECT_POLL_INTERVAL_MS.
+ * A cancelled tool call has nobody left to hand a reconnected result to, so
+ * there is nothing to gain by continuing to retry. The signal is never
+ * passed into `poll` itself: aborting the fetch of a request already in
+ * flight is the caller's decision, not this loop's (see MdrClient's own
+ * doc comments on the three long-poll methods).
+ */
+async function withReconnect<T>(
+  poll: (timeoutSeconds?: number) => Promise<T>,
+  timeoutSeconds: number | undefined,
+  windowMs: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  const pollDeadline = timeoutSeconds === undefined ? Infinity : Date.now() + timeoutSeconds * 1000;
+  let giveUpAt: number | undefined;
+  let attemptTimeout = timeoutSeconds;
+  for (;;) {
+    try {
+      return await poll(attemptTimeout);
+    } catch (err) {
+      if (!(err instanceof ServerUnreachableError)) throw err;
+      if (signal?.aborted) throw err;
+      const now = Date.now();
+      giveUpAt ??= Math.min(now + windowMs, pollDeadline);
+      if (now + RECONNECT_POLL_INTERVAL_MS >= giveUpAt) throw err;
+      await sleep(RECONNECT_POLL_INTERVAL_MS, signal);
+      if (signal?.aborted) throw err;
+      if (timeoutSeconds !== undefined) {
+        attemptTimeout = Math.max(1, Math.ceil((pollDeadline - Date.now()) / 1000));
+      }
+    }
+  }
+}
+
+/**
+ * Wrap the three long-poll methods of an already-guarded client so a
+ * ServerUnreachableError retries instead of ending the call there. Kept as a
+ * second pass over the guarded client, not folded into guardServerErrors
+ * itself: guardServerErrors' job is giving every method the same "the
+ * server is gone" error, and only these three calls should then sit and
+ * retry it. Mixing that policy into the generic wrapper would hide, at a
+ * glance, that a method like postReview is deliberately not one of them (it
+ * fails once and reports it, so the caller decides whether to call again).
+ */
+function withReconnectingPolls(client: MdrClient, windowMs: number): MdrClient {
+  return {
+    ...client,
+    waitForSession: (sessionId, timeoutSeconds, signal) =>
+      withReconnect((t) => client.waitForSession(sessionId, t), timeoutSeconds, windowMs, signal),
+    waitForAsk: (sessionId, askId, timeoutSeconds, signal) =>
+      withReconnect(
+        (t) => client.waitForAsk(sessionId, askId, t),
+        timeoutSeconds,
+        windowMs,
+        signal,
+      ),
+    waitForReview: (sessionId, timeoutSeconds, signal) =>
+      withReconnect((t) => client.waitForReview(sessionId, t), timeoutSeconds, windowMs, signal),
+  };
+}
+
 /**
  * HTTP client for the mdr web server. Used by the tool-call handler to
  * talk to the Hono API (grant access, create session, long-poll /wait,
  * POST /abort). Purely functional — no mutable state, no SDK coupling.
+ *
+ * `reconnectWindowMs` overrides RECONNECT_WINDOW_MS; tests use it to keep a
+ * "the server never comes back" case from actually taking two minutes.
  */
-export function createMdrClient(baseUrl: string): MdrClient {
+export function createMdrClient(
+  baseUrl: string,
+  options: { reconnectWindowMs?: number } = {},
+): MdrClient {
   const url = (p: string) => `${baseUrl.replace(/\/$/, '')}${p}`;
   const request = (p: string, init?: RequestInit) => fetch(url(p), init);
+  const reconnectWindowMs = options.reconnectWindowMs ?? RECONNECT_WINDOW_MS;
 
-  return guardServerErrors<MdrClient>(
+  const client = guardServerErrors<MdrClient>(
     {
       async grantAccess(paths) {
         for (const p of paths) {
@@ -312,4 +442,6 @@ export function createMdrClient(baseUrl: string): MdrClient {
     },
     baseUrl,
   );
+
+  return withReconnectingPolls(client, reconnectWindowMs);
 }

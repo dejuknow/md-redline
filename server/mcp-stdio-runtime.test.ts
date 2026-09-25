@@ -9,7 +9,7 @@ import {
   handleWaitToolCall,
   __resetOpenedBrowserUrlsForTests,
 } from './mcp-stdio/handler';
-import { createMdrClient } from './mcp-stdio/client';
+import { createMdrClient, ServerUnreachableError } from './mcp-stdio/client';
 
 // The handler module keeps a process-scoped set of URLs it has already
 // opened the browser for. Reset between tests so reused session IDs
@@ -118,7 +118,7 @@ describe('handleRequestReviewToolCall', () => {
     expect(openInBrowser).not.toHaveBeenCalled();
 
     // Should wait for session and return the batch result
-    expect(client.waitForSession).toHaveBeenCalledWith('rev_existing', 90);
+    expect(client.waitForSession).toHaveBeenCalledWith('rev_existing', 90, undefined);
     expect(result.content[0].text).toContain('SECOND BATCH');
     expect(result.content[0].text).toContain('rev_existing');
   });
@@ -589,7 +589,7 @@ describe('handleAskToolCall', () => {
     expect(client.postAgentComments).toHaveBeenCalledWith('rev_xyz', [
       { filePath: '/tmp/a.md', anchor: 'a', text: 'q?' },
     ]);
-    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test', 90);
+    expect(client.waitForAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test', 90, undefined);
     expect(result.content[0].text).toContain('the answer');
     expect(result.content[0].text).toContain('questionIndex');
   });
@@ -613,7 +613,9 @@ describe('handleAskToolCall', () => {
     );
 
     expect(waitForAsk).toHaveBeenCalledTimes(3);
-    for (const call of waitForAsk.mock.calls) expect(call).toEqual(['rev_xyz', 'ask_test', 90]);
+    for (const call of waitForAsk.mock.calls) {
+      expect(call).toEqual(['rev_xyz', 'ask_test', 90, undefined]);
+    }
     expect(result.content[0].text).toContain('slow answer');
   });
 
@@ -654,6 +656,30 @@ describe('handleAskToolCall', () => {
         { client, sendProgress: undefined, signal: undefined },
       ),
     ).rejects.toThrow('waitForAsk failed (HTTP 500)');
+    expect(releaseAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
+  });
+
+  it('gives a specific, non-generic error when the wait gives up because the server is unreachable', async () => {
+    const releaseAsk = vi.fn().mockResolvedValue(undefined);
+    const client = makeMockClient({
+      waitForAsk: vi
+        .fn()
+        .mockRejectedValue(new ServerUnreachableError('http://localhost:5188', 'ECONNREFUSED')),
+      releaseAsk,
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+
+    // A thrown ServerUnreachableError here is not returned to the caller;
+    // the handler catches it and reports a result that says the question
+    // may still be pending on the server, since postAgentComments already
+    // succeeded before the wait itself lost the connection. Calling
+    // mdr_ask again for the same question risks a duplicate post.
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('still in the file');
+    expect(result.content[0].text).toContain('do not call mdr_ask again');
     expect(releaseAsk).toHaveBeenCalledWith('rev_xyz', 'ask_test');
   });
 
@@ -792,7 +818,7 @@ describe('handleWaitToolCall', () => {
     );
     expect(result.content[0].text).toContain('finished engaging');
     expect(result.content[0].text).toContain('Read the file');
-    expect(client.waitForReview).toHaveBeenCalledWith('rev_1', 90);
+    expect(client.waitForReview).toHaveBeenCalledWith('rev_1', 90, undefined);
   });
 
   it('returns pending message when timeout elapses', async () => {

@@ -111,3 +111,70 @@ describe('useUpdateNotice', () => {
     });
   });
 });
+
+describe('useUpdateNotice reloadReady (#116)', () => {
+  it('stays false while every poll reports the same version', async () => {
+    stubFetch({ version: '0.6.0' }, {});
+    const { result } = renderHook(() => useUpdateNotice());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.reloadReady).toBe(false);
+  });
+
+  it('flips true once a later poll reports a different version', async () => {
+    vi.useFakeTimers();
+    let versionCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/version')) {
+          versionCalls++;
+          const version = versionCalls === 1 ? '0.6.0' : '0.7.0';
+          return new Response(JSON.stringify({ version }), { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useUpdateNotice());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    });
+    expect(versionCalls).toBe(2);
+    expect(result.current.reloadReady).toBe(true);
+    unmount();
+  });
+
+  it('a failed poll leaves reloadReady and the recorded version unchanged', async () => {
+    vi.useFakeTimers();
+    let versionCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/version')) {
+          versionCalls++;
+          if (versionCalls === 2) throw new Error('server unreachable');
+          return new Response(JSON.stringify({ version: '0.6.0' }), { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useUpdateNotice());
+    // First poll (success) records '0.6.0'. Second poll (the failure) fires
+    // after ERROR_RETRY_MS from the first, since the first succeeded at the
+    // normal cadence; advance far enough to cover both.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    });
+    expect(versionCalls).toBeGreaterThanOrEqual(2);
+    expect(result.current.reloadReady).toBe(false);
+
+    // A subsequent successful poll with the same original version still
+    // shouldn't flip reloadReady.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    });
+    expect(result.current.reloadReady).toBe(false);
+    unmount();
+  });
+});

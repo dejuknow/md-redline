@@ -40,6 +40,10 @@ export default defineConfig({
       MD_REDLINE_PORT: '3101',
       MD_REDLINE_VITE_PORT: '4173',
       NO_UPDATE_NOTIFIER: '1',
+      // A saved session from one e2e run must never restore into the next.
+      // The home dir above is already wiped per run, but this keeps the
+      // server from writing or reading a sessions file at all here.
+      MD_REDLINE_PERSIST_SESSIONS: '0',
     },
   },
 });

@@ -146,6 +146,20 @@ export interface ReviewSession {
   waitingForAgent: boolean;
 }
 
+/**
+ * Disambiguates why an agent-origin session ended, and why a terminal
+ * user-origin session's ReviewResult waiter resolved the way it did (see
+ * InternalSession.terminalReason for the per-value meaning). Named and
+ * exported so PersistedSession can carry the same value across a restart.
+ */
+export type SessionTerminalReason =
+  | 'done'
+  | 'finished'
+  | 'user_cancelled'
+  | 'browser_disconnected'
+  | 'agent_silent'
+  | null;
+
 interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
   /** The files the session was created with, before any addFiles (#117). */
   originalFilePaths: string[];
@@ -203,17 +217,34 @@ interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
    *   'agent_silent'        — gcSilentAgentSessions aborted
    * Null until a terminal handler runs.
    */
-  terminalReason:
-    | 'done'
-    | 'finished'
-    | 'user_cancelled'
-    | 'browser_disconnected'
-    | 'agent_silent'
-    | null;
+  terminalReason: SessionTerminalReason;
   /** Resolves the waitForSessionDone promise. */
   doneResolver: (() => void) | null;
   /** The promise mdr_wait polls on. */
   doneWaiter: Promise<void> | null;
+  /**
+   * The ReviewResult a terminal session's legacy waiter was resolved with,
+   * captured at the same moment as the resolve call. Restoring a store after
+   * a restart (#116) replays this into a freshly-resolved waiter, so an
+   * agent whose /wait poll reconnects after the process comes back still
+   * gets the final prompt or abort reason it would have gotten without the
+   * restart. Null until a terminal path runs. Also set on agent-origin
+   * sessions, which resolve the same legacy waiter for symmetry even though
+   * no production route awaits it.
+   */
+  terminalResult: ReviewResult | null;
+  /**
+   * Milliseconds to add to this session's recorded activity time before
+   * gcSilentAgentSessions compares it against AGENT_SILENT_TIMEOUT_MS. Set
+   * once by restoreState, to the server's downtime (`now - savedAt`), for a
+   * session that survived a restart; 0 for one created after boot, where the
+   * shift would have no correct meaning. Shifting rather than resetting to
+   * `now` means the outage itself never counts against the session, but
+   * whatever idling had already happened before the crash still does: a
+   * session already 3 minutes silent when the server went down only gets the
+   * 2 minutes it had left after restore, not a fresh 5 (#116 follow-up).
+   */
+  livenessShiftMs: number;
 }
 
 export interface CreateSessionInput {
@@ -223,15 +254,86 @@ export interface CreateSessionInput {
   clientId?: string;
 }
 
+/**
+ * The JSON-safe form of a session for the on-disk snapshot (#116): dates are
+ * ISO strings and the queued-batch map is a [path, count][] array, since
+ * neither Date nor Map survives JSON.stringify/parse. Every field a route or
+ * tab can observe on a session is here (see the "Saved" table in the
+ * session-persistence design doc), plus terminalResult, which a plain
+ * ReviewSession never exposes.
+ */
+export interface PersistedSession {
+  id: string;
+  filePaths: string[];
+  originalFilePaths: string[];
+  fileAddedAt?: Record<string, string>;
+  enableResolve: boolean;
+  origin: SessionOrigin;
+  clientId?: string;
+  author?: string;
+  createdAt: string;
+  /**
+   * ISO timestamp, saved so a restart can tell how stale a session already
+   * was rather than treating every open session as freshly seen (#116
+   * follow-up). See restoreState for how it is used on the way back in.
+   */
+  lastHeartbeatAt: string;
+  lastAgentActivityAt: string | null;
+  status: 'open' | 'done' | 'aborted';
+  sentCommentIds: string[];
+  waitingForAgent: boolean;
+  waitingForAgentSince: string | null;
+  agentCommentCount: number;
+  sessionDoneAt: string | null;
+  terminalReason: SessionTerminalReason;
+  terminalAt: string | null;
+  terminalResult: ReviewResult | null;
+  queuedBatch: { commentIds: string[]; commentCountsByPath: [string, number][] } | null;
+  /**
+   * Downtime credit the silent-agent clock already carries from earlier
+   * restarts. Saved so a second crash adds to it instead of dropping it,
+   * which would count the first outage as silence. Optional: files written
+   * before it existed restore with none.
+   */
+  livenessShiftMs?: number;
+}
+
+/**
+ * Everything session-persistence.ts writes to and reads from disk. Produced
+ * by exportState() and consumed by restoreState(); the file on disk wraps
+ * this with a version number and a savedAt timestamp that this module does
+ * not need to know about.
+ */
+export interface PersistedStoreState {
+  sessions: PersistedSession[];
+  pendingAsks: PendingAsk[];
+  settledAsks: { askId: string; sessionId: string; result: AskResult; at: number }[];
+}
+
 export class ReviewSessionStore {
   private sessions = new Map<string, InternalSession>();
   private pendingAsks = new Map<string, InternalPendingAsk>();
   private sweepHandle: ReturnType<typeof setInterval> | null = null;
   private onSessionAborted: ((sessionId: string, asks: PendingAsk[]) => void) | null = null;
   private onAsksClosedOnDone: ((sessionId: string, asks: PendingAsk[]) => void) | null = null;
+  /** Notified after every method that changes state exportState() would save. */
+  private onChange: (() => void) | null = null;
 
   setOnSessionAborted(cb: (sessionId: string, asks: PendingAsk[]) => void): void {
     this.onSessionAborted = cb;
+  }
+
+  /**
+   * Called after every method that changes state exportState() would save,
+   * so the server can debounce a write to disk (#116). Deliberately NOT
+   * called from heartbeat() (its clock is reset to the restart moment on
+   * load anyway, so persisting it would be pointless) or from
+   * beginWaitPark/endWaitPark (parkedWaitCount is never saved; it is always
+   * 0 immediately after a restart, since nobody can be parked on a promise
+   * that does not exist yet).
+   */
+  setOnChange(cb: () => void): void {
+    this.onChange = cb;
   }
 
   /**
@@ -278,9 +380,12 @@ export class ReviewSessionStore {
       terminalReason: null,
       doneResolver: null,
       doneWaiter: null,
+      terminalResult: null,
+      livenessShiftMs: 0,
     };
 
     this.sessions.set(id, session);
+    this.onChange?.();
     return this.toPublic(session);
   }
 
@@ -362,6 +467,7 @@ export class ReviewSessionStore {
       s.fileAddedAt = { ...s.fileAddedAt };
       for (const p of added) s.fileAddedAt[p] = at;
     }
+    this.onChange?.();
     return { session: this.toPublic(s), added };
   }
 
@@ -415,9 +521,11 @@ export class ReviewSessionStore {
       s.resolver = resolver;
       s.waitingForAgent = true;
       s.waitingForAgentSince = new Date();
+      this.onChange?.();
       return resolvedWaiter;
     }
 
+    this.onChange?.();
     return s.waiter;
   }
 
@@ -508,7 +616,9 @@ export class ReviewSessionStore {
     // no production consumer awaits this promise today, but an in-process
     // helper that calls waitForSession(agentSessionId) would otherwise hang
     // until TERMINAL_RETENTION_MS GCs the session.
-    s.resolver({ status: 'done' });
+    const result: ReviewResult = { status: 'done' };
+    s.terminalResult = result;
+    s.resolver(result);
     // Remember the id and the precise reason past terminal retention so a
     // late mdr_wait poll still gets the right status after the session is
     // GC'd.
@@ -516,6 +626,7 @@ export class ReviewSessionStore {
     // Intentionally NOT firing onSessionAborted — see comment above. The
     // user's choice to click Done while questions were pending is a
     // deliberate "I'm done" signal, not an abort. Preserve markers.
+    this.onChange?.();
   }
 
   /**
@@ -607,6 +718,7 @@ export class ReviewSessionStore {
     s.waitingForAgent = true;
     s.waitingForAgentSince = new Date();
 
+    this.onChange?.();
     return true;
   }
 
@@ -644,6 +756,7 @@ export class ReviewSessionStore {
         commentCountsByPath: new Map(commentCountsByPath),
       };
     }
+    this.onChange?.();
     return true;
   }
 
@@ -694,11 +807,9 @@ export class ReviewSessionStore {
     s.queuedBatch = null;
     s.status = 'done';
     s.terminalAt = new Date();
-    if (prompt) {
-      s.resolver({ status: 'done', prompt });
-    } else {
-      s.resolver({ status: 'done' });
-    }
+    const result: ReviewResult = prompt ? { status: 'done', prompt } : { status: 'done' };
+    s.terminalResult = result;
+    s.resolver(result);
     // Unblock any pending mdr_wait. For an agent-origin session, /finish was
     // invoked via the user-batch flow rather than the agent banner's Done
     // button — surface that to the agent so it doesn't claim "the user
@@ -711,6 +822,7 @@ export class ReviewSessionStore {
         /* swallow — cleanup is best-effort */
       }
     }
+    this.onChange?.();
     return true;
   }
 
@@ -735,7 +847,9 @@ export class ReviewSessionStore {
     s.queuedBatch = null;
     s.status = 'aborted';
     s.terminalAt = new Date();
-    s.resolver({ status: 'aborted', reason });
+    const result: ReviewResult = { status: 'aborted', reason };
+    s.terminalResult = result;
+    s.resolver(result);
     // Unblock any pending mdr_wait with the actual abort reason so the agent
     // doesn't mistake an abort for a user-Done. wasSessionDone tracks the
     // id so a late mdr_wait after GC still resolves (falls back to 'done').
@@ -747,6 +861,7 @@ export class ReviewSessionStore {
         /* callback errors are swallowed; cleanup is best-effort */
       }
     }
+    this.onChange?.();
     return true;
   }
 
@@ -825,6 +940,7 @@ export class ReviewSessionStore {
       resolver,
       waiter,
     });
+    this.onChange?.();
     return { askId, waiter };
   }
 
@@ -877,6 +993,7 @@ export class ReviewSessionStore {
     // Partial replies are accepted — comments without a reply are implicit "no reply".
     ask.resolver({ status: 'reply', replies: ordered, totalQuestions: ask.questions.length });
     this.pendingAsks.delete(askId);
+    this.onChange?.();
     return true;
   }
 
@@ -905,6 +1022,7 @@ export class ReviewSessionStore {
     if (!ask || ask.sessionId !== sessionId) return false;
     this.pendingAsks.delete(askId);
     ask.resolver({ status: 'no_reply', reason: 'released' });
+    this.onChange?.();
     return true;
   }
 
@@ -919,6 +1037,9 @@ export class ReviewSessionStore {
     s.agentCommentCount += count;
     const now = new Date();
     s.lastAgentActivityAt = now;
+    // Real activity starts the silence clock over, so any downtime credit
+    // from a restart no longer applies.
+    s.livenessShiftMs = 0;
     // Treat an agent POST as a heartbeat so subsequent batched calls keep
     // finding this session via findOpenSession even if the browser tab is
     // backgrounded and Chrome throttles its setInterval-based heartbeats.
@@ -931,6 +1052,7 @@ export class ReviewSessionStore {
     // for as long as it keeps posting, and the user's mdr_request_review poll
     // would never learn the review is dead.
     if (s.origin === 'agent') s.lastHeartbeatAt = now;
+    this.onChange?.();
   }
 
   /**
@@ -945,6 +1067,7 @@ export class ReviewSessionStore {
     const name = author.trim().slice(0, MAX_SESSION_AUTHOR_LEN);
     if (!name || name === 'Agent') return;
     s.author = name;
+    this.onChange?.();
   }
 
   /**
@@ -959,6 +1082,7 @@ export class ReviewSessionStore {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     s.agentCommentCount = Math.max(0, s.agentCommentCount - count);
+    this.onChange?.();
   }
 
   /**
@@ -987,7 +1111,12 @@ export class ReviewSessionStore {
       const lastActivity = s.lastAgentActivityAt
         ? s.lastAgentActivityAt.getTime()
         : s.createdAt.getTime();
-      if (now - lastActivity < AGENT_SILENT_TIMEOUT_MS) continue;
+      // Shifted forward by livenessShiftMs (0 outside of a restored
+      // session), so the server's downtime is invisible to the silence
+      // timer without erasing whatever idling had already happened before
+      // the crash. See livenessShiftMs's own doc comment on InternalSession.
+      const effectiveActivity = lastActivity + s.livenessShiftMs;
+      if (now - effectiveActivity < AGENT_SILENT_TIMEOUT_MS) continue;
       this.abort(s.id, 'agent_silent');
     }
   }
@@ -1045,7 +1174,9 @@ export class ReviewSessionStore {
           const aborted = this.abortAsks(id, 'browser_disconnected');
           s.status = 'aborted';
           s.terminalAt = new Date(now);
-          s.resolver({ status: 'aborted', reason: 'browser_disconnected' });
+          const result: ReviewResult = { status: 'aborted', reason: 'browser_disconnected' };
+          s.terminalResult = result;
+          s.resolver(result);
           // Same as the explicit abort() path: wake any parked mdr_wait so
           // the agent doesn't hang waiting for a Done that will never come.
           this.markDoneWaiterResolved(s, 'browser_disconnected');
@@ -1056,6 +1187,7 @@ export class ReviewSessionStore {
               /* swallow */
             }
           }
+          this.onChange?.();
         } else if (
           s.waitingForAgent &&
           s.waitingForAgentSince &&
@@ -1065,6 +1197,7 @@ export class ReviewSessionStore {
           // user so they can send another batch or finish the review.
           s.waitingForAgent = false;
           s.waitingForAgentSince = null;
+          this.onChange?.();
         }
         continue;
       }
@@ -1093,6 +1226,227 @@ export class ReviewSessionStore {
     this.pendingAsks.clear();
     this.recentlyDoneIds.clear();
     this.settledAsks.clear();
+  }
+
+  /**
+   * A JSON-safe snapshot of everything the spec's "Saved" table calls out
+   * (#116): sessions, pending asks, and recent settled-ask results. Pure:
+   * no I/O, no clock reads beyond what each session already recorded, so
+   * session-persistence.ts can call it on whatever cadence it likes and the
+   * store never has to know a file exists.
+   *
+   * Deliberately excluded, per the design doc's "not saved, rebuilt on
+   * load" list: resolver/waiter/doneResolver/doneWaiter (promises don't
+   * survive JSON anyway) and parkedWaitCount (always 0 on a fresh process).
+   * lastHeartbeatAt IS saved (below): restoreState needs it to tell how
+   * stale a session already was, rather than treating every open session as
+   * freshly seen (#116 follow-up). recentlyDoneIds is also left out: it
+   * exists only to answer a late mdr_wait after in-memory GC, which
+   * restoreState already handles by keeping terminal sessions for
+   * TERMINAL_RETENTION_MS.
+   */
+  exportState(): PersistedStoreState {
+    const sessions: PersistedSession[] = [];
+    for (const s of this.sessions.values()) {
+      sessions.push({
+        id: s.id,
+        filePaths: [...s.filePaths],
+        originalFilePaths: [...s.originalFilePaths],
+        fileAddedAt: s.fileAddedAt ? { ...s.fileAddedAt } : undefined,
+        enableResolve: s.enableResolve,
+        origin: s.origin,
+        clientId: s.clientId,
+        author: s.author,
+        createdAt: s.createdAt.toISOString(),
+        lastHeartbeatAt: s.lastHeartbeatAt.toISOString(),
+        lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,
+        status: s.status,
+        sentCommentIds: [...s.sentCommentIds],
+        waitingForAgent: s.waitingForAgent,
+        waitingForAgentSince: s.waitingForAgentSince ? s.waitingForAgentSince.toISOString() : null,
+        agentCommentCount: s.agentCommentCount,
+        livenessShiftMs: s.livenessShiftMs,
+        sessionDoneAt: s.sessionDoneAt ? s.sessionDoneAt.toISOString() : null,
+        terminalReason: s.terminalReason,
+        terminalAt: s.terminalAt ? s.terminalAt.toISOString() : null,
+        terminalResult: s.terminalResult,
+        queuedBatch: s.queuedBatch
+          ? {
+              commentIds: [...s.queuedBatch.commentIds],
+              commentCountsByPath: [...s.queuedBatch.commentCountsByPath.entries()],
+            }
+          : null,
+      });
+    }
+
+    const pendingAsks: PendingAsk[] = [];
+    for (const ask of this.pendingAsks.values()) {
+      pendingAsks.push({
+        askId: ask.askId,
+        sessionId: ask.sessionId,
+        questions: [...ask.questions],
+      });
+    }
+
+    const settledAsks: PersistedStoreState['settledAsks'] = [];
+    for (const [askId, settled] of this.settledAsks) {
+      settledAsks.push({
+        askId,
+        sessionId: settled.sessionId,
+        result: settled.result,
+        at: settled.at,
+      });
+    }
+
+    return { sessions, pendingAsks, settledAsks };
+  }
+
+  /**
+   * Rebuild this store's state from a snapshot exportState() produced
+   * elsewhere, after a round trip through JSON (#116). Only meaningful on a
+   * store that has never held a session: the server calls this once, after
+   * it starts listening but before any request is allowed to run (every
+   * request is held open until the restore finishes, via
+   * holdRequestsUntilOpen in session-persistence.ts), so nothing else can
+   * observe a half-restored store.
+   *
+   * `now` stands in for the restart moment and `savedAt` for the file's own
+   * saved-at timestamp (both parameters, not Date.now() and the file's value
+   * read directly, so tests can pick them). Every session's heartbeat clock,
+   * and the silence clock gcSilentAgentSessions checks it against, are
+   * shifted forward by `now - savedAt` (the server's downtime) rather than
+   * reset to `now`: the outage itself must never count against a live tab or
+   * agent, but whatever idling had already happened before the crash must
+   * still count against the budget it already used. Any session whose
+   * terminal state is older than TERMINAL_RETENTION_MS is dropped rather
+   * than restored, so a long-dead session doesn't reappear as if it just
+   * ended. Never touches a markdown file and never fires onSessionAborted /
+   * onAsksClosedOnDone: those callbacks exist to keep a file's markers in
+   * sync with a session ending just now, and nothing ended just now here.
+   */
+  restoreState(state: PersistedStoreState, opts: { now: Date; savedAt: number }): void {
+    if (this.sessions.size > 0 || this.pendingAsks.size > 0) {
+      throw new Error('restoreState must be called on a store that has not created a session yet');
+    }
+    const { now, savedAt } = opts;
+    // Floored at 0: loadPersistedState already rejects a savedAt in the
+    // future before this ever runs, so a negative value here would only mean
+    // a caller passed inconsistent now/savedAt values directly (as a test
+    // might), not a real clock skew case this needs to handle gracefully.
+    const downtimeMs = Math.max(0, now.getTime() - savedAt);
+
+    const retentionCutoff = now.getTime() - TERMINAL_RETENTION_MS;
+    for (const persisted of state.sessions) {
+      if (
+        persisted.status !== 'open' &&
+        persisted.terminalAt &&
+        Date.parse(persisted.terminalAt) < retentionCutoff
+      ) {
+        continue; // too old to still matter; nobody can still be polling for it
+      }
+
+      let resolver!: (result: ReviewResult) => void;
+      const waiter = new Promise<ReviewResult>((resolve) => {
+        resolver = resolve;
+      });
+      if (persisted.status !== 'open' && persisted.terminalResult) {
+        // Resolve immediately: an agent whose /wait poll reconnects after
+        // the restart must see the same terminal result it would have
+        // gotten without one (this is the whole point of #116).
+        resolver(persisted.terminalResult);
+      }
+
+      // sessionDoneAt is only ever set on agent-origin sessions (via
+      // setSessionDone, or the finish/abort/sweep paths through
+      // markDoneWaiterResolved), so this one check covers both "terminal
+      // agent-origin session" and "session with sessionDoneAt" from the
+      // design doc's restore rules.
+      const doneWaiter: Promise<void> | null = persisted.sessionDoneAt ? Promise.resolve() : null;
+
+      const session: InternalSession = {
+        id: persisted.id,
+        filePaths: [...persisted.filePaths],
+        originalFilePaths: [...persisted.originalFilePaths],
+        fileAddedAt: persisted.fileAddedAt ? { ...persisted.fileAddedAt } : undefined,
+        enableResolve: persisted.enableResolve,
+        origin: persisted.origin,
+        clientId: persisted.clientId,
+        author: persisted.author,
+        createdAt: new Date(persisted.createdAt),
+        // Shifted forward by the downtime rather than reset to `now`: a
+        // heartbeat that was already 20 minutes old when the server saved
+        // its state must still read as 20 minutes old after restore, not as
+        // freshly seen. Resetting to `now` (the old behavior) revived
+        // sessions whose tab was already gone before the restart, reopening
+        // findOpenSession's dedupe pool and the 30-minute heartbeat sweep
+        // window as if the tab had just been seen (#116 follow-up).
+        lastHeartbeatAt: new Date(Date.parse(persisted.lastHeartbeatAt) + downtimeMs),
+        lastAgentActivityAt: persisted.lastAgentActivityAt
+          ? new Date(persisted.lastAgentActivityAt)
+          : null,
+        status: persisted.status,
+        sentCommentIds: [...persisted.sentCommentIds],
+        waitingForAgent: persisted.waitingForAgent,
+        waitingForAgentSince: persisted.waitingForAgentSince
+          ? new Date(persisted.waitingForAgentSince)
+          : null,
+        resolver,
+        waiter,
+        // Nobody can be parked on a promise that was just recreated.
+        parkedWaitCount: 0,
+        terminalAt: persisted.terminalAt ? new Date(persisted.terminalAt) : null,
+        queuedBatch: persisted.queuedBatch
+          ? {
+              commentIds: [...persisted.queuedBatch.commentIds],
+              commentCountsByPath: new Map(persisted.queuedBatch.commentCountsByPath),
+            }
+          : null,
+        agentCommentCount: persisted.agentCommentCount,
+        sessionDoneAt: persisted.sessionDoneAt ? new Date(persisted.sessionDoneAt) : null,
+        terminalReason: persisted.terminalReason,
+        doneResolver: null,
+        doneWaiter,
+        terminalResult: persisted.terminalResult,
+        livenessShiftMs:
+          (Number.isFinite(persisted.livenessShiftMs) ? (persisted.livenessShiftMs as number) : 0) +
+          downtimeMs,
+      };
+
+      this.sessions.set(session.id, session);
+    }
+
+    for (const ask of state.pendingAsks) {
+      const session = this.sessions.get(ask.sessionId);
+      // A session that didn't survive restore (dropped above, or never
+      // existed) or that already ended can't still be waiting on a reply.
+      if (!session || session.status !== 'open') continue;
+      let settle!: (result: AskResult) => void;
+      const waiter = new Promise<AskResult>((resolve) => {
+        settle = resolve;
+      });
+      // Mirrors addAsk's resolver: every way an ask ends still needs to land
+      // in settledAsks so a poll that arrives after it is answered.
+      const resolver = (result: AskResult) => {
+        this.rememberSettledAsk(ask.askId, ask.sessionId, result);
+        settle(result);
+      };
+      this.pendingAsks.set(ask.askId, {
+        askId: ask.askId,
+        sessionId: ask.sessionId,
+        questions: [...ask.questions],
+        resolver,
+        waiter,
+      });
+    }
+
+    for (const settled of state.settledAsks) {
+      if (now.getTime() - settled.at > TERMINAL_RETENTION_MS) continue;
+      this.settledAsks.set(settled.askId, {
+        sessionId: settled.sessionId,
+        result: settled.result,
+        at: settled.at,
+      });
+    }
   }
 
   private toPublic(s: InternalSession): ReviewSession {

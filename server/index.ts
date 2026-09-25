@@ -31,6 +31,14 @@ import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
 import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
+import {
+  cleanStaleTempFiles,
+  createSessionSaver,
+  holdRequestsUntilOpen,
+  loadPersistedState,
+  sessionsFilePath,
+  startPeriodicSave,
+} from './session-persistence';
 
 const require = createRequire(import.meta.url);
 const { version: APP_VERSION, name: PACKAGE_NAME } = require('../package.json') as {
@@ -1541,12 +1549,19 @@ const updateChecker = createUpdateChecker({
   packageName: PACKAGE_NAME,
 });
 
-export const app = createApp({
+// createAppFull rather than createApp: the isMainModule boot path below needs
+// the same reviewSessions instance the routes are wired to, to restore it
+// from disk and to save it back. Every unit test still goes through
+// createApp/createAppFull directly (never through this module-scope call, and
+// never through the isMainModule block that follows), so persistence stays
+// opt-in to a real server process.
+const { app, reviewSessions } = createAppFull({
   staticDir: detectStaticDir(),
   defaultTrustHome: true,
   getLatestVersion: updatesEnabled ? updateChecker.getLatest : undefined,
   isUpdateCheckPending: updatesEnabled ? updateChecker.isPending : undefined,
 });
+export { app };
 
 const DEFAULT_PORT = resolveApiPort();
 const MAX_PORT_ATTEMPTS = 10;
@@ -1626,19 +1641,89 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
   );
 }
 
+// MD_REDLINE_PERSIST_SESSIONS=0 turns persistence off entirely: no read at
+// boot, no write ever. Used by playwright.config.ts's dev-server env and
+// meant for anyone who wants a server that never remembers a review across
+// a restart.
+const persistSessions = process.env.MD_REDLINE_PERSIST_SESSIONS !== '0';
+
 if (isMainModule) {
-  findAvailablePort(app.fetch)
+  // Requests wait for the restore below: see holdRequestsUntilOpen.
+  const gate = holdRequestsUntilOpen(app.fetch);
+  findAvailablePort(gate.fetch)
     .then(async (port) => {
-      await writePortFile(PORT_FILE, port);
-      if (updatesEnabled) void updateChecker.start();
-      console.log(`md-redline server running on http://127.0.0.1:${port}`);
-      const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
-      if (initialArg) {
-        console.log(`Initial path: ${initialArg}`);
+      // Only set once persistence is actually wired up below, so cleanup()
+      // (which runs on every exit, including a plain process.exit(0) from
+      // /api/shutdown; see the 'exit' listener below) has nothing to flush
+      // if persistence is off or restore hasn't gotten this far yet.
+      let saver: ReturnType<typeof createSessionSaver> | null = null;
+      let periodicSave: ReturnType<typeof startPeriodicSave> | null = null;
+      if (persistSessions) {
+        const homeDir = resolveHomeDir();
+        const sessionsPath = sessionsFilePath(homeDir, port);
+        // A temp file a write created but never got to rename into place
+        // (the process died mid-save) is otherwise silent debris; clear it
+        // out before anything else touches this port's saved state.
+        await cleanStaleTempFiles(homeDir, port);
+        // Restore before writePortFile advertises this server: the port
+        // file (and the CLI's port-scan fallback) is how a client finds a
+        // server to talk to, so restoring first means nobody can observe
+        // this process before its sessions are back (#116).
+        const loaded = await loadPersistedState(sessionsPath, new Date());
+        let restored = false;
+        if (loaded) {
+          try {
+            reviewSessions.restoreState(loaded.state, { now: new Date(), savedAt: loaded.savedAt });
+            restored = true;
+          } catch (err) {
+            // A file that passed the shape check but still can't be
+            // restored must not keep the server from starting.
+            console.warn('[sessions] could not restore saved review sessions', err);
+          }
+        }
+        saver = createSessionSaver({
+          path: sessionsPath,
+          getState: () => reviewSessions.exportState(),
+        });
+        reviewSessions.setOnChange(saver.schedule);
+        if (restored) {
+          // Heartbeats are now part of what gets saved, and restoreState
+          // just shifted every session's clock by the downtime; writing
+          // that shift to disk now means a crash before anything else
+          // changes still restores correctly next time, instead of losing
+          // the shift and treating the sessions as freshly seen again.
+          saver.schedule();
+        }
+        // onChange only fires on a state mutation, so an idle live review's
+        // savedAt would otherwise go stale forever; this refreshes it on a
+        // fixed cadence regardless of whether anything else changed (see
+        // startPeriodicSave's own doc comment).
+        periodicSave = startPeriodicSave({
+          saver,
+          hasOpenSessions: () => reviewSessions.listOpenSessions().length > 0,
+        });
       }
 
+      // Registered as early in the boot sequence as the saver's own
+      // existence allows: before the request gate opens and before
+      // writePortFile advertises this server, so a Ctrl-C in that narrow
+      // window still flushes whatever saver exists and removes the port
+      // file this process owns.
+      let cleanedUp = false;
       const cleanup = () => {
+        // Idempotent: SIGINT's handler below calls this and then
+        // process.exit, which itself re-enters the 'exit' listener. Without
+        // the flag, a plain Ctrl-C would flush the saved state twice.
+        if (cleanedUp) return;
+        cleanedUp = true;
+        periodicSave?.stop();
         removePortFileIfOwned(PORT_FILE, port);
+        // flushSync is genuinely synchronous (see session-persistence.ts),
+        // which is required here: Node only runs synchronous code in an
+        // 'exit' listener. /api/shutdown's process.exit(0) reaches this same
+        // listener, so this one call also covers a graceful HTTP shutdown;
+        // there is no separate wiring for that route.
+        saver?.flushSync();
       };
       process.on('exit', cleanup);
       process.on('SIGINT', () => {
@@ -1649,8 +1734,19 @@ if (isMainModule) {
         cleanup();
         process.exit(0);
       });
+
+      gate.open();
+
+      await writePortFile(PORT_FILE, port);
+      if (updatesEnabled) void updateChecker.start();
+      console.log(`md-redline server running on http://127.0.0.1:${port}`);
+      const initialArg = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : '';
+      if (initialArg) {
+        console.log(`Initial path: ${initialArg}`);
+      }
     })
     .catch((err) => {
+      gate.open();
       console.error(err.message);
       process.exit(1);
     });

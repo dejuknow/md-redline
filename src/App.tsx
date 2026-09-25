@@ -485,7 +485,7 @@ export default function App() {
   // Toast notification state
   const { toast, showToast, dismissToast } = useToast();
   showToastRef.current = showToast;
-  const { latest: updateLatest, dismiss: dismissUpdateNotice } = useUpdateNotice();
+  const { latest: updateLatest, dismiss: dismissUpdateNotice, reloadReady } = useUpdateNotice();
 
   // Accumulate external-change counts so rapid SSE events coalesce into one
   // updating toast ("3 comments addressed") instead of flickering "1 comment" each time.
@@ -3395,7 +3395,12 @@ export default function App() {
         />
 
         {/* Update-available notice: persistent sibling of the toast */}
-        <UpdateNotice latest={updateLatest} onDismiss={dismissUpdateNotice} showToast={showToast} />
+        <UpdateNotice
+          latest={updateLatest}
+          reloadReady={reloadReady}
+          onDismiss={dismissUpdateNotice}
+          showToast={showToast}
+        />
 
         {/* Comments drawer: the comment surface wherever the rail can't show */}
         <CommentsDrawer

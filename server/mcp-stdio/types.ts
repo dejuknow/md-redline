@@ -202,15 +202,37 @@ export interface PostReviewResult {
 export interface MdrClient {
   grantAccess(paths: string[]): Promise<void>;
   createSession(input: CreateSessionInput): Promise<CreateSessionResult>;
-  waitForSession(sessionId: string, timeoutSeconds?: number): Promise<WaitResult>;
+  /**
+   * Long-poll. `signal`, when given, only governs the reconnect retry a
+   * dropped connection gets (see `withReconnect` in client.ts): an already
+   * aborted signal skips retrying and an abort mid-retry wakes the wait
+   * early, but the signal is never handed to the underlying fetch, so a
+   * request already in flight still runs to the server's own timeout.
+   */
+  waitForSession(
+    sessionId: string,
+    timeoutSeconds?: number,
+    signal?: AbortSignal,
+  ): Promise<WaitResult>;
   abortSession(sessionId: string): Promise<void>;
   postAgentComments(sessionId: string, questions: AskQuestion[]): Promise<PostAgentCommentsResult>;
-  /** Long-poll — intentionally not signal-aware; cancel via releaseAsk instead. */
-  waitForAsk(sessionId: string, askId: string, timeoutSeconds?: number): Promise<AskWaitResult>;
+  /** Long-poll: cancel via releaseAsk, not `signal`, which (like the other
+   * two long polls) only governs the reconnect retry; see waitForSession. */
+  waitForAsk(
+    sessionId: string,
+    askId: string,
+    timeoutSeconds?: number,
+    signal?: AbortSignal,
+  ): Promise<AskWaitResult>;
   postReview(sessionId: string, args: PostReviewArgs): Promise<PostReviewResult>;
   releaseAsk(sessionId: string, askId: string): Promise<void>;
-  /** Long-poll — server's 90s timeout bounds the wait; client doesn't abort the fetch. */
-  waitForReview(sessionId: string, timeoutSeconds?: number): Promise<WaitForReviewResult>;
+  /** Long-poll: server's 90s timeout bounds the wait; `signal` only governs
+   * the reconnect retry, not the fetch itself. See waitForSession. */
+  waitForReview(
+    sessionId: string,
+    timeoutSeconds?: number,
+    signal?: AbortSignal,
+  ): Promise<WaitForReviewResult>;
   /** POST /api/baselines. Returns immediately; the server reads the files itself. */
   captureBaseline(input: BaselineInput): Promise<CaptureBaselineResult>;
   /** POST /api/review-sessions/:id/files. Paths must already be granted. */

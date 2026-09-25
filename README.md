@@ -336,7 +336,7 @@ rather than adding new ones.
 
 - **The agent says it has no mdr tools.** Restart your MCP client after `mdr mcp install`; most clients only discover new servers at launch. For non-Claude clients, confirm `mdr` is on the `PATH` the client actually uses (see MCP setup above).
 - **The browser opened but the page will not load.** A stale server may be holding the port. Run `mdr --stop`, then reopen your file.
-- **A review banner is stuck on screen.** Click **End review** (agent reviews) or **Cancel review** (your reviews). Sessions do not survive a server restart, but comments do.
+- **A review banner is stuck on screen.** Click **End review** (agent reviews) or **Cancel review** (your reviews). A session survives a server restart that comes back within a few minutes; comments always survive, since they live in the file.
 - **Something went wrong mid-session.** The file is always the source of truth. Comments and agent questions live in the markdown itself as `<!-- @comment{...} -->` markers, so you can read, edit, or delete them in any editor, and the agent is always told to re-read the file when a session ends unexpectedly.
 
 ## Development
