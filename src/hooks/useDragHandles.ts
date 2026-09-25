@@ -130,6 +130,15 @@ function getContainerTextOffset(container: HTMLElement, targetNode: Node, offset
   return getVisibleTextContent(range.cloneContents()).length;
 }
 
+/** The nearest ancestor that scrolls vertically, or null. */
+function scrollingAncestor(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return node;
+  }
+  return null;
+}
+
 export function useDragHandles({
   viewerRef,
   scrollContainerRef,
@@ -301,8 +310,29 @@ export function useDragHandles({
         if (!drag) return;
 
         // PointerEvent extends MouseEvent, so the caret lookup is unchanged.
-        const caret = caretFromPoint(clientX, clientY);
-        if (!caret || !container.contains(caret.node)) return;
+        let caret = caretFromPoint(clientX, clientY);
+        if (!caret || !container.contains(caret.node)) {
+          // A pointer past the text's edge (the page margin beside a line,
+          // above the first line, below the last) means the nearest edge of
+          // the text, not "no move". Dropping it made a fast flick, which the
+          // browser may deliver as one jump into the margin, move the anchor
+          // nowhere, and it stopped even a slow drag at whatever its last
+          // in-text sample happened to be (#60).
+          // The part of the container actually on screen: a long document
+          // runs past its scrolling pane, and the toolbar sits over the top of
+          // the window, where caretFromPoint finds nothing of the text.
+          const box = container.getBoundingClientRect();
+          const pane = scrollingAncestor(container)?.getBoundingClientRect();
+          const left = Math.max(box.left, pane?.left ?? 0, 0);
+          const right = Math.min(box.right, pane?.right ?? Infinity, window.innerWidth);
+          const top = Math.max(box.top, pane?.top ?? 0, 0);
+          const bottom = Math.min(box.bottom, pane?.bottom ?? Infinity, window.innerHeight);
+          const x = Math.min(Math.max(clientX, left + 1), right - 1);
+          const y = Math.min(Math.max(clientY, top + 1), bottom - 1);
+          if (x === clientX && y === clientY) return;
+          caret = caretFromPoint(x, y);
+          if (!caret || !container.contains(caret.node)) return;
+        }
 
         // Don't allow dragging into another comment's mark. A resolved
         // anchor's trace is not one: it is a memento of a settled thread, and

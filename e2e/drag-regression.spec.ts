@@ -154,6 +154,71 @@ test.describe('Drag start handle backwards - regression', () => {
     expect(cleanAnchor.length).toBeGreaterThan('followed by regular text'.length);
   });
 
+  test('a drag that jumps into the margin in one step still moves the anchor (#60)', async ({
+    page,
+  }) => {
+    // A fast flick can arrive as a single move that lands past the text's
+    // edge. That used to be dropped whole, so the handle moved and the
+    // highlight did not.
+    await openFixture(page);
+    await addComment(page, 'followed by regular text', 'One-step jump');
+    const card = getCard(page, 'One-step jump');
+    await card.click();
+    await expect(page.locator('[data-drag-handle]')).toHaveCount(2);
+    await stableHandlePositions(page);
+
+    const startHandle = page.locator('[data-drag-handle]').first();
+    const box = await startHandle.boundingBox();
+    await startHandle.hover();
+    await page.mouse.down();
+    await page.mouse.move(box!.x - 300, box!.y + box!.height / 2, { steps: 1 });
+    await page.mouse.up();
+
+    const anchorPreview = card.locator('[data-anchor-quote]').first();
+    await expect
+      .poll(
+        async () =>
+          ((await anchorPreview.textContent()) ?? '').replace(/["\u201C\u201D]/g, '').trim().length,
+      )
+      .toBeGreaterThan('followed by regular text'.length);
+  });
+
+  test('a drag past the top of the window on a long document still moves the anchor (#60)', async ({
+    page,
+  }) => {
+    // The container runs past the viewport here, so a point clamped to its
+    // full box would still be off-screen, where no caret can be found.
+    const filler = Array.from({ length: 60 }, (_, i) => `Filler line number ${i + 1}.`).join(
+      '\n\n',
+    );
+    writeFileSync(FIXTURE, `# Long\n\n${filler}\n\nThe target words sit down here.\n\n${filler}\n`);
+    await openFixture(page);
+    await addComment(page, 'target words', 'Long doc drag');
+    await page
+      .locator('mark.comment-highlight')
+      .first()
+      .evaluate((m) => m.scrollIntoView({ block: 'start' }));
+    const card = getCard(page, 'Long doc drag');
+    await card.click();
+    await expect(page.locator('[data-drag-handle]')).toHaveCount(2);
+    await stableHandlePositions(page);
+
+    const startHandle = page.locator('[data-drag-handle]').first();
+    const box = await startHandle.boundingBox();
+    await startHandle.hover();
+    await page.mouse.down();
+    await page.mouse.move(box!.x, -40, { steps: 1 });
+    await page.mouse.up();
+
+    const anchorPreview = card.locator('[data-anchor-quote]').first();
+    await expect
+      .poll(
+        async () =>
+          ((await anchorPreview.textContent()) ?? '').replace(/["\u201C\u201D]/g, '').trim().length,
+      )
+      .toBeGreaterThan('target words'.length);
+  });
+
   test('highlight survives page reload after large backward expansion', async ({ page }) => {
     await openFixture(page);
 
