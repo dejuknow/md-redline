@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { buildRangeHtml } from './copy-selection-html';
+import { buildNativeCopyFlavors, buildRangeHtml } from './copy-selection-html';
 
 function mount(html: string): HTMLElement {
   const container = document.createElement('div');
@@ -500,5 +500,53 @@ describe('internal attributes never reach the clipboard', () => {
     expect(html).toContain('Some text here');
     expect(html).not.toContain('data-src-start');
     expect(html).not.toContain('data-src-end');
+  });
+});
+
+describe('buildNativeCopyFlavors (#103)', () => {
+  function selectContents(el: Element): Selection {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return sel;
+  }
+
+  it('builds both flavors for rendered markdown, without source offsets', () => {
+    const root = mount(
+      '<div class="prose"><p data-src-start="0" data-src-end="12">Hello <strong>world</strong></p></div>',
+    );
+    const flavors = buildNativeCopyFlavors(selectContents(root.querySelector('p')!));
+    expect(flavors?.text).toBe('Hello world');
+    expect(flavors?.html).toContain('<strong>world</strong>');
+    expect(flavors?.html).not.toContain('data-src');
+    root.remove();
+  });
+
+  it('still strips offsets when the selection runs out of rendered markdown', () => {
+    const root = mount(
+      '<div class="prose"><p data-src-start="0" data-src-end="5">Hello</p></div><nav>Toolbar</nav>',
+    );
+    const flavors = buildNativeCopyFlavors(selectContents(root));
+    expect(flavors?.text).toContain('Hello');
+    expect(flavors?.html).toContain('Hello');
+    expect(flavors?.html).not.toContain('data-src');
+    root.remove();
+  });
+
+  it('leaves the copy to the browser outside rendered markdown', () => {
+    const root = mount('<p data-src-start="0" data-src-end="5">Hello</p>');
+    expect(buildNativeCopyFlavors(selectContents(root.querySelector('p')!))).toBeNull();
+    root.remove();
+  });
+
+  it('leaves the copy to the browser for an empty or whitespace selection', () => {
+    const root = mount('<div class="prose"><p>   </p></div>');
+    expect(buildNativeCopyFlavors(selectContents(root.querySelector('p')!))).toBeNull();
+    window.getSelection()!.removeAllRanges();
+    expect(buildNativeCopyFlavors(window.getSelection())).toBeNull();
+    expect(buildNativeCopyFlavors(null)).toBeNull();
+    root.remove();
   });
 });

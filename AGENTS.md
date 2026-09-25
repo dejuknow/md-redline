@@ -1202,6 +1202,19 @@ browser's own range, so a plain Cmd/Ctrl+C would copy nothing. The document-leve
 
 Both flavors go on the clipboard, so pasting into a rich-text editor keeps
 headings, bold, links, tables, and list structure.
+
+A copy the viewer does not own still goes through the app when it would expose
+source offsets (#103). When `getCopySelectionFallbackText` returns null but a
+live native selection touches rendered markdown (`.prose`: the rendered diff
+overlay, or a pending touch or pen selection that was never painted; a
+selection that runs out of it, like Cmd+A, is serialized against its common
+ancestor),
+`buildNativeCopyFlavors` writes `text/plain` from the selection and `text/html`
+through `buildRangeHtml`, which strips `data-src-*`. Left to the browser, its
+own `text/html` would carry every block's offsets. Text selected in a field,
+the raw view, and anything that touches no `.prose` keep the native copy. If
+serializing fails, the app still owns the copy and writes only the plain text,
+so the offsets never leak by fallback.
 #### Touch and pen selections
 Selections made by touch or pen route through a pending flow instead of the
 mouseup path (`useSelection.ts`): touch selection never fires `mouseup`, and

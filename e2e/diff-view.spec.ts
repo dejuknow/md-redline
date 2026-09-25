@@ -426,6 +426,99 @@ test.describe('Rendered diff overlay', () => {
     await expect(page.locator('.rendered-diff-added')).toBeVisible();
   });
 
+  test('copying a hunk from the rendered diff keeps source offsets off the clipboard (#103)', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(500);
+    writeFileSync(
+      FIXTURE,
+      FIXTURE_ORIGINAL.replace(
+        'Rate limiting prevents brute force attacks.',
+        'Rate limiting prevents brute force attacks and stops scraping bots.',
+      ),
+    );
+    await expect(page.getByText(/stops scraping bots/)).toBeVisible({ timeout: 15_000 });
+    await renderedDiffBtn(page).click();
+    const hunk = page.locator('.rendered-diff-added').first();
+    await expect(hunk).toBeVisible();
+    // Guard for the test itself: the hunk carries offsets a native copy would leak.
+    expect(await hunk.locator('[data-src-start]').count()).toBeGreaterThan(0);
+
+    // Select the hunk natively, the way a drag across it does: the overlay is
+    // not the viewer, so nothing repaints or clears this selection.
+    const copied = await page.evaluate(() => {
+      const el = document.querySelector('.rendered-diff-added')!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      let out = { plain: '', html: '' };
+      document.addEventListener(
+        'copy',
+        (e) => {
+          out = {
+            plain: e.clipboardData?.getData('text/plain') ?? '',
+            html: e.clipboardData?.getData('text/html') ?? '',
+          };
+        },
+        { once: true },
+      );
+      document.execCommand('copy');
+      return out;
+    });
+
+    expect(copied.plain).toContain('stops scraping bots');
+    expect(copied.html).toContain('stops scraping bots');
+    expect(copied.html).not.toContain('data-src');
+  });
+
+  test('select-all in the rendered diff keeps source offsets off the clipboard too (#103)', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(500);
+    writeFileSync(
+      FIXTURE,
+      FIXTURE_ORIGINAL.replace('The authentication system', 'The auth system'),
+    );
+    await expect(page.getByText(/The auth system/)).toBeVisible({ timeout: 15_000 });
+    await renderedDiffBtn(page).click();
+    await expect(page.locator('.rendered-diff-added').first()).toBeVisible();
+
+    // Cmd+A's range spans the whole page, so its common ancestor is outside
+    // the overlay's rendered markdown.
+    const copied = await page.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.body);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      let out = { plain: '', html: '' };
+      document.addEventListener(
+        'copy',
+        (e) => {
+          out = {
+            plain: e.clipboardData?.getData('text/plain') ?? '',
+            html: e.clipboardData?.getData('text/html') ?? '',
+          };
+        },
+        { once: true },
+      );
+      document.execCommand('copy');
+      return out;
+    });
+
+    expect(copied.plain).toContain('The auth system');
+    expect(copied.html).toContain('The auth system');
+    expect(copied.html).not.toContain('data-src');
+  });
+
   test('toggling diff off in rendered view restores plain rendered view', async ({
     page,
     context,
