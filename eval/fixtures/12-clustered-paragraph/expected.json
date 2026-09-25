@@ -14,8 +14,7 @@
       "id": "eval-12-c2",
       "expectedAction": "address",
       "contentHints": {
-        "shouldContain": ["webhook"],
-        "shouldNotContain": ["The system processes the payment"]
+        "shouldContain": ["webhook", "asynchronous"]
       }
     },
     {

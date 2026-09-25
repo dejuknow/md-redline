@@ -7,6 +7,7 @@ import { getFormat } from './formats/index.js';
 import { claudeCli } from './agents/claude-cli.js';
 import { claudeCliResolve } from './agents/claude-cli-resolve.js';
 import { claudeCliRemove } from './agents/claude-cli-remove.js';
+import { DEFAULT_MODEL, setClaudeModel } from './agents/run-claude.js';
 import type { AgentAdapter, EvalCase, ExpectedCriteria, ScoringResult } from './types.js';
 import { decideSkip } from './case-selection.js';
 
@@ -45,7 +46,7 @@ async function runCase(
   evalCase: EvalCase,
   agent: AgentAdapter,
   formatName: string,
-): Promise<ScoringResult> {
+): Promise<{ result: ScoringResult; output: string }> {
   const format = getFormat(formatName);
 
   const inputRaw = await readFile(evalCase.inputPath, 'utf-8');
@@ -72,7 +73,7 @@ async function runCase(
   // Transform output back to current format for scoring
   const outputRaw = format.fromVariant(outputVariant);
 
-  return score(evalCase.name, inputRaw, outputRaw, expected);
+  return { result: score(evalCase.name, inputRaw, outputRaw, expected), output: outputRaw };
 }
 
 function printTable(results: ScoringResult[]) {
@@ -161,6 +162,7 @@ async function main() {
       case: { type: 'string', short: 'c' },
       format: { type: 'string', short: 'f', default: 'current' },
       agent: { type: 'string', short: 'a', default: 'claude-cli' },
+      model: { type: 'string', short: 'm', default: DEFAULT_MODEL },
       'dry-run': { type: 'boolean', default: false },
       verbose: { type: 'boolean', short: 'v', default: false },
     },
@@ -196,7 +198,11 @@ async function main() {
   }
 
   const formatName = values.format!;
-  console.log(`\nRunning with agent="${agentName}", format="${formatName}"\n`);
+  const modelName = values.model!;
+  setClaudeModel(modelName);
+  console.log(
+    `\nRunning with agent="${agentName}", model="${modelName}", format="${formatName}"\n`,
+  );
 
   // Create results directory
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -237,7 +243,7 @@ async function main() {
 
     process.stdout.write(`Running: ${evalCase.name}...`);
     try {
-      const result = await runCase(evalCase, agent, formatName);
+      const { result, output } = await runCase(evalCase, agent, formatName);
       results.push(result);
       console.log(` done (overall: ${(result.overall * 100).toFixed(0)}%)`);
 
@@ -245,6 +251,8 @@ async function main() {
       const caseDir = join(runDir, evalCase.name);
       await mkdir(caseDir, { recursive: true });
       await writeFile(join(caseDir, 'scores.json'), JSON.stringify(result, null, 2));
+      // Keep what the agent wrote, so a score change can be read, not guessed at.
+      await writeFile(join(caseDir, 'output.md'), output);
 
       if (values.verbose) {
         for (const d of result.details) {
@@ -286,6 +294,7 @@ async function main() {
   const summary = {
     timestamp,
     agent: agentName,
+    model: modelName,
     format: formatName,
     cases: results.length,
     skipped,

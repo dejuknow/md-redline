@@ -102,7 +102,7 @@ That adapter is implemented in [agents/claude-cli.ts](./agents/claude-cli.ts). I
 - shells out to the local `claude` CLI with `Read`, `Edit`, and `Write` tool access
 - reads the edited file back from disk
 
-Important: the adapter does not pass an explicit model flag to `claude`. The effective model is whatever your local Claude CLI is configured to use by default at runtime.
+The model is pinned (default `claude-opus-5-5`, set in [agents/run-claude.ts](./agents/run-claude.ts)) so scores stay comparable across runs. Override it with `--model`. Each run records the model in `summary.json`. Runs before 2026-09-25 used the CLI's default model and did not record it.
 
 ## Formats
 
@@ -116,6 +116,8 @@ The runner supports these flags:
   Run only cases whose directory name includes the provided substring.
 - `-a`, `--agent`
   Select the agent adapter. Current default and only built-in option: `claude-cli`.
+- `-m`, `--model`
+  Model passed to `claude --model`. Default: `claude-opus-5-5`.
 - `-f`, `--format`
   Select the format adapter. Current default and only built-in option: `current`.
 - `--dry-run`
@@ -141,11 +143,12 @@ eval/results/<timestamp>_<agent>_<format>/
   summary.json
   <case-name>/
     scores.json
+    output.md
 ```
 
 - `summary.json`
   Aggregate metadata plus all case scores for the run.
 - `<case-name>/scores.json`
   Per-case scoring details.
-
-The harness currently saves scores and summaries, not the edited markdown outputs themselves.
+- `<case-name>/output.md`
+  The markdown the agent wrote, so a score change can be checked against the actual edit.

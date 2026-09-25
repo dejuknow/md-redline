@@ -6,14 +6,14 @@
       "id": "eval-08-c1",
       "expectedAction": "address",
       "contentHints": {
-        "shouldNotContain": ["Products have a title, description, price, and images. Each product belongs to exactly one category."]
+        "shouldContain": ["size"]
       }
     },
     {
       "id": "eval-08-c2",
       "expectedAction": "address",
       "contentHints": {
-        "shouldNotContain": ["Before checkout the cart is validated. Invalid items are flagged to the user."]
+        "shouldContain": ["minimum"]
       }
     },
     {
