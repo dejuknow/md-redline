@@ -29,7 +29,7 @@ import { BaselineStore } from './baselines';
 import { registerBaselineRoutes } from './routes/baselines';
 import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
-import { resolveApiPort, resolveHomeDir, resolveVitePort } from './env';
+import { resolveApiPort, resolveHomeDir, resolveStrictApiPort, resolveVitePort } from './env';
 import { createUpdateChecker, isUpdateCheckDisabled } from './update-check';
 import {
   cleanStaleTempFiles,
@@ -1564,7 +1564,10 @@ const { app, reviewSessions } = createAppFull({
 export { app };
 
 const DEFAULT_PORT = resolveApiPort();
-const MAX_PORT_ATTEMPTS = 10;
+// A port MD_REDLINE_PORT names is bound exactly or not at all: drifting to the
+// next free one would start a server the CLI, which only looks on that port,
+// never finds (#58). Otherwise, including a bare PORT, the next free port.
+const MAX_PORT_ATTEMPTS = resolveStrictApiPort() === null ? 10 : 1;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 
 /**

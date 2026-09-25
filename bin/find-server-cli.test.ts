@@ -56,10 +56,13 @@ function scratchDir(): string {
 }
 
 /** Run the seam with the port file redirected into a scratch temp dir. */
-function findServer(env: NodeJS.ProcessEnv = {}): Promise<string> {
+function findServer(
+  env: NodeJS.ProcessEnv = {},
+  args: string[] = ['__find-server'],
+): Promise<string> {
   const dir = scratchDir();
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [BIN, '__find-server'], {
+    const child = spawn(process.execPath, [BIN, ...args], {
       env: {
         ...process.env,
         // os.tmpdir() reads TMPDIR on POSIX and TEMP/TMP on Windows, and it is
@@ -119,15 +122,26 @@ describe('choosing which running server to act on', () => {
     expect(await findServer({ PORT: String(named.port) })).toBe(String(named.port));
   });
 
-  it('falls back to the port file when the named server is not answering', async () => {
-    // Naming a port is not a demand that it be the only candidate. A stale
-    // MD_REDLINE_PORT in a shell profile must not stop the CLI finding the
-    // server that is actually running.
+  it('never falls back to another server when the named one is not answering (#58)', async () => {
+    // A named port means that instance and no other. Falling back to the
+    // recorded server opened files inside a different instance and could stop
+    // it to "upgrade" a server nobody named; with nothing found, the CLI
+    // starts a server on the named port instead.
     const recorded = await startFakeServer();
     writePortFile(recorded.port);
     const deadPort = await unusedPort();
 
-    expect(await findServer({ MD_REDLINE_PORT: String(deadPort) })).toBe(String(recorded.port));
+    expect(await findServer({ MD_REDLINE_PORT: String(deadPort) })).toBe('none');
+  });
+
+  it('keeps a bare PORT lenient, since other apps export it too', async () => {
+    // Only MD_REDLINE_PORT is strict. A PORT=3000 left in a shell for a
+    // Next.js app must not stop mdr finding the server that is running.
+    const recorded = await startFakeServer();
+    writePortFile(recorded.port);
+    const deadPort = await unusedPort();
+
+    expect(await findServer({ PORT: String(deadPort) })).toBe(String(recorded.port));
   });
 
   it('still prefers the port file when nothing was named', async () => {
@@ -194,3 +208,108 @@ function portIsFree(port: number): Promise<boolean> {
     server.listen(port, '127.0.0.1', () => server.close(() => resolvePromise(true)));
   });
 }
+
+/**
+ * A dev client that answers /__mdr__ like vite.config.ts does, on a given
+ * port, saying which API it proxies to (or nothing, like an older one).
+ */
+function startFakeClient(port: number, apiPort: number | null): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer((req, res) => {
+      if (req.url === '/__mdr__') {
+        const headers: Record<string, string> = {};
+        if (apiPort !== null) headers['x-mdr-api-port'] = String(apiPort);
+        res.writeHead(200, headers);
+        res.end('mdr');
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    servers.push(server);
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolvePromise());
+  });
+}
+
+/** Two adjacent free ports, so a scan from the first reaches the second. */
+async function adjacentPorts(): Promise<[number, number]> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const first = await unusedPort();
+    try {
+      await startFakeClient(first + 1, null).then(() => servers.pop()?.close());
+      return [first, first + 1];
+    } catch {
+      // The neighbor was taken; try another pair.
+    }
+  }
+  throw new Error('no two adjacent free ports');
+}
+
+describe('choosing which dev client to open or stop (#58)', () => {
+  it("skips another instance's client and finds the one proxying to this server", async () => {
+    const [other, mine] = await adjacentPorts();
+    await startFakeClient(other, 7100);
+    await startFakeClient(mine, 7441);
+
+    const found = await findServer({ MD_REDLINE_VITE_PORT: String(other) }, [
+      '__find-client',
+      '7441',
+    ]);
+    expect(found).toBe(String(mine));
+  });
+
+  it('never picks a client that does not say which server it proxies to', async () => {
+    const [port] = await adjacentPorts();
+    await startFakeClient(port, null);
+
+    const found = await findServer({ MD_REDLINE_VITE_PORT: String(port) }, [
+      '__find-client',
+      '7441',
+    ]);
+    expect(found).toBe('none');
+  });
+});
+
+describe('a named port held by another program (#58)', () => {
+  it('fails at once with a clear message instead of waiting out the start', async () => {
+    const other = createServer((_req, res) => {
+      res.writeHead(404);
+      res.end();
+    });
+    servers.push(other);
+    const port = await new Promise<number>((resolvePromise) => {
+      other.listen(0, '127.0.0.1', () => {
+        const address = other.address();
+        resolvePromise(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    const doc = join(scratchDir(), 'doc.md');
+    writeFileSync(doc, '# Doc\n');
+
+    const started = Date.now();
+    const output = await new Promise<string>((resolvePromise, reject) => {
+      const child = spawn(process.execPath, [BIN, 'baseline', doc], {
+        env: {
+          ...process.env,
+          TMPDIR: scratchDir(),
+          TEMP: scratchDir(),
+          TMP: scratchDir(),
+          MD_REDLINE_HOME: scratchDir(),
+          MD_REDLINE_PORT: String(port),
+          PORT: '',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      children.push(child);
+      let all = '';
+      child.stdout.on('data', (chunk) => (all += String(chunk)));
+      child.stderr.on('data', (chunk) => (all += String(chunk)));
+      child.once('error', reject);
+      child.once('close', () => resolvePromise(all));
+    });
+
+    expect(output).toContain(`port ${port} (MD_REDLINE_PORT) is in use by another program`);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+});

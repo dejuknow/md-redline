@@ -259,7 +259,7 @@ All of these environment variables are optional.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MD_REDLINE_BROWSER` | OS default browser | Command used to open the review URL. Set it to a specific browser binary (for example `MD_REDLINE_BROWSER=firefox`); it is spawned with the URL as its argument. The older `MDR_BROWSER` still works: it is used whenever this one is unset or blank. |
-| `MD_REDLINE_PORT` (or `PORT`) | `6373` | Port for the API server. It scans up to 10 ports upward from here if that one is taken. `MD_REDLINE_PORT` wins when both are set; a blank one defers to `PORT`. |
+| `MD_REDLINE_PORT` (or `PORT`) | `6373` | Port for the API server. Unset, it scans up to 10 ports upward from 6373 if that one is taken. Set through `MD_REDLINE_PORT`, it means that instance only: `mdr` uses or starts a server on exactly that port, and `mdr --stop` stops only that one. `PORT` also sets it but stays lenient, since other apps export it too. `MD_REDLINE_PORT` wins when both are set; a blank one defers to `PORT`. |
 | `MD_REDLINE_VITE_PORT` | `5188` | Port for the Vite dev client (development only). |
 | `MD_REDLINE_HOME` | your OS home directory | Base directory for md-redline's preferences file (`.md-redline.json`, which stores trusted roots and the update-check cache). |
 | `MD_REDLINE_CLIENT_ID` | a new ID for each `mdr mcp` process | Identifies one agent session to `mdr mcp`. Set it once per agent session when a tool starts a fresh `mdr mcp` for every call (for example [mcp2cli](https://github.com/nilslice/mcp2cli) or a shell loop), so reopening the same files reuses that agent's review instead of starting another. Don't set it machine-wide (in a shell profile, say): every agent would then share one review. At most 256 characters. |

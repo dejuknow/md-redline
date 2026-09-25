@@ -29,8 +29,15 @@ export function mdrIdentityPlugin(): Plugin {
     name: 'mdr-identity',
     configureServer(server: ViteDevServer) {
       server.middlewares.use(
-        (req: { url?: string }, res: { end: (body: string) => void }, next: () => void) => {
+        (
+          req: { url?: string },
+          res: { setHeader: (name: string, value: string) => void; end: (body: string) => void },
+          next: () => void,
+        ) => {
           if (req.url === '/__mdr__') {
+            // The header says which API server this client proxies to, so the
+            // CLI can tell its own dev client from another instance's (#58).
+            res.setHeader('x-mdr-api-port', String(apiPort));
             res.end('mdr');
             return;
           }

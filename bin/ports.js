@@ -104,6 +104,33 @@ export function resolveNamedApiPort(env = process.env) {
  * @param {Record<string, string | undefined>} [env] Defaults to `process.env`.
  * @returns {number} A port between 1 and 65535.
  */
+/**
+ * The port MD_REDLINE_PORT names, or null. Only mdr's own variable makes a
+ * port strict (that instance and no other, bound exactly; #58). `PORT` is a
+ * generic name other apps export too (Next.js reads it), so it still picks the
+ * port but keeps the old lenient lookup and bind.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {number | null}
+ */
+export function resolveStrictApiPort(env = process.env) {
+  return resolvePort(env, ['MD_REDLINE_PORT'], null);
+}
+
 export function resolveApiPort(env = process.env) {
   return resolveNamedApiPort(env) ?? FALLBACK_PORT;
+}
+
+export const FALLBACK_VITE_PORT = 5188;
+
+/**
+ * Port for the Vite dev client. No alias: this one only ever had the prefixed
+ * name. Lives here, beside the API resolver, so the CLI looks for a dev client
+ * where the server and vite.config.ts put it (#58).
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {number}
+ */
+export function resolveVitePort(env = process.env) {
+  return resolvePort(env, ['MD_REDLINE_VITE_PORT'], FALLBACK_VITE_PORT);
 }
