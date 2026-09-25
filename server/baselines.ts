@@ -7,10 +7,10 @@
  * from disk and stores it here; the browser seeds its reference from this
  * copy only when it has no reference for that path at all.
  *
- * Pure in-memory store. Reading files, checking sizes, and validating
- * paths belong to the route layer. Nothing survives a server restart,
- * unlike review sessions, which are saved to disk (#116); #138 tracks
- * persisting these too.
+ * In-memory store with no I/O of its own. Reading files, checking sizes, and
+ * validating paths belong to the route layer; saving copies to disk so they
+ * survive a restart (#138) belongs to baseline-persistence.ts, which hears
+ * about every stored and dropped copy through `setListener`.
  */
 
 export interface Baseline {
@@ -36,12 +36,42 @@ export const MAX_BASELINES = 64;
 /** An unclaimed baseline is dropped after this long. Checked lazily on read. */
 export const BASELINE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** Told about every copy the store keeps or drops, in the order it happens. */
+export interface BaselineListener {
+  /** A copy put back by `restore`, already saved; nothing to write. */
+  restored(entry: Baseline): void;
+  stored(entry: Baseline): void;
+  removed(path: string): void;
+}
+
 export class BaselineStore {
   private readonly entries = new Map<string, Baseline>();
   private readonly now: () => number;
+  private listener: BaselineListener | null = null;
 
   constructor(opts: { now?: () => number } = {}) {
     this.now = opts.now ?? Date.now;
+  }
+
+  setListener(listener: BaselineListener | null): void {
+    this.listener = listener;
+  }
+
+  /**
+   * Put back copies saved before a restart, keeping their original capture
+   * times so the 24h expiry still counts from the real capture. Past the
+   * expiry or the entry cap, the oldest are dropped, and the listener hears
+   * about each one so its saved file goes too. Expects one copy per path and
+   * an empty store, so call it before anything else writes.
+   */
+  restore(saved: Baseline[]): void {
+    const newestFirst = [...saved].sort((a, b) => b.capturedAt - a.capturedAt);
+    for (const entry of newestFirst) {
+      this.listener?.restored(entry);
+      if (this.entries.size >= MAX_BASELINES) this.listener?.removed(entry.path);
+      else this.entries.set(entry.path, { ...entry });
+    }
+    this.expire();
   }
 
   /** Store a copy for `path`, replacing any older one. Returns metadata only. */
@@ -58,6 +88,7 @@ export class BaselineStore {
       ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
     };
     this.entries.set(input.path, entry);
+    this.listener?.stored(entry);
     return toMeta(entry);
   }
 
@@ -82,7 +113,7 @@ export class BaselineStore {
   private expire(): void {
     const cutoff = this.now() - BASELINE_TTL_MS;
     for (const [path, entry] of this.entries) {
-      if (entry.capturedAt < cutoff) this.entries.delete(path);
+      if (entry.capturedAt < cutoff) this.drop(path);
     }
   }
 
@@ -91,7 +122,12 @@ export class BaselineStore {
     for (const entry of this.entries.values()) {
       if (!oldest || entry.capturedAt < oldest.capturedAt) oldest = entry;
     }
-    if (oldest) this.entries.delete(oldest.path);
+    if (oldest) this.drop(oldest.path);
+  }
+
+  private drop(path: string): void {
+    this.entries.delete(path);
+    this.listener?.removed(path);
   }
 }
 

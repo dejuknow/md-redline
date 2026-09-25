@@ -89,3 +89,76 @@ describe('BaselineStore', () => {
     expect(store.has('/a.md')).toBe(false);
   });
 });
+
+describe('BaselineStore listener and restore (#138)', () => {
+  function recording() {
+    const events: string[] = [];
+    return {
+      events,
+      listener: {
+        restored: (e: { path: string }) => events.push(`restored ${e.path}`),
+        stored: (e: { path: string }) => events.push(`stored ${e.path}`),
+        removed: (p: string) => events.push(`removed ${p}`),
+      },
+    };
+  }
+
+  it('reports every copy stored, evicted, and expired, in order', () => {
+    const { store, tick } = makeStore();
+    const { events, listener } = recording();
+    store.setListener(listener);
+    for (let i = 0; i < MAX_BASELINES; i++) {
+      store.set({ path: `/f${i}.md`, content: 'x' });
+      tick(1);
+    }
+    store.set({ path: '/new.md', content: 'x' });
+    expect(events.slice(-2)).toEqual(['removed /f0.md', 'stored /new.md']);
+    tick(BASELINE_TTL_MS + 1);
+    events.length = 0;
+    store.list();
+    expect(events).toHaveLength(MAX_BASELINES);
+    expect(events.every((e) => e.startsWith('removed '))).toBe(true);
+  });
+
+  it('restore keeps the original capture time, so expiry counts from the real capture', () => {
+    const { store, tick } = makeStore(5_000_000);
+    store.restore([{ path: '/a.md', content: 'a', capturedAt: 1_000_000, bytes: 1 }]);
+    expect(store.get('/a.md')?.capturedAt).toBe(1_000_000);
+    tick(BASELINE_TTL_MS - 4_000_000);
+    expect(store.get('/a.md')).not.toBeNull();
+    tick(1);
+    expect(store.get('/a.md')).toBeNull();
+  });
+
+  it('restore drops a copy already past its expiry, with room to spare', () => {
+    const { store } = makeStore(BASELINE_TTL_MS * 2);
+    const { events, listener } = recording();
+    store.setListener(listener);
+    store.restore([{ path: '/old.md', content: 'x', capturedAt: 0, bytes: 1 }]);
+    expect(store.has('/old.md')).toBe(false);
+    expect(events).toEqual(['restored /old.md', 'removed /old.md']);
+  });
+
+  it('restore drops what is expired or past the cap, oldest first, and reports each', () => {
+    const { store } = makeStore(BASELINE_TTL_MS * 2);
+    const { events, listener } = recording();
+    store.setListener(listener);
+    const now = BASELINE_TTL_MS * 2;
+    const fresh = Array.from({ length: MAX_BASELINES + 1 }, (_, i) => ({
+      path: `/f${i}.md`,
+      content: 'x',
+      capturedAt: now - 1_000 + i,
+      bytes: 1,
+    }));
+    const stale = { path: '/stale.md', content: 'x', capturedAt: 0, bytes: 1 };
+    store.restore([stale, ...fresh]);
+    expect(store.list()).toHaveLength(MAX_BASELINES);
+    expect(store.has('/f0.md')).toBe(false);
+    expect(store.has(`/f${MAX_BASELINES}.md`)).toBe(true);
+    expect(events.filter((e) => e.startsWith('removed')).sort()).toEqual([
+      'removed /f0.md',
+      'removed /stale.md',
+    ]);
+    expect(events.filter((e) => e.startsWith('restored'))).toHaveLength(MAX_BASELINES + 2);
+  });
+});

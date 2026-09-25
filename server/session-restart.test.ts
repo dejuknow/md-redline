@@ -30,6 +30,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createMdrClient } from './mcp-stdio/client';
 import { sessionsFilePath } from './session-persistence';
+import { baselinesDirPath } from './baseline-persistence';
 import type { WaitResult } from './mcp-stdio/types';
 
 const REPO_ROOT = join(__dirname, '..');
@@ -426,4 +427,73 @@ describe('a review session survives a real server restart (#116)', () => {
     expect(getRes.status).toBe(404);
     expect(existsSync(savedPath)).toBe(false);
   }, 20_000);
+});
+
+describe('agent before copies survive a real server restart (#138)', () => {
+  async function captureBaseline(baseUrl: string, filePath: string): Promise<void> {
+    const res = await fetch(`${baseUrl}/api/baselines`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [filePath], agentName: 'Claude' }),
+    });
+    expect(res.status).toBe(201);
+  }
+
+  async function fetchBaseline(baseUrl: string, filePath: string): Promise<Response> {
+    return fetch(`${baseUrl}/api/baselines/content?path=${encodeURIComponent(filePath)}`);
+  }
+
+  it('SIGKILL: a copy captured before the crash is back after relaunch', async () => {
+    const { homeDir, docPath } = makeHomeDir();
+    const port = await pickTestPort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const serverA = launchServer({ port, homeDir });
+    await waitForServerReady(serverA, 10_000);
+    await captureBaseline(baseUrl, docPath);
+    // The agent edits the file after capturing, as it would for real.
+    writeFileSync(docPath, '# Doc\n\nEdited by the agent.\n');
+
+    // A hard kill runs no exit handler, so the copy has to be saved and
+    // listed already. That follows the capture closely; wait for it rather
+    // than guess a delay.
+    const stateFile = join(baselinesDirPath(homeDir, port), 'state.json');
+    const listed = () => {
+      try {
+        return (JSON.parse(readFileSync(stateFile, 'utf8')) as { files: string[] }).files.length;
+      } catch {
+        return 0;
+      }
+    };
+    const deadline = Date.now() + 5_000;
+    while (listed() === 0) {
+      if (Date.now() > deadline) throw new Error('the before copy was never saved');
+      await sleep(20);
+    }
+    await stopServer(serverA, 'SIGKILL');
+
+    const serverB = launchServer({ port, homeDir });
+    await waitForServerReady(serverB, 10_000);
+    const res = await fetchBaseline(baseUrl, docPath);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { content: string; agentName?: string };
+    expect(body.content).toBe('# Doc\n\nSome body text.\n');
+    expect(body.agentName).toBe('Claude');
+  }, 30_000);
+
+  it('MD_REDLINE_PERSIST_SESSIONS=0 keeps copies in memory only', async () => {
+    const { homeDir, docPath } = makeHomeDir();
+    const port = await pickTestPort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const serverA = launchServer({ port, homeDir, persistSessions: false });
+    await waitForServerReady(serverA, 10_000);
+    await captureBaseline(baseUrl, docPath);
+    await stopServer(serverA, 'SIGTERM');
+    expect(existsSync(baselinesDirPath(homeDir, port))).toBe(false);
+
+    const serverB = launchServer({ port, homeDir, persistSessions: false });
+    await waitForServerReady(serverB, 10_000);
+    expect((await fetchBaseline(baseUrl, docPath)).status).toBe(404);
+  }, 30_000);
 });
