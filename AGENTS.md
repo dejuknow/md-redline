@@ -114,21 +114,48 @@ highlighting, orphan detection, and agent handoff are unaffected.
 | Container | Where the marker goes | Why |
 |---|---|---|
 | Fenced code block | Before the opening fence, own line | A marker inside is literal text |
+| Code block the regex misses: a fence in a blockquote or list item, an indented code block (#136) | Before the top-level block holding it (the code block itself, or its whole list or quote), own line | Literal text too; a marker line right before a nested fence would split the container, and one before a single list item would restart the list's numbering |
 | YAML/TOML frontmatter (offset 0 only) | After the closing fence, own line | It can't go before, and a comment body containing `: ` breaks the YAML parse |
 | HTML comment | Before the block; own line only when the comment owns its line | Nested comments don't exist: the first `-->` closes the outer one and the rest becomes visible text |
 | Inline code span | Before the opening backticks, inline | Inside, every other renderer shows the marker as literal code (#123) |
 
-Fences, frontmatter and HTML comments are computed with regexes, and each
+Placement protects the union of detection's regex fences and every code block
+the parser finds (`getParsedCode`: nested in a blockquote or list item,
+indented, or after a line that only looks like a fence), and repeats its moves
+until the marker sits outside all of them, so a marker never lands where
+detection skips it (#136). Its last rule snaps any own-line marker to the start
+of the top-level block around it, since a regex move lands at a raw line start
+with no idea of containers and a marker line inside a list, blockquote or
+paragraph splits it. The regex is not run to EOF for placement any more: the
+parser knows where an unclosed fence really ends (a nested one ends with its
+list item). A marker moved out of code is never used for anchor recovery, a
+drag onto code records the code's context rather than the list start's, and
+an own-line marker uses the document's own line ending. A marker right after a
+leading byte-order mark counts as starting the first line. Fences,
+frontmatter and HTML comments are computed with regexes, and each
 container's scan excludes the others (a fence line inside frontmatter is YAML,
-a `<!--` inside a fence or a code span is sample text). Code spans are the one
-container taken from the parse (`getInlineCodeRanges`: remark-parse with
-frontmatter and GFM, the renderer's parser, cached by text), because they
-interact with nearly everything inline: HTML tags and autolinks outrank them,
-and they end at every block boundary. That is deliberately narrow. #30 built
-the full parse-derived rewrite for the block containers and it corrupted
-documents six ways, since block node boundaries do not match the source; an
-inline code node's offsets are exactly its backticks. Extend the regex
-scanners for block containers, not the parse.
+a `<!--` inside a fence or a code span is sample text). Code spans (#123) and
+the code blocks the fence regex misses (#136) come from the parse
+(`getParsedCode`: remark-parse with frontmatter and GFM, the renderer's parser,
+one cached parse per text, skipped for a text with nothing that could be code),
+and only ever for PLACEMENT, to decide where not to write. Detection keeps its
+regexes. That split is the point: #30 let the parse decide where detection
+looks, and it corrupted documents six ways, since block node boundaries do not
+match the source. Only placement learns from the parse, and a move it makes
+has to land outside detection's ranges too.
+
+Known limits of the code-block relocation: the same code text twice inside
+one list means a drag onto the second copy records the first copy's context;
+and a mermaid diagram inside a list item, or after a line that only looks like
+a fence, loses a comment from its diagram thread because the marker now sits
+before the whole list. Comment order uses the anchor's position within the
+top-level block, not the marker's, so a comment on code in item 20 still sorts
+after items 1 to 19 (`orderCommentsByAnchor`). An own-line marker at the start
+of a top-level block holding code, or a line the fence regex takes for a
+fence, is never used for anchor recovery (`sitsBeforeMovedCode`): that is where
+placement moves a marker for code, and the text after it is not the anchor.
+Own-line markers elsewhere, like one an agent left above text it rewrote,
+still recover.
 
 **Reading, inside a code span:** a complete marker still parses (mdr wrote
 markers inside backticks before #123, and those keep working). Anything else

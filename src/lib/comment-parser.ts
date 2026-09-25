@@ -51,10 +51,7 @@ type CommentTransform =
   | { type: 'remove' }
   | { type: 'replace'; comment: MdComment };
 
-function getCodeBlockRanges(
-  rawMarkdown: string,
-  { unclosedRunsToEof = false }: { unclosedRunsToEof?: boolean } = {},
-): CodeBlockRange[] {
+function getCodeBlockRanges(rawMarkdown: string): CodeBlockRange[] {
   const codeBlockRanges: CodeBlockRange[] = [];
   const fenceRegex = /^ {0,3}(`{3,}|~{3,}).*$/gm;
   let fenceMatch: RegExpExecArray | null;
@@ -88,17 +85,11 @@ function getCodeBlockRanges(
     }
   }
 
-  // A fence with no closer runs to the end of the document, which is how every
-  // renderer reads it. Only PLACEMENT is told so, and the asymmetry is
-  // deliberate and one-directional: insertion protecting more than detection
-  // sees can only push a marker further OUT of a container, into text detection
-  // does read. The reverse, teaching detection about a container insertion does
-  // not know, is what silently loses comments, so detection keeps pairing
-  // fences exactly as it does today.
-  if (unclosedRunsToEof && openFence) {
-    codeBlockRanges.push({ start: openFence.start, end: rawMarkdown.length });
-  }
-
+  // A fence with no closer is not a range here. Every renderer runs it to the
+  // end of its container, and placement learns that from the parser
+  // (getParsedCode), which knows where the container ends; detection keeps
+  // pairing fences exactly as it always has, since teaching it a container
+  // existing documents never counted is what silently loses comments.
   return codeBlockRanges;
 }
 
@@ -180,44 +171,107 @@ const inlineCodeParser = unified()
   .use(remarkFrontmatter, ['yaml', 'toml'])
   .use(remarkGfm);
 
-/**
- * Inline code spans, taken from the parser the renderer uses rather than a
- * scanner of our own (#123). Code spans interact with nearly everything
- * inline: HTML tags and autolinks outrank them, they end at block boundaries
- * (list items, headings, table cells, blockquote breaks), and a backslash
- * cannot escape their closer. A hand-rolled scanner got several of those
- * wrong and moved markers into URLs and other blocks. This is not the #30
- * rewrite: #30 read BLOCK containers off node boundaries, which do not match
- * the source. An inlineCode node's offsets are exactly its backticks, and a
- * marker goes in front of them inline, with no line break.
- */
+/** A code block as the renderer parses it, and where a marker for it goes. */
+interface ParsedCodeBlock extends CodeBlockRange {
+  /**
+   * Start of the line where the top-level block holding this code begins: the
+   * code block itself at the top level, or the whole list or blockquote it
+   * sits in. A marker line there cannot split the container, where one right
+   * before a nested fence would (#30) and one before a single list item would
+   * restart the list's numbering.
+   */
+  target: number;
+}
+
+/** What placement and detection need from one parse of a text. */
+interface ParsedCode {
+  inline: CodeBlockRange[];
+  blocks: ParsedCodeBlock[];
+  /** Every top-level block, from the start of its first line to its end. */
+  topLevel: CodeBlockRange[];
+}
+
+const NO_CODE: ParsedCode = { inline: [], blocks: [], topLevel: [] };
+
 // A few recent results, keyed by the text. A batch of agent comments inserts
 // into the same clean text over and over, and one change is parsed by several
 // callers, so the parse (tens of ms on a large spec) runs once, not per call.
-const inlineCodeCache = new Map<string, CodeBlockRange[]>();
 // Sized for several open tabs: the tab badges re-parse every tab on each change.
-const INLINE_CODE_CACHE_SIZE = 16;
+const parsedCodeCache = new Map<string, ParsedCode>();
+const PARSED_CODE_CACHE_SIZE = 16;
 
-function getInlineCodeRanges(markdown: string): CodeBlockRange[] {
-  if (!markdown.includes('`')) return [];
-  const cached = inlineCodeCache.get(markdown);
+/**
+ * Code spans and code blocks, taken from the parser the renderer uses rather
+ * than scanners of our own (#123, #136). Code spans interact with nearly
+ * everything inline: HTML tags and autolinks outrank them, they end at block
+ * boundaries, and a backslash cannot escape their closer. Code blocks nest in
+ * blockquotes and list items, and indented code has no fence at all; the
+ * fence regex misses each of those. This is not the #30 rewrite: #30 read
+ * BLOCK containers off node boundaries to decide where detection looks; here
+ * the parse only tells placement where not to write, and detection keeps its
+ * regex, since teaching it containers existing documents never counted would
+ * make their markers vanish.
+ *
+ * Skipped when the text has nothing that could be code (no backtick, no tilde
+ * fence, no run of four spaces or a tab), which is most documents.
+ */
+function getParsedCode(markdown: string): ParsedCode {
+  // Any run of four spaces or a tab, not just at a line start: indented code
+  // also sits after a blockquote's "> " or a list marker.
+  if (!/`|~~~| {4}|\t/.test(markdown)) return NO_CODE;
+  const cached = parsedCodeCache.get(markdown);
   if (cached) return cached;
-  const ranges: CodeBlockRange[] = [];
+  const parsed: ParsedCode = { inline: [], blocks: [], topLevel: [] };
   // micromark drops a leading byte-order mark and counts offsets without it,
-  // as src/markdown/pipeline.ts also corrects for.
+  // as src/markdown/pipeline.ts also corrects for. Nothing may be placed
+  // before the mark, so a line start is never earlier than it.
   const bom = markdown.charCodeAt(0) === 0xfeff ? 1 : 0;
-  visit(inlineCodeParser.parse(markdown), 'inlineCode', (node) => {
-    const start = node.position?.start.offset;
-    const end = node.position?.end.offset;
-    if (start !== undefined && end !== undefined) {
-      ranges.push({ start: start + bom, end: end + bom });
-    }
-  });
-  if (inlineCodeCache.size >= INLINE_CODE_CACHE_SIZE) {
-    inlineCodeCache.delete(inlineCodeCache.keys().next().value as string);
+  const tree = inlineCodeParser.parse(markdown);
+  for (const top of tree.children) {
+    const topStart = top.position?.start.offset;
+    const topEnd = top.position?.end.offset;
+    if (topStart === undefined || topEnd === undefined) continue;
+    const lineStart = Math.max(bom, markdown.lastIndexOf('\n', topStart + bom - 1) + 1);
+    parsed.topLevel.push({ start: lineStart, end: topEnd + bom });
+    visit(top, (node) => {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start === undefined || end === undefined) return;
+      if (node.type === 'inlineCode') parsed.inline.push({ start: start + bom, end: end + bom });
+      if (node.type === 'code') {
+        parsed.blocks.push({ start: start + bom, end: end + bom, target: lineStart });
+      }
+    });
   }
-  inlineCodeCache.set(markdown, ranges);
-  return ranges;
+  if (parsedCodeCache.size >= PARSED_CODE_CACHE_SIZE) {
+    parsedCodeCache.delete(parsedCodeCache.keys().next().value as string);
+  }
+  parsedCodeCache.set(markdown, parsed);
+  return parsed;
+}
+
+/**
+ * Whether an own-line marker at `offset` sits at the start of a top-level
+ * block holding code, or a line the fence regex takes for a fence: exactly
+ * where placement moves a marker for code it could not write into (#136).
+ * The text after such a marker is the list's first item or a paragraph above
+ * the code, not the anchor, so recovering from it re-pointed comments on
+ * edited code at unrelated prose. Own-line markers elsewhere (an agent that
+ * restructured the text around one) still recover.
+ */
+function sitsBeforeMovedCode(cleanMarkdown: string, offset: number): boolean {
+  const { topLevel, blocks } = getParsedCode(cleanMarkdown);
+  const block = topLevel.find((b) => offset >= b.start && offset < b.end);
+  if (!block) return false;
+  return (
+    blocks.some((c) => c.start >= block.start && c.start < block.end) ||
+    getCodeBlockRanges(cleanMarkdown).some((r) => r.start >= block.start && r.start < block.end)
+  );
+}
+
+/** Inline code spans (#123); see getParsedCode. */
+function getInlineCodeRanges(markdown: string): CodeBlockRange[] {
+  return getParsedCode(markdown).inline;
 }
 
 function getStandaloneStripEnd(
@@ -225,8 +279,17 @@ function getStandaloneStripEnd(
   markerStart: number,
   markerEnd: number,
 ): number {
-  const isStartOfLine = markerStart === 0 || rawMarkdown[markerStart - 1] === '\n';
-  return isStartOfLine && rawMarkdown[markerEnd] === '\n' ? markerEnd + 1 : markerEnd;
+  // Right after a leading byte-order mark is the start of the first line too:
+  // placement puts an own-line marker there rather than ahead of the mark.
+  const isStartOfLine =
+    markerStart === 0 ||
+    rawMarkdown[markerStart - 1] === '\n' ||
+    (markerStart === 1 && rawMarkdown.charCodeAt(0) === 0xfeff);
+  if (!isStartOfLine) return markerEnd;
+  // A CRLF document's own-line marker ends in \r\n (placement writes the
+  // document's own line ending), and both characters go with the marker.
+  if (rawMarkdown.startsWith('\r\n', markerEnd)) return markerEnd + 2;
+  return rawMarkdown[markerEnd] === '\n' ? markerEnd + 1 : markerEnd;
 }
 
 /**
@@ -561,7 +624,8 @@ export function parseComments(rawMarkdown: string): ParseResult {
     if (anchorResolves(comment.anchor, plainDoc, mermaidDoc ?? '')) continue;
     comment.anchorStale = true;
     const recovered =
-      marker.offset === frontmatterEnd
+      marker.offset === frontmatterEnd ||
+      (marker.newlineBudget === 0 && sitsBeforeMovedCode(cleanMarkdown, marker.offset))
         ? null
         : recoverAnchorAtOffset(cleanMarkdown, marker.offset, marker.newlineBudget);
     // A candidate that cannot be located is worse than none: it would suppress
@@ -987,20 +1051,54 @@ export function insertComment(
   // anchor is unaffected: it stays the real text, so highlighting, orphan
   // detection, and agent handoff all keep working.
   //
-  // A fifth container, inline code (#123), extends these scanners rather than
-  // replacing them: #30 built the parse-derived rewrite and found it corrupts
-  // documents in six new ways. Each pass below can only move the offset to a
-  // position outside every container the passes before it protect.
+  // Code spans (#123) and code blocks the regex misses (#136) come from the
+  // renderer's parse, but only to decide where NOT to write: detection keeps
+  // its regexes, and #30's rewrite, which let the parse decide where detection
+  // looks, corrupted documents six ways. Each pass below can only move the
+  // offset to a position outside every container the passes before it
+  // protect, and the code-block loop repeats until that holds for all of them.
   let ownLine = false;
   let leadingNewline = false;
   {
-    const fencedRanges = getCodeBlockRanges(cleanMarkdown, { unclosedRunsToEof: true });
+    // Fences as detection finds them (the regex), plus every code block the
+    // parser finds (#136): nested in a blockquote or list item, indented, or
+    // after a line that only looks like a fence. The parser also knows where
+    // an unclosed fence really ends (at the end of its list item, say), so
+    // the regex is not told to run one to EOF here.
+    const fencedRanges = getCodeBlockRanges(cleanMarkdown);
+    const { blocks: codeBlocks, topLevel } = getParsedCode(cleanMarkdown);
     const frontmatter = getFrontmatterRange(cleanMarkdown);
-    // Fenced blocks: before the opening fence.
-    for (const range of fencedRanges) {
-      if (insertionCleanOffset >= range.start && insertionCleanOffset <= range.end) {
-        insertionCleanOffset = range.start;
-        ownLine = true;
+    // Moved until nothing moves. A regex move lands at a raw line start with
+    // no idea of containers, and a marker on its own line inside a list,
+    // blockquote or paragraph splits it; the last rule snaps any own-line
+    // marker to the start of the top-level block around it. Each move can
+    // land inside another range (a mis-paired regex fence covering a list's
+    // start, say), and a marker must end up outside all of them or detection,
+    // which reads the regex's ranges, would not find it. Offsets only ever
+    // decrease, so this ends.
+    for (let moved = true; moved; ) {
+      moved = false;
+      for (const range of fencedRanges) {
+        if (insertionCleanOffset >= range.start && insertionCleanOffset <= range.end) {
+          if (insertionCleanOffset !== range.start) moved = true;
+          insertionCleanOffset = range.start;
+          ownLine = true;
+        }
+      }
+      for (const block of codeBlocks) {
+        if (insertionCleanOffset >= block.start && insertionCleanOffset < block.end) {
+          if (insertionCleanOffset !== block.target) moved = true;
+          insertionCleanOffset = block.target;
+          ownLine = true;
+        }
+      }
+      if (ownLine) {
+        for (const block of topLevel) {
+          if (insertionCleanOffset > block.start && insertionCleanOffset < block.end) {
+            insertionCleanOffset = block.start;
+            moved = true;
+          }
+        }
       }
     }
     // Frontmatter: after the closing fence. It cannot go before, since
@@ -1023,7 +1121,7 @@ export function insertComment(
     // move the offset to a `<!--` that lies outside every fence and outside
     // the frontmatter, so it can never undo the two passes above. Reordering
     // these three, or dropping the exclusions, breaks that.
-    const nonHtmlRegions = frontmatter ? [...fencedRanges, frontmatter] : fencedRanges;
+    const nonHtmlRegions = [...fencedRanges, ...codeBlocks, ...(frontmatter ? [frontmatter] : [])];
     // Code spans are scanned first and excluded from the comment pass: a
     // `<!--` inside backticks is text, not an unclosed comment running to EOF
     // that would drag every later marker up to it.
@@ -1060,8 +1158,10 @@ export function insertComment(
   const rawInsertionPoint = cleanToRawOffset(insertionCleanOffset);
 
   const marker = serializeComment(comment);
-  const before = leadingNewline ? '\n' : '';
-  const after = ownLine ? '\n' : '';
+  // The document's own line ending, so a CRLF file stays CRLF.
+  const newline = cleanMarkdown.includes('\r\n') ? '\r\n' : '\n';
+  const before = leadingNewline ? newline : '';
+  const after = ownLine ? newline : '';
   return (
     rawMarkdown.slice(0, rawInsertionPoint) +
     before +
@@ -1171,10 +1271,22 @@ export function updateCommentAnchor(
     // markdown, or just past the backticks when the marker sits in front of a
     // code span (#123).
     let anchorIdx = target.cleanOffset;
-    if (cleanMarkdown[anchorIdx] === '`' && !cleanMarkdown.startsWith(newAnchor, anchorIdx)) {
-      const span = getInlineCodeRanges(cleanMarkdown).find((r) => r.start === anchorIdx);
-      const inSpan = span ? cleanMarkdown.indexOf(newAnchor, anchorIdx) : -1;
-      if (span && inSpan !== -1 && inSpan + newAnchor.length <= span.end) anchorIdx = inSpan;
+    if (!cleanMarkdown.startsWith(newAnchor, anchorIdx)) {
+      // A marker moved in front of the code it belongs to: the backticks of
+      // a code span (#123), or the list, quote or block around a code block
+      // (#136). The anchor is inside that code, not at the marker.
+      const { inline, blocks } = getParsedCode(cleanMarkdown);
+      const holders = [
+        ...inline.filter((r) => r.start === anchorIdx),
+        ...blocks.filter((b) => b.target === anchorIdx),
+      ];
+      for (const holder of holders) {
+        const found = cleanMarkdown.indexOf(newAnchor, holder.start);
+        if (found !== -1 && found + newAnchor.length <= holder.end) {
+          anchorIdx = found;
+          break;
+        }
+      }
     }
     const CONTEXT_LEN = 30;
     const beforeStart = Math.max(0, anchorIdx - CONTEXT_LEN);
@@ -2122,8 +2234,21 @@ export function orderCommentsByAnchor(cleanMarkdown: string, comments: MdComment
     const direct = cleanMarkdown.indexOf(displayAnchor(comment));
     return direct === -1 ? (comment.cleanOffset ?? 0) : direct;
   };
+  // Where each comment's anchor actually is. A marker moved out of code sits
+  // at the start of the list or quote around it (#136), possibly items ahead
+  // of the code it belongs to, so the anchor is looked for from the marker to
+  // the end of that top-level block. An ordinary marker is right before its
+  // anchor, so this is its own offset or very near it.
+  const { topLevel } = getParsedCode(cleanMarkdown);
+  const sortKey = (comment: MdComment): number => {
+    const offset = comment.cleanOffset ?? 0;
+    const block = topLevel.find((b) => offset >= b.start && offset < b.end);
+    if (!block) return offset;
+    const found = cleanMarkdown.indexOf(displayAnchor(comment), offset);
+    return found !== -1 && found < block.end ? found : offset;
+  };
   return [...comments].sort(
-    (a, b) => (a.cleanOffset ?? 0) - (b.cleanOffset ?? 0) || anchorPosition(a) - anchorPosition(b),
+    (a, b) => sortKey(a) - sortKey(b) || anchorPosition(a) - anchorPosition(b),
   );
 }
 
