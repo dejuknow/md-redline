@@ -242,13 +242,17 @@ describe('a server that is gone (#116)', () => {
 
       const started = Date.now();
       const err = await createMdrClient(base)
-        .waitForReview('rev_x', 3)
+        .waitForReview('rev_deadline', 3)
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ServerUnreachableError);
       expect(Date.now() - started).toBeLessThan(4_000);
-      expect(urls[0]).toContain('timeout=3');
-      const later = urls.slice(1).map((u) => Number(/timeout=(\d+)/.exec(u)?.[1]));
+      // Only this poll's requests: an ephemeral port can be reached by a
+      // client from another test file running in parallel, which on Windows
+      // CI put a request with no timeout in this list.
+      const mine = urls.filter((u) => u.includes('/rev_deadline/'));
+      expect(mine[0]).toContain('timeout=3');
+      const later = mine.slice(1).map((u) => Number(/timeout=(\d+)/.exec(u)?.[1]));
       expect(later.length).toBeGreaterThan(0);
       for (const t of later) expect(t).toBeLessThanOrEqual(2);
     }, 8_000);
