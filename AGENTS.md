@@ -1001,6 +1001,26 @@ palette, settings, the file opener and the comments drawer never render on top
 of a live menu. A tab switch closes it too: its items hold a `SelectionInfo`
 captured in the document being left.
 
+**Focus and Escape across that handoff (#100).** Opening an overlay closes the
+menu in the same commit, so the composer's "came back" moment coincides with
+the overlay taking over. `CommentForm` takes `overlayOpen` (App passes
+`activeModal !== null || drawerOpen`) and, when the menu closes under an open
+overlay, owes the focus instead of taking it; it pays when the overlay closes,
+if focus is still on the body. Taking it at once put search keystrokes into the
+draft and left Settings with no focus of its own, so Escape reached the draft.
+Separately, `useSelection` clears the selection on Escape keyup only when no
+overlay or menu was open as the key went down. App hands it
+`escapeOwnedElsewhereRef` (any `activeModal`, the drawer, any context menu), and
+it asks in the capture phase on `window`, before a handler closes the layer or
+stops the event (the palette stops it), keeping the answer across auto-repeats
+until keyup. Asking what handlers did instead (`defaultPrevented`) missed the
+palette, the drawer and held keys. Before this, the Escape that closed Settings,
+search, the palette, the drawer or a context menu also dropped the selection
+and discarded an expanded draft. The draft also ignores an auto-repeated
+Escape, so a held key that closed an overlay does not carry on into cancelling
+the draft once focus comes back to it. One Escape per layer: the first closes
+the overlay or menu, a second clears the selection.
+
 **The menu carries Comment and Copy, not templates.** It listed the same eight
 templates the pill does, which made one label mean two things: the pill's
 prefill the composer, the menu's posted immediately. Prefilling from the menu

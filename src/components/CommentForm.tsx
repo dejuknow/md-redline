@@ -22,6 +22,12 @@ interface Props {
    * a draft comes back exactly as it was left.
    */
   hidden?: boolean;
+  /**
+   * An overlay (search, Settings, the command palette, the comments drawer)
+   * is open. It owns the keyboard, so the draft must not take focus back from
+   * it; it gets focus back when the overlay closes instead (#100).
+   */
+  overlayOpen?: boolean;
   onSubmit: (
     anchor: string,
     text: string,
@@ -38,6 +44,7 @@ export function CommentForm({
   isPending,
   autoExpand,
   hidden = false,
+  overlayOpen = false,
   onSubmit,
   onCancel,
   onLock,
@@ -273,6 +280,10 @@ export function CommentForm({
     }
     if (e.key === 'Escape') {
       e.preventDefault();
+      // Only a fresh press. A held Escape that just closed an overlay goes on
+      // repeating after the draft takes its focus back, and must not carry on
+      // into cancelling the draft (#100).
+      if (e.repeat) return;
       if (prefillPristine && text) {
         setText('');
         setPrefillPristine(false);
@@ -284,13 +295,31 @@ export function CommentForm({
 
   // A browser blurs the focused element when an ancestor becomes invisible, so
   // an expanded composer comes back caretless after the menu closes. Put focus
-  // where the reader left it.
+  // where the reader left it, unless the menu closed because an overlay opened
+  // (#100): opening search or Settings closes every menu in the same commit,
+  // and taking focus then put the reader's keystrokes into the draft, and let
+  // Escape in Settings discard it. The focus is owed instead, and paid when
+  // the overlay closes, if nothing else has claimed it by then.
   const wasHiddenRef = useRef(hidden);
+  const focusOwedRef = useRef(false);
   useEffect(() => {
     const cameBack = wasHiddenRef.current && !hidden;
     wasHiddenRef.current = hidden;
-    if (cameBack && isExpanded) inputRef.current?.focus();
-  }, [hidden, isExpanded]);
+    if (!isExpanded) {
+      focusOwedRef.current = false;
+      return;
+    }
+    if (cameBack) {
+      if (overlayOpen) focusOwedRef.current = true;
+      else inputRef.current?.focus();
+      return;
+    }
+    if (focusOwedRef.current && !overlayOpen && !hidden) {
+      focusOwedRef.current = false;
+      const active = document.activeElement;
+      if (!active || active === document.body) inputRef.current?.focus();
+    }
+  }, [hidden, isExpanded, overlayOpen]);
 
   const handleExpand = () => {
     onLock(); // Lock the selection so mouseup events don't clear it

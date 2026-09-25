@@ -779,8 +779,10 @@ export default function App() {
     );
   }, []);
 
+  // Filled in below, once the menus and the drawer it reads exist.
+  const escapeOwnedElsewhereRef = useRef<() => boolean>(() => false);
   const { selection, commentSelection, isPending, clearSelection, lockSelection, adoptSelection } =
-    useSelection(proseRef as RefObject<HTMLElement | null>);
+    useSelection(proseRef as RefObject<HTMLElement | null>, escapeOwnedElsewhereRef);
 
   // Mirrors cleanMarkdown for callbacks that must stay stable: the marker-free
   // document is what a copy hands back, and it is what the block spans index.
@@ -985,6 +987,15 @@ export default function App() {
   // it. Close it automatically once the rail becomes available again, so
   // the two surfaces never show at the same time.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // An Escape pressed while any of these is open closes it and leaves the
+  // selection, and an expanded comment draft, alone (#100).
+  escapeOwnedElsewhereRef.current = () =>
+    activeModal !== null ||
+    drawerOpen ||
+    viewerCtxMenu.isOpen ||
+    explorerCtxMenu.isOpen ||
+    tabCtxMenu.isOpen ||
+    sidebarCtxMenu.isOpen;
 
   // An overlay taking the screen closes any open context menu. Without this the
   // palette, settings, the file opener or the comments drawer render on top of
@@ -3408,6 +3419,7 @@ export default function App() {
               isPending={isPending}
               autoExpand={autoExpandForm}
               hidden={viewerCtxMenu.isOpen}
+              overlayOpen={activeModal !== null || drawerOpen}
               onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
                 handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
                 setAutoExpandForm(false);
