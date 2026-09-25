@@ -3,6 +3,14 @@ export interface CommentReply {
   text: string;
   author: string;
   timestamp: string;
+  /**
+   * Whether an agent wrote this reply (#102). Set when mdr writes or first
+   * sees a reply: false from the reader's own UI, true from the agent API and
+   * for a reply that arrived by an edit to the file (an agent following the
+   * review prompt). Absent on replies written before it existed, which fall
+   * back to comparing author names.
+   */
+  agent?: boolean;
 }
 
 export type CommentStatus = 'open' | 'resolved';

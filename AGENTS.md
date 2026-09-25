@@ -96,7 +96,15 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
 
 - `anchor` — the originally selected text (what the comment refers to). It is a lookup key, not a label: an edit that rewrites the anchored text without updating this field detaches the comment. The hand-off prompt tells agents to keep it in sync, and `parseComments` recovers from the marker's position when they don't (see "Anchor recovery after a rewrite")
 - `text` — the reviewer's feedback
-- `replies` — threaded discussion array
+- `replies` — threaded discussion array. A reply may carry `agent: true|false`
+  (#102), stamped when mdr writes or first sees it: `false` from the reader's
+  UI (`addReply`), `true` from the agent API (`/agent-comments`) and for a reply
+  that arrived by an edit to the file (set during the timestamp backfill, since
+  that is how a prompt-following agent replies). The "answered" badge
+  (`computeAnsweredCommentIds`) reads the stamp; a reply with none, written
+  before the stamp existed, falls back to "an author other than the comment's".
+  A person replying by hand-editing the file outside mdr is counted as an
+  agent, which is the accepted cost.
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
 - `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`).

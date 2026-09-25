@@ -3273,6 +3273,9 @@ describe('POST /agent-comments with replies and expectsReply=false', () => {
     expect(body.repliesWritten).toBe(1);
     // Verify no pendingAsks created for this session
     expect(reviewSessions.getPendingAsks(sessionId)).toHaveLength(0);
+    // A reply posted through the agent API is stamped as an agent's (#102).
+    const written = await readFile(tempFile, 'utf8');
+    expect(written).toMatch(/"text":"a reply"[^}]*"agent":true/);
   });
 
   it('still creates pendingAsk when expectsReply=true (default for backward compat)', async () => {

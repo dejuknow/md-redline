@@ -1390,6 +1390,9 @@ export function addReply(
     text,
     author,
     timestamp: new Date().toISOString(),
+    // Written from mdr's own UI, so a person's, whatever name it carries: a
+    // colleague, or the reader after renaming themselves (#102).
+    agent: false,
   };
 
   // Use transformCommentMarkers directly so we can clear `expectsReply` on the
@@ -1421,7 +1424,7 @@ export function addReply(
 export function appendReply(
   content: string,
   commentId: string,
-  reply: { id: string; text: string; author: string; timestamp: string },
+  reply: { id: string; text: string; author: string; timestamp: string; agent?: boolean },
 ): string {
   // Track whether the target comment was found so we can detect "not found".
   let found = false;
@@ -1507,7 +1510,10 @@ export function backfillReplyTimestamps(
     const nextReplies = comment.replies.map((reply) => {
       if (forceIds.has(reply.id)) {
         changed = true;
-        return { ...reply, timestamp: fallbackIso };
+        // A reply that arrived by an edit to the file came from outside mdr:
+        // an agent following the review prompt, which is also why it has no
+        // trustworthy timestamp (#102). One mdr wrote says so already.
+        return { ...reply, timestamp: fallbackIso, agent: reply.agent ?? true };
       }
       return reply;
     });

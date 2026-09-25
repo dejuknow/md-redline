@@ -3944,3 +3944,28 @@ describe('placing a marker never changes how the document renders (#136)', () =>
     expect(c.contextAfter?.startsWith('\n    ```')).toBe(true);
   });
 });
+
+describe('stamping who wrote a reply (#102)', () => {
+  const base = marker({ id: 'c1', anchor: 'hello' }) + 'hello';
+
+  it("marks a reply from mdr's own UI as a person's", () => {
+    const [c] = parseComments(addReply(base, 'c1', 'thanks', 'Priya')).comments;
+    expect(c.replies?.[0].agent).toBe(false);
+  });
+
+  it("marks a reply that arrived by an edit to the file as an agent's, once", () => {
+    const withReplies = base.replace(
+      '"id":"c1"',
+      '"id":"c1","replies":[{"id":"ra","text":"done","author":"Claude"},{"id":"rb","text":"x","author":"Me","timestamp":"2026-01-01T00:00:00.000Z","agent":false}]',
+    );
+    const out = backfillReplyTimestamps(
+      withReplies,
+      new Set(['ra', 'rb']),
+      '2026-09-25T00:00:00.000Z',
+    );
+    const [c] = parseComments(out).comments;
+    expect(c.replies?.find((r) => r.id === 'ra')?.agent).toBe(true);
+    // An explicit stamp is never overwritten.
+    expect(c.replies?.find((r) => r.id === 'rb')?.agent).toBe(false);
+  });
+});
