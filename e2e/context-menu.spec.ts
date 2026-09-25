@@ -105,6 +105,31 @@ async function openSecondFile(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Context menu on comment highlight', () => {
+  test('a selection over commented text opens the selection menu, with Copy (#88)', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Already discussed');
+
+    // Select the commented words again and right-click the selection.
+    const menu = await openSelectionMenu(page, 'valid credentials');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByText('Copy', { exact: true })).toBeVisible();
+    await expect(menu.getByText('Delete')).toHaveCount(0);
+  });
+
+  test('the comment menu is still one right-click away with nothing selected (#88)', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Still reachable');
+    await page.mouse.click(5, 5);
+
+    await page.locator('mark.comment-highlight').first().click({ button: 'right' });
+    const menu = page.locator('.context-menu-enter');
+    await expect(menu.getByText('Delete')).toBeVisible();
+  });
+
   test('right-clicking a highlight shows context menu with comment actions', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Ctx menu test');

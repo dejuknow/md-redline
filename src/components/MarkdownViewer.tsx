@@ -694,27 +694,53 @@ export const MarkdownViewer = memo(
       // would lock keyboard users out of this menu entirely.
       if (e.shiftKey && isSecondaryClick(e)) return;
 
-      // Check if right-click is on a comment highlight
-      const mark = markToAct(e.target as HTMLElement);
-      if (mark?.dataset.commentIds) {
-        const ids = mark.dataset.commentIds.split(',');
-        // preventDefault only if a menu actually opened: the consumer refuses a
-        // mark whose comment is gone, and eating the native menu for a menu
-        // that never appears leaves the reader with no menu at all.
-        if (onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY })) {
-          e.preventDefault();
-        }
-        return;
-      }
-
+      // A selection the reader just made wins over a comment it overlaps
+      // (#88): selecting is the more deliberate act, and the comment menu
+      // offered no Copy or Comment, so neither was reachable on text that
+      // already carried a comment. The comment's own actions stay one
+      // right-click away, on its highlight with nothing selected.
+      //
       // The viewer paints the committed selection as mark.selection-highlight,
       // which replaces the selected text nodes and so collapses the browser's
       // own range. By the time a right-click arrives there is no native
       // selection left for the check below to find, which is why right-clicking
       // one's own selection fell through to the browser's menu. The painted
       // mark IS the selection, so recognize it directly.
-      if ((e.target as HTMLElement).closest(SELECTION_MARK_SELECTOR)) {
+      const target = e.target as HTMLElement;
+      if (target.closest(SELECTION_MARK_SELECTOR)) {
         if (onCtxMenu({ type: 'selection', x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // A live native range the click is actually on wins the same way. Only
+      // one the click lands inside: a selection elsewhere must not take a
+      // comment's right-click away from it.
+      const liveSel = window.getSelection();
+      const liveRange = liveSel && liveSel.rangeCount > 0 ? liveSel.getRangeAt(0) : null;
+      const liveOnTarget =
+        liveRange !== null &&
+        !liveRange.collapsed &&
+        liveSel!.toString().trim().length > 0 &&
+        containerRef.current?.contains(liveRange.commonAncestorContainer) === true &&
+        liveRange.intersectsNode(target);
+      if (liveOnTarget) {
+        const liveText = liveSel!.toString().trim();
+        if (onCtxMenu({ type: 'selection', liveText, x: e.clientX, y: e.clientY })) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Check if right-click is on a comment highlight
+      const mark = markToAct(target);
+      if (mark?.dataset.commentIds) {
+        const ids = mark.dataset.commentIds.split(',');
+        // preventDefault only if a menu actually opened: the consumer refuses a
+        // mark whose comment is gone, and eating the native menu for a menu
+        // that never appears leaves the reader with no menu at all.
+        if (onCtxMenu({ type: 'highlight', commentIds: ids, x: e.clientX, y: e.clientY })) {
           e.preventDefault();
         }
         return;
