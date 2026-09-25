@@ -1165,6 +1165,37 @@ mark.search-highlight-active {
   transform: scaleX(1.5);
 }
 
+/* Explorer and mermaid-panel resize dividers (useResizablePanel). Without
+   touch-action the browser claims a touch drag for scrolling before the page
+   sees a single pointermove, the same reason .drag-handle needs it above.
+   z-index matches .drag-handle's: the pane after the divider paints later in
+   tree order and otherwise wins the hit test over the divider's own line and
+   the pad on that side, which left only the left half grabbable. */
+.resize-divider {
+  touch-action: none;
+  z-index: 10;
+}
+/* The hit target around the 1px line: 9px for a mouse, which lays only 4px
+   over each pane. On a touch-first device it widens to 25px (WCAG 2.5.8's
+   24px minimum, the same -12px #35 gave the anchor handles). Not for a
+   mouse: a full-height strip that wide would take the explorer's scrollbar
+   edge and clicks near the seam. The accepted cost: a hybrid laptop with a
+   touchscreen reports its trackpad as the primary pointer, so a finger
+   there gets the 9px target. */
+.resize-hit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+@media (pointer: coarse) {
+  .resize-hit {
+    left: -12px;
+    right: -12px;
+  }
+}
+
 /* During drag, lock cursor across entire page */
 body.anchor-dragging,
 body.anchor-dragging * {

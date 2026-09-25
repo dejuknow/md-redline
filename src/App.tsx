@@ -3022,10 +3022,12 @@ export default function App() {
           </div>
           {explorerVisible && (
             <div
-              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-              onMouseDown={(e) => onResizeStart('explorer', e)}
+              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group resize-divider"
+              onPointerDown={onResizeStart('explorer')}
             >
-              <div className="absolute inset-y-0 -left-1 -right-1" />
+              {/* The hit target, not the 1px line you can see; see
+                  .resize-hit in index.css for why it widens only for touch. */}
+              <div className="resize-hit" />
             </div>
           )}
         </>
@@ -3496,7 +3498,7 @@ export default function App() {
           onDeleteReply={handleDeleteReply}
           onActivateComment={setActiveCommentId}
           panelWidth={mermaidPanelWidth}
-          onPanelResizeStart={(e) => onResizeStart('mermaidPanel', e)}
+          onPanelResizeStart={onResizeStart('mermaidPanel')}
           isResizing={isDragging}
         />
 
