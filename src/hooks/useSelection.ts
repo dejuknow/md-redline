@@ -4,7 +4,15 @@ import { SELECTION_MARK_SELECTOR } from '../lib/selection-mark';
 import { isSecondaryClick } from '../lib/platform';
 import type { SelectionInfo } from '../types';
 
-export function useSelection(containerRef: React.RefObject<HTMLElement | null>) {
+/**
+ * @param escapeOwnedElsewhere Whether an overlay or menu is open, asked when
+ *   Escape goes down. An Escape pressed while one is open is that layer's
+ *   (it closes it), not a request to drop the selection (#100).
+ */
+export function useSelection(
+  containerRef: React.RefObject<HTMLElement | null>,
+  escapeOwnedElsewhere?: React.RefObject<() => boolean>,
+) {
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   // Selections made by touch or pen are captured here instead of opening the
   // comment form directly. Native selection-handle drags happen in browser
@@ -167,8 +175,25 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
       lastCommit = info ? { epoch: epochRef.current, detail: e.detail } : null;
     };
 
+    // An Escape pressed while an overlay or menu is open (Settings, search,
+    // the palette, the drawer, a context menu) closes that layer and is not a
+    // request to drop the selection: clearing it too discarded an expanded
+    // comment draft along with it (#100). Asked in the capture phase on
+    // window, before any handler runs and closes the layer (and so before one
+    // can stop the event), and kept across auto-repeats until the key comes
+    // up, since a held key's later repeats find nothing open.
+    let escapeOwned = false;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      escapeOwned = escapeOwned || (escapeOwnedElsewhere?.current?.() ?? false);
+    };
+
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (escapeOwned) {
+          escapeOwned = false;
+          return;
+        }
         lockedRef.current = false;
         commitSelection(null);
         window.getSelection()?.removeAllRanges();
@@ -224,16 +249,18 @@ export function useSelection(containerRef: React.RefObject<HTMLElement | null>) 
 
     document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('keydown', handleKeyDown, true);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keyup', handleKeyUp);
       document.removeEventListener('selectionchange', handleSelectionChange);
       clearTimeout(selectionDebounce);
     };
-  }, [containerRef, commitSelection, capturePending]);
+  }, [containerRef, commitSelection, capturePending, escapeOwnedElsewhere]);
 
   return {
     selection,
