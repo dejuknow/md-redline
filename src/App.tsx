@@ -82,6 +82,7 @@ import { useComments, type CommentFocusOrigin } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
+import { buildNativeCopyFlavors } from './lib/copy-selection-html';
 import { rangeFromPaintedSelection, resolveSelectionMarkdown } from './lib/copy-as-markdown';
 import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
@@ -2396,7 +2397,21 @@ export default function App() {
         composerCaretCollapsed:
           composer !== null && composer.selectionStart === composer.selectionEnd,
       });
-      if (!fallbackText || !e.clipboardData) return;
+      if (!e.clipboardData) return;
+      if (!fallbackText) {
+        // Left alone, the browser would serialize the selection itself and
+        // hand the clipboard every block's source offsets (#103). Text selected
+        // in a field keeps the native copy.
+        const tag = active?.tagName;
+        if (active?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA') return;
+        const flavors =
+          viewMode === 'rendered' ? buildNativeCopyFlavors(window.getSelection()) : null;
+        if (!flavors) return;
+        e.preventDefault();
+        e.clipboardData.setData('text/plain', flavors.text);
+        if (flavors.html) e.clipboardData.setData('text/html', flavors.html);
+        return;
+      }
 
       // The viewer paints its own selection highlight, which clears the native
       // browser selection range. Restore expected copy behavior from app state,

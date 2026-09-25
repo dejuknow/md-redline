@@ -367,6 +367,40 @@ export function buildRangeHtml(range: Range, container: Element | null): string 
   }
 }
 
+/**
+ * The clipboard flavors for a copy the browser would otherwise serialize
+ * itself (#103): a live native selection inside rendered markdown, such as a
+ * hunk in the rendered diff or a pending touch selection. The browser's own
+ * `text/html` would carry every block's `data-src-*` offsets, so the app
+ * writes the flavors instead, through the same serializer as the viewer's
+ * copies. Null when the selection is empty or touches no rendered markdown,
+ * which leaves the copy to the browser. `html` is null when serializing failed; the
+ * caller still owns the copy then, so the offsets never leak by fallback.
+ */
+export function buildNativeCopyFlavors(
+  selection: Selection | null,
+): { text: string; html: string | null } | null {
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const text = selection.toString();
+  if (text.trim().length === 0) return null;
+  const range = selection.getRangeAt(0);
+  const common = range.commonAncestorContainer;
+  const element = common instanceof Element ? common : common.parentElement;
+  if (!element) return null;
+  // A selection that runs out of rendered markdown (Cmd+A, a drag from a diff
+  // hunk into the toolbar) has its common ancestor outside it, but still
+  // covers annotated blocks, so it is serialized against that ancestor.
+  const container =
+    element.closest('.prose') ??
+    (Array.from(element.ownerDocument.querySelectorAll('.prose')).some((prose) =>
+      range.intersectsNode(prose),
+    )
+      ? element
+      : null);
+  if (!container) return null;
+  return { text, html: buildRangeHtml(range, container) };
+}
+
 function serializeRange(range: Range, container: Element | null): string | null {
   if (!container) return null;
   const doc = container.ownerDocument;
