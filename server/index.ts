@@ -27,6 +27,12 @@ import { ReviewSessionStore, type PendingAsk } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
 import { BaselineStore } from './baselines';
 import { registerBaselineRoutes } from './routes/baselines';
+import {
+  baselinesDirPath,
+  createBaselinePersister,
+  loadPersistedBaselines,
+  type BaselinePersister,
+} from './baseline-persistence';
 import { DEFAULT_ENABLE_RESOLVE } from '../src/lib/settings';
 import { parseComments, removeComment, transformCommentMarkers } from '../src/lib/comment-parser';
 import { resolveApiPort, resolveHomeDir, resolveStrictApiPort, resolveVitePort } from './env';
@@ -1520,7 +1526,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     });
   }
 
-  return { app, reviewSessions };
+  return { app, reviewSessions, baselines };
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -1550,12 +1556,12 @@ const updateChecker = createUpdateChecker({
 });
 
 // createAppFull rather than createApp: the isMainModule boot path below needs
-// the same reviewSessions instance the routes are wired to, to restore it
-// from disk and to save it back. Every unit test still goes through
+// the same reviewSessions and baselines instances the routes are wired to, to
+// restore them from disk and to save them back. Every unit test still goes through
 // createApp/createAppFull directly (never through this module-scope call, and
 // never through the isMainModule block that follows), so persistence stays
 // opt-in to a real server process.
-const { app, reviewSessions } = createAppFull({
+const { app, reviewSessions, baselines } = createAppFull({
   staticDir: detectStaticDir(),
   defaultTrustHome: true,
   getLatestVersion: updatesEnabled ? updateChecker.getLatest : undefined,
@@ -1644,8 +1650,8 @@ async function findAvailablePort(appFetch: typeof app.fetch): Promise<number> {
   );
 }
 
-// MD_REDLINE_PERSIST_SESSIONS=0 turns persistence off entirely: no read at
-// boot, no write ever. Used by playwright.config.ts's dev-server env and
+// MD_REDLINE_PERSIST_SESSIONS=0 turns persistence off entirely, for review
+// sessions and agent before copies alike: no read at boot, no write ever. Used by playwright.config.ts's dev-server env and
 // meant for anyone who wants a server that never remembers a review across
 // a restart.
 const persistSessions = process.env.MD_REDLINE_PERSIST_SESSIONS !== '0';
@@ -1661,6 +1667,7 @@ if (isMainModule) {
       // if persistence is off or restore hasn't gotten this far yet.
       let saver: ReturnType<typeof createSessionSaver> | null = null;
       let periodicSave: ReturnType<typeof startPeriodicSave> | null = null;
+      let baselinePersister: BaselinePersister | null = null;
       if (persistSessions) {
         const homeDir = resolveHomeDir();
         const sessionsPath = sessionsFilePath(homeDir, port);
@@ -1684,6 +1691,22 @@ if (isMainModule) {
             console.warn('[sessions] could not restore saved review sessions', err);
           }
         }
+        // Agent before copies (#138), restored under the same window. Loaded
+        // here, before the saver exists, because the exit handlers are only
+        // registered once it does: a signal during this read would otherwise
+        // skip the session flush. The listener goes on before restore so a
+        // copy restore drops (expired, or past the entry cap) loses its file.
+        const baselinesDir = baselinesDirPath(homeDir, port);
+        const savedBaselines = await loadPersistedBaselines(baselinesDir, new Date());
+        baselinePersister = createBaselinePersister({ dir: baselinesDir });
+        baselines.setListener(baselinePersister);
+        baselines.restore(savedBaselines);
+        // The restored copies' save time is refreshed now, then every minute
+        // while any are held (touch does nothing otherwise), so a crash
+        // still restores them. flushSync stops the timer at exit.
+        baselinePersister.touch();
+        baselinePersister.startTouching();
+
         saver = createSessionSaver({
           path: sessionsPath,
           getState: () => reviewSessions.exportState(),
@@ -1727,6 +1750,7 @@ if (isMainModule) {
         // listener, so this one call also covers a graceful HTTP shutdown;
         // there is no separate wiring for that route.
         saver?.flushSync();
+        baselinePersister?.flushSync();
       };
       process.on('exit', cleanup);
       process.on('SIGINT', () => {

@@ -43,6 +43,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `server/review-sessions.ts`: review session store (create, batch, finish, abort, heartbeat, sweep)
 - `server/routes/review-sessions.ts`: HTTP routes for review session endpoints
 - `server/baselines.ts`: in-memory store of agent "before" copies behind `mdr_baseline` (newest copy per path, 64 entries, 2 MiB each, 24h lazy expiry)
+- `server/baseline-persistence.ts`: saves those copies to `~/.md-redline/baselines-<port>/` so they survive a restart (#138)
 - `server/routes/baselines.ts`: HTTP routes for the baseline store
 - `server/mcp-stdio/`: MCP stdio server (handler, client, server, types, validate)
 - `server/update-check.ts`: daily npm registry check for a newer published version, cached via preferences
@@ -289,7 +290,37 @@ except heartbeats and wait-park bookkeeping. `MD_REDLINE_PERSIST_SESSIONS=0`
 turns it off (the Playwright web server sets it, so one run never restores
 into the next). Accepted gap: a batch handed to a parked waiter at the
 instant the process dies is lost with the HTTP response, though
-`sentCommentIds` records it as sent. Baselines are still memory-only (#138).
+`sentCommentIds` records it as sent.
+
+Agent before copies (`mdr_baseline`) survive a restart the same way (#138),
+under the same window and the same off switch (`server/baseline-persistence.ts`).
+Each copy is its own file in `~/.md-redline/baselines-<port>/` (a copy can be
+2 MiB, too heavy to rewrite 64 of on every capture), named by a hash of its
+path plus its capture time, so a newer copy of a path is a new file rather than
+an overwrite. `state.json` beside them is the only thing that vouches for a
+file: it lists the exact files the server holds and when it was last seen
+alive (refreshed on each change, every minute while any copy is held, and on
+exit). At boot only listed files are restored, and only within
+`RESTORE_WINDOW_MS`; unlisted files, and every file outside the window, are
+deleted, so a copy that failed to delete or an older copy of a replaced path
+can never come back. A replace or drop takes the old file off the list, then
+writes the new one, then lists it, then deletes the old one, so a crash loses
+that copy at worst and never restores the older one in its place. The store
+reports changes through `BaselineStore.setListener` (`restored`, `stored`,
+`removed`) and still does no I/O; the persister queues them per path and
+writes them in batches. A change whose write fails is retried by the next
+batch or the one-minute refresh, and the exit handler writes, synchronously,
+whatever is queued or still being written, then starts no further async
+write. A restored copy keeps its original capture time, so the
+24-hour expiry still counts from the real capture. A listed file that does not
+parse, does not match its own name, or is stamped in the future is deleted; a
+file, or `state.json`, that merely cannot be read is left alone and not
+restored. The baselines are loaded before the session saver is created, so the
+exit handlers are not held back by a large read. Files are 0600 in a 0700
+directory, and the directory is removed once it holds nothing. Accepted gaps: a
+hard kill before a capture's batch lands loses that copy, and a port that never
+starts again keeps its directory, as it keeps its sessions file.
+
 Markers persist on disk regardless. `GET /api/file` sweeps markers whose
 `expectsReply` flag references a session that is no longer open and clears
 the flag (marker preserved). A post-restart `mdr_wait` on an unknown session

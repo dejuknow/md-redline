@@ -28,7 +28,7 @@ const PERSISTENCE_VERSION = 1;
  * have given up long before this window closes). Matches RESTORE_WINDOW_MS
  * in the design doc.
  */
-const RESTORE_WINDOW_MS = 5 * 60_000;
+export const RESTORE_WINDOW_MS = 5 * 60_000;
 
 /**
  * How far into the future a `savedAt` may read before it is treated as
@@ -37,7 +37,7 @@ const RESTORE_WINDOW_MS = 5 * 60_000;
  * anything past that means the file did not come from this machine's clock
  * just now.
  */
-const FUTURE_SLOP_MS = 5_000;
+export const FUTURE_SLOP_MS = 5_000;
 
 /** The on-disk wrapper around a PersistedStoreState: a version tag so a
  * downgrade or a future format never gets parsed as if it matched, plus the
@@ -54,7 +54,7 @@ export function sessionsFilePath(homeDir: string, port: number): string {
   return join(homeDir, '.md-redline', `sessions-${port}.json`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -437,7 +437,7 @@ export function startPeriodicSave(opts: {
   return { stop: () => clearInterval(timer) };
 }
 
-async function mkdirIfNeeded(dir: string): Promise<void> {
+export async function mkdirIfNeeded(dir: string): Promise<void> {
   // A saved session holds file paths and, in a terminal result, the prompt
   // with comment text, so the directory (like the file) is kept private to
   // the user. mkdir's mode option only applies to directories it actually
@@ -489,7 +489,15 @@ export async function cleanStaleTempFiles(homeDir: string, port: number): Promis
  * transient, not a real failure.
  */
 function writeSyncNow(path: string, state: PersistedStoreState): void {
-  const payload = toPersistedFile(state, Date.now());
+  writePrivateFileSync(path, JSON.stringify(toPersistedFile(state, Date.now())));
+}
+
+/**
+ * Write `content` to `path` crash-safely and synchronously, private to the
+ * user (0600 in a 0700 directory). Shared with baseline-persistence.ts, whose
+ * exit-time flush has the same constraint. Throws on failure.
+ */
+export function writePrivateFileSync(path: string, content: string): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
@@ -498,7 +506,6 @@ function writeSyncNow(path: string, state: PersistedStoreState): void {
     /* best effort; see mkdirIfNeeded's async twin for why this matters */
   }
   const tmpPath = `${path}.${randomBytes(6).toString('hex')}.tmp`;
-  const content = JSON.stringify(payload);
   try {
     // 'wx' (as atomicWriteFile uses for its own temp file) fails instead of
     // following a symlink planted at tmpPath, rather than writeFileSync's
