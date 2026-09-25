@@ -91,7 +91,7 @@ export interface MermaidFullscreenModalProps {
    * the user can drag to resize, matching the main app's sidebar. */
   panelWidth: number;
   /** Drag start handler from `useResizablePanel`. */
-  onPanelResizeStart: (e: React.MouseEvent) => void;
+  onPanelResizeStart: (e: React.PointerEvent<HTMLDivElement>) => void;
   /** True while the user is dragging — disables the panel's width transition
    * to avoid laggy follow-along. */
   isResizing: boolean;
@@ -487,10 +487,12 @@ export function MermaidFullscreenModal({
               is visible so it can't be clicked when the panel is hidden. */}
           {panelVisible && (
             <div
-              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group"
-              onMouseDown={onPanelResizeStart}
+              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group resize-divider"
+              onPointerDown={onPanelResizeStart}
             >
-              <div className="absolute inset-y-0 -left-1 -right-1" />
+              {/* The hit target, not the 1px line you can see; see
+                  .resize-hit in index.css for why it widens only for touch. */}
+              <div className="resize-hit" />
             </div>
           )}
           <div
@@ -498,6 +500,7 @@ export function MermaidFullscreenModal({
               panelVisible ? '' : 'w-0 border-l-0'
             } ${isResizing ? '' : 'transition-[width] duration-200 ease-in-out'}`}
             style={panelVisible ? { width: panelWidth } : undefined}
+            data-mermaid-panel
           >
             <MermaidThreadPanel
               threads={orderedComments}

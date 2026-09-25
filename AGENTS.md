@@ -1169,6 +1169,31 @@ has to preserve the intermediate positions.
 `Input.dispatchTouchEvent`, not dispatched DOM events: #33 established that
 synthetic-pointer tests here pass even with the touch handlers deleted.
 
+The explorer divider and the mermaid fullscreen panel splitter
+(`useResizablePanel.ts`, both consumed as `onResizeStart(panel)`, a function
+that returns the actual pointerdown handler) had the identical mouse-only
+pattern and the identical silent-dead-end failure on a tablet; #59 converted
+them the same way. `setPointerCapture` runs only after the in-flight guard and
+primary-pointer check pass, and inside a `try`, for the same reason DragHandles
+takes it there. A release saves the width; `pointercancel` and
+`lostpointercapture` put it back where the drag began (`revertAndEnd`), since a
+gesture the system took away was not a choice, and both share one `endDrag`.
+There is no Escape path, unlike the anchor handles. `pointerdown` is cancelled
+for every pointer type, which is also what keeps focus in a field being edited
+when a mouse grabs a divider. `.resize-divider` has `z-index: 10`: the pane
+after it paints later in tree order and otherwise covered the divider's own
+line and right-hand pad, so only the left half was grabbable (a bug before
+#59 too). The hit target is `.resize-hit`, a pad around the 1px line: 9px for
+a mouse, 25px on a touch-first device (`@media (pointer: coarse)`, matching
+`.drag-handle`'s -12px inset for WCAG 2.5.8). The wide pad is touch-only
+because a full-height 25px strip would take the explorer's scrollbar edge and
+clicks near the seam from a mouse; the accepted cost is that a hybrid
+touchscreen laptop reports its trackpad as primary, so a finger there gets
+9px. The spec pins both widths, the line hit, focus, and the revert. `e2e/touch-resize-handles.spec.ts`
+covers both dividers the same way `e2e/touch-drag-handles.spec.ts` covers the
+anchor handles: real CDP touch input, a cancelled drag, and a mouse regression
+check.
+
 ### Comments rail
 The single comment surface for the rendered view: a fixed-width column at the
 right edge of the document page, inside the same width-managed page unit as
