@@ -258,14 +258,17 @@ describe('a server that is gone (#116)', () => {
     }, 8_000);
 
     it('does not retry a non-poll method on ServerUnreachableError', async () => {
+      // Only this call's requests: an ephemeral port can be reached by a
+      // client from another test file running in parallel, which on macOS CI
+      // counted a second request here.
       let attempts = 0;
       const base = await listen((req) => {
-        attempts += 1;
+        if (req.url?.includes('/rev_no_retry/')) attempts += 1;
         req.socket.destroy();
       });
 
       const err = await createMdrClient(base)
-        .abortSession('rev_x')
+        .abortSession('rev_no_retry')
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ServerUnreachableError);
