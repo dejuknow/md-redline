@@ -92,6 +92,31 @@ test('holding Escape down in Settings keeps the draft', async ({ page }) => {
   await expect(draft(page)).toHaveValue('my unsaved draft');
 });
 
+test('Escape that cancels a confirm dialog keeps the draft', async ({ page }) => {
+  // "Delete all comments" needs a comment to delete, and asks first.
+  writeFileSync(
+    FIXTURE,
+    TEST_DOC_BASELINE.replace(
+      'Rate limiting',
+      '<!-- @comment{"id":"c1","anchor":"Rate limiting","text":"Why?","author":"Reviewer"} -->Rate limiting',
+    ),
+  );
+  await draftUnderMenu(page);
+  await page.keyboard.press(withMod('k'));
+  await page.getByPlaceholder('Type a command...').fill('Delete all comments');
+  await page.keyboard.press('Enter');
+  const confirm = page.getByRole('alertdialog', { name: 'Delete all comments' });
+  await expect(confirm).toBeVisible();
+  // The dialog listens for Escape from an effect that runs just after it
+  // paints; a press in that first instant would reach nothing.
+  await page.waitForTimeout(200);
+
+  await page.keyboard.press('Escape');
+
+  await expect(confirm).toHaveCount(0);
+  await expect(draft(page)).toHaveValue('my unsaved draft');
+});
+
 test.describe('in a window too narrow for the rail', () => {
   test.use({ viewport: { width: 900, height: 800 } });
 

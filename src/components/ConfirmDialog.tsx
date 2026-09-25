@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { ActionButton } from './ActionButton';
 
 interface Props {
@@ -21,6 +21,7 @@ export function ConfirmDialog({
   onCancel,
 }: Props) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -43,11 +44,18 @@ export function ConfirmDialog({
       <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
 
       {/* Dialog */}
+      {/* The role also tells App's Escape handling that the key is this
+          dialog's to use, so cancelling keeps a comment draft (#100). */}
       <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="relative w-full max-w-sm bg-surface-raised rounded-xl shadow-2xl border border-border p-5 overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-sm font-semibold text-content mb-1">{title}</h3>
+        <h3 id={titleId} className="text-sm font-semibold text-content mb-1">
+          {title}
+        </h3>
         <p className="text-xs text-content-secondary mb-5">{message}</p>
 
         <div className="flex justify-end gap-2">

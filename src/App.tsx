@@ -1000,7 +1000,10 @@ export default function App() {
     viewerCtxMenu.isOpen ||
     explorerCtxMenu.isOpen ||
     tabCtxMenu.isOpen ||
-    sidebarCtxMenu.isOpen;
+    sidebarCtxMenu.isOpen ||
+    // A confirm dialog, whether App's own or the rail's or list's, whose
+    // open state this component cannot see.
+    document.querySelector('[role="alertdialog"]') !== null;
 
   // An overlay taking the screen closes any open context menu. Without this the
   // palette, settings, the file opener or the comments drawer render on top of
