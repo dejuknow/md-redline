@@ -1219,6 +1219,17 @@ instead and pointer events keep arriving at the document, so deleting or
 resolving the comment mid-drag, or switching to the raw or diff view, left the
 drag live and committed an anchor edit for something that was gone.
 
+**A pointer past the text counts as its nearest edge (#60).** `applyMoveAt`
+used to drop any move whose caret fell outside the prose container, so a drag
+that jumped into the page margin in one step (a fast flick, which the browser
+can coalesce into a single move) moved the anchor nowhere, and even a slow drag
+stopped at its last in-text sample. It now clamps the point into the part of
+the container actually on screen (its box, intersected with its scrolling pane
+and the window, since a long document runs past the pane and the toolbar covers
+the top of the window) and looks up the caret again: beside a line means that
+line's start or end, past the top or bottom of the pane the first or last
+visible line.
+
 A second finger cannot start a competing drag: the handle refuses a
 non-`isPrimary` pointer and the hook refuses to begin while one is in flight.
 Either alone is enough today, which is why `e2e/touch-drag-handles.spec.ts`
