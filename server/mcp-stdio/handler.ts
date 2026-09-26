@@ -214,13 +214,17 @@ export async function handleRequestReviewToolCall(
     ctx.signal?.removeEventListener('abort', cancelListener);
   }
 
+  // Every exit from this call carries the note, pending included: a review
+  // that outlasts the first poll comes back through
+  // handleContinueReviewToolCall, which has no session paths to check, so
+  // this is the only result that can say it.
+  const baselineNote = missingBaseline.length > 0 ? NO_BASELINE_NOTE(missingBaseline) : '';
+
   if (result.status === 'pending') {
     return {
-      content: [{ type: 'text', text: STILL_WAITING(session.sessionId) }],
+      content: [{ type: 'text', text: STILL_WAITING(session.sessionId) + baselineNote }],
     };
   }
-
-  const baselineNote = missingBaseline.length > 0 ? NO_BASELINE_NOTE(missingBaseline) : '';
 
   if (result.status === 'batch') {
     return {

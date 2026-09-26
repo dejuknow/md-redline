@@ -495,6 +495,25 @@ describe('handleRequestReviewToolCall', () => {
       expect(result.content[0].text).not.toContain('no before copy');
     });
 
+    it('appends the note to a pending result, the only one a slow review returns from this call', async () => {
+      const client = makeReviewClient({
+        grantAccess: vi.fn().mockResolvedValue(undefined),
+        createSession: vi.fn().mockResolvedValue({ sessionId: 'rev_1', url: '/?review=rev_1' }),
+        waitForSession: vi.fn().mockResolvedValue({ status: 'pending' }),
+        getSessionFilePaths: vi.fn().mockResolvedValue(['/abs/a.md']),
+        listBaselines: vi.fn().mockResolvedValue({ baselines: [] }),
+      });
+      const openInBrowser = vi.fn().mockResolvedValue(undefined);
+
+      const result = await handleRequestReviewToolCall(
+        { mode: 'new', filePaths: ['/abs/a.md'], enableResolve: false },
+        { client, openInBrowser, baseUrl: 'http://localhost:5188' },
+      );
+
+      expect(result.content[0].text).toContain('Review in progress');
+      expect(result.content[0].text).toContain('no before copy');
+    });
+
     it('appends the note to a done result carrying a prompt', async () => {
       const client = makeReviewClient({
         grantAccess: vi.fn().mockResolvedValue(undefined),
