@@ -268,6 +268,44 @@ describe('scorer', () => {
       expect(result.scores.execution).toBe(1.0);
     });
 
+    it('matches shouldContain hints case-insensitively', () => {
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = '| Replication factor | 3 |';
+      const expected = makeExpected({
+        contentShouldChange: true,
+        comments: [
+          {
+            id: 'c1',
+            expectedAction: 'address',
+            contentHints: {
+              shouldContain: ['replication'],
+            },
+          },
+        ],
+      });
+
+      const result = score('content-hints-case', input, output, expected);
+      expect(result.scores.execution).toBe(1.0);
+    });
+
+    it('matches shouldNotContain exactly, so a lowercase decoy survives', () => {
+      const input = `Hello ${makeMarker({ id: 'c1', anchor: 'Hello' })}world`;
+      const output = 'Edge Gateway, behind the regional API gateway';
+      const expected = makeExpected({
+        contentShouldChange: true,
+        comments: [
+          {
+            id: 'c1',
+            expectedAction: 'address',
+            contentHints: { shouldNotContain: ['API Gateway'] },
+          },
+        ],
+      });
+
+      const result = score('content-hints-not-exact', input, output, expected);
+      expect(result.scores.execution).toBe(1.0);
+    });
+
     it('content hints for "skip" comments are ignored', () => {
       const input = `A ${makeMarker({ id: 'c1', anchor: 'A' })}`;
       const output = 'A — changed';

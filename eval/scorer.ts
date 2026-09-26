@@ -140,11 +140,16 @@ export function score(
       }
     }
 
+    // shouldContain hints are keywords, so "Replication factor" in a table
+    // header satisfies "replication". shouldNotContain stays exact: it names
+    // the text that must go, and a fixture can keep a lowercase decoy nearby
+    // (14's "regional API gateway" prose) that the edit must leave alone.
+    const hintHaystack = outputParsed.cleanMarkdown.toLowerCase();
     for (const exp of expected.comments) {
       if (exp.expectedAction === 'skip') continue;
       if (!exp.contentHints) continue;
       for (const s of exp.contentHints.shouldContain ?? []) {
-        const found = outputParsed.cleanMarkdown.includes(s);
+        const found = hintHaystack.includes(s.toLowerCase());
         allChecks.push({
           pass: found,
           detail: `${exp.id}: should contain "${trunc(s)}" — ${found ? 'pass' : 'FAIL'}`,
