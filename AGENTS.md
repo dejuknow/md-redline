@@ -1741,23 +1741,77 @@ showing, and disappears again once scrolled back above the first heading.
 The reader's place is kept as a block, not a pixel offset
 (`src/lib/viewport-anchor.ts`): the topmost top-level block still in view,
 identified by content (tag, text length, text prefix) and, for identical
-blocks, by which copy it is, plus its offset from the viewport top. The
-viewer rebuilds its subtree with innerHTML on every render, so no node is
-kept for native scroll anchoring to hold onto; the anchor is found again by
-content instead. A reader at scrollTop 0 is not anchored and stays at the top.
+blocks, by which copy it is, plus its offset from the viewport top. A Mermaid
+diagram is identified by its source instead: it is a `<pre>` of source until
+its SVG renders and SVG text after, with an id minted per render, so neither
+its tag nor its text survives. The viewer rebuilds its subtree with innerHTML
+on every render, so no node is kept for native scroll anchoring to hold onto;
+the anchor is found again by content instead, at its recorded offset clamped
+to the block's current height (a reader deep in a tall diagram source lands at
+the end of the shorter SVG, not past it). A reader at scrollTop 0 is not
+anchored and stays at the top.
 
-Two things use it. `MarkdownViewer` captures the anchor before each rebuild
-and scrolls it back afterwards, so an edit above the reader (an agent's
-change, a comment being written) leaves them on the same text.
-`useScrollMemory` saves one position per open document in sessionStorage under
-`md-redline-scroll-positions`, so switching tabs or refreshing returns each
-document to the same text; a document not yet visited opens at the top. It
-reads the outgoing position in a layout-effect cleanup, before the viewer's
-own layout effect swaps the next document in, and also on `pagehide`. When the
-saved block is gone it falls back to the saved pixel offset. A tab activated
-during its first load is restored when its body renders, and the restore runs
-once: one that cannot land (the block is gone and the document is now shorter
-than the offset) leaves the reader at the bottom and is not retried.
+Two things use it. `MarkdownViewer` captures the anchor before a rebuild and
+scrolls it back afterwards, so an edit above the reader (an agent's change, a
+diagram landing, an image that refetches as the rebuild re-inserts it) leaves
+them on the same text. App passes the viewer a `documentKey` (the file path),
+and the viewer compares each pass with the last one that showed content:
+- A document arriving (a fresh mount, a switch to another file, or the first
+  pass with content after a first load) is not corrected and reads no layout
+  before it is filled: App's restore owns its position, and measuring an empty
+  viewer would clamp the scroller to it.
+- A pass that changed the document (its HTML, or the diagrams rendered into
+  it) is an edit and always corrects, whatever else changed with it: deleting
+  a comment rewrites the file and clears the active comment in one commit.
+- A pass that left the document alone but changed the active comment or moved
+  the search (a new non-empty query, a step to another match) is a jump (the
+  next-comment jump and card clicks start a smooth scroll before the commit,
+  the search pass starts one) and is not corrected: the correction is an
+  instant scrollTo, which would abort it. Opening or closing the find bar with
+  no query is not a search move.
+- Every other pass corrects, including a repaint of only the selection or the
+  sent marks.
+The search pass scrolls to the active match only on a search move or an
+arrival, so an agent edit with the find bar open leaves the reader where they
+are rather than sending them back to the match. A pass that lands while a jump
+is still in flight (diagrams finishing, an agent edit) still cuts it short.
+App renders the same viewer element for every document, with or without
+diagrams, so a document's first Mermaid fence edits it rather than remounting.
+
+`useScrollMemory` saves one position per file visited and per view, for the
+life of the browser tab, in sessionStorage: rendered positions under
+`md-redline-scroll-positions`, raw view's pixel offsets under
+`md-redline-raw-scroll-positions`. Nothing prunes them. The diff keeps none, in
+either view (the rendered diff overlay and raw view's inline diff both
+interleave removed text, so their offsets are neither view's); a restore that
+arrives under it waits for the view beneath. Switching tabs, reopening a
+closed file (the last tab included), refreshing, or closing the diff returns
+the reader to the same text in that view; a document not yet visited opens at
+the top. A Raw/Rendered toggle saves the view being left and opens the other
+at the top, as it always has.
+
+The outgoing position is read by `ReadingPositionCapture`, a class component
+App renders with the active path and view, from `getSnapshotBeforeUpdate`.
+That runs before React applies any of the commit's DOM changes. An effect
+cannot do it: React runs a parent's layout-effect cleanups after its subtree's
+DOM mutations, so whenever React itself changes the DOM on the switch (the
+diff overlay keyed by path, the raw view's own scroller, a column that narrows
+because only one document reserves the rail's gutter) a cleanup in App reads
+the arriving layout. The position is
+also saved on `pagehide` and when the page is hidden (`visibilitychange`, since
+a discarded background tab never fires pagehide), each time from the live
+scroller and blocks. A document left before its restore ran keeps the position
+it was waiting for.
+
+When the saved block is gone the restore falls back to the saved pixel offset.
+It waits for a body to land on: a tab on its first load, or whose first load
+failed (access denied, a fetch error), is restored when its content renders
+after Allow or Reload. It also waits for settings (Document width), but no
+longer than `STARTUP_REVEAL_MS` after mount, even when an overlay revealed the
+column sooner. A restore that finds no scroller is skipped, not kept waiting. The restore runs once: one that cannot land
+(the block is gone and the document is now shorter than the offset) leaves the
+reader at the bottom and is not retried. With the find bar open, a restore
+yields to the viewer's scroll to the active match in the arriving document.
 
 Every restore uses `scrollTo({ behavior: 'instant' })`, overriding the
 `scroll-behavior: smooth` `.overflow-y-auto` gets from index.css: a restore
@@ -1767,8 +1821,20 @@ scrolling itself.
 Reloading a `?review=` URL reopens the session's files instead of the saved tab
 session, so the active document is kept too (`src/lib/active-tab.ts`):
 sessionStorage, keyed by review id, and reopened on reload while the session
-still includes it. A new browser tab on the same review starts on the first
-file.
+still includes it, with the explorer starting in that document's folder. A new
+browser tab on the same review starts on the first file.
+
+At start-up the main column (and the explorer beside it) stays hidden with
+`visibility: hidden`, which keeps layout so a restore still lands, until
+settings, the first review-sessions poll, the first document's choice and its
+content have arrived, or `STARTUP_REVEAL_MS` (1s) passes. Opening an overlay in
+that window (command palette, file opener, find bar, a dialog or menu) reveals
+it at once: none of them are portaled, so inside the hidden column they would
+be invisible and their autofocus would fail. The cap is a timer of its own,
+so an early reveal does not cut the explorer's or the restore's waits short.
+App derives "an overlay is open"
+once (`overlayOpen`) for both this reveal and the Escape guard that keeps a
+selection when Escape closes an overlay (#100).
 
 ### Handoff button
 `src/components/HandOffButton.tsx` (in the panel toolbar) is md-redline's

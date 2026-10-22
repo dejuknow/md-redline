@@ -1286,23 +1286,25 @@ describe('MarkdownViewer viewport scroll anchor', () => {
       scroller.scrollTop = 300;
       expect(prose.children[6].tagName).toBe('HR');
 
-      // No edit: only a flag the render effect depends on changes.
+      // Three paragraphs inserted above both rules: the second rule moves to
+      // index 9, and the first one (now at 5) is the wrong copy to land on.
+      const updatedMarkdown = `${insertedAbove}\n\n${markdown}`;
       rerender(
         <div className="overflow-y-auto" style={{ height: `${VIEWPORT_HEIGHT}px` }}>
           <MarkdownViewer
-            html={renderMarkdown(markdown)}
-            cleanMarkdown={markdown}
+            html={renderMarkdown(updatedMarkdown)}
+            cleanMarkdown={updatedMarkdown}
             comments={[]}
             activeCommentId={null}
             selectionText={null}
             selectionOffset={null}
-            enableResolve
             onHighlightClick={vi.fn()}
           />
         </div>,
       );
 
-      expect(scroller.scrollTop).toBe(300);
+      expect(prose.children[9].tagName).toBe('HR');
+      expect(scroller.scrollTop).toBe(450);
     } finally {
       restoreLayout();
     }
@@ -1335,6 +1337,410 @@ describe('MarkdownViewer viewport scroll anchor', () => {
 
       expect(scroller.scrollTop).toBe(0);
       expect(findByText(prose, 'Inserted paragraph one').getBoundingClientRect().top).toBe(0);
+    } finally {
+      restoreLayout();
+    }
+  });
+
+  // --- A scroller laid out like a browser's, for what the fake layout above
+  // cannot show: what reading layout at the wrong moment costs, and which
+  // passes issue a correction at all.
+
+  /** `count` unique paragraphs: tall enough (50px each) to scroll. */
+  function paragraphs(count: number, from = 0): string {
+    return Array.from({ length: count }, (_, i) => `Paragraph ${from + i} unique text.`).join(
+      '\n\n',
+    );
+  }
+
+  /**
+   * The scroller as a browser lays it out: reading scrollTop clamps it to what
+   * the viewer's blocks allow, and the clamp sticks. Records every scrollTo's
+   * behavior; only an instant one moves it this tick (`scroll-behavior:
+   * smooth`, index.css).
+   */
+  function modelScroller(scroller: HTMLElement) {
+    let top = 0;
+    const behaviors: (ScrollBehavior | undefined)[] = [];
+    const max = () =>
+      Math.max(
+        0,
+        (scroller.querySelector('.prose')?.children.length ?? 0) * ELEMENT_HEIGHT - VIEWPORT_HEIGHT,
+      );
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => (top = Math.min(top, max())),
+      set: (v: number) => {
+        top = Math.max(0, Math.min(v, max()));
+      },
+    });
+    scroller.scrollTo = ((options: ScrollToOptions) => {
+      behaviors.push(options.behavior);
+      if (options.behavior === 'instant') scroller.scrollTop = options.top ?? 0;
+    }) as typeof scroller.scrollTo;
+    return behaviors;
+  }
+
+  /**
+   * installFakeLayout for a viewer that may be remounted (its container is
+   * looked up on every call), with `shift.px` added below the first block:
+   * content above the reader changing height partway through a pass, as an
+   * image above them collapsing while it refetches, or a diagram landing.
+   */
+  function installLiveLayout(scroller: HTMLElement, shift = { px: 0 }): () => void {
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
+      if (this === scroller) return fakeRect(0, VIEWPORT_HEIGHT);
+      const prose = scroller.querySelector('.prose');
+      if (prose && this.parentElement === prose) {
+        const idx = Array.from(prose.children).indexOf(this);
+        const top = idx * ELEMENT_HEIGHT + (idx > 0 ? shift.px : 0) - scroller.scrollTop;
+        return fakeRect(top, top + ELEMENT_HEIGHT);
+      }
+      return original.call(this);
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  }
+
+  type ViewerProps = Parameters<typeof MarkdownViewer>[0];
+
+  function viewerFor(markdown: string, props: Partial<ViewerProps> = {}) {
+    return (
+      <MarkdownViewer
+        html={renderMarkdown(markdown)}
+        cleanMarkdown={markdown}
+        comments={[]}
+        activeCommentId={null}
+        selectionText={null}
+        selectionOffset={null}
+        onHighlightClick={vi.fn()}
+        {...props}
+      />
+    );
+  }
+
+  it('keeps the offset through a remount instead of measuring the empty viewer', () => {
+    // App mounts a new viewer when the diff overlay closes. It starts empty,
+    // and a layout read before it is filled clamps the scroller to that empty
+    // height: the reader dropped to the top.
+    const markdown = paragraphs(30);
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(markdown)}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller);
+    try {
+      scroller.scrollTop = 600;
+
+      rerender(
+        <div className="overflow-y-auto">
+          <section>{viewerFor(markdown)}</section>
+        </div>,
+      );
+
+      expect(scroller.scrollTop).toBe(600);
+    } finally {
+      restoreLayout();
+    }
+  });
+
+  /** jsdom implements no scrollIntoView; the search pass calls it. */
+  function stubIntoView() {
+    const original = Element.prototype.scrollIntoView;
+    const intoView = vi.fn();
+    Element.prototype.scrollIntoView = intoView;
+    return { intoView, restore: () => (Element.prototype.scrollIntoView = original) };
+  }
+
+  it('does not correct the position on a pass that moves the active comment or the search', () => {
+    // A jump to a comment starts its smooth scroll before the commit that
+    // marks it active, and a find-bar step starts one in the search pass. If
+    // anything above the reader changes height meanwhile, a correction would
+    // be an instant scrollTo, which aborts the jump.
+    const markdown = paragraphs(30);
+    const shift = { px: 0 };
+    const { intoView, restore } = stubIntoView();
+    const search = { searchQuery: 'unique text', searchActiveIndex: 0 };
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(markdown, search)}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const behaviors = modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller, shift);
+    try {
+      scroller.scrollTop = 600;
+      intoView.mockClear();
+
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(markdown, {
+            ...search,
+            activeCommentId: 'c1',
+            // Runs partway through the pass, after the rebuild.
+            onSearchCount: () => {
+              shift.px = 40;
+            },
+          })}
+        </div>,
+      );
+      expect(intoView).not.toHaveBeenCalled();
+
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(markdown, {
+            ...search,
+            searchActiveIndex: 1,
+            activeCommentId: 'c1',
+            onSearchCount: () => {
+              shift.px = 80;
+            },
+          })}
+        </div>,
+      );
+      expect(intoView).toHaveBeenCalledTimes(1);
+
+      expect(behaviors).toEqual([]);
+    } finally {
+      restoreLayout();
+      restore();
+    }
+  });
+
+  it('corrects the position on a pass that only repaints the selection', () => {
+    // Highlights do not move text, but the rebuild re-inserts every image and
+    // diagram, and one that refetches or collapses still shifts what is below.
+    const markdown = paragraphs(30);
+    const shift = { px: 0 };
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(markdown)}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const behaviors = modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller, shift);
+    try {
+      scroller.scrollTop = 600;
+
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(markdown, {
+            selectionText: 'Paragraph 3 unique text.',
+            onSearchCount: () => {
+              shift.px = 40;
+            },
+          })}
+        </div>,
+      );
+
+      expect(behaviors).toEqual(['instant']);
+      expect(scroller.scrollTop).toBe(640);
+    } finally {
+      restoreLayout();
+    }
+  });
+
+  it('corrects an edit that also clears the active comment', () => {
+    // Deleting a comment rewrites the file and clears the active comment in
+    // one commit. The deletion started no jump, so the edit is corrected.
+    const markdown = paragraphs(30);
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(markdown, { activeCommentId: 'c1' })}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const behaviors = modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller);
+    try {
+      scroller.scrollTop = 600;
+
+      const edited = `${insertedAbove}\n\n${markdown}`;
+      rerender(
+        <div className="overflow-y-auto">{viewerFor(edited, { activeCommentId: null })}</div>,
+      );
+
+      expect(behaviors).toEqual(['instant']);
+      expect(scroller.scrollTop).toBe(750);
+    } finally {
+      restoreLayout();
+    }
+  });
+
+  it('corrects a pass that opens or closes the find bar with no query', () => {
+    // App passes the query only while the bar is open: closing it turns
+    // 'Paragraph' into undefined, opening it turns undefined into ''. Neither
+    // scrolls anywhere, so neither is a jump to protect.
+    const markdown = paragraphs(30);
+    const shift = { px: 0 };
+    const { intoView, restore } = stubIntoView();
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">
+        {viewerFor(markdown, { searchQuery: 'Paragraph 2 unique', searchActiveIndex: 0 })}
+      </div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const behaviors = modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller, shift);
+    try {
+      scroller.scrollTop = 600;
+      intoView.mockClear();
+
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(markdown, {
+            searchQuery: undefined,
+            searchActiveIndex: 0,
+            onSearchCount: () => {
+              shift.px = 40;
+            },
+          })}
+        </div>,
+      );
+      expect(behaviors).toEqual(['instant']);
+      expect(scroller.scrollTop).toBe(640);
+
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(markdown, {
+            searchQuery: '',
+            searchActiveIndex: 0,
+            onSearchCount: () => {
+              shift.px = 80;
+            },
+          })}
+        </div>,
+      );
+      expect(behaviors).toEqual(['instant', 'instant']);
+      expect(scroller.scrollTop).toBe(680);
+      expect(intoView).not.toHaveBeenCalled();
+    } finally {
+      restoreLayout();
+      restore();
+    }
+  });
+
+  it('keeps the reader in place through an edit with the find bar open, without jumping to the match', () => {
+    // The reader moved on from the match they found. An agent edit above them
+    // must neither send them back to it nor leave them displaced by the edit.
+    const markdown = paragraphs(30);
+    const { intoView, restore } = stubIntoView();
+    const search = { searchQuery: 'Paragraph 2 unique', searchActiveIndex: 0 };
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(markdown, search)}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const behaviors = modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller);
+    try {
+      scroller.scrollTop = 600;
+      intoView.mockClear();
+
+      const edited = `${insertedAbove}\n\n${markdown}`;
+      rerender(<div className="overflow-y-auto">{viewerFor(edited, search)}</div>);
+
+      expect(intoView).not.toHaveBeenCalled();
+      // Paragraph 12 was at the top; three paragraphs landed above it.
+      expect(behaviors).toEqual(['instant']);
+      expect(scroller.scrollTop).toBe(750);
+    } finally {
+      restoreLayout();
+      restore();
+    }
+  });
+
+  it('leaves an arriving document to App, carrying no place over from the one before', () => {
+    // The reader is on Paragraph 12 of one file. The next file has a block
+    // with the same text further down; correcting toward it would scroll the
+    // arriving document to a place that belongs to the other one.
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(paragraphs(30), { documentKey: '/a.md' })}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const behaviors = modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller);
+    try {
+      scroller.scrollTop = 600;
+
+      const other = `${paragraphs(5, 100)}\n\n${paragraphs(30)}`;
+      rerender(<div className="overflow-y-auto">{viewerFor(other, { documentKey: '/b.md' })}</div>);
+
+      expect(behaviors).toEqual([]);
+      expect(scroller.scrollTop).toBe(600);
+    } finally {
+      restoreLayout();
+    }
+  });
+
+  it('scrolls to the active match when a document arrives, once its content is in', () => {
+    const { intoView, restore } = stubIntoView();
+    const search = { searchQuery: 'Paragraph 20 unique', searchActiveIndex: 0 };
+    try {
+      // A tab on its first load: nothing to show, nothing to scroll to.
+      const { rerender } = render(
+        <div className="overflow-y-auto">{viewerFor('', { ...search, documentKey: '/a.md' })}</div>,
+      );
+      expect(intoView).not.toHaveBeenCalled();
+
+      // Its content lands: still the arrival.
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(paragraphs(30), { ...search, documentKey: '/a.md' })}
+        </div>,
+      );
+      expect(intoView).toHaveBeenCalledTimes(1);
+
+      // A switch to another file.
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(paragraphs(30), { ...search, documentKey: '/b.md' })}
+        </div>,
+      );
+      expect(intoView).toHaveBeenCalledTimes(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it('finds a reader anchored on a Mermaid diagram again once its SVG lands', () => {
+    // The diagram is a <pre> of source until its SVG renders, then a
+    // .mermaid-block of SVG text with a per-render id: keyed by tag and text,
+    // the anchor captured on the first never matches the second.
+    const source = 'graph TD\n  A --> B';
+    const markdown = `${paragraphs(10)}\n\n\`\`\`mermaid\n${source}\n\`\`\`\n\n${paragraphs(19, 11)}`;
+    const shift = { px: 0 };
+    const { container, rerender } = render(
+      <div className="overflow-y-auto">{viewerFor(markdown, { mermaidSvgMap: new Map() })}</div>,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    const prose = container.querySelector('.prose') as HTMLElement;
+    modelScroller(scroller);
+    const restoreLayout = installLiveLayout(scroller, shift);
+    try {
+      expect(prose.children[10].tagName).toBe('PRE');
+      // The diagram's top is 20px above the viewport.
+      scroller.scrollTop = 520;
+
+      rerender(
+        <div className="overflow-y-auto">
+          {viewerFor(markdown, {
+            mermaidSvgMap: new Map([
+              [
+                source,
+                {
+                  svg: '<svg id="mermaid-svg-3"><style>#mermaid-svg-3 .node{fill:red}</style><text>A</text><text>B</text></svg>',
+                },
+              ],
+            ]),
+            onSearchCount: () => {
+              shift.px = 40;
+            },
+          })}
+        </div>,
+      );
+
+      expect(prose.children[10].classList.contains('mermaid-block')).toBe(true);
+      // Still 20px above the viewport, 40px further down the document.
+      expect(scroller.scrollTop).toBe(560);
     } finally {
       restoreLayout();
     }

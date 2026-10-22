@@ -117,6 +117,32 @@ test('Escape that cancels a confirm dialog keeps the draft', async ({ page }) =>
   await expect(draft(page)).toHaveValue('my unsaved draft');
 });
 
+test('Escape that closes the Mermaid fullscreen view keeps the draft', async ({ page }) => {
+  // The fullscreen view is one more overlay whose Escape is its own: the
+  // selection, and the draft riding on it, stay.
+  writeFileSync(
+    FIXTURE,
+    `${TEST_DOC_BASELINE}\n\`\`\`mermaid\ngraph TD\n  A[Start] --> B[Finish]\n\`\`\`\n`,
+  );
+  await page.goto(`/?file=${FIXTURE}`);
+  await page.locator('.prose').waitFor({ timeout: 10_000 });
+  await selectText(page, 'valid credentials');
+  await page.locator('[data-comment-form] button', { hasText: 'Comment' }).click();
+  await draft(page).fill('my unsaved draft');
+
+  await page.locator('.mermaid-block-expand').click();
+  const fullscreen = page.getByRole('dialog', { name: 'Diagram fullscreen view' });
+  await expect(fullscreen).toBeVisible();
+  // It listens for Escape from an effect that runs just after it paints; a
+  // press in that first instant would reach nothing.
+  await page.waitForTimeout(200);
+
+  await page.keyboard.press('Escape');
+
+  await expect(fullscreen).toHaveCount(0);
+  await expect(draft(page)).toHaveValue('my unsaved draft');
+});
+
 test.describe('in a window too narrow for the rail', () => {
   test.use({ viewport: { width: 900, height: 800 } });
 

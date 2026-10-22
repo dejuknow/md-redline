@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -224,6 +224,44 @@ test.describe('Reloading a review', () => {
       timeout: 12_000,
     });
     await expect(page.getByRole('heading', { name: 'Review Session Fixture' })).toHaveCount(0);
+  });
+
+  test('opens the explorer beside the document that was active', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    // The two files live in different folders, so the folder the explorer
+    // lists says which of them start-up placed it beside.
+    const nestedDir = resolve(__dirname, 'fixtures', `review-reload-nested-${process.pid}`);
+    const nestedPath = resolve(nestedDir, 'nested.md');
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(nestedPath, '# Nested Review File\n\nIn a folder of its own.\n');
+    try {
+      const res = await request.post(`${baseURL}/api/review-sessions`, {
+        data: { filePaths: [FIXTURE_PATH, nestedPath], enableResolve: false },
+      });
+      expect(res.status()).toBe(201);
+      const { sessionId } = (await res.json()) as { sessionId: string };
+
+      await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+      await expect(page.getByRole('heading', { name: 'Review Session Fixture' })).toBeVisible({
+        timeout: 12_000,
+      });
+      await tabFor(page, nestedPath).click();
+      await expect(page.getByRole('heading', { name: 'Nested Review File' })).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Nested Review File' })).toBeVisible({
+        timeout: 12_000,
+      });
+      const explorerRow = (path: string) =>
+        page.locator(`button.w-full.text-left[title="${path}"]`);
+      await expect(explorerRow(nestedPath)).toBeVisible({ timeout: 5_000 });
+      await expect(explorerRow(FIXTURE_PATH)).toHaveCount(0);
+    } finally {
+      rmSync(nestedDir, { recursive: true, force: true });
+    }
   });
 });
 

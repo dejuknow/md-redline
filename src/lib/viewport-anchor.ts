@@ -19,10 +19,33 @@ export interface ViewportAnchor {
 }
 
 /** Content identity for a top-level block. The tag name keeps a heading and a
- *  paragraph with identical text apart. */
+ *  paragraph with identical text apart. A Mermaid diagram is keyed by its
+ *  source instead: the same diagram is a <pre> of source until its SVG lands
+ *  and a .mermaid-block of SVG text after, and that SVG text carries an id
+ *  minted per render (`#mermaid-svg-N` in its styles), so neither its tag nor
+ *  its text survives from one render to the next. */
 export function viewportAnchorKey(el: Element): string {
+  const source = mermaidSourceOf(el);
+  if (source !== null) return `MERMAID:${source.length}:${source.slice(0, 200)}`;
   const text = el.textContent ?? '';
   return `${el.tagName}:${text.length}:${text.slice(0, 200)}`;
+}
+
+/**
+ * The diagram source behind a top-level Mermaid block in any of its states, or
+ * null for any other block. Trimmed as MarkdownViewer trims it to look the SVG
+ * up, so all three states agree: the fenced <pre> still waiting for its SVG,
+ * the rendered .mermaid-block (whose fullscreen button carries the source), and
+ * the .mermaid-block error that replaces a diagram that failed to render.
+ */
+function mermaidSourceOf(el: Element): string | null {
+  if (el.tagName === 'PRE') {
+    const code = el.querySelector(':scope > code.language-mermaid');
+    return code ? (code.textContent ?? '').trim() : null;
+  }
+  if (!el.classList.contains('mermaid-block')) return null;
+  const holder = el.querySelector(':scope > .mermaid-block-expand') ?? el;
+  return holder.getAttribute('data-mermaid-source');
 }
 
 /** How many blocks before `index` share its key: which copy of an identical
@@ -81,6 +104,11 @@ export function captureViewportAnchor(
 /**
  * The scrollTop that puts the anchored block back at its recorded offset, or
  * undefined when no block among `blocks`' children matches the anchor.
+ *
+ * The offset is clamped to the block's current height. A block can come back
+ * shorter than it was (a Mermaid diagram's source <pre> replaced by its SVG):
+ * a reader 800px into an 1100px <pre> whose diagram is 300px tall lands at the
+ * diagram's end, not 500px past it in whatever follows.
  */
 export function viewportAnchorScrollTop(
   scroller: HTMLElement,
@@ -90,7 +118,8 @@ export function viewportAnchorScrollTop(
   const children = Array.from(blocks.children);
   const index = matchViewportAnchor(anchor.key, anchor.ordinal, children.map(viewportAnchorKey));
   if (index === undefined) return undefined;
-  const blockTop =
-    children[index].getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-  return scroller.scrollTop + blockTop - anchor.offset;
+  const rect = children[index].getBoundingClientRect();
+  const blockTop = rect.top - scroller.getBoundingClientRect().top;
+  const offset = Math.max(anchor.offset, -(rect.bottom - rect.top));
+  return scroller.scrollTop + blockTop - offset;
 }
