@@ -1,12 +1,10 @@
 import {
-  forwardRef,
   useState,
   useRef,
   useMemo,
   useCallback,
   useEffect,
   useLayoutEffect,
-  type ComponentProps,
   type RefObject,
 } from 'react';
 import { useTabs } from './hooks/useTabs';
@@ -80,7 +78,7 @@ import { useAgentBaselines } from './hooks/useAgentBaselines';
 import { shouldAdvanceFrontier, formatReferenceLabel } from './lib/review-frontier';
 import { useComments, type CommentFocusOrigin } from './hooks/useComments';
 import { useHeadingTracking } from './hooks/useHeadingTracking';
-import { useScrollMemory } from './hooks/useScrollMemory';
+import { ReadingPositionCapture, useScrollMemory, type ReadingView } from './hooks/useScrollMemory';
 import { useContextMenuItems } from './hooks/useContextMenuItems';
 import { getCopySelectionFallbackText } from './lib/copy-selection';
 import { buildNativeCopyFlavors } from './lib/copy-selection-html';
@@ -126,21 +124,15 @@ const NO_UNPAINTED_ANCHORS: ReadonlySet<string> = new Set<string>();
  * file" on its next edit.
  */
 const BACKFILL_WRITE_DELAY_MS = 2000;
-// Longest the main column stays hidden waiting for its start-up inputs.
+// Longest any start-up wait lasts: the main column staying hidden for its
+// start-up inputs, the explorer waiting for its folder, and the
+// reading-position restore waiting for settings.
 const STARTUP_REVEAL_MS = 1000;
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
 const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
-
-const ThemedMarkdownViewer = forwardRef<
-  MarkdownViewerHandle,
-  ComponentProps<typeof MarkdownViewer>
->(function ThemedMarkdownViewer(props, ref) {
-  const theme = usePersistedTheme();
-  return <MarkdownViewer ref={ref} {...props} theme={theme} />;
-});
 
 export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
@@ -192,6 +184,15 @@ export default function App() {
   // The active tab has no content to show yet. A reload keeps the old content
   // on screen while it loads, so it is not a first load.
   const firstLoadInProgress = isLoading && !rawMarkdown;
+  // Whether STARTUP_REVEAL_MS has passed since mount, which ends every
+  // start-up wait. A timer of its own rather than the column's reveal: an
+  // overlay opened early reveals the column, and that must not cut the other
+  // waits short.
+  const [startupCapElapsed, setStartupCapElapsed] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setStartupCapElapsed(true), STARTUP_REVEAL_MS);
+    return () => clearTimeout(id);
+  }, []);
 
   // Dirty-tab close guard: when closing tabs that have unsaved changes
   // (e.g. save failed), show a confirmation dialog before discarding.
@@ -812,7 +813,8 @@ export default function App() {
     );
   }, []);
 
-  // Filled in below, once the menus and the drawer it reads exist.
+  // Filled in from overlayOpen, next to the start-up reveal just above the
+  // returned tree, once every overlay it reads exists.
   const escapeOwnedElsewhereRef = useRef<() => boolean>(() => false);
   const { selection, commentSelection, isPending, clearSelection, lockSelection, adoptSelection } =
     useSelection(proseRef as RefObject<HTMLElement | null>, escapeOwnedElsewhereRef);
@@ -1035,18 +1037,6 @@ export default function App() {
   // it. Close it automatically once the rail becomes available again, so
   // the two surfaces never show at the same time.
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // An Escape pressed while any of these is open closes it and leaves the
-  // selection, and an expanded comment draft, alone (#100).
-  escapeOwnedElsewhereRef.current = () =>
-    activeModal !== null ||
-    drawerOpen ||
-    viewerCtxMenu.isOpen ||
-    explorerCtxMenu.isOpen ||
-    tabCtxMenu.isOpen ||
-    sidebarCtxMenu.isOpen ||
-    // A confirm dialog, whether App's own or the rail's or list's, whose
-    // open state this component cannot see.
-    document.querySelector('[role="alertdialog"]') !== null;
 
   // An overlay taking the screen closes any open context menu. Without this the
   // palette, settings, the file opener or the comments drawer render on top of
@@ -1513,7 +1503,6 @@ export default function App() {
   }, [captureReference, restoreReference, showToast]);
 
   const mermaidBlocks = useMemo(() => collectMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
-  const viewerNeedsTheme = mermaidBlocks.length > 0;
 
   // Mermaid rendering — hoisted here so both MarkdownViewer and the fullscreen modal
   // can share the same pre-rendered SVG map without double-rendering.
@@ -1612,10 +1601,46 @@ export default function App() {
 
   // Each document keeps its own place in the scroll container, which is shared
   // between them, as a block in the viewer's container so it comes back to the
-  // same text. A tab activated during its first load has neither the block nor
-  // the height to reach, so the restore waits for the body.
+  // same text. Raw view keeps its own offsets. The diff keeps none, in either
+  // view: RenderedDiffView and raw view's inline diff both interleave the
+  // removed text, so their offsets are neither view's. The condition is the
+  // one both views switch to their diff layout on.
   const getViewerBlocks = useCallback(() => viewerRef.current?.getContainer() ?? null, []);
-  useScrollMemory(containerRef, getViewerBlocks, activeFilePath, !firstLoadInProgress);
+  const readingView: ReadingView | null = renderedDiffVisible
+    ? null
+    : viewMode === 'raw'
+      ? 'raw'
+      : 'rendered';
+  // The restore waits for a body to land on: a tab on its first load has
+  // neither the block nor the height to reach, and a first load that failed
+  // (access denied, a fetch error) shows only its error until Allow or Reload
+  // brings the content. It also waits for settings, since Document width
+  // arriving after the restore would rewrap the text under it, but no longer
+  // than the start-up cap: by then the page is on screen, and a later restore
+  // is a jump the reader sees. Not the reveal itself: an overlay opened early
+  // reveals the column while settings are still on their way, and the restore
+  // can land behind the overlay once they arrive.
+  const activeBodyShown =
+    !firstLoadInProgress && !(error && !rawMarkdown) && (settingsHydrated || startupCapElapsed);
+  // With the find bar open, the viewer's highlight pass (a child's layout
+  // effect, so it runs first) starts a smooth scroll to the arriving
+  // document's active match. An instant restore would abort it and leave
+  // "1 of N" pointing off-screen, so the match wins.
+  const searchHoldsScroll = useCallback(
+    () =>
+      showSearch &&
+      searchQuery !== '' &&
+      containerRef.current?.querySelector('mark[data-search-active]') != null,
+    [showSearch, searchQuery],
+  );
+  const captureReadingPosition = useScrollMemory({
+    containerRef,
+    getBlocks: getViewerBlocks,
+    activeFilePath,
+    view: readingView,
+    rendered: activeBodyShown,
+    restoreYields: searchHoldsScroll,
+  });
 
   const handleHeadingNavigate = useCallback(
     (id: string) => {
@@ -2048,9 +2073,10 @@ export default function App() {
           }
         }
         reviewTabsOpenedRef.current = true;
-        const firstFile = session.filePaths[0];
-        if (firstFile) {
-          const parent = getParentDir(firstFile);
+        // The explorer starts beside the document that opens, which a reload
+        // can make a file other than the first.
+        if (activeTarget) {
+          const parent = getParentDir(activeTarget);
           if (parent) setExplorerDir(parent);
         }
       } catch {
@@ -2970,22 +2996,62 @@ export default function App() {
   // hidden until they have arrived, and never hides again: later changes are
   // the reader's or an agent's, not start-up. STARTUP_REVEAL_MS caps the wait
   // if a request never answers.
-  const [startupLaidOut, setStartupLaidOut] = useState(false);
   const startupTargetKnown = initialTargetKnown && reviewTargetKnown;
   const firstDocumentSettled = startupTargetKnown && (!activeFilePath || !firstLoadInProgress);
-  if (!startupLaidOut && settingsHydrated && reviewSessionsFetched && firstDocumentSettled) {
+  // Whether any overlay App renders is open: a modal (palette, file opener,
+  // find bar, settings, shortcuts), a confirm dialog, the comments drawer, the
+  // Mermaid fullscreen view, a context menu. Two things ask, and they ask the
+  // same question, so this is the one list.
+  const overlayOpen =
+    activeModal !== null ||
+    pendingClose !== null ||
+    confirmDeleteAll ||
+    drawerOpen ||
+    // activeModal becomes 'mermaidFullscreen' too, but from an effect a
+    // commit after the view opens. The start-up reveal has to happen in the
+    // render that opens it, so the view's own state is asked directly.
+    mermaidFullscreen.isOpen ||
+    viewerCtxMenu.isOpen ||
+    explorerCtxMenu.isOpen ||
+    tabCtxMenu.isOpen ||
+    sidebarCtxMenu.isOpen;
+  // An Escape pressed while one is open closes it and leaves the selection,
+  // and an expanded comment draft, alone (#100). Read when Escape goes down,
+  // so it is reassigned every render.
+  escapeOwnedElsewhereRef.current = () =>
+    overlayOpen ||
+    // A confirm dialog of the rail's or the list's own, whose open state this
+    // component cannot see.
+    document.querySelector('[role="alertdialog"]') !== null;
+  // And one opened during start-up (Cmd+K, Cmd+O, Cmd+F, a dialog, a menu) is
+  // the reader asking for the page now. None of them are portaled: they render
+  // inside the main column, where visibility: hidden would leave them
+  // invisible and their autofocus failing, so typed text went nowhere. The
+  // column is revealed in the same render that opens one. The rail's and the
+  // list's own confirm dialogs need no state here: they open only from the
+  // rail or the drawer, and the rail is hidden with the column while the
+  // drawer is an overlay of its own.
+  const [startupLaidOut, setStartupLaidOut] = useState(false);
+  if (
+    !startupLaidOut &&
+    (overlayOpen ||
+      startupCapElapsed ||
+      (settingsHydrated && reviewSessionsFetched && firstDocumentSettled))
+  ) {
     setStartupLaidOut(true);
   }
-  useEffect(() => {
-    if (startupLaidOut) return;
-    const id = setTimeout(() => setStartupLaidOut(true), STARTUP_REVEAL_MS);
-    return () => clearTimeout(id);
-  }, [startupLaidOut]);
-  // The reveal's timeout also caps the explorer's wait for its folder.
-  const explorerDirKnown = startupTargetKnown || startupLaidOut;
+  // The cap also ends the explorer's wait for its folder. The cap, not the
+  // reveal: an overlay revealing the column early would otherwise mount the
+  // explorer before start-up has chosen its folder.
+  const explorerDirKnown = startupTargetKnown || startupCapElapsed;
 
   return (
     <div className="h-screen flex bg-surface-secondary">
+      <ReadingPositionCapture
+        path={activeFilePath}
+        view={readingView}
+        onLeave={captureReadingPosition}
+      />
       {/* Full-height left sidebar: expanded panel or slim icon rail. It owns
           the window's left edge top to bottom (the chrome row starts to its
           right). Hidden entirely in focus mode. */}
@@ -3431,53 +3497,39 @@ export default function App() {
                               />
                             ) : (
                               <>
-                                {viewerNeedsTheme ? (
-                                  <ThemedMarkdownViewer
-                                    ref={viewerRef}
-                                    html={html}
-                                    cleanMarkdown={cleanMarkdown}
-                                    comments={comments}
-                                    activeCommentId={activeCommentId}
-                                    selectionText={selection?.text ?? null}
-                                    selectionOffset={selection?.offset ?? null}
-                                    onHighlightClick={handleHighlightClickWithPopover}
-                                    // Fragment arg is intentionally ignored in v1; openTab
-                                    // takes only the path. See spec §3 non-goals.
-                                    onLocalLinkClick={openTab}
-                                    onContextMenu={handleViewerContextMenuUnlessOverlay}
-                                    enableResolve={settings.enableResolve}
-                                    searchQuery={showSearch ? searchQuery : undefined}
-                                    searchActiveIndex={activeSearchIndex}
-                                    onSearchCount={handleSearchCount}
-                                    sentCommentIds={sentCommentIds}
-                                    mermaidSvgMap={mermaidSvgMap}
-                                    onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                    onHighlightsPainted={handleHighlightsPainted}
-                                  />
-                                ) : (
-                                  <MarkdownViewer
-                                    ref={viewerRef}
-                                    html={html}
-                                    cleanMarkdown={cleanMarkdown}
-                                    comments={comments}
-                                    activeCommentId={activeCommentId}
-                                    selectionText={selection?.text ?? null}
-                                    selectionOffset={selection?.offset ?? null}
-                                    onHighlightClick={handleHighlightClickWithPopover}
-                                    // Fragment arg is intentionally ignored in v1; openTab
-                                    // takes only the path. See spec §3 non-goals.
-                                    onLocalLinkClick={openTab}
-                                    onContextMenu={handleViewerContextMenuUnlessOverlay}
-                                    enableResolve={settings.enableResolve}
-                                    searchQuery={showSearch ? searchQuery : undefined}
-                                    searchActiveIndex={activeSearchIndex}
-                                    onSearchCount={handleSearchCount}
-                                    sentCommentIds={sentCommentIds}
-                                    mermaidSvgMap={mermaidSvgMap}
-                                    onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                    onHighlightsPainted={handleHighlightsPainted}
-                                  />
-                                )}
+                                {/* One element for every document, with or
+                                    without diagrams. Swapping the element type
+                                    when a document gained or lost its first
+                                    Mermaid fence remounted the viewer, which
+                                    has no place to hold onto across a mount:
+                                    an agent edit inserting a diagram above the
+                                    reader pushed them down. The theme only
+                                    feeds the viewer's own fallback renderer,
+                                    unused while mermaidSvgMap is passed. */}
+                                <MarkdownViewer
+                                  ref={viewerRef}
+                                  html={html}
+                                  cleanMarkdown={cleanMarkdown}
+                                  documentKey={activeFilePath}
+                                  comments={comments}
+                                  activeCommentId={activeCommentId}
+                                  selectionText={selection?.text ?? null}
+                                  selectionOffset={selection?.offset ?? null}
+                                  onHighlightClick={handleHighlightClickWithPopover}
+                                  // Fragment arg is intentionally ignored in v1; openTab
+                                  // takes only the path. See spec §3 non-goals.
+                                  onLocalLinkClick={openTab}
+                                  onContextMenu={handleViewerContextMenuUnlessOverlay}
+                                  enableResolve={settings.enableResolve}
+                                  searchQuery={showSearch ? searchQuery : undefined}
+                                  searchActiveIndex={activeSearchIndex}
+                                  onSearchCount={handleSearchCount}
+                                  sentCommentIds={sentCommentIds}
+                                  theme={persistedTheme}
+                                  mermaidSvgMap={mermaidSvgMap}
+                                  onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                  onHighlightsPainted={handleHighlightsPainted}
+                                />
                                 <DragHandles
                                   startPos={handlePositions?.start ?? null}
                                   endPos={handlePositions?.end ?? null}

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 import { addComment } from './helpers/comments';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -222,10 +223,15 @@ test('reloading a review lists only its own folder in the explorer, once the pag
           ?.closest('.flex-1.min-w-0.flex.flex-col');
         const mainShown = main && getComputedStyle(main).visibility === 'visible';
         if (!mainShown) {
-          for (const el of document.querySelectorAll('button, div')) {
-            const text = el.childElementCount === 0 ? el.textContent?.trim() : '';
+          // Text nodes, not elements: the explorer's file row is a button
+          // holding an icon and a span, so no leaf element carries its name.
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const text = node.textContent?.trim() ?? '';
+            const el = node.parentElement;
             if (
               (text === 'Loading...' || text === 'test-doc.md') &&
+              el &&
               getComputedStyle(el).visibility === 'visible' &&
               !seen.beforeReveal.includes(text)
             ) {
@@ -256,6 +262,32 @@ test('reloading a review lists only its own folder in the explorer, once the pag
       headers: { 'content-type': 'application/json' },
     });
   }
+});
+
+test('an overlay opened during start-up is shown and takes typing', async ({ page }) => {
+  // The main column stays hidden while start-up settles, and the command
+  // palette, like every other overlay, renders inside it. Holding settings
+  // back keeps the page in that window for most of the reveal cap.
+  await page.route('**/api/preferences', async (route) => {
+    if (route.request().method() === 'GET') await new Promise((r) => setTimeout(r, 900));
+    await route.continue();
+  });
+  await page.goto(`/?file=${fixturePath}`);
+  await page.locator('[data-doc-page]').waitFor({ state: 'attached', timeout: 10_000 });
+  const mainVisibility = await page.evaluate(
+    () =>
+      getComputedStyle(
+        document.querySelector('[data-doc-page]')!.closest('.flex-1.min-w-0.flex.flex-col')!,
+      ).visibility,
+  );
+  expect(mainVisibility, 'still starting up').toBe('hidden');
+
+  await page.keyboard.press(withMod('k'));
+  const input = page.getByPlaceholder('Type a command...');
+  await expect(input).toBeVisible();
+  await expect(input).toBeFocused();
+  await page.keyboard.type('reload');
+  await expect(input).toHaveValue('reload');
 });
 
 test('a review opened in a new tab is shown once its document has loaded', async ({
