@@ -1,0 +1,30 @@
+{
+  "markerMode": "resolve",
+  "requiresAgent": "claude-cli-resolve",
+  "totalComments": 2,
+  "actionableComments": 1,
+  "comments": [
+    {
+      "id": "eval-21-c1",
+      "expectedAction": "skip"
+    },
+    {
+      "id": "eval-21-c2",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["24 hours", "8", "doubl"]
+      }
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": [
+    {
+      "type": "contains",
+      "value": "Every delivery is signed with the endpoint secret. Receivers must verify the signature before processing the payload."
+    },
+    {
+      "type": "contains",
+      "value": "The signature is an HMAC-SHA256 of the raw request body, sent in the `X-Signature` header."
+    }
+  ]
+}

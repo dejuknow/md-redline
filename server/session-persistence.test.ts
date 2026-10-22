@@ -78,6 +78,7 @@ function makeSession(overrides: Partial<PersistedSession> = {}): PersistedSessio
     lastAgentActivityAt: '2026-09-24T00:00:01.000Z',
     status: 'open',
     sentCommentIds: ['c1'],
+    sentReplyIds: ['r1'],
     waitingForAgent: false,
     waitingForAgentSince: null,
     agentCommentCount: 1,
@@ -230,6 +231,30 @@ describe('loadPersistedState', () => {
     // real type never allows, which is exactly what a hand-edited or
     // truncated file on disk could contain.
     const badSession = { ...makeSession(), filePaths: 'not-an-array' as unknown as string[] };
+    const badState = { sessions: [badSession], pendingAsks: [], settledAsks: [] };
+    await writeRawFile(path, { version: 1, savedAt: Date.now(), ...badState });
+
+    const result = await loadPersistedState(path, new Date());
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a session saved before sentReplyIds existed', async () => {
+    const path = join(testDir, 'sessions-1.json');
+    const oldSession: Partial<PersistedSession> = makeSession();
+    delete oldSession.sentReplyIds;
+    const state = { sessions: [oldSession], pendingAsks: [], settledAsks: [] };
+    const now = new Date();
+    await writeRawFile(path, { version: 1, savedAt: now.getTime(), ...state });
+
+    const result = await loadPersistedState(path, now);
+    expect(result).toEqual({ state, savedAt: now.getTime() });
+  });
+
+  it('rejects a file whose sentReplyIds is not an array of strings', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const path = join(testDir, 'sessions-1.json');
+    const badSession = { ...makeSession(), sentReplyIds: [1, 2] as unknown as string[] };
     const badState = { sessions: [badSession], pendingAsks: [], settledAsks: [] };
     await writeRawFile(path, { version: 1, savedAt: Date.now(), ...badState });
 

@@ -143,6 +143,15 @@ export interface ReviewSession {
   fileAddedAt?: Record<string, string>;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
+  /**
+   * The reviewer replies delivered in sent batches. A thread the agent already
+   * has stays sent until the reviewer writes a reply that is not in here, so a
+   * reply goes out once rather than until the agent answers. Each entry is
+   * opaque to the server: the browser sends a reply id plus a hash of the reply
+   * text, so an edited reply counts as new. Kept apart from sentCommentIds,
+   * which feeds the agent's prompt verbatim.
+   */
+  sentReplyIds: string[];
   waitingForAgent: boolean;
 }
 
@@ -281,6 +290,8 @@ export interface PersistedSession {
   lastAgentActivityAt: string | null;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
+  /** Optional: files written before replies were tracked restore with none. */
+  sentReplyIds?: string[];
   waitingForAgent: boolean;
   waitingForAgentSince: string | null;
   agentCommentCount: number;
@@ -367,6 +378,7 @@ export class ReviewSessionStore {
       lastHeartbeatAt: now,
       status: 'open',
       sentCommentIds: [],
+      sentReplyIds: [],
       waitingForAgent: false,
       resolver,
       waiter,
@@ -690,16 +702,12 @@ export class ReviewSessionStore {
    * resolve a promise nobody holds; the batch would be silently lost (see
    * parkedWaitCount).
    */
-  sendBatch(id: string, prompt: string, commentIds: string[]): boolean {
+  sendBatch(id: string, prompt: string, commentIds: string[], replyIds: string[] = []): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open' || s.waitingForAgent || s.parkedWaitCount === 0) return false;
 
     // Accumulate sent IDs
-    for (const cid of commentIds) {
-      if (!s.sentCommentIds.includes(cid)) {
-        s.sentCommentIds.push(cid);
-      }
-    }
+    this.recordSent(s, commentIds, replyIds);
 
     // Resolve the current waiter
     s.resolver({ status: 'batch', prompt, commentIds });
@@ -725,13 +733,16 @@ export class ReviewSessionStore {
    * rebuilt at delivery time (in waitForSession) so back-to-back queue
    * merges don't double-up the system-instructions preamble.
    */
-  queueBatch(id: string, commentIds: string[], commentCountsByPath: Map<string, number>): boolean {
+  queueBatch(
+    id: string,
+    commentIds: string[],
+    commentCountsByPath: Map<string, number>,
+    replyIds: string[] = [],
+  ): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
-    // Update sentCommentIds so the UI correctly disables the button after queuing.
-    for (const cid of commentIds) {
-      if (!s.sentCommentIds.includes(cid)) s.sentCommentIds.push(cid);
-    }
+    // Update the sent ids so the UI correctly disables the button after queuing.
+    this.recordSent(s, commentIds, replyIds);
     if (s.queuedBatch) {
       const mergedIds = Array.from(new Set([...s.queuedBatch.commentIds, ...commentIds]));
       const mergedCounts = new Map(s.queuedBatch.commentCountsByPath);
@@ -753,6 +764,20 @@ export class ReviewSessionStore {
     }
     this.onChange?.();
     return true;
+  }
+
+  /**
+   * Remember what a batch carried so the browser stops offering it again:
+   * the comments by id, and the reviewer replies on them by reply id. Both
+   * lists only grow, and an id already present is not added twice.
+   */
+  private recordSent(s: InternalSession, commentIds: string[], replyIds: string[]): void {
+    for (const cid of commentIds) {
+      if (!s.sentCommentIds.includes(cid)) s.sentCommentIds.push(cid);
+    }
+    for (const rid of replyIds) {
+      if (!s.sentReplyIds.includes(rid)) s.sentReplyIds.push(rid);
+    }
   }
 
   /**
@@ -808,6 +833,7 @@ export class ReviewSessionStore {
     prompt?: string,
     commentIds?: string[],
     commentCountsByPath?: Map<string, number>,
+    replyIds: string[] = [],
   ): boolean {
     const s = this.sessions.get(id);
     if (!s || s.status !== 'open') return false;
@@ -837,13 +863,7 @@ export class ReviewSessionStore {
       finalPrompt = this.batchPrompt(s, finalIds, counts);
     }
 
-    if (finalIds) {
-      for (const cid of finalIds) {
-        if (!s.sentCommentIds.includes(cid)) {
-          s.sentCommentIds.push(cid);
-        }
-      }
-    }
+    this.recordSent(s, finalIds ?? [], replyIds);
 
     s.status = 'done';
     s.terminalAt = new Date();
@@ -1304,6 +1324,7 @@ export class ReviewSessionStore {
         lastAgentActivityAt: s.lastAgentActivityAt ? s.lastAgentActivityAt.toISOString() : null,
         status: s.status,
         sentCommentIds: [...s.sentCommentIds],
+        sentReplyIds: [...s.sentReplyIds],
         waitingForAgent: s.waitingForAgent,
         waitingForAgentSince: s.waitingForAgentSince ? s.waitingForAgentSince.toISOString() : null,
         agentCommentCount: s.agentCommentCount,
@@ -1428,6 +1449,7 @@ export class ReviewSessionStore {
           : null,
         status: persisted.status,
         sentCommentIds: [...persisted.sentCommentIds],
+        sentReplyIds: [...(persisted.sentReplyIds ?? [])],
         waitingForAgent: persisted.waitingForAgent,
         // Shifted like lastHeartbeatAt: the agent's 60 seconds to pick up a
         // sent batch cannot run while the server is down, or the banner
@@ -1508,6 +1530,7 @@ export class ReviewSessionStore {
       author: s.author,
       status: s.status,
       sentCommentIds: [...s.sentCommentIds],
+      sentReplyIds: [...s.sentReplyIds],
       waitingForAgent: s.waitingForAgent,
     };
   }

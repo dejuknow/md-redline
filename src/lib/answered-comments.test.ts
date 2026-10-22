@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { computeAnsweredCommentIds, computeUserRepliedLastIds } from './answered-comments';
+import {
+  computeAnsweredCommentIds,
+  computeUserRepliedLast,
+  effectiveSentCommentIds,
+  isCommentSent,
+  replyKey,
+} from './answered-comments';
 import type { MdComment, CommentReply } from '../types';
 
 function comment(over: Partial<MdComment> = {}): MdComment {
@@ -106,20 +112,65 @@ describe('the agent stamp on a reply (#102)', () => {
   });
 });
 
-describe('computeUserRepliedLastIds', () => {
-  const stamped = (agent: boolean, id: string): CommentReply => ({
-    ...reply(agent ? 'Claude' : 'Dennis', id),
-    agent,
+const stamped = (agent: boolean, id: string, text = 'text'): CommentReply => ({
+  ...reply(agent ? 'Claude' : 'Dennis', id),
+  text,
+  agent,
+});
+
+describe('replyKey', () => {
+  it('starts with the reply id and is stable for the same reply', () => {
+    const r = stamped(false, 'r1', 'Please keep the old name.');
+    expect(replyKey(r)).toMatch(/^r1~[0-9a-z]+$/);
+    expect(replyKey(r)).toBe(replyKey({ ...r }));
   });
 
-  it('includes a thread whose last reply is the reviewer’s', () => {
-    const c = comment({ replies: [stamped(true, 'r1'), stamped(false, 'r2')] });
-    expect(computeUserRepliedLastIds([c])).toEqual(new Set(['c1']));
+  it('changes when the text is edited, though the id stays', () => {
+    const before = stamped(false, 'r1', 'Please keep the old name.');
+    const after = { ...before, text: 'Please keep the old name, but add an alias.' };
+    expect(replyKey(after)).not.toBe(replyKey(before));
+  });
+
+  it('ignores everything but the id and the text', () => {
+    const r = stamped(false, 'r1', 'same');
+    expect(replyKey({ ...r, timestamp: '2030-01-01T00:00:00.000Z', author: 'Someone' })).toBe(
+      replyKey(r),
+    );
+  });
+
+  it('tells apart texts that differ by one character, and an empty text from a missing one', () => {
+    expect(replyKey(stamped(false, 'r1', 'a'))).not.toBe(replyKey(stamped(false, 'r1', 'b')));
+    const missing = { id: 'r1', author: 'Dennis', timestamp: 't' } as unknown as CommentReply;
+    expect(replyKey(missing)).toBe(replyKey(stamped(false, 'r1', '')));
+  });
+});
+
+describe('computeUserRepliedLast', () => {
+  it('maps a thread whose last reply is the reviewer’s to that reply’s key', () => {
+    const last = stamped(false, 'r2');
+    const c = comment({ replies: [stamped(true, 'r1'), last] });
+    expect(computeUserRepliedLast([c])).toEqual(new Map([['c1', replyKey(last)]]));
+  });
+
+  it('maps to the newest reply when the reviewer replied more than once', () => {
+    const newest = stamped(false, 'r3');
+    const c = comment({ replies: [stamped(true, 'r1'), stamped(false, 'r2'), newest] });
+    expect(computeUserRepliedLast([c])).toEqual(new Map([['c1', replyKey(newest)]]));
+  });
+
+  it('gives an edited reply a new key', () => {
+    const sent = comment({ replies: [stamped(true, 'r1'), stamped(false, 'r2', 'first draft')] });
+    const edited = comment({
+      replies: [stamped(true, 'r1'), stamped(false, 'r2', 'corrected draft')],
+    });
+    expect(computeUserRepliedLast([edited]).get('c1')).not.toBe(
+      computeUserRepliedLast([sent]).get('c1'),
+    );
   });
 
   it('excludes a thread the agent answered last', () => {
     const c = comment({ replies: [stamped(false, 'r1'), stamped(true, 'r2')] });
-    expect(computeUserRepliedLastIds([c])).toEqual(new Set());
+    expect(computeUserRepliedLast([c])).toEqual(new Map());
   });
 
   it('excludes a resolved thread the reviewer replied to last', () => {
@@ -128,15 +179,90 @@ describe('computeUserRepliedLastIds', () => {
       status: 'resolved',
       resolved: true,
     });
-    expect(computeUserRepliedLastIds([c])).toEqual(new Set());
+    expect(computeUserRepliedLast([c])).toEqual(new Map());
+  });
+
+  it('keeps a resolved thread the reviewer replied to last when resolve is off', () => {
+    const last = stamped(false, 'r2');
+    const c = comment({
+      replies: [stamped(true, 'r1'), last],
+      status: 'resolved',
+      resolved: true,
+    });
+    expect(computeUserRepliedLast([c], false)).toEqual(new Map([['c1', replyKey(last)]]));
   });
 
   it('excludes a thread with no replies', () => {
-    expect(computeUserRepliedLastIds([comment()])).toEqual(new Set());
+    expect(computeUserRepliedLast([comment()])).toEqual(new Map());
   });
 
   it('falls back to author comparison for unstamped replies', () => {
-    const own = comment({ replies: [reply('Claude', 'r1'), reply('Dennis', 'r2')] });
-    expect(computeUserRepliedLastIds([own])).toEqual(new Set(['c1']));
+    const last = reply('Dennis', 'r2');
+    const own = comment({ replies: [reply('Claude', 'r1'), last] });
+    expect(computeUserRepliedLast([own])).toEqual(new Map([['c1', replyKey(last)]]));
+  });
+});
+
+describe('isCommentSent', () => {
+  const none = new Map<string, string>();
+
+  it('is false for an id that was never sent', () => {
+    expect(isCommentSent('c1', new Set(), new Set(), none)).toBe(false);
+  });
+
+  it('is true for a sent id with no reviewer reply waiting', () => {
+    expect(isCommentSent('c1', new Set(['c1']), new Set(), none)).toBe(true);
+  });
+
+  it('is true when the reviewer’s last reply is among the sent keys', () => {
+    const replied = new Map([['c1', 'r1~a']]);
+    expect(isCommentSent('c1', new Set(['c1']), new Set(['r1~a']), replied)).toBe(true);
+  });
+
+  it('is false when the reviewer’s last reply is not among the sent keys', () => {
+    const replied = new Map([['c1', 'r1~b']]);
+    expect(isCommentSent('c1', new Set(['c1']), new Set(['r1~a']), replied)).toBe(false);
+  });
+});
+
+describe('effectiveSentCommentIds', () => {
+  it('lists the ids the sessions and this tab have sent, once each', () => {
+    expect(effectiveSentCommentIds(['c1', 'c2', 'c1'], ['c2', 'c3'], new Map(), [])).toEqual([
+      'c1',
+      'c2',
+      'c3',
+    ]);
+  });
+
+  it('leaves out a sent comment whose last reply has not gone out', () => {
+    const replied = new Map([['c2', 'r1~b']]);
+    expect(effectiveSentCommentIds(['c1', 'c2'], [], replied, ['r1~a'])).toEqual(['c1']);
+  });
+
+  it('keeps a sent comment whose last reply went out, per a session or this tab', () => {
+    const replied = new Map([
+      ['c1', 'r1~a'],
+      ['c2', 'r2~a'],
+    ]);
+    expect(effectiveSentCommentIds(['c1', 'c2'], [], replied, ['r1~a', 'r2~a'])).toEqual([
+      'c1',
+      'c2',
+    ]);
+    // Reported by the sessions, or only recorded optimistically: same result.
+    expect(effectiveSentCommentIds(['c1'], ['c2'], replied, ['r1~a', 'r2~a'])).toEqual([
+      'c1',
+      'c2',
+    ]);
+  });
+
+  it('does not add a comment with a pending reply that was never sent', () => {
+    const replied = new Map([['c9', 'r1~a']]);
+    expect(effectiveSentCommentIds(['c1'], [], replied, [])).toEqual(['c1']);
+  });
+
+  it('returns a comment to the sent list once its reply is sent', () => {
+    const replied = new Map([['c1', 'r1~b']]);
+    expect(effectiveSentCommentIds(['c1'], [], replied, ['r1~a'])).toEqual([]);
+    expect(effectiveSentCommentIds(['c1'], [], replied, ['r1~a', 'r1~b'])).toEqual(['c1']);
   });
 });

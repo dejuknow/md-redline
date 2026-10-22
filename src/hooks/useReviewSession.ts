@@ -6,6 +6,12 @@ export interface ReviewSession {
   enableResolve: boolean;
   status: 'open' | 'done' | 'aborted';
   sentCommentIds: string[];
+  /**
+   * The reviewer replies already delivered in sent batches, each a reply id
+   * plus a hash of its text (`replyKey`), so an edited reply counts as new.
+   * Absent from a server that predates reply tracking, which reads as none sent.
+   */
+  sentReplyIds?: string[];
   waitingForAgent: boolean;
   origin: 'user' | 'agent';
   /** ISO timestamp when the session was created. Always populated by the server's toPublic; used to tiebreak overlapping sessions for the same file. */
@@ -36,7 +42,8 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
       x.lastAgentActivityAt !== y.lastAgentActivityAt ||
       x.author !== y.author ||
       x.filePaths.length !== y.filePaths.length ||
-      x.sentCommentIds.length !== y.sentCommentIds.length
+      x.sentCommentIds.length !== y.sentCommentIds.length ||
+      (x.sentReplyIds ?? []).length !== (y.sentReplyIds ?? []).length
     ) {
       return false;
     }
@@ -45,6 +52,11 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
     }
     for (let j = 0; j < x.sentCommentIds.length; j++) {
       if (x.sentCommentIds[j] !== y.sentCommentIds[j]) return false;
+    }
+    const xReplies = x.sentReplyIds ?? [];
+    const yReplies = y.sentReplyIds ?? [];
+    for (let j = 0; j < xReplies.length; j++) {
+      if (xReplies[j] !== yReplies[j]) return false;
     }
   }
   return true;

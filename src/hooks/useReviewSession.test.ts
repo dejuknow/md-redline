@@ -301,6 +301,53 @@ describe('useReviewSession', () => {
     expect(result.current.sessions[0].sentCommentIds).toEqual(['c1']);
   });
 
+  it('updates sessions when only sentReplyIds changes', async () => {
+    // The banner reads sentReplyIds to stop offering a reply that went out, so
+    // a poll that differs in nothing else must still replace the session.
+    let pollCount = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/review-sessions') {
+        pollCount += 1;
+        const sentReplyIds = pollCount >= 2 ? ['r1'] : [];
+        return {
+          ok: true,
+          json: async () => ({
+            sessions: [
+              {
+                id: 'rev_1',
+                filePaths: ['/tmp/a.md'],
+                enableResolve: false,
+                status: 'open',
+                sentCommentIds: ['c1'],
+                sentReplyIds,
+                waitingForAgent: false,
+              },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
+    });
+
+    const { result } = renderHook(() => useReviewSession(['/tmp/a.md']));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const first = result.current.sessions;
+    expect(first[0].sentReplyIds).toEqual([]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      for (let j = 0; j < 5; j++) await Promise.resolve();
+    });
+
+    expect(result.current.sessions).not.toBe(first);
+    expect(result.current.sessions[0].sentReplyIds).toEqual(['r1']);
+  });
+
   it('exposes session.origin from GET /api/review-sessions response', async () => {
     fetchMock.mockResolvedValue({
       ok: true,

@@ -26,7 +26,7 @@ import {
   orderCommentsByAnchor,
 } from '../lib/comment-parser';
 import { randomId } from '../lib/random-id';
-import { computeUserRepliedLastIds } from '../lib/answered-comments';
+import { computeUserRepliedLast } from '../lib/answered-comments';
 import { getEffectiveStatus, type MdComment } from '../types';
 import { renderMarkdown } from '../markdown/pipeline';
 import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
@@ -213,10 +213,12 @@ export function useComments(params: UseCommentsParams) {
       };
     }, [tabs, activeFilePath, comments, enableResolve]);
 
-  // Sent threads the reviewer replied to after the agent's last reply: pending
-  // again until the agent answers, so a reply alone enables Send.
-  const userRepliedLastIds = useMemo(() => {
-    const ids = new Set<string>();
+  // Threads the reviewer replied to after the agent's last reply, each mapped
+  // to that reply's key (id plus a hash of its text). A sent thread is pending
+  // again for a reply, or an edit of one, that has not gone out yet, so a reply
+  // alone enables Send.
+  const userRepliedLast = useMemo(() => {
+    const lastReplyKeys = new Map<string, string>();
     for (const tab of tabs) {
       let tabComments = comments;
       if (tab.filePath !== activeFilePath) {
@@ -227,10 +229,12 @@ export function useComments(params: UseCommentsParams) {
         }
       }
       const userTabComments = tabComments.filter((c) => !c.agentInitiated);
-      for (const id of computeUserRepliedLastIds(userTabComments)) ids.add(id);
+      for (const [id, replyKey] of computeUserRepliedLast(userTabComments, enableResolve)) {
+        lastReplyKeys.set(id, replyKey);
+      }
     }
-    return ids;
-  }, [tabs, activeFilePath, comments]);
+    return lastReplyKeys;
+  }, [tabs, activeFilePath, comments, enableResolve]);
 
   const commentCount = enableResolve
     ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
@@ -459,7 +463,7 @@ export function useComments(params: UseCommentsParams) {
     commentCounts,
     resolvedCommentCounts,
     commentIdsByFile,
-    userRepliedLastIds,
+    userRepliedLast,
     agentCommentCounts,
     commentCount,
     updateAndSave,

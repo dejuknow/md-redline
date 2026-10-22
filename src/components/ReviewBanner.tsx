@@ -1,8 +1,19 @@
 import { useCallback, useState, useEffect } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
+import { isCommentSent } from '../lib/answered-comments';
 import type { ReviewSession } from '../hooks/useReviewSession';
 import type { ShowToast } from '../hooks/useToast';
+
+/**
+ * What this tab has just sent, before a session refresh reports it: comment
+ * ids, and reply keys (`replyKey` in answered-comments.ts). Owned by the
+ * parent, which also passes both to `onBatchSent`.
+ */
+export interface OptimisticSent {
+  commentIds: ReadonlySet<string>;
+  replyKeys: ReadonlySet<string>;
+}
 
 interface ReviewBannerProps {
   sessions: ReviewSession[];
@@ -11,29 +22,67 @@ interface ReviewBannerProps {
   /** Called after a successful handoff so the parent can capture diff snapshots for the session's files. */
   onHandoffSuccess: (session: ReviewSession) => void;
   onResolved: () => void;
-  /** Called after a successful batch POST with the IDs that were sent. Parent uses this for optimistic UI update. */
-  onBatchSent?: (sentIds: string[]) => void;
+  /**
+   * Called after a successful send (batch or send & finish) with the comment
+   * IDs and reply keys that went out. The parent records them and hands them
+   * back as `optimisticSent`, so what just went out reads as sent before the
+   * next session refresh reports it.
+   */
+  onBatchSent?: (sentIds: string[], sentReplyKeys: string[]) => void;
+  /** Sent ids and reply keys the parent has recorded ahead of the session. */
+  optimisticSent?: OptimisticSent;
   /** Optional toast callback for brief confirmation and error messages. */
   showToast?: ShowToast;
   /** Comment IDs grouped by file path. */
   commentIdsByFile: Map<string, string[]>;
-  /** Sent comments whose last reply is the reviewer's: pending again until the agent replies. */
-  userRepliedLastIds?: ReadonlySet<string>;
+  /**
+   * Open comments whose last reply is the reviewer's, mapped to that reply's
+   * key. A sent comment is pending again for a reply not yet recorded as sent.
+   */
+  userRepliedLast?: ReadonlyMap<string, string>;
   /** Count of agent questions awaiting a reply, per session id. */
   pendingAskCountsBySession?: Map<string, number>;
   /** Scroll/focus the session's first pending agent question. */
   onJumpToAsk?: (sessionId: string) => void;
 }
 
+const NO_REPLIES: ReadonlyMap<string, string> = new Map();
+const NO_OPTIMISTIC: OptimisticSent = { commentIds: new Set(), replyKeys: new Set() };
+
 // A session is ready to send only when we have an authoritative comment count
 // for every file it references. Tabs load asynchronously after `?review=<id>`
 // opens them, and `commentCounts` is keyed by open tab paths. Without this
 // guard, a click during the loading window would generate a "no changes,
 // proceed" prompt using a zero count that is actually "not yet known."
-const NO_IDS: ReadonlySet<string> = new Set();
-
 function sessionIsReady(s: ReviewSession, commentCounts: Map<string, number>): boolean {
   return s.filePaths.every((p) => commentCounts.has(p));
+}
+
+// The session's comments that still need to go out. A comment is unsent until
+// it is sent; a sent one counts as unsent again only when the reviewer's last
+// reply on it is one that has not gone out yet. Sent means the session reports
+// it or this tab has just sent it: the session lags the click by a refresh,
+// and in that gap the same batch would otherwise be offered again.
+// Judging by the reply rather than by "the agent has not answered yet" keeps a
+// reply from being offered again while the agent is still working on it.
+function unsentCommentIds(
+  s: ReviewSession,
+  commentIdsByFile: Map<string, string[]>,
+  userRepliedLast: ReadonlyMap<string, string>,
+  optimistic: OptimisticSent,
+): string[] {
+  const sentIds = new Set([...s.sentCommentIds, ...optimistic.commentIds]);
+  const sentKeys = new Set([...(s.sentReplyIds ?? []), ...optimistic.replyKeys]);
+  return s.filePaths
+    .flatMap((p) => commentIdsByFile.get(p) ?? [])
+    .filter((id) => !isCommentSent(id, sentIds, sentKeys, userRepliedLast));
+}
+
+// The reply keys a batch carries: the last reply of each thread being sent
+// that has one. The server records them (as `replyIds`) so the thread is not
+// offered again for the same reply text.
+function replyKeysFor(ids: string[], userRepliedLast: ReadonlyMap<string, string>): string[] {
+  return ids.flatMap((id) => userRepliedLast.get(id) ?? []);
 }
 
 // Per-file comment counts for a session's files, in the shape /batch and
@@ -70,9 +119,10 @@ export function ReviewBanner({
   onHandoffSuccess,
   onResolved,
   onBatchSent,
+  optimisticSent = NO_OPTIMISTIC,
   showToast,
   commentIdsByFile,
-  userRepliedLastIds = NO_IDS,
+  userRepliedLast = NO_REPLIES,
   pendingAskCountsBySession,
   onJumpToAsk,
 }: ReviewBannerProps) {
@@ -97,11 +147,9 @@ export function ReviewBanner({
 
   const handleSendBatch = useCallback(
     async (s: ReviewSession) => {
-      const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
-      const unsentIds = sessionIds.filter(
-        (id) => !s.sentCommentIds.includes(id) || userRepliedLastIds.has(id),
-      );
+      const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
       if (unsentIds.length === 0) return;
+      const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
       setBusyId(s.id);
       try {
         const prompt = buildPromptForSession(s, unsentIds);
@@ -117,6 +165,7 @@ export function ReviewBanner({
             body: JSON.stringify({
               prompt,
               commentIds: unsentIds,
+              replyIds: replyKeys,
               commentCounts: commentCountsForSession,
             }),
           });
@@ -132,7 +181,7 @@ export function ReviewBanner({
         }
         const data = (await res.json()) as { ok: boolean; queued?: boolean };
         onHandoffSuccess(s);
-        onBatchSent?.(unsentIds);
+        onBatchSent?.(unsentIds, replyKeys);
         if (data.queued) {
           showToast?.(
             `Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`,
@@ -151,7 +200,8 @@ export function ReviewBanner({
     [
       buildPromptForSession,
       commentIdsByFile,
-      userRepliedLastIds,
+      userRepliedLast,
+      optimisticSent,
       commentCounts,
       onHandoffSuccess,
       onBatchSent,
@@ -163,10 +213,8 @@ export function ReviewBanner({
     async (s: ReviewSession) => {
       setBusyId(s.id);
       try {
-        const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
-        const unsentIds = sessionIds.filter(
-          (id) => !s.sentCommentIds.includes(id) || userRepliedLastIds.has(id),
-        );
+        const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
+        const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
         // A batch queued behind a busy agent is delivered with the finish, so
         // the server needs the counts to rebuild the prompt even when there
         // are no unsent ids of our own.
@@ -176,6 +224,7 @@ export function ReviewBanner({
             ? {
                 prompt: buildPromptForSession(s, unsentIds),
                 commentIds: unsentIds,
+                replyIds: replyKeys,
                 commentCounts: commentCountsForSession,
               }
             : { commentCounts: commentCountsForSession };
@@ -197,6 +246,7 @@ export function ReviewBanner({
           return;
         }
         onHandoffSuccess(s);
+        if (unsentIds.length > 0) onBatchSent?.(unsentIds, replyKeys);
         showToast?.('Review finished and sent to agent', 'success');
         onResolved();
       } finally {
@@ -207,8 +257,10 @@ export function ReviewBanner({
       buildPromptForSession,
       commentIdsByFile,
       commentCounts,
-      userRepliedLastIds,
+      userRepliedLast,
+      optimisticSent,
       onHandoffSuccess,
+      onBatchSent,
       onResolved,
       showToast,
     ],
@@ -306,10 +358,7 @@ export function ReviewBanner({
         }
 
         const ready = sessionIsReady(s, commentCounts);
-        const sessionIds = s.filePaths.flatMap((p) => commentIdsByFile.get(p) ?? []);
-        const unsentIds = sessionIds.filter(
-          (id) => !s.sentCommentIds.includes(id) || userRepliedLastIds.has(id),
-        );
+        const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
         const disabled = busyId === s.id || !ready;
         const userSessionAskCount = pendingAskCountsBySession?.get(s.id) ?? 0;
         return (
