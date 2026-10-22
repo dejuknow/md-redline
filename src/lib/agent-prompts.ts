@@ -88,7 +88,7 @@ You MUST edit the files at the exact paths listed above. Do NOT copy them to a d
 ## What to do
 ${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
 1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${commentIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
-2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. If a comment already carries a reply authored by you, it was answered in an earlier round: leave it exactly as it is and do not reply again.
+2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. If a comment already carries a reply authored by you and no later reply from me, it was answered in an earlier round: leave it exactly as it is and do not reply again. If I replied after your last reply, address my latest reply and add a new reply.
 3. ${replyStep}
 4. ${afterAction}
 5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it

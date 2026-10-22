@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeAnsweredCommentIds } from './answered-comments';
+import { computeAnsweredCommentIds, computeUserRepliedLastIds } from './answered-comments';
 import type { MdComment, CommentReply } from '../types';
 
 function comment(over: Partial<MdComment> = {}): MdComment {
@@ -103,5 +103,40 @@ describe('the agent stamp on a reply (#102)', () => {
   it('falls back to names when a hand-edited stamp is not a boolean', () => {
     const odd = { ...reply('Claude'), agent: 'true' } as unknown as CommentReply;
     expect(computeAnsweredCommentIds([comment({ replies: [odd] })]).has('c1')).toBe(true);
+  });
+});
+
+describe('computeUserRepliedLastIds', () => {
+  const stamped = (agent: boolean, id: string): CommentReply => ({
+    ...reply(agent ? 'Claude' : 'Dennis', id),
+    agent,
+  });
+
+  it('includes a thread whose last reply is the reviewer’s', () => {
+    const c = comment({ replies: [stamped(true, 'r1'), stamped(false, 'r2')] });
+    expect(computeUserRepliedLastIds([c])).toEqual(new Set(['c1']));
+  });
+
+  it('excludes a thread the agent answered last', () => {
+    const c = comment({ replies: [stamped(false, 'r1'), stamped(true, 'r2')] });
+    expect(computeUserRepliedLastIds([c])).toEqual(new Set());
+  });
+
+  it('excludes a resolved thread the reviewer replied to last', () => {
+    const c = comment({
+      replies: [stamped(true, 'r1'), stamped(false, 'r2')],
+      status: 'resolved',
+      resolved: true,
+    });
+    expect(computeUserRepliedLastIds([c])).toEqual(new Set());
+  });
+
+  it('excludes a thread with no replies', () => {
+    expect(computeUserRepliedLastIds([comment()])).toEqual(new Set());
+  });
+
+  it('falls back to author comparison for unstamped replies', () => {
+    const own = comment({ replies: [reply('Claude', 'r1'), reply('Dennis', 'r2')] });
+    expect(computeUserRepliedLastIds([own])).toEqual(new Set(['c1']));
   });
 });

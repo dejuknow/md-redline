@@ -1,4 +1,5 @@
 import type { MdComment } from '../types';
+import { getEffectiveStatus } from '../types';
 
 /**
  * Ids of comments whose thread carries a reply from someone other than
@@ -23,6 +24,28 @@ import type { MdComment } from '../types';
 export function computeAnsweredCommentIds(comments: readonly MdComment[]): Set<string> {
   return new Set(
     comments.filter((c) => c.replies?.some((r) => isAgentReply(r, c.author))).map((c) => c.id),
+  );
+}
+
+/**
+ * Ids of open comments whose last reply is not an agent's: the reviewer
+ * answered after the agent's last reply, so the thread needs the agent again
+ * even when it was sent in an earlier batch. Without this a reply on a sent
+ * thread never enables Send and never reaches the agent. A resolved thread is
+ * left out: a closing "thanks" must not send it back.
+ */
+export function computeUserRepliedLastIds(comments: readonly MdComment[]): Set<string> {
+  return new Set(
+    comments
+      .filter((c) => {
+        const last = c.replies?.[c.replies.length - 1];
+        return (
+          last !== undefined &&
+          !isAgentReply(last, c.author) &&
+          getEffectiveStatus(c) !== 'resolved'
+        );
+      })
+      .map((c) => c.id),
   );
 }
 
