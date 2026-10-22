@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, act } from '@testing-library/react';
+import { render, cleanup, act, fireEvent, within } from '@testing-library/react';
 import { TabBar } from './TabBar';
 
 // jsdom has no ResizeObserver. TabBar watches the tab strip's scrollport and
@@ -152,5 +152,101 @@ describe('TabBar: keeping the active tab in view', () => {
     await settle();
 
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
+describe('TabBar: comment count badges', () => {
+  // one.md has open comments, two.md has only resolved ones, three.md has both
+  // (the open count wins), and four.md has neither.
+  const BADGE_TABS = ['one', 'two', 'three', 'four'].map((name) => ({
+    filePath: `/docs/${name}.md`,
+    error: null,
+  }));
+  const counts = new Map([
+    ['/docs/one.md', 3],
+    ['/docs/three.md', 1],
+  ]);
+  const resolvedCounts = new Map([
+    ['/docs/two.md', 2],
+    ['/docs/three.md', 4],
+  ]);
+
+  function renderBadges(resolved?: Map<string, number>) {
+    return render(
+      <TabBar
+        tabs={BADGE_TABS}
+        activeFilePath="/docs/one.md"
+        commentCounts={counts}
+        resolvedCommentCounts={resolved}
+        onSwitchTab={() => {}}
+        onCloseTab={() => {}}
+        onOpenFile={() => {}}
+      />,
+    );
+  }
+
+  /** The count badges inside one tab's button, found by the file name it shows. */
+  function badgesIn(scope: HTMLElement, fileName: string) {
+    const button = within(scope).getByText(fileName).closest('button') as HTMLElement;
+    return {
+      open: Array.from(button.querySelectorAll('span.rounded-full')).filter(
+        (el) => !el.hasAttribute('title') && /^\d+$/.test(el.textContent ?? ''),
+      ),
+      resolved: Array.from(button.querySelectorAll('span[title$=" resolved"]')),
+    };
+  }
+
+  function expectBadges(scope: HTMLElement) {
+    // Open comments draw the plain count badge.
+    const one = badgesIn(scope, 'one.md');
+    expect(one.open.map((el) => el.textContent)).toEqual(['3']);
+    expect(one.resolved).toHaveLength(0);
+
+    // No open comments but some resolved: the outlined "N resolved" badge.
+    const two = badgesIn(scope, 'two.md');
+    expect(two.open).toHaveLength(0);
+    expect(two.resolved.map((el) => [el.textContent, el.getAttribute('title')])).toEqual([
+      ['2', '2 resolved'],
+    ]);
+
+    // An open count wins over a resolved count.
+    const three = badgesIn(scope, 'three.md');
+    expect(three.open.map((el) => el.textContent)).toEqual(['1']);
+    expect(three.resolved).toHaveLength(0);
+
+    // Neither: no badge at all.
+    const four = badgesIn(scope, 'four.md');
+    expect(four.open).toHaveLength(0);
+    expect(four.resolved).toHaveLength(0);
+  }
+
+  it('draws the open count, or the "N resolved" badge when only resolved remain, in the tab strip', () => {
+    const { container } = renderBadges(resolvedCounts);
+
+    expectBadges(container);
+  });
+
+  it('draws the same badges in the overflow tab list', () => {
+    // The tab list button only mounts once the strip overflows, and jsdom
+    // reports zero scroll and client widths.
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(200);
+    const { getByTestId } = renderBadges(resolvedCounts);
+
+    fireEvent.click(getByTestId('tab-list-button'));
+
+    expectBadges(getByTestId('tab-list-menu'));
+  });
+
+  it('draws no resolved badge when the resolved counts are empty or omitted', () => {
+    // App passes an empty map while the resolve workflow is off; the prop is
+    // optional, so a missing map has to read the same.
+    for (const resolved of [new Map<string, number>(), undefined]) {
+      const { container, unmount } = renderBadges(resolved);
+
+      expect(container.querySelectorAll('span[title$=" resolved"]')).toHaveLength(0);
+      expect(badgesIn(container, 'two.md').open).toHaveLength(0);
+      unmount();
+    }
   });
 });
