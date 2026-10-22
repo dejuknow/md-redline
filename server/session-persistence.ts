@@ -139,6 +139,7 @@ function isPersistedSession(value: unknown): boolean {
     typeof value.status === 'string' &&
     STATUSES.has(value.status) &&
     isStringArray(value.sentCommentIds) &&
+    (value.sentReplyIds === undefined || isStringArray(value.sentReplyIds)) &&
     typeof value.waitingForAgent === 'boolean' &&
     isNullableString(value.waitingForAgentSince) &&
     typeof value.agentCommentCount === 'number' &&

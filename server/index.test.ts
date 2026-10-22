@@ -2217,6 +2217,80 @@ describe('review sessions API', () => {
     expect(batch.response.status).toBe(400);
   });
 
+  // A clientId of its own keeps these off the session the other tests share
+  // for docsFile, whose sent ids would otherwise leak into the assertions.
+  async function createIsolatedSession(clientId: string): Promise<string> {
+    const create = await requestJson(app, '/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [docsFile], enableResolve: false, clientId }),
+    });
+    return (create.body as { sessionId: string }).sessionId;
+  }
+
+  it('POST .../batch records replyIds on the session, apart from commentIds', async () => {
+    const sessionId = await createIsolatedSession('reply-ids-batch');
+
+    const batch = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Address these', commentIds: ['c1'], replyIds: ['r1', 'r1'] }),
+    });
+    expect(batch.response.status).toBe(200);
+
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ sentCommentIds: ['c1'], sentReplyIds: ['r1'] });
+  });
+
+  it.each([
+    ['a string', 'r1'],
+    ['an object', { r1: true }],
+    ['an array with a non-string', ['r1', 2]],
+  ])('POST .../batch rejects replyIds that is %s with 400', async (_label, replyIds) => {
+    const sessionId = await createIsolatedSession('reply-ids-bad-batch');
+
+    const batch = await requestJson(app, `/api/review-sessions/${sessionId}/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'x', commentIds: ['c1'], replyIds }),
+    });
+    expect(batch.response.status).toBe(400);
+    expect(batch.body).toMatchObject({ error: 'replyIds must be an array of strings' });
+
+    // Nothing was recorded for the rejected request.
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ sentCommentIds: [], sentReplyIds: [] });
+  });
+
+  it('POST .../finish records replyIds on the session', async () => {
+    const sessionId = await createIsolatedSession('reply-ids-finish');
+
+    const finish = await requestJson(app, `/api/review-sessions/${sessionId}/finish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'final', commentIds: ['c1'], replyIds: ['r1'] }),
+    });
+    expect(finish.response.status).toBe(200);
+
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ status: 'done', sentReplyIds: ['r1'] });
+  });
+
+  it('POST .../finish rejects replyIds that is not an array of strings with 400', async () => {
+    const sessionId = await createIsolatedSession('reply-ids-bad-finish');
+
+    const finish = await requestJson(app, `/api/review-sessions/${sessionId}/finish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'final', commentIds: ['c1'], replyIds: [7] }),
+    });
+    expect(finish.response.status).toBe(400);
+
+    // The session stays open: a rejected finish must not close it.
+    const after = await requestJson(app, `/api/review-sessions/${sessionId}`);
+    expect(after.body).toMatchObject({ status: 'open', sentCommentIds: [], sentReplyIds: [] });
+  });
+
   it('POST .../batch while waitingForAgent returns 200 with queued:true instead of 409', async () => {
     const create = await requestJson(app, '/api/review-sessions', {
       method: 'POST',

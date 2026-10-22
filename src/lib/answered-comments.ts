@@ -28,25 +28,85 @@ export function computeAnsweredCommentIds(comments: readonly MdComment[]): Set<s
 }
 
 /**
- * Ids of open comments whose last reply is not an agent's: the reviewer
- * answered after the agent's last reply, so the thread needs the agent again
- * even when it was sent in an earlier batch. Without this a reply on a sent
- * thread never enables Send and never reaches the agent. A resolved thread is
- * left out: a closing "thanks" must not send it back.
+ * Identifies a reply by its id and its text. `editReply` keeps the id, so the
+ * id alone would call a corrected reply already sent and the correction would
+ * never reach the agent. The hash is only there to tell two texts apart, not to
+ * protect anything, so a small string hash (djb2) is enough.
  */
-export function computeUserRepliedLastIds(comments: readonly MdComment[]): Set<string> {
-  return new Set(
-    comments
-      .filter((c) => {
-        const last = c.replies?.[c.replies.length - 1];
-        return (
-          last !== undefined &&
-          !isAgentReply(last, c.author) &&
-          getEffectiveStatus(c) !== 'resolved'
-        );
-      })
-      .map((c) => c.id),
-  );
+export function replyKey(reply: NonNullable<MdComment['replies']>[number]): string {
+  // A render path again: a hand-edited marker can lack the text.
+  const text = typeof reply.text === 'string' ? reply.text : '';
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = (Math.imul(hash, 33) + text.charCodeAt(i)) >>> 0;
+  }
+  return `${reply.id}~${hash.toString(36)}`;
+}
+
+/**
+ * Open comments whose last reply is not an agent's, mapped to that reply's key
+ * (`replyKey`): the reviewer answered after the agent's last reply, so the
+ * thread needs the agent again even when it was sent in an earlier batch.
+ * Without this a reply on a sent thread never enables Send and never reaches
+ * the agent.
+ *
+ * The key is what separates "this reply already went out" from "a newer one is
+ * waiting": a sent thread counts as unsent again only for a reply the session
+ * has not recorded as sent, and an edited reply is a new key. With the resolve
+ * workflow on, a resolved thread is left out: a closing "thanks" must not send
+ * it back. With it off, the card still shows a resolved thread as open with
+ * Reply, so a reply typed there is kept like any other.
+ */
+export function computeUserRepliedLast(
+  comments: readonly MdComment[],
+  enableResolve = true,
+): Map<string, string> {
+  const lastReplyKeys = new Map<string, string>();
+  for (const c of comments) {
+    const last = c.replies?.[c.replies.length - 1];
+    if (
+      last !== undefined &&
+      !isAgentReply(last, c.author) &&
+      (!enableResolve || getEffectiveStatus(c) !== 'resolved')
+    ) {
+      lastReplyKeys.set(c.id, replyKey(last));
+    }
+  }
+  return lastReplyKeys;
+}
+
+/**
+ * Whether a comment has gone to the agent as it stands now: its id is sent, and
+ * so is the reviewer's last reply on it, when there is one. A sent comment whose
+ * last reply key is not in `sentReplyKeys` is waiting on a reply and counts as
+ * unsent, which is what keeps the banner's Send and the card's "Sent" badge in
+ * agreement.
+ */
+export function isCommentSent(
+  id: string,
+  sentCommentIds: ReadonlySet<string>,
+  sentReplyKeys: ReadonlySet<string>,
+  userRepliedLast: ReadonlyMap<string, string>,
+): boolean {
+  if (!sentCommentIds.has(id)) return false;
+  const lastReplyKey = userRepliedLast.get(id);
+  return lastReplyKey === undefined || sentReplyKeys.has(lastReplyKey);
+}
+
+/**
+ * The ids the cards and highlights show as "Sent": every id a session recorded
+ * or this tab just sent, minus those waiting on a reviewer reply that has not
+ * gone out. Order follows `serverIds`, then `optimisticIds`.
+ */
+export function effectiveSentCommentIds(
+  serverIds: readonly string[],
+  optimisticIds: readonly string[],
+  userRepliedLast: ReadonlyMap<string, string>,
+  sentReplyKeys: readonly string[],
+): string[] {
+  const sentIds = new Set([...serverIds, ...optimisticIds]);
+  const sentKeys = new Set(sentReplyKeys);
+  return [...sentIds].filter((id) => isCommentSent(id, sentIds, sentKeys, userRepliedLast));
 }
 
 /**

@@ -183,6 +183,18 @@ function parseCommentCounts(raw: unknown, filePaths: readonly string[]): Map<str
   return counts;
 }
 
+/**
+ * Parse the optional `replyIds` body field shared by /batch and /finish: the
+ * reviewer replies the batch carries, as the opaque keys (reply id plus a text
+ * hash) the browser builds. Absent means none; any shape other than an array
+ * of strings is null, which the caller rejects.
+ */
+function parseReplyIds(raw: unknown): string[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string')) return null;
+  return raw as string[];
+}
+
 export function registerReviewSessionRoutes(
   app: Hono,
   reviewSessions: ReviewSessionStore,
@@ -400,7 +412,12 @@ export function registerReviewSessionRoutes(
 
   app.post('/api/review-sessions/:id/batch', async (c) => {
     const id = c.req.param('id');
-    let body: { prompt?: unknown; commentIds?: unknown; commentCounts?: unknown };
+    let body: {
+      prompt?: unknown;
+      commentIds?: unknown;
+      replyIds?: unknown;
+      commentCounts?: unknown;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -415,6 +432,10 @@ export function registerReviewSessionRoutes(
     if (body.commentIds.some((id) => typeof id !== 'string')) {
       return c.json({ error: 'commentIds must contain strings' }, 400);
     }
+    const replyIds = parseReplyIds(body.replyIds);
+    if (!replyIds) {
+      return c.json({ error: 'replyIds must be an array of strings' }, 400);
+    }
     if (!reviewSessions.getSession(id)) {
       return c.json({ error: 'Session not found' }, 404);
     }
@@ -425,7 +446,7 @@ export function registerReviewSessionRoutes(
       body.commentCounts,
       sessionForCounts?.filePaths ?? [],
     );
-    const ok = reviewSessions.sendBatch(id, body.prompt, body.commentIds as string[]);
+    const ok = reviewSessions.sendBatch(id, body.prompt, body.commentIds as string[], replyIds);
     if (!ok) {
       // Direct delivery wasn't possible: the agent is busy with the previous
       // batch (waitingForAgent), or no /wait poll is parked right now — the
@@ -438,6 +459,7 @@ export function registerReviewSessionRoutes(
         id,
         body.commentIds as string[],
         commentCountsByPath,
+        replyIds,
       );
       if (!queued) {
         return c.json({ error: 'Session is not open' }, 409);
@@ -455,7 +477,12 @@ export function registerReviewSessionRoutes(
 
   app.post('/api/review-sessions/:id/finish', async (c) => {
     const id = c.req.param('id');
-    let body: { prompt?: unknown; commentIds?: unknown; commentCounts?: unknown } = {};
+    let body: {
+      prompt?: unknown;
+      commentIds?: unknown;
+      replyIds?: unknown;
+      commentCounts?: unknown;
+    } = {};
     try {
       const raw = await c.req.text();
       if (raw.trim().length > 0) {
@@ -467,6 +494,11 @@ export function registerReviewSessionRoutes(
     const sessionForCounts = reviewSessions.getSession(id);
     if (!sessionForCounts) {
       return c.json({ error: 'Session not found' }, 404);
+    }
+    // Checked before the pending-ask handling below, which has side effects.
+    const replyIds = parseReplyIds(body.replyIds);
+    if (!replyIds) {
+      return c.json({ error: 'replyIds must be an array of strings' }, 400);
     }
     // Finish is the user-origin "I'm finished" signal, so pending asks get
     // the same treatment as /agent-done: deliver any inline replies first,
@@ -502,7 +534,7 @@ export function registerReviewSessionRoutes(
       reviewSessions.getSession(id)?.filePaths ?? sessionForCounts.filePaths,
     );
     const queuedCount = reviewSessions.getQueuedBatch(id)?.commentIds.length ?? 0;
-    const ok = reviewSessions.finish(id, prompt, commentIds, commentCountsByPath);
+    const ok = reviewSessions.finish(id, prompt, commentIds, commentCountsByPath, replyIds);
     if (!ok) {
       return c.json({ error: 'Session is not open' }, 409);
     }

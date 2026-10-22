@@ -72,6 +72,33 @@ describe('ReviewSessionStore', () => {
     expect(s.sentCommentIds).toEqual(['c1', 'c2', 'c3']);
   });
 
+  it('sendBatch records replyIds once each, apart from the delivered commentIds', async () => {
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    expect(store.getSession(session.id)?.sentReplyIds).toEqual([]);
+
+    store.beginWaitPark(session.id);
+    const waiter1 = store.waitForSession(session.id);
+    store.sendBatch(session.id, 'batch1', ['c1', 'c2'], ['r1', 'r1', 'r2']);
+    // The agent's prompt is built from commentIds verbatim, so reply ids must not leak in.
+    expect(await waiter1).toEqual({ status: 'batch', prompt: 'batch1', commentIds: ['c1', 'c2'] });
+
+    store.beginWaitPark(session.id);
+    store.waitForSession(session.id);
+    store.sendBatch(session.id, 'batch2', ['c1'], ['r2', 'r3']);
+
+    const s = store.getSession(session.id)!;
+    expect(s.sentReplyIds).toEqual(['r1', 'r2', 'r3']);
+    expect(s.sentCommentIds).toEqual(['c1', 'c2']);
+  });
+
+  it('sendBatch without replyIds leaves sentReplyIds alone', () => {
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
+    store.waitForSession(session.id);
+    store.sendBatch(session.id, 'batch1', ['c1']);
+    expect(store.getSession(session.id)?.sentReplyIds).toEqual([]);
+  });
+
   it('after sendBatch, waitForSession returns a NEW promise that blocks', async () => {
     const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
     store.beginWaitPark(session.id);
@@ -512,6 +539,19 @@ describe('ReviewSessionStore', () => {
       expect(s.sentCommentIds).toContain('c3');
     });
 
+    it('queueBatch records replyIds once each, apart from the queued commentIds', () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
+      store.waitForSession(session.id);
+      store.sendBatch(session.id, 'batch1', ['c1'], ['r1']); // sets waitingForAgent
+
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]), ['r2', 'r2']);
+      store.queueBatch(session.id, ['c3'], new Map([['/tmp/a.md', 3]]), ['r2', 'r3']);
+
+      expect(store.getQueuedBatch(session.id)?.commentIds).toEqual(['c2', 'c3']);
+      expect(store.getSession(session.id)?.sentReplyIds).toEqual(['r1', 'r2', 'r3']);
+    });
+
     it('queueBatch merges into an existing queued batch by unioning IDs and taking max-per-file counts', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       store.beginWaitPark(session.id);
@@ -645,6 +685,26 @@ describe('ReviewSessionStore', () => {
         expect((result.prompt!.match(/## Comment format/g) ?? []).length).toBe(1);
       }
       expect(store.getSession(session.id)?.sentCommentIds).toEqual(['c1', 'c2', 'c3']);
+    });
+
+    it('finish() records replyIds once each, next to those a queued batch already recorded', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      store.beginWaitPark(session.id);
+      store.waitForSession(session.id);
+      store.sendBatch(session.id, 'batch1', ['c1'], ['r1']);
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]), ['r2']);
+
+      store.finish(session.id, 'CLIENT PROMPT', ['c3'], new Map([['/tmp/a.md', 3]]), ['r2', 'r3']);
+
+      expect(store.getSession(session.id)?.sentReplyIds).toEqual(['r1', 'r2', 'r3']);
+      store.beginWaitPark(session.id);
+      const result = await store.waitForSession(session.id);
+      // The rebuilt terminal prompt lists comment ids only.
+      expect(result.status).toBe('done');
+      if (result.status === 'done') {
+        expect(result.prompt).toMatch(/`c2`, `c3`/);
+        expect(result.prompt).not.toMatch(/`r\d`/);
+      }
     });
 
     it('finish() without a queued batch passes the client prompt through unchanged', async () => {
@@ -1312,6 +1372,42 @@ describe('persistence (#116)', () => {
 
     const result = await waiter;
     expect(result).toEqual({ status: 'batch', prompt: 'BATCH', commentIds: ['c1'] });
+    after.dispose();
+  });
+
+  it('sentReplyIds survive a restore', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    before.beginWaitPark(session.id);
+    before.waitForSession(session.id);
+    before.sendBatch(session.id, 'batch1', ['c1'], ['r1']);
+    before.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]), ['r2']);
+    const savedAt = Date.now();
+    const state = roundTrip(before.exportState());
+    before.dispose();
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    expect(after.getSession(session.id)?.sentReplyIds).toEqual(['r1', 'r2']);
+    after.dispose();
+  });
+
+  it('a save written before sentReplyIds existed restores with none', () => {
+    const before = new ReviewSessionStore();
+    const session = before.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const savedAt = Date.now();
+    const state = roundTrip(before.exportState());
+    before.dispose();
+    for (const persisted of state.sessions) delete persisted.sentReplyIds;
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    expect(after.getSession(session.id)?.sentReplyIds).toEqual([]);
+    // Still usable: recording a reply on the restored session works.
+    after.beginWaitPark(session.id);
+    after.waitForSession(session.id);
+    expect(after.sendBatch(session.id, 'batch', ['c1'], ['r1'])).toBe(true);
+    expect(after.getSession(session.id)?.sentReplyIds).toEqual(['r1']);
     after.dispose();
   });
 

@@ -32,7 +32,7 @@ import {
 } from './components/MarkdownViewer';
 import { TableOfContents } from './components/TableOfContents';
 import { CommentPopover } from './components/CommentPopover';
-import { computeAnsweredCommentIds } from './lib/answered-comments';
+import { computeAnsweredCommentIds, effectiveSentCommentIds } from './lib/answered-comments';
 import { CommentForm } from './components/CommentForm';
 import { Toolbar } from './components/Toolbar';
 import { TabBar } from './components/TabBar';
@@ -858,7 +858,7 @@ export default function App() {
     commentCounts,
     resolvedCommentCounts,
     commentIdsByFile,
-    userRepliedLastIds,
+    userRepliedLast,
     agentCommentCounts,
     commentCount,
     handleAddComment,
@@ -2928,30 +2928,61 @@ export default function App() {
     if (!showAccessRequest) setSawGrant(false);
   }, [showAccessRequest]);
 
-  // Optimistic sent IDs: updated immediately when a batch is sent, before
-  // the server round-trip completes. Merged with the server's sentCommentIds
-  // so the "Sent" badges appear instantly on click.
+  // Optimistic sent IDs and reply keys: updated immediately when a batch is
+  // sent, before the server round-trip completes. Merged with the sessions'
+  // sentCommentIds and sentReplyIds so the "Sent" badges appear instantly on
+  // click, and so the banner does not offer the same batch again in the gap
+  // before the next refresh reports it.
   const [optimisticSentIds, setOptimisticSentIds] = useState<string[]>([]);
+  const [optimisticSentReplyKeys, setOptimisticSentReplyKeys] = useState<string[]>([]);
   const handleBatchSent = useCallback(
-    (ids: string[]) => {
+    (ids: string[], replyKeys: string[]) => {
       setOptimisticSentIds((prev) => [...prev, ...ids]);
+      setOptimisticSentReplyKeys((prev) => [...prev, ...replyKeys]);
       refreshReviewSessions();
     },
     [refreshReviewSessions],
   );
+  // Comment ids are unique across files, so one set serves every session.
+  const optimisticSent = useMemo(
+    () => ({
+      commentIds: new Set(optimisticSentIds),
+      replyKeys: new Set(optimisticSentReplyKeys),
+    }),
+    [optimisticSentIds, optimisticSentReplyKeys],
+  );
 
-  const sentCommentIds = useMemo(() => {
-    const serverIds = reviewSessions.flatMap((s) => s.sentCommentIds);
-    if (optimisticSentIds.length === 0) return serverIds;
-    return [...new Set([...serverIds, ...optimisticSentIds])];
-  }, [reviewSessions, optimisticSentIds]);
+  // A sent thread the reviewer has replied to since stays out of this list
+  // until that reply goes out, so its card agrees with the banner's Send count.
+  // `userRepliedLast` is rebuilt whenever any tab's text changes, so the list is
+  // keyed by its contents (NUL cannot appear in an id): the viewer re-lays its
+  // highlights whenever this identity changes, and that must not happen for an
+  // edit that leaves the sent set alone.
+  const sentCommentIdsKey = useMemo(
+    () =>
+      effectiveSentCommentIds(
+        reviewSessions.flatMap((s) => s.sentCommentIds),
+        optimisticSentIds,
+        userRepliedLast,
+        [...reviewSessions.flatMap((s) => s.sentReplyIds ?? []), ...optimisticSentReplyKeys],
+      ).join('\0'),
+    [reviewSessions, optimisticSentIds, optimisticSentReplyKeys, userRepliedLast],
+  );
+  const sentCommentIds = useMemo(
+    () => (sentCommentIdsKey ? sentCommentIdsKey.split('\0') : []),
+    [sentCommentIdsKey],
+  );
 
   // Clear optimistic IDs when the review session ends
   useEffect(() => {
-    if (reviewSessions.length === 0 && optimisticSentIds.length > 0) {
+    if (
+      reviewSessions.length === 0 &&
+      (optimisticSentIds.length > 0 || optimisticSentReplyKeys.length > 0)
+    ) {
       setOptimisticSentIds([]);
+      setOptimisticSentReplyKeys([]);
     }
-  }, [reviewSessions, optimisticSentIds]);
+  }, [reviewSessions, optimisticSentIds, optimisticSentReplyKeys]);
 
   // Tab badges answer "does this file have open comments", so they include
   // agent-initiated ones. The handoff button keeps the sendable-only map.
@@ -3231,9 +3262,10 @@ export default function App() {
           onHandoffSuccess={handleReviewHandoffSuccess}
           onResolved={handleReviewResolved}
           onBatchSent={handleBatchSent}
+          optimisticSent={optimisticSent}
           showToast={showToast}
           commentIdsByFile={commentIdsByFile}
-          userRepliedLastIds={userRepliedLastIds}
+          userRepliedLast={userRepliedLast}
           pendingAskCountsBySession={pendingAskCountsBySession}
           onJumpToAsk={handleJumpToAsk}
         />

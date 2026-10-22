@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useMemo, useState } from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { ReviewBanner } from './ReviewBanner';
 import type { ReviewSession } from '../hooks/useReviewSession';
@@ -469,7 +470,7 @@ describe('ReviewBanner', () => {
     fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
 
     await waitFor(() => {
-      expect(onBatchSent).toHaveBeenCalledWith(['c1', 'c2', 'c3']);
+      expect(onBatchSent).toHaveBeenCalledWith(['c1', 'c2', 'c3'], []);
     });
   });
 
@@ -595,7 +596,7 @@ describe('ReviewBanner', () => {
 
     await waitFor(() => {
       // Only c1 from spec-a should be sent, not c2/c3/c4 from other files
-      expect(onBatchSent).toHaveBeenCalledWith(['c1']);
+      expect(onBatchSent).toHaveBeenCalledWith(['c1'], []);
     });
   });
 });
@@ -905,5 +906,317 @@ describe('Agent session Done button', () => {
       />,
     );
     expect(screen.getByText(/Codex is reviewing/)).not.toBeNull();
+  });
+});
+
+describe('ReviewBanner: a reviewer reply on a sent thread', () => {
+  const FILE = '/tmp/spec-a.md';
+  const counts = new Map([[FILE, 2]]);
+  // c1 was sent in an earlier batch; the reviewer has since replied on it.
+  const sentThread: ReviewSession = {
+    ...session,
+    filePaths: [FILE],
+    sentCommentIds: ['c1'],
+    sentReplyIds: [],
+  };
+
+  interface HarnessProps {
+    session: ReviewSession;
+    userRepliedLast: Map<string, string>;
+    ids?: string[];
+    showToast?: () => void;
+    onBatchSent?: (ids: string[], keys: string[]) => void;
+  }
+
+  // Plays the part App plays: it records what the banner reports as sent and
+  // hands it back, while the `session` prop only changes when a test says the
+  // poll came back.
+  function Harness({
+    session: s,
+    userRepliedLast,
+    ids = ['c1'],
+    showToast,
+    onBatchSent,
+  }: HarnessProps) {
+    const [sentIds, setSentIds] = useState<string[]>([]);
+    const [sentKeys, setSentKeys] = useState<string[]>([]);
+    const optimisticSent = useMemo(
+      () => ({ commentIds: new Set(sentIds), replyKeys: new Set(sentKeys) }),
+      [sentIds, sentKeys],
+    );
+    return (
+      <ReviewBanner
+        sessions={[s]}
+        commentCounts={counts}
+        onHandoffSuccess={() => {}}
+        onResolved={() => {}}
+        onBatchSent={(sent, keys) => {
+          setSentIds((prev) => [...prev, ...sent]);
+          setSentKeys((prev) => [...prev, ...keys]);
+          onBatchSent?.(sent, keys);
+        }}
+        optimisticSent={optimisticSent}
+        showToast={showToast}
+        commentIdsByFile={new Map([[FILE, ids]])}
+        userRepliedLast={userRepliedLast}
+      />
+    );
+  }
+
+  const sendButton = () => screen.getByRole('button', { name: /send \d+ comment/i });
+  const lastBody = () => {
+    const calls = fetchMock.mock.calls;
+    return JSON.parse((calls[calls.length - 1][1] as RequestInit).body as string);
+  };
+
+  it('turns Send on, and off again once the reply is sent, even after a refresh', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const replied = new Map([['c1', 'r1~a']]);
+
+    const { rerender } = render(
+      <Harness session={sentThread} userRepliedLast={replied} showToast={showToast} />,
+    );
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(false);
+    expect(sendButton().textContent).toBe('Send 1 comment');
+
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(lastBody()).toMatchObject({ commentIds: ['c1'], replyIds: ['r1~a'] });
+
+    // The session refresh brings back what the server recorded.
+    const refreshed = { ...sentThread, sentReplyIds: ['r1~a'] };
+    rerender(<Harness session={refreshed} userRepliedLast={replied} showToast={showToast} />);
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(sendButton().textContent).toBe('Send 0 comments');
+
+    // A later poll returns an equal session in a new object: still off, also
+    // while the agent has not answered yet.
+    rerender(
+      <Harness
+        session={{ ...refreshed }}
+        userRepliedLast={new Map(replied)}
+        showToast={showToast}
+      />,
+    );
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+
+    // And once the agent answers, the thread is no longer a reviewer-last one.
+    rerender(<Harness session={refreshed} userRepliedLast={new Map()} showToast={showToast} />);
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns Send off the moment it is sent, before the session reports it', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const onBatchSent = vi.fn();
+
+    // The session prop is never refreshed here: the poll has not come back.
+    render(
+      <Harness
+        session={sentThread}
+        userRepliedLast={new Map([['c1', 'r1~a']])}
+        showToast={showToast}
+        onBatchSent={onBatchSent}
+      />,
+    );
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(onBatchSent).toHaveBeenCalledWith(['c1'], ['r1~a']);
+
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(sendButton().textContent).toBe('Send 0 comments');
+    fireEvent.click(sendButton());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not offer a first send again before the session reports it', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const fresh = { ...sentThread, sentCommentIds: [] };
+
+    render(
+      <Harness
+        session={fresh}
+        userRepliedLast={new Map()}
+        ids={['c1', 'c2']}
+        showToast={showToast}
+      />,
+    );
+    expect(sendButton().textContent).toBe('Send 2 comments');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+
+    expect(sendButton().textContent).toBe('Send 0 comments');
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(sendButton());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns Send on again for a newer reviewer reply and sends only that reply', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const sentOnce = { ...sentThread, sentReplyIds: ['r1~a'] };
+
+    const { rerender } = render(
+      <Harness session={sentOnce} userRepliedLast={new Map([['c1', 'r1~a']])} />,
+    );
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+
+    rerender(
+      <Harness
+        session={sentOnce}
+        userRepliedLast={new Map([['c1', 'r2~a']])}
+        showToast={showToast}
+      />,
+    );
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(false);
+    expect(sendButton().textContent).toBe('Send 1 comment');
+
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(lastBody()).toMatchObject({ commentIds: ['c1'], replyIds: ['r2~a'] });
+  });
+
+  it('turns Send on once for an edited reply, and leaves an unchanged one sent', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    // r1 went out as it read then; the reviewer has since corrected its text,
+    // which keeps the id and changes the key.
+    const sentOnce = { ...sentThread, sentReplyIds: ['r1~a'] };
+
+    const { rerender } = render(
+      <Harness session={sentOnce} userRepliedLast={new Map([['c1', 'r1~a']])} />,
+    );
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+
+    const edited = new Map([['c1', 'r1~b']]);
+    rerender(<Harness session={sentOnce} userRepliedLast={edited} showToast={showToast} />);
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(lastBody()).toMatchObject({ commentIds: ['c1'], replyIds: ['r1~b'] });
+
+    // Sent once: off again, with or without the poll, and a second edit-free
+    // render does not send it a second time.
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+    rerender(
+      <Harness
+        session={{ ...sentOnce, sentReplyIds: ['r1~a', 'r1~b'] }}
+        userRepliedLast={new Map(edited)}
+        showToast={showToast}
+      />,
+    );
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts a never-sent comment as unsent, and sends its last reply with it', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const unsent = { ...sentThread, sentCommentIds: [] };
+
+    render(
+      <Harness
+        session={unsent}
+        userRepliedLast={new Map([['c1', 'r1~a']])}
+        ids={['c1', 'c2']}
+        showToast={showToast}
+      />,
+    );
+    expect(sendButton().textContent).toBe('Send 2 comments');
+
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    // c2 has no reply, so only c1's reply key goes along.
+    expect(lastBody()).toMatchObject({ commentIds: ['c1', 'c2'], replyIds: ['r1~a'] });
+  });
+
+  it('treats a session from a server without sentReplyIds as having sent none', () => {
+    const legacy: ReviewSession = { ...sentThread };
+    delete legacy.sentReplyIds;
+
+    render(<Harness session={legacy} userRepliedLast={new Map([['c1', 'r1~a']])} />);
+    expect(sendButton().textContent).toBe('Send 1 comment');
+  });
+
+  it('Send & finish leaves out a reply that was already sent', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const sentOnce = { ...sentThread, sentReplyIds: ['r1~a'] };
+
+    // Only c1's already-sent reply: nothing to send, so the button just finishes.
+    const { rerender } = render(
+      <Harness
+        session={sentOnce}
+        userRepliedLast={new Map([['c1', 'r1~a']])}
+        showToast={showToast}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /finish review/i }));
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(lastBody()).toEqual({ commentCounts: { [FILE]: 2 } });
+
+    // With a new comment c2 alongside it, only c2 rides along.
+    fetchMock.mockClear();
+    showToast.mockClear();
+    rerender(
+      <Harness
+        session={sentOnce}
+        userRepliedLast={new Map([['c1', 'r1~a']])}
+        ids={['c1', 'c2']}
+        showToast={showToast}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /send 1 & finish/i }));
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    const body = lastBody();
+    expect(body.commentIds).toEqual(['c2']);
+    expect(body.replyIds).toEqual([]);
+    expect(body.prompt).not.toContain('`c1`');
+  });
+
+  it('Send & finish leaves out a reply sent a moment ago, before the session reports it', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+
+    render(
+      <Harness
+        session={sentThread}
+        userRepliedLast={new Map([['c1', 'r1~a']])}
+        showToast={showToast}
+      />,
+    );
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    showToast.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /finish review/i }));
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/review-sessions/rev_1/finish');
+    expect(lastBody()).toEqual({ commentCounts: { [FILE]: 2 } });
+  });
+
+  it('Send & finish includes a reply the session has not sent, and reports it as sent', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const showToast = vi.fn();
+    const onBatchSent = vi.fn();
+    const sentOnce = { ...sentThread, sentReplyIds: ['r1~a'] };
+
+    render(
+      <Harness
+        session={sentOnce}
+        userRepliedLast={new Map([['c1', 'r2~a']])}
+        showToast={showToast}
+        onBatchSent={onBatchSent}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /send 1 & finish/i }));
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/review-sessions/rev_1/finish');
+    expect(lastBody()).toMatchObject({ commentIds: ['c1'], replyIds: ['r2~a'] });
+    expect(onBatchSent).toHaveBeenCalledWith(['c1'], ['r2~a']);
   });
 });
