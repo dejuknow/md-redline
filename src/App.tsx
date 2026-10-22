@@ -856,6 +856,7 @@ export default function App() {
     missingAnchors,
     newOrphanIds,
     commentCounts,
+    resolvedCommentCounts,
     commentIdsByFile,
     userRepliedLastIds,
     agentCommentCounts,
@@ -3252,6 +3253,7 @@ export default function App() {
               tabs={tabs}
               activeFilePath={activeFilePath}
               commentCounts={tabCommentCounts}
+              resolvedCommentCounts={resolvedCommentCounts}
               onSwitchTab={switchTab}
               onCloseTab={closeTab}
               onOpenFile={openFilePicker}

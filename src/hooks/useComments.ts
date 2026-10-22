@@ -27,7 +27,7 @@ import {
 } from '../lib/comment-parser';
 import { randomId } from '../lib/random-id';
 import { computeUserRepliedLastIds } from '../lib/answered-comments';
-import { getEffectiveStatus } from '../types';
+import { getEffectiveStatus, type MdComment } from '../types';
 import { renderMarkdown } from '../markdown/pipeline';
 import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
@@ -147,50 +147,71 @@ export function useComments(params: UseCommentsParams) {
   // Agent-initiated comments (mdr_ask questions) are excluded — they're tracked
   // and surfaced separately via the "Awaiting your reply" section, and they
   // must NOT be sent back to the agent as part of a user batch.
-  const { commentCounts, commentIdsByFile, agentCommentCounts } = useMemo(() => {
-    const counts = new Map<string, number>();
-    const idsByFile = new Map<string, string[]>();
-    const agentCounts = new Map<string, number>();
-    for (const tab of tabs) {
-      if (tab.filePath === activeFilePath) {
-        const userComments = comments.filter((c) => !c.agentInitiated);
-        const openComments = userComments.filter((c) => getEffectiveStatus(c) !== 'resolved');
-        counts.set(tab.filePath, openComments.length);
-        idsByFile.set(
-          tab.filePath,
-          openComments.map((c) => c.id),
-        );
-        const agentComments = comments.filter(
-          (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
-        );
-        agentCounts.set(tab.filePath, agentComments.length);
-      } else {
-        try {
-          const { comments: tabComments } = parseComments(tab.rawMarkdown);
-          const userTabComments = tabComments.filter((c) => !c.agentInitiated);
-          const openTabComments = userTabComments.filter(
-            (c) => getEffectiveStatus(c) !== 'resolved',
-          );
-          counts.set(tab.filePath, openTabComments.length);
+  //
+  // A resolved comment only counts as gone while the resolve workflow is on.
+  // With it off, the highlight, card and List view still show a resolved
+  // marker as open (with Reply), so it stays in the badge and the Send set;
+  // dropping it would silently lose a reply typed there. Agent questions are
+  // the exception: "Awaiting your reply" only surfaces open ones in either
+  // mode, so a resolved question never counts.
+  const { commentCounts, resolvedCommentCounts, commentIdsByFile, agentCommentCounts } =
+    useMemo(() => {
+      const counts = new Map<string, number>();
+      const resolvedCounts = new Map<string, number>();
+      const idsByFile = new Map<string, string[]>();
+      const agentCounts = new Map<string, number>();
+      const isCounted = (c: MdComment) => !enableResolve || getEffectiveStatus(c) !== 'resolved';
+      for (const tab of tabs) {
+        if (tab.filePath === activeFilePath) {
+          const userComments = comments.filter((c) => !c.agentInitiated);
+          const countedComments = userComments.filter(isCounted);
+          counts.set(tab.filePath, countedComments.length);
           idsByFile.set(
             tab.filePath,
-            openTabComments.map((c) => c.id),
+            countedComments.map((c) => c.id),
           );
-          const agentTabComments = tabComments.filter(
+          if (enableResolve) {
+            resolvedCounts.set(
+              tab.filePath,
+              userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+            );
+          }
+          const agentComments = comments.filter(
             (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
           );
-          agentCounts.set(tab.filePath, agentTabComments.length);
-        } catch {
-          counts.set(tab.filePath, 0);
+          agentCounts.set(tab.filePath, agentComments.length);
+        } else {
+          try {
+            const { comments: tabComments } = parseComments(tab.rawMarkdown);
+            const userTabComments = tabComments.filter((c) => !c.agentInitiated);
+            const countedTabComments = userTabComments.filter(isCounted);
+            counts.set(tab.filePath, countedTabComments.length);
+            idsByFile.set(
+              tab.filePath,
+              countedTabComments.map((c) => c.id),
+            );
+            if (enableResolve) {
+              resolvedCounts.set(
+                tab.filePath,
+                userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+              );
+            }
+            const agentTabComments = tabComments.filter(
+              (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
+            );
+            agentCounts.set(tab.filePath, agentTabComments.length);
+          } catch {
+            counts.set(tab.filePath, 0);
+          }
         }
       }
-    }
-    return {
-      commentCounts: counts,
-      commentIdsByFile: idsByFile,
-      agentCommentCounts: agentCounts,
-    };
-  }, [tabs, activeFilePath, comments]);
+      return {
+        commentCounts: counts,
+        resolvedCommentCounts: resolvedCounts,
+        commentIdsByFile: idsByFile,
+        agentCommentCounts: agentCounts,
+      };
+    }, [tabs, activeFilePath, comments, enableResolve]);
 
   // Sent threads the reviewer replied to after the agent's last reply: pending
   // again until the agent answers, so a reply alone enables Send.
@@ -211,7 +232,9 @@ export function useComments(params: UseCommentsParams) {
     return ids;
   }, [tabs, activeFilePath, comments]);
 
-  const commentCount = comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length;
+  const commentCount = enableResolve
+    ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
+    : comments.length;
 
   // Core update helper — synchronously updates the ref so back-to-back
   // mutations (e.g. rapid keyboard shortcuts) each read the latest state.
@@ -434,6 +457,7 @@ export function useComments(params: UseCommentsParams) {
     missingAnchors,
     newOrphanIds,
     commentCounts,
+    resolvedCommentCounts,
     commentIdsByFile,
     userRepliedLastIds,
     agentCommentCounts,

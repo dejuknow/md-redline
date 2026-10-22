@@ -928,7 +928,8 @@ per session:
 - **Agent is reviewing** (`origin='agent'`, no pending questions): "{Agent} is reviewing
   file.md" with a spinner while the agent is active (including just-started sessions
   with no posts yet) and a static dot once the agent has been quiet for 30s. Shows
-  the comment count in parentheses. Single action: **End review**.
+  the comment count in parentheses (resolved agent comments are left out). Single
+  action: **End review**.
 - **Awaiting your reply** (`origin='agent'`, pending `mdr_ask` questions): the row
   switches to "{Agent} is waiting on your reply." with a pulsing warning dot and the
   question-count chip (click to jump). **End review** stays available but asks for
@@ -1353,11 +1354,20 @@ The kebab is hidden entirely when the file has no comments. These duplicate
 density and the drawer, so the kebab is the one route that works in Anchored
 density too.
 
-Tab badges count open comments, user and agent-initiated alike
-(`tabCommentCounts` in App), never resolved ones whatever the resolve flag,
-so a fully resolved file shows no badge; the handoff button keeps the
-sendable-only map. Inline code in prose renders neutral (`--theme-text`
-on `--theme-bg-inset`), never the crimson accent:
+Tab badges count user and agent-initiated comments alike (`tabCommentCounts`
+in App). Whether a resolved user comment counts follows the resolve workflow.
+With it on, a resolved comment is out of the tab badge, the Send set
+(`commentIdsByFile`, which feeds the Review banner) and `commentCount`, and a
+tab with no open comments but some resolved ones draws a quiet outlined "N
+resolved" badge instead (`resolvedCommentCounts`, user comments only; same in
+the tab strip and the overflow tab list). With it off, resolved comments stay
+in all of those counts and no "N resolved" badge is drawn, because the
+highlight, card and List view still show a resolved marker as open with Reply,
+and leaving it out of Send would silently drop a reply typed there. A resolved
+agent question is out of the agent count in both modes, since "Awaiting your
+reply" only surfaces open ones. The handoff button keeps the sendable-only map. Inline code in prose
+renders neutral (`--theme-text` on `--theme-bg-inset`), never the crimson
+accent:
 
 - **Anchored** (default): cards align to their document anchors. Cards are
   compact by default (anchor text, comment preview, reply summary); the active
