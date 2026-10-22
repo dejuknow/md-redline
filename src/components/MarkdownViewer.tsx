@@ -57,6 +57,13 @@ export interface ViewerContextMenuInfo {
 interface Props {
   html: string;
   cleanMarkdown: string;
+  /**
+   * Which document this is (App passes the file path). A change is a document
+   * arriving rather than an edit to the one on screen: the viewer leaves its
+   * position to App's restore instead of carrying the outgoing document's
+   * place into it.
+   */
+  documentKey?: string | null;
   comments: MdComment[];
   activeCommentId: string | null;
   selectionText: string | null;
@@ -148,6 +155,7 @@ export const MarkdownViewer = memo(
     {
       html,
       cleanMarkdown,
+      documentKey,
       comments,
       activeCommentId,
       selectionText,
@@ -175,6 +183,19 @@ export const MarkdownViewer = memo(
     // caller doesn't re-trigger the highlight effect below.
     const highlightsPaintedCb = useRef(onHighlightsPainted);
     highlightsPaintedCb.current = onHighlightsPainted;
+    // The last rebuild that left a document on screen: which document, and
+    // the state that moves the reader when it changes. Null until one has (a
+    // fresh mount, or a document still on its first load). The next pass
+    // compares against it to tell an arrival, a jump and an edit apart (see
+    // the reader's-place capture).
+    const lastRebuildRef = useRef<{
+      documentKey: string | null | undefined;
+      html: string;
+      mermaidSvgMap: Map<string, MermaidResult>;
+      activeCommentId: string | null;
+      searchQuery: string | undefined;
+      searchActiveIndex: number | undefined;
+    } | null>(null);
 
     // Mermaid rendering. When App hoists useMermaidRenderer and passes the map
     // as a prop, we use that (so both the viewer and fullscreen modal share the
@@ -293,13 +314,55 @@ export const MarkdownViewer = memo(
       // viewport steady, and a full innerHTML replacement leaves none, so the
       // reader would be displaced by however much content changed above them.
       // See lib/viewport-anchor.ts for how the anchor is identified.
+      //
+      // Not when a document is arriving: a fresh mount (the diff overlay
+      // closing, a return from raw view), a switch to another file, or the
+      // first pass with content after one that had none (a tab on its first
+      // load). App restores the arriving document's own position
+      // (useScrollMemory), and the outgoing document's place means nothing in
+      // it. An empty viewer must not be measured anyway: reading layout before
+      // the fill below lays the scroller out around nothing and clamps its
+      // scrollTop to fit, dropping the reader at the top. Left unread, the
+      // browser keeps scrollTop through the fill.
+      //
+      // An edit always corrects: a pass whose content changed (its HTML, or
+      // the diagrams rendered into it), whatever else changed with it.
+      // Deleting a comment rewrites the file and clears the active comment in
+      // the same commit, and the reader's place matters more than a jump that
+      // the deletion did not start.
+      //
+      // Otherwise not when the pass is a jump: the active comment changed (a
+      // jump to it or a card click started a smooth scroll before this commit)
+      // or the search moved (the search pass below starts one). The correction
+      // is an instant scrollTo, which would abort it. Opening or closing the
+      // find bar is not a search move: with no query, nothing scrolls.
+      //
+      // Every other pass corrects too: a repaint of the selection or sent
+      // marks. Highlights do not move text, but the rebuild re-inserts every
+      // image and diagram, and one that refetches or collapses while it loads
+      // still shifts what is below it.
       const scroller = container.closest<HTMLElement>('.overflow-y-auto');
-      const priorAnchor = scroller ? captureViewportAnchor(scroller, container) : undefined;
+      const prior = lastRebuildRef.current;
+      const arriving = prior === null || prior.documentKey !== documentKey;
+      const searchMoved =
+        arriving ||
+        (!!searchQuery &&
+          (prior.searchQuery !== searchQuery || prior.searchActiveIndex !== searchActiveIndex));
+      const edited = !arriving && (prior.html !== html || prior.mermaidSvgMap !== mermaidSvgMap);
+      const jumping =
+        !arriving && !edited && (searchMoved || prior.activeCommentId !== activeCommentId);
+      const priorAnchor =
+        scroller && !arriving && !jumping ? captureViewportAnchor(scroller, container) : undefined;
 
       // Set innerHTML from scratch — guarantees a clean starting state
       // Defense-in-depth: rehype-sanitize is the primary sanitizer, but
       // DOMPurify provides a second layer in case of a remark/rehype bypass.
       container.innerHTML = sanitizeRenderedMarkdown(html);
+      // An empty pass (a tab still on its first load) records nothing, so the
+      // pass that brings its content is still the arrival.
+      lastRebuildRef.current = container.firstElementChild
+        ? { documentKey, html, mermaidSvgMap, activeCommentId, searchQuery, searchActiveIndex }
+        : null;
 
       // --- Heading IDs ---
       assignHeadingIds(container);
@@ -350,6 +413,10 @@ export const MarkdownViewer = memo(
         } else if (result?.error) {
           const errDiv = document.createElement('div');
           errDiv.className = 'mermaid-block mermaid-error';
+          // The rendered block carries its source on its fullscreen button;
+          // this one has none, so it carries it itself. viewportAnchorKey reads
+          // it so a reader anchored on the diagram is found again.
+          errDiv.dataset.mermaidSource = source;
           errDiv.textContent = `Mermaid error: ${result.error}`;
           pre.replaceWith(errDiv);
         } else {
@@ -590,8 +657,18 @@ export const MarkdownViewer = memo(
       }
 
       // --- Search highlights ---
+      // Every pass with a query repaints the matches, but only a pass that
+      // moved the search (a new query, a step to the next or previous match)
+      // or brought a document in scrolls to the active one. An agent edit
+      // with the find bar open is neither: the reader stays where they are
+      // reading, held there by the correction below.
       if (searchQuery) {
-        const count = highlightSearchMatches(container, searchQuery, searchActiveIndex ?? 0);
+        const count = highlightSearchMatches(
+          container,
+          searchQuery,
+          searchActiveIndex ?? 0,
+          searchMoved,
+        );
         searchCountCb.current?.(count);
       } else {
         searchCountCb.current?.(0);
@@ -675,6 +752,13 @@ export const MarkdownViewer = memo(
       // so the reader would watch the document slide back into place. No
       // match (the anchored block was deleted or rewritten) leaves the reader
       // where they are.
+      //
+      // One case still cuts a jump short: a pass that lands while it is in
+      // flight, such as diagrams finishing or an agent edit. That pass is not
+      // the jump's own, so it corrects, and the instant correction aborts the
+      // smooth scroll. Telling that apart would need to know a smooth scroll is
+      // running, which the jump started in an earlier commit and no scroll
+      // event has necessarily reported yet.
       if (scroller && priorAnchor) {
         const top = viewportAnchorScrollTop(scroller, container, priorAnchor);
         if (top !== undefined && top !== scroller.scrollTop) {
@@ -688,6 +772,7 @@ export const MarkdownViewer = memo(
       };
     }, [
       html,
+      documentKey,
       comments,
       activeCommentId,
       selectionText,
@@ -1412,11 +1497,13 @@ function pruneEmptyInlineFormatting(container: HTMLElement) {
 
 /** Find all case-insensitive occurrences of `query` in the container's text and wrap them
  *  in <mark class="search-highlight"> elements. The match at `activeIndex` gets an additional
- *  `search-highlight-active` class and is scrolled into view. */
+ *  `search-highlight-active` class and, unless `scrollToActive` is false (a repaint that is
+ *  not the reader moving through the matches), is scrolled into view. */
 export function highlightSearchMatches(
   container: HTMLElement,
   query: string,
   activeIndex: number,
+  scrollToActive = true,
 ): number {
   const textNodes = collectVisibleTextNodes(container);
   if (textNodes.length === 0) return 0;
@@ -1482,7 +1569,7 @@ export function highlightSearchMatches(
   }
 
   // Scroll active match into view
-  const activeMark = container.querySelector('mark[data-search-active]');
+  const activeMark = scrollToActive ? container.querySelector('mark[data-search-active]') : null;
   if (activeMark) {
     activeMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
