@@ -105,7 +105,9 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
   (`computeAnsweredCommentIds`) reads the stamp; a reply with none, written
   before the stamp existed, falls back to "an author other than the comment's".
   A person replying by hand-editing the file outside mdr is counted as an
-  agent, which is the accepted cost.
+  agent, which is the accepted cost. `CommentCard` reads the stamp too: a reply
+  stamped `true` gets no Edit or Delete. It does not fall back on names, so an
+  unstamped reply keeps both.
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
 - `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`).

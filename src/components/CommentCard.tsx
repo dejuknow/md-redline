@@ -261,6 +261,12 @@ export const CommentCard = memo(function CommentCard({
   const unreadReplies = unreadReplyIds ? replies.filter((r) => unreadReplyIds.has(r.id)) : [];
   const hasUnread = unreadReplies.length > 0;
   const summaryReplies = hasUnread ? unreadReplies : replies;
+  // Reply answers the last message in the thread, so once the thread renders
+  // in full the trigger sits under it. Left in the footer it reads as a reply
+  // to the comment, sitting above the agent answer the reader is responding
+  // to. A compact card collapses its thread to a summary line, so its footer
+  // keeps the trigger.
+  const threadShown = !compact && replies.length > 0;
   const isEditingReply = editingReplyId !== null;
   const editingReply = editingReplyId
     ? (replies.find((reply) => reply.id === editingReplyId) ?? null)
@@ -519,14 +525,16 @@ export const CommentCard = memo(function CommentCard({
           >
             {!isResolved && (
               <>
-                <ActionButton
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRequestReplyCompose(comment.id);
-                  }}
-                >
-                  Reply
-                </ActionButton>
+                {!threadShown && (
+                  <ActionButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRequestReplyCompose(comment.id);
+                    }}
+                  >
+                    Reply
+                  </ActionButton>
+                )}
                 <ActionButton
                   onClick={(e) => {
                     e.stopPropagation();
@@ -615,7 +623,7 @@ export const CommentCard = memo(function CommentCard({
       </div>
 
       {/* Replies thread */}
-      {!compact && replies.length > 0 && (
+      {threadShown && (
         <div className="mx-3 mb-2 border-l-2 border-border-subtle pl-3 space-y-2">
           {replies.map((reply) => {
             const replyTimeAgo = timeAgo(reply.timestamp);
@@ -684,7 +692,11 @@ export const CommentCard = memo(function CommentCard({
                         {reply.author}
                         {replyTimeAgo && <> &middot; {replyTimeAgo}</>}
                       </span>
-                      {!isResolved && (
+                      {/* Only the stamp hides these (#102). An unstamped reply
+                          keeps them: the name comparison that stands in for a
+                          missing stamp can mistake a colleague for an agent,
+                          and guessing wrong takes Edit away from a person. */}
+                      {!isResolved && reply.agent !== true && (
                         <div
                           className="invisible flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:visible group-hover/reply:opacity-100 group-focus-within/reply:visible group-focus-within/reply:opacity-100"
                           onClick={(e) => e.stopPropagation()}
@@ -709,6 +721,24 @@ export const CommentCard = memo(function CommentCard({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Reply trigger for a full thread (see `threadShown`). Hidden while the
+          composer is open, since the composer renders right below it, and
+          while another editor is open, as the footer's actions are. */}
+      {threadShown && !isResolved && !isReplying && !isEditing && !isEditingReply && (
+        <div
+          className={`px-3 pb-2 flex justify-end transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        >
+          <ActionButton
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestReplyCompose(comment.id);
+            }}
+          >
+            Reply
+          </ActionButton>
         </div>
       )}
 
@@ -758,12 +788,13 @@ export const CommentCard = memo(function CommentCard({
         </button>
       )}
 
-      {/* Reply input (shown when replying — trigger is in the action bar
-          above). Deliberately not compact-gated, unlike the collapsed replies
-          thread: the composer is an explicit editor surface, opened only by an
-          action-bar click, which is reachable on a compact (inactive) margin
-          card exactly like the Edit textarea above. Gating it on !compact left
-          Reply dead on inactive anchored cards while Edit worked. */}
+      {/* Reply input (shown when replying — trigger is under a full thread,
+          else in the action bar above). Deliberately not compact-gated, unlike
+          the collapsed replies thread: the composer is an explicit editor
+          surface, opened only by a Reply click, which is reachable on a
+          compact (inactive) margin card exactly like the Edit textarea above.
+          Gating it on !compact left Reply dead on inactive anchored cards
+          while Edit worked. */}
       {!isResolved && isReplying && (
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
           <textarea
