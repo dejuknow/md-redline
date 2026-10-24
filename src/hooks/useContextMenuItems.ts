@@ -145,17 +145,22 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         // anchors became right-clickable when they started painting a trace,
         // so offering the items here would be the only place in the app that
         // promises an action nothing can carry out.
+        // A comment the agent wrote gets no Edit, matching its card.
         const threadItems: ContextMenuEntry[] = isResolved
           ? []
           : [
-              {
-                label: 'Edit',
-                onClick: () => {
-                  setActiveCommentId(commentId);
-                  ensureCommentSurface(commentId);
-                  triggerEdit(commentId);
-                },
-              },
+              ...(comment.agentInitiated
+                ? []
+                : [
+                    {
+                      label: 'Edit',
+                      onClick: () => {
+                        setActiveCommentId(commentId);
+                        ensureCommentSurface(commentId);
+                        triggerEdit(commentId);
+                      },
+                    },
+                  ]),
               {
                 label: 'Reply',
                 onClick: () => {

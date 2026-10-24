@@ -533,14 +533,18 @@ export const CommentCard = memo(function CommentCard({
             {!isResolved && (
               <>
                 {!threadShown && <ActionButton onClick={handleReplyTrigger}>Reply</ActionButton>}
-                <ActionButton
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRequestCommentEdit(comment.id);
-                  }}
-                >
-                  Edit
-                </ActionButton>
+                {/* A comment the agent wrote (mdr_ask, mdr_comment) is its
+                    text, like an agent's reply, so it gets no Edit. */}
+                {!comment.agentInitiated && (
+                  <ActionButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRequestCommentEdit(comment.id);
+                    }}
+                  >
+                    Edit
+                  </ActionButton>
+                )}
               </>
             )}
             {isResolved
