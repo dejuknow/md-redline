@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 
 // Mock preferences-client so SettingsContext doesn't hit the network
@@ -424,6 +424,99 @@ describe('CommentCard: compact mode', () => {
       editor: { mode: 'reply-compose', token: 1 },
     });
     expect(await screen.findByPlaceholderText('Write a reply...')).toBeTruthy();
+  });
+});
+
+describe('CommentCard: reply actions in a thread', () => {
+  const reviewerComment: MdComment = {
+    ...baseComment,
+    agentInitiated: false,
+    author: 'Alice',
+  };
+  const answered: MdComment = {
+    ...reviewerComment,
+    replies: [
+      {
+        id: 'r1',
+        text: 'Per-tenant, yes.',
+        author: 'Claude',
+        timestamp: new Date().toISOString(),
+        agent: true,
+      },
+    ],
+  };
+
+  const replyButtons = () => screen.queryAllByRole('button', { name: /^reply$/i });
+  const follows = (a: Node, b: Node) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('puts Reply under a full thread, not above it in the footer', async () => {
+    const { container } = renderCard({ comment: answered, isActive: true });
+    await screen.findByText('Per-tenant, yes.');
+    const lastReply = container.querySelector('[data-reply-id="r1"]')!;
+    expect(replyButtons()).toHaveLength(1);
+    expect(follows(lastReply, replyButtons()[0])).toBe(true);
+  });
+
+  it('keeps Reply in the footer of a compact card, whose thread is a summary line', async () => {
+    renderCard({ comment: answered, compact: true });
+    const summary = await screen.findByTestId('reply-summary');
+    expect(replyButtons()).toHaveLength(1);
+    expect(follows(replyButtons()[0], summary)).toBe(true);
+  });
+
+  it('hides the thread trigger while the composer is open below it', async () => {
+    renderCard({
+      comment: answered,
+      isActive: true,
+      editor: { mode: 'reply-compose', token: 1 },
+    });
+    await screen.findByPlaceholderText('Write a reply...');
+    // Only the composer's own submit button remains.
+    expect(replyButtons()).toHaveLength(1);
+    expect((replyButtons()[0] as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('offers no Edit or Delete on a reply stamped as an agent’s', async () => {
+    const { container } = renderCard({ comment: answered, isActive: true });
+    await screen.findByText('Per-tenant, yes.');
+    const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+    expect(within(reply).queryByRole('button', { name: /^edit$/i })).toBeNull();
+    expect(within(reply).queryByRole('button', { name: /delete/i })).toBeNull();
+  });
+
+  it('keeps Edit and Delete on the reviewer’s own reply', async () => {
+    const own: MdComment = {
+      ...reviewerComment,
+      replies: [
+        {
+          id: 'r1',
+          text: 'Thanks.',
+          author: 'Alice',
+          timestamp: new Date().toISOString(),
+          agent: false,
+        },
+      ],
+    };
+    const { container } = renderCard({ comment: own, isActive: true });
+    await screen.findByText('Thanks.');
+    const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+    expect(within(reply).queryByRole('button', { name: /^edit$/i })).not.toBeNull();
+    expect(within(reply).queryByRole('button', { name: /delete/i })).not.toBeNull();
+  });
+
+  it('keeps Edit and Delete on an unstamped reply, even from another author', async () => {
+    // Without the stamp, only a name comparison could call this an agent's
+    // reply, and that comparison mistakes a colleague for an agent (#102).
+    const unstamped: MdComment = {
+      ...reviewerComment,
+      replies: [{ id: 'r1', text: 'Agreed.', author: 'Bob', timestamp: new Date().toISOString() }],
+    };
+    const { container } = renderCard({ comment: unstamped, isActive: true });
+    await screen.findByText('Agreed.');
+    const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+    expect(within(reply).queryByRole('button', { name: /^edit$/i })).not.toBeNull();
+    expect(within(reply).queryByRole('button', { name: /delete/i })).not.toBeNull();
   });
 });
 
