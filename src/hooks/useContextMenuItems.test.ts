@@ -2,16 +2,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useContextMenuItems, type UseContextMenuItemsParams } from './useContextMenuItems';
-import type { SelectionInfo } from '../types';
+import type { MdComment, SelectionInfo } from '../types';
 
 function menu() {
   return { isOpen: false, x: 0, y: 0, open: vi.fn(), close: vi.fn() };
 }
 
-function setup(committed: SelectionInfo, selectionAsMarkdown = vi.fn(() => null as string | null)) {
+function setup(
+  committed: SelectionInfo,
+  selectionAsMarkdown = vi.fn(() => null as string | null),
+  comments: MdComment[] = [],
+) {
   const viewerCtxMenu = menu();
   const params = {
-    comments: [],
+    comments,
     enableResolve: false,
     handleResolve: vi.fn(),
     handleUnresolve: vi.fn(),
@@ -115,5 +119,35 @@ describe('Copy as Markdown in the selection menu (#101)', () => {
   it('leaves the item out when there is nothing to copy', () => {
     const { result } = setup(committed);
     expect(copyItem(result)).toBeUndefined();
+  });
+});
+
+describe('the highlight menu on a comment the agent wrote (#174)', () => {
+  const comment = (agentInitiated: boolean): MdComment => ({
+    id: 'c1',
+    anchor: 'cached per tenant',
+    text: 'Should this be per tenant or global?',
+    author: agentInitiated ? 'Claude' : 'Alice',
+    timestamp: new Date().toISOString(),
+    agentInitiated,
+  });
+
+  function labels(comments: MdComment[]) {
+    const { result } = setup({} as SelectionInfo, undefined, comments);
+    act(() => {
+      result.current.handleViewerContextMenu({ type: 'highlight', commentIds: ['c1'], x: 0, y: 0 });
+    });
+    return result.current.ctxMenuItems.map((item) => (item as { label?: string }).label);
+  }
+
+  it('offers no Edit, but keeps Reply and Delete', () => {
+    const items = labels([comment(true)]);
+    expect(items).not.toContain('Edit');
+    expect(items).toContain('Reply');
+    expect(items).toContain('Delete');
+  });
+
+  it('keeps Edit on the reader’s own comment', () => {
+    expect(labels([comment(false)])).toContain('Edit');
   });
 });

@@ -207,10 +207,12 @@ describe('CommentCard — agent-initiated comment', () => {
     expect(replyBtn).not.toBeNull();
   });
 
-  it('renders the Edit action when active', () => {
+  it('offers no Edit when active, since the text is the agent’s (#174)', () => {
+    // An mdr_ask question or mdr_comment note falls under the same rule as an
+    // agent's reply. Delete and Reply stay (see the two tests above).
     renderCard({ isActive: true });
     const editBtn = screen.queryByRole('button', { name: /^edit$/i });
-    expect(editBtn).not.toBeNull();
+    expect(editBtn).toBeNull();
   });
 });
 

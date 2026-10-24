@@ -110,7 +110,7 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
   names, so an unstamped reply keeps both.
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
-- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`).
+- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`). Like a reply stamped `agent: true`, such a comment gets no Edit, on its card or in the highlight's context menu; Delete and Reply stay.
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
 - `sessionId` — links an agent-initiated marker to a review session for reply routing.
 - Strip all `<!-- @comment{...} -->` markers to get clean content
