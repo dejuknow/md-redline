@@ -106,8 +106,8 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
   before the stamp existed, falls back to "an author other than the comment's".
   A person replying by hand-editing the file outside mdr is counted as an
   agent, which is the accepted cost. `CommentCard` reads the stamp too: a reply
-  stamped `true` gets no Edit or Delete. It does not fall back on names, so an
-  unstamped reply keeps both.
+  stamped `true` gets no Edit, though it keeps Delete. It does not fall back on
+  names, so an unstamped reply keeps both.
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
 - `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`).
@@ -2273,7 +2273,13 @@ for Open and neutral surface-inset for Resolved, and the Resolve action uses the
 success intent (recolored from crimson so it does not read as destructive next to Delete;
 toasts and the review banner carry the crimson budget instead). Keyboard focus on a
 card (`ThreadCard.tsx`) shows a `focus-visible` ring in `--theme-accent-ring` in place of the
-browser's native outline.
+browser's native outline. On an unselected card the footer actions fade in on hover or when
+one of them takes keyboard focus. Once a card shows its full thread (not compact, with
+replies), Reply leaves the footer: the selected card ends with a "Write a reply..." field,
+styled like the reply composer and sitting where it opens. A compact card, or one with no
+replies, keeps Reply in the footer. An unselected card that shows its full thread (List view
+and the Mermaid thread panel never compact) offers no Reply until it is selected, so it
+holds no empty row for a hidden one.
 
 Overlay surfaces (command palette, settings, file opener, keyboard shortcuts, confirm dialog)
 share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
