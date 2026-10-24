@@ -447,15 +447,34 @@ describe('CommentCard: reply actions in a thread', () => {
   };
 
   const replyButtons = () => screen.queryAllByRole('button', { name: /^reply$/i });
+  const replyField = () => screen.queryByRole('button', { name: 'Write a reply...' });
   const follows = (a: Node, b: Node) =>
     Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-  it('puts Reply under a full thread, not above it in the footer', async () => {
+  it('ends a selected card’s full thread with a reply field, not a footer Reply', async () => {
     const { container } = renderCard({ comment: answered, isActive: true });
     await screen.findByText('Per-tenant, yes.');
     const lastReply = container.querySelector('[data-reply-id="r1"]')!;
-    expect(replyButtons()).toHaveLength(1);
-    expect(follows(lastReply, replyButtons()[0])).toBe(true);
+    expect(replyField()).not.toBeNull();
+    expect(follows(lastReply, replyField()!)).toBe(true);
+    expect(replyButtons()).toHaveLength(0);
+  });
+
+  it('opens the composer from the reply field', async () => {
+    const onRequestReplyCompose = vi.fn();
+    renderCard({ comment: answered, isActive: true, onRequestReplyCompose });
+    await screen.findByText('Per-tenant, yes.');
+    fireEvent.click(replyField()!);
+    expect(onRequestReplyCompose).toHaveBeenCalledWith('cmt_1');
+  });
+
+  it('holds no reply row on an unselected card whose thread shows in full', async () => {
+    // The List view never compacts its cards. A trigger kept there at
+    // opacity 0 still takes a row and can take keyboard focus unseen.
+    renderCard({ comment: answered, isActive: false });
+    await screen.findByText('Per-tenant, yes.');
+    expect(replyField()).toBeNull();
+    expect(replyButtons()).toHaveLength(0);
   });
 
   it('keeps Reply in the footer of a compact card, whose thread is a summary line', async () => {
@@ -465,24 +484,35 @@ describe('CommentCard: reply actions in a thread', () => {
     expect(follows(replyButtons()[0], summary)).toBe(true);
   });
 
-  it('hides the thread trigger while the composer is open below it', async () => {
+  it('swaps the reply field for the composer while it is open', async () => {
     renderCard({
       comment: answered,
       isActive: true,
       editor: { mode: 'reply-compose', token: 1 },
     });
     await screen.findByPlaceholderText('Write a reply...');
+    expect(replyField()).toBeNull();
     // Only the composer's own submit button remains.
     expect(replyButtons()).toHaveLength(1);
     expect((replyButtons()[0] as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('offers no Edit or Delete on a reply stamped as an agent’s', async () => {
+  it('offers Delete but no Edit on a reply stamped as an agent’s', async () => {
+    // Rewriting an agent's words makes no sense, but dropping one stray
+    // answer (a duplicate, say) shouldn't cost the whole thread.
     const { container } = renderCard({ comment: answered, isActive: true });
     await screen.findByText('Per-tenant, yes.');
     const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
     expect(within(reply).queryByRole('button', { name: /^edit$/i })).toBeNull();
-    expect(within(reply).queryByRole('button', { name: /delete/i })).toBeNull();
+    expect(within(reply).queryByRole('button', { name: /delete/i })).not.toBeNull();
+  });
+
+  it('reveals an unselected card’s footer actions to keyboard focus', async () => {
+    // The footer fades in on hover. Without a focus rule, Tab lands on
+    // buttons that stay invisible.
+    renderCard({ comment: { ...reviewerComment, replies: [] }, isActive: false });
+    const edit = await screen.findByRole('button', { name: /^edit$/i });
+    expect(edit.parentElement!.className).toContain('focus-within:opacity-100');
   });
 
   it('keeps Edit and Delete on the reviewer’s own reply', async () => {

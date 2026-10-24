@@ -357,6 +357,28 @@ test.describe('Comment editing and replies', () => {
     await expect(page.getByText('Yes, still recommended per OWASP.')).toBeVisible();
   });
 
+  test('a later reply goes through the field under the thread', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'double-submit cookie pattern', 'Thread reply field');
+
+    const card = getCard(page, 'Thread reply field');
+    await card.getByText('Thread reply field').click();
+    await card.getByRole('button', { name: 'Reply' }).click();
+    await card.getByPlaceholder('Write a reply...').fill('First reply');
+    await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
+    await expect(card.locator('[data-reply-id]')).toHaveCount(1);
+
+    // With a reply in the thread, Reply leaves the footer for a field at the
+    // end of the thread.
+    await expect(card.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
+    await card.getByRole('button', { name: 'Write a reply...' }).click();
+    await card.getByPlaceholder('Write a reply...').fill('Second reply');
+    await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
+
+    await expect(card.locator('[data-reply-id]')).toHaveCount(2);
+    await expect(card.locator('[data-reply-id]').last()).toContainText('Second reply');
+  });
+
   test('edit and delete a reply', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'double-submit cookie pattern', 'Reply lifecycle');
