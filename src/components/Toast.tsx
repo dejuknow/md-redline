@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ToastAction, ToastKind } from '../hooks/useToast';
 
 interface Props {
@@ -39,9 +39,51 @@ const KIND_STYLES: Record<ToastKind, { iconColor: string; icon: string }> = {
   },
 };
 
+/** How long a toast stays up, not counting time spent paused. */
+const TOAST_DURATION_MS = 5000;
+
 export function Toast({ message, visible, onDismiss, action, kind = 'info', toastId }: Props) {
   const [show, setShow] = useState(false);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The auto-dismiss clock can pause, so it keeps what is left of its time
+  // rather than a single fixed timeout. Pointing at the toast or focusing a
+  // control inside it pauses the clock (and the countdown bar with it):
+  // someone reaching for Undo shouldn't lose it on the way.
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const remainingRef = useRef(TOAST_DURATION_MS);
+  const startedAtRef = useRef(0);
+  const hoveredRef = useRef(false);
+  const focusedRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [paused, setPaused] = useState(false);
+
+  const fadeOut = useCallback(() => {
+    setShow(false);
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(onDismiss, 200);
+  }, [onDismiss]);
+
+  const startClock = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    startedAtRef.current = Date.now();
+    timerRef.current = setTimeout(() => {
+      timerRef.current = undefined;
+      fadeOut();
+    }, remainingRef.current);
+  }, [fadeOut]);
+
+  const syncPause = useCallback(() => {
+    const shouldPause = hoveredRef.current || focusedRef.current;
+    if (shouldPause && timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+      remainingRef.current -= Date.now() - startedAtRef.current;
+      setPaused(true);
+    } else if (!shouldPause && !timerRef.current && remainingRef.current > 0) {
+      startClock();
+      setPaused(false);
+    }
+  }, [startClock]);
 
   // Clean up fade timer on unmount
   useEffect(() => {
@@ -54,34 +96,60 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
     if (visible) {
       // Trigger enter animation
       requestAnimationFrame(() => setShow(true));
-      // Reset the auto-dismiss timer on every message update so coalesced
-      // toasts stay visible while new events keep arriving.
-      const timer = setTimeout(() => {
-        setShow(false);
-        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-        fadeTimerRef.current = setTimeout(onDismiss, 200);
-      }, 5000);
+      // Reset the auto-dismiss clock on every message update so coalesced
+      // toasts stay visible while new events keep arriving. A toast that
+      // arrives under the pointer or focus starts paused. Focus is read from
+      // the page rather than remembered: a replacement toast can drop the
+      // focused button (Undo swapped for "Couldn't undo") without a blur.
+      remainingRef.current = TOAST_DURATION_MS;
+      focusedRef.current = Boolean(containerRef.current?.contains(document.activeElement));
+      const startPaused = hoveredRef.current || focusedRef.current;
+      setPaused(startPaused);
+      if (!startPaused) startClock();
       return () => {
-        clearTimeout(timer);
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = undefined;
         if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       };
     } else {
       setShow(false);
+      // The toast unmounts without a mouseleave or blur (clicking Undo hides
+      // it under the pointer), so the next toast would otherwise start paused.
+      hoveredRef.current = false;
+      focusedRef.current = false;
     }
-  }, [visible, message, toastId, onDismiss]);
+  }, [visible, message, toastId, startClock]);
 
   if (!visible) return null;
 
   return (
     <div
+      ref={containerRef}
       role="status"
       aria-live="polite"
       className={`fixed bottom-12 right-4 z-50 transition-all duration-200 ${
         show ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
+      onMouseEnter={() => {
+        hoveredRef.current = true;
+        syncPause();
+      }}
+      onMouseLeave={() => {
+        hoveredRef.current = false;
+        syncPause();
+      }}
+      onFocus={() => {
+        focusedRef.current = true;
+        syncPause();
+      }}
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        focusedRef.current = false;
+        syncPause();
+      }}
     >
       <div
-        className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-lg"
+        className="relative overflow-hidden flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-lg"
         style={{ background: TOAST_BG, color: TOAST_FG }}
       >
         <svg
@@ -99,9 +167,7 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
           <button
             onClick={() => {
               action.onClick();
-              setShow(false);
-              if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-              fadeTimerRef.current = setTimeout(onDismiss, 200);
+              fadeOut();
             }}
             className="ml-1 px-2 py-0.5 rounded text-xs font-semibold bg-current/10 hover:bg-current/20 transition-colors"
           >
@@ -109,11 +175,7 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
           </button>
         )}
         <button
-          onClick={() => {
-            setShow(false);
-            if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-            fadeTimerRef.current = setTimeout(onDismiss, 200);
-          }}
+          onClick={fadeOut}
           className="ml-2 opacity-70 hover:opacity-100 transition-opacity"
           aria-label="Dismiss notification"
         >
@@ -127,6 +189,22 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
+        {/* Runs down over the toast's time so it is plain it will close on its
+            own. Only a toast with a button gets one: with nothing to act on,
+            there is nothing to race. Keyed per toast so a new one restarts it.
+            Reduced motion leaves it static (index.css). */}
+        {action && (
+          <div
+            key={`${toastId ?? 0}:${message}`}
+            data-toast-countdown
+            aria-hidden="true"
+            className="toast-countdown absolute inset-x-0 bottom-0 h-0.5 bg-current opacity-40"
+            style={{
+              animationDuration: `${TOAST_DURATION_MS}ms`,
+              animationPlayState: paused ? 'paused' : 'running',
+            }}
+          />
+        )}
       </div>
     </div>
   );
