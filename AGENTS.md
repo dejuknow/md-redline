@@ -2292,7 +2292,9 @@ muted, borderless variant (`.comment-quote-resolved`). The status pill is amber 
 for Open and neutral surface-inset for Resolved, and the Resolve action uses the green
 success intent (recolored from crimson so it does not read as destructive next to Delete;
 toasts and the review banner carry the crimson budget instead). Every card is a tab stop
-(`ThreadCard.tsx`, `tabIndex={0}`), and it shows a `focus-visible` ring in
+(`ThreadCard.tsx`, `tabIndex={0}`) with `role="article"`, an accessible name of the form
+`Comment by <author> on "<anchor>"` (the anchor cut to 60 characters), and
+`aria-current="true"` while selected, and it shows a `focus-visible` ring in
 `--theme-accent-ring` in place of the browser's native outline. Enter or Space on the
 focused card itself selects it, the same as a click (a key that bubbles up from a button or
 textarea inside it is left to that control); Tab then walks into its actions. Card actions
@@ -2306,7 +2308,7 @@ card included, since "Re-anchor to selection" must work without selecting the ca
 collapsing the text selection). A
 selected card has three scopes. The first comment's own **Edit** (absent on a resolved
 comment and on one an agent wrote) sits on its byline row, and each reply's **Edit** (absent
-on a reply stamped `agent: true`) and trash sit on that reply's row; both fade in on hover
+on a reply stamped `agent: true`) and trash (named "Delete reply") sit on that reply's row; both fade in on hover
 or keyboard focus of their row, by opacity rather than `invisible`, so Tab can reach them
 and focusing one reveals it. Hover variants only apply where the input can hover, so on a
 device that cannot (`@media (hover: none)`) they are always visible. The card then ends

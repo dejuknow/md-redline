@@ -124,3 +124,33 @@ describe('ThreadCard keyboard reach', () => {
     expect(notPrevented).toBe(true);
   });
 });
+
+describe('ThreadCard for assistive tech', () => {
+  // A focusable element needs a role and a name, or a screen reader lands on
+  // an unnamed group of text. The selected card is the current one.
+  it('is a named article', () => {
+    render(createElement(ThreadCard, baseThreadProps), { wrapper: AllProviders });
+    const card = screen.getByRole('article', { name: 'Comment by Claude on "Hello world"' });
+    expect(card.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('marks the selected card as current', () => {
+    render(createElement(ThreadCard, { ...baseThreadProps, active: true }), {
+      wrapper: AllProviders,
+    });
+    expect(screen.getByRole('article').getAttribute('aria-current')).toBe('true');
+  });
+
+  it('shortens a long anchor in the name', () => {
+    const anchor = 'a'.repeat(80);
+    render(
+      createElement(ThreadCard, {
+        ...baseThreadProps,
+        thread: { ...baseThreadProps.thread, anchor },
+      }),
+      { wrapper: AllProviders },
+    );
+    const name = screen.getByRole('article').getAttribute('aria-label')!;
+    expect(name).toBe(`Comment by Claude on "${'a'.repeat(60)}..."`);
+  });
+});

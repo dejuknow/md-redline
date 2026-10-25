@@ -517,7 +517,7 @@ describe('CommentCard: reply actions in a thread', () => {
     const { container } = renderCard({ comment: answered, isActive: true });
     await screen.findByText('Per-tenant, yes.');
     const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
-    const actions = within(reply).getByRole('button', { name: 'Delete' }).parentElement!;
+    const actions = within(reply).getByRole('button', { name: 'Delete reply' }).parentElement!;
     expect(actions.className).toContain('opacity-0');
     expect(actions.className).toContain('group-hover/reply:opacity-100');
     expect(actions.className).toContain('group-focus-within/reply:opacity-100');
@@ -556,7 +556,7 @@ describe('CommentCard: reply actions in a thread', () => {
     });
     await screen.findByText('Per-tenant, yes.');
     const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
-    fireEvent.click(within(reply).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(reply).getByRole('button', { name: 'Delete reply' }));
     expect(onDeleteReply).toHaveBeenCalledWith('cmt_1', 'r1');
     expect(onDelete).not.toHaveBeenCalled();
   });
@@ -775,7 +775,7 @@ describe('CommentCard: action scope', () => {
       const { container } = renderCard({ comment: withReplies, isActive: true });
       await screen.findByText('Looks right.');
       const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
-      const wrapper = within(reply).getByRole('button', { name: 'Delete' }).parentElement!;
+      const wrapper = within(reply).getByRole('button', { name: 'Delete reply' }).parentElement!;
       expect(wrapper.className).toContain('[@media(hover:none)]:opacity-100');
     });
   });

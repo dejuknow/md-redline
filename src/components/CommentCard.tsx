@@ -694,7 +694,10 @@ export const CommentCard = memo(function CommentCard({
                               Edit
                             </ActionButton>
                           )}
+                          {/* Named for its scope, beside the thread bar's
+                              "Delete thread". */}
                           <DeleteIconButton
+                            label="Delete reply"
                             onClick={() => {
                               onDeleteReply(comment.id, reply.id);
                             }}

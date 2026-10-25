@@ -415,7 +415,7 @@ test.describe('Comment editing and replies', () => {
     await expect(reply).toContainText('Updated reply text');
     await expect(reply).not.toContainText('Initial reply text');
 
-    await clickReplyAction(reply, 'Delete');
+    await clickReplyAction(reply, 'Delete reply');
     await expect(card.locator('[data-reply-id]')).toHaveCount(0);
   });
 
