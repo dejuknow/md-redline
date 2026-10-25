@@ -106,11 +106,11 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
   before the stamp existed, falls back to "an author other than the comment's".
   A person replying by hand-editing the file outside mdr is counted as an
   agent, which is the accepted cost. `CommentCard` reads the stamp too: a reply
-  stamped `true` gets no Edit, though it keeps Delete. It does not fall back on
+  stamped `true` gets no Edit, though it keeps its trash. It does not fall back on
   names, so an unstamped reply keeps both.
 - `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
-- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`). Like a reply stamped `agent: true`, such a comment gets no Edit, on its card or in the highlight's context menu; Delete and Reply stay.
+- `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`). Like a reply stamped `agent: true`, such a comment gets no Edit, on its card or in the highlight's context menu; Delete and the reply field stay.
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
 - `sessionId` — links an agent-initiated marker to a review session for reply routing.
 - Strip all `<!-- @comment{...} -->` markers to get clean content
@@ -1394,7 +1394,7 @@ tab with no open comments but some resolved ones draws a quiet outlined "N
 resolved" badge instead (`resolvedCommentCounts`, user comments only; same in
 the tab strip and the overflow tab list). With it off, resolved comments stay
 in all of those counts and no "N resolved" badge is drawn, because the
-highlight, card and List view still show a resolved marker as open with Reply,
+highlight, card and List view still show a resolved marker as open with a reply field,
 and leaving it out of Send would silently drop a reply typed there. A resolved
 agent question is out of the agent count in both modes, since "Awaiting your
 reply" only surfaces open ones. The handoff button keeps the sendable-only map. Inline code in prose
@@ -1404,10 +1404,11 @@ accent:
 - **Anchored** (default): cards align to their document anchors. Cards are
   compact by default (anchor text, comment preview, reply summary); the active
   card (selected by clicking its highlight or the card itself) expands to the
-  full thread view with all actions, including Reply. A compact card's replies
-  collapse to a clickable disclosure line naming who replied ("2 replies from
-  Claude and Dennis", `data-testid="reply-summary"`); clicking it activates the
-  card, which is what expands the thread. Replies that arrived from outside the
+  full thread view with its actions and a reply field; an unselected card has
+  none. A compact card's replies collapse to a clickable disclosure line naming
+  who replied ("2 replies from Claude and Dennis",
+  `data-testid="reply-summary"`); clicking it activates the card, which is what
+  expands the thread. Replies that arrived from outside the
   app since the reader last opened that card are tracked per file path by
   `useUnreadReplies` (session-only, never persisted) and fed in as
   `unreadReplyIds`; when a card has any, the line counts and attributes only
@@ -2292,13 +2293,24 @@ for Open and neutral surface-inset for Resolved, and the Resolve action uses the
 success intent (recolored from crimson so it does not read as destructive next to Delete;
 toasts and the review banner carry the crimson budget instead). Keyboard focus on a
 card (`ThreadCard.tsx`) shows a `focus-visible` ring in `--theme-accent-ring` in place of the
-browser's native outline. On an unselected card the footer actions fade in on hover or when
-one of them takes keyboard focus. Once a card shows its full thread (not compact, with
-replies), Reply leaves the footer: the selected card ends with a "Write a reply..." field,
-styled like the reply composer and sitting where it opens. A compact card, or one with no
-replies, keeps Reply in the footer. An unselected card that shows its full thread (List view
-and the Mermaid thread panel never compact) offers no Reply until it is selected, so it
-holds no empty row for a hidden one.
+browser's native outline. Card actions are split by what they act on, and only the selected
+card has any. An unselected card (any margin card but the active one, and every card in the
+List view and the Mermaid thread panel, which never compact) renders no action buttons at
+all, not even hidden ones, so its footer is just the byline; its reply rows get none either.
+The exception is the anchor-repair pair, "Keep this anchor" and "Re-anchor to selection",
+which sit in a row under the byline, always visible, on any card that needs them. A
+selected card has three scopes. The first comment's own **Edit** (absent on a resolved
+comment and on one an agent wrote) sits on its byline row, and each reply's **Edit** (absent
+on a reply stamped `agent: true`) and trash sit on that reply's row; both fade in on hover
+or keyboard focus of their row, by opacity rather than `invisible`, so Tab can reach them
+and focusing one reveals it. The card then ends with a "Write a reply..." field, shown on
+every open card whatever its reply count (hidden while resolved), styled like the reply
+composer and sitting where it opens, and a **thread bar**: a hairline across the full card
+width over a row with **Resolve** (**Reopen** on a resolved card; only with the resolve
+workflow on) at the left, aligned to the card's content edge, and the trash at the right,
+labelled "Delete thread" when the comment has replies and "Delete" when it has none. The
+field and the thread bar both hide while the comment editor, a reply editor or the reply
+composer is open. There is no footer Reply button in any state.
 
 Overlay surfaces (command palette, settings, file opener, keyboard shortcuts, confirm dialog)
 share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and

@@ -56,10 +56,26 @@ function getCard(page: Page, commentText: string) {
   return page.locator('.group.rounded-lg', { hasText: commentText });
 }
 
+/**
+ * Select a card, then click one of its action buttons. An unselected card
+ * renders no actions at all, so clicking the comment text comes first. Edit is
+ * the first comment's own and sits on its byline row; Resolve, Reopen and
+ * Delete act on the whole thread and live in the thread bar, where Delete
+ * reads "Delete thread" once the comment has replies. The click is not forced:
+ * selecting the card re-lays it out, and Playwright's wait for the button to
+ * settle is what keeps the click from landing where it used to be. (opacity-0
+ * counts as visible to Playwright, so the hover-revealed Edit needs no force.)
+ */
 async function clickCardAction(page: Page, commentText: string, actionName: string) {
   const card = getCard(page, commentText);
-  await card.hover();
-  await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
+  await card.getByText(commentText).first().click();
+  const scope =
+    actionName === 'Edit' ? card.locator('.group\\/root') : card.locator('[data-thread-bar]');
+  const button =
+    actionName === 'Delete'
+      ? scope.getByRole('button', { name: /^Delete( thread)?$/ })
+      : scope.getByRole('button', { name: actionName, exact: true });
+  await button.click();
 }
 
 /** Enable a boolean setting via the Settings panel toggle */
@@ -128,7 +144,7 @@ test.describe('Highlight popover (rail-hidden contexts)', () => {
     const pop = popover(page);
     await expect(pop).toBeVisible();
 
-    await pop.getByRole('button', { name: 'Reply' }).click();
+    await pop.getByRole('button', { name: 'Write a reply...' }).click();
     await pop.locator('textarea').fill('Reply from the popover');
     await page.keyboard.press(withMod('Enter'));
 

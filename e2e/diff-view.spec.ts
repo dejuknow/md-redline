@@ -325,9 +325,11 @@ test.describe('Diff overlay', () => {
     // comments drawer instead.
     await openCommentsDrawer(page);
 
-    // Resolve the single open comment via its card action. Exact match is
-    // required: a non-exact "Resolve" also matches the drawer's "Resolved"
-    // filter tab.
+    // Resolve the single open comment via its card action. Only a selected card
+    // carries actions, so select it by clicking its comment text first. Exact
+    // match is required: a non-exact "Resolve" also matches the drawer's
+    // "Resolved" filter tab.
+    await page.locator('[data-comment-card-id] p').first().click();
     await page.getByRole('button', { name: 'Resolve', exact: true }).first().click();
 
     // Frontier advances: reset toast appears and the chunk badge disappears.

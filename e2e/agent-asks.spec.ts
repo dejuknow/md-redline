@@ -113,14 +113,10 @@ test.describe('Agent asks', () => {
       `${baseURL}/api/review-sessions/${sessionId}/asks/${askId}/wait`,
     );
 
-    // Reply to the ask via the standard Reply button on the comment card.
+    // Reply to the ask from the reply field on the comment card.
     await commentCards.first().click(); // activate
     // Open the reply form
-    await commentCards
-      .first()
-      .getByRole('button', { name: /^reply$/i })
-      .first()
-      .click();
+    await commentCards.first().getByRole('button', { name: 'Write a reply...' }).click();
     // Fill the reply text
     await commentCards
       .first()
@@ -130,7 +126,6 @@ test.describe('Agent asks', () => {
     await commentCards
       .first()
       .getByRole('button', { name: /^reply$/i })
-      .last()
       .click();
 
     // The inline reply saves the file, and the save resolves the pending ask
