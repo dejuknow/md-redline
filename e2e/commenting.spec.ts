@@ -1,7 +1,8 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { clickCardAction, clickReplyAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 import { withMod } from './helpers/shortcuts';
@@ -118,43 +119,6 @@ async function clickVisibleProsePointOutsideCommentForm(page: Page) {
   }
 
   await page.mouse.click(point.x, point.y);
-}
-
-/**
- * Get the comment card container that holds a comment with the given text.
- * Uses the data structure: card > div.px-3.py-2 > p (comment text)
- */
-function getCard(page: Page, commentText: string) {
-  return page.locator('.group.rounded-lg', { hasText: commentText });
-}
-
-/**
- * Select a card, then click one of its action buttons. An unselected card
- * renders no actions at all, so clicking the comment text comes first. Edit is
- * the first comment's own and sits on its byline row; Resolve, Reopen and
- * Delete act on the whole thread and live in the thread bar, where Delete
- * reads "Delete thread" once the comment has replies. The click is not forced:
- * selecting the card re-lays it out, and Playwright's wait for the button to
- * settle is what keeps the click from landing where it used to be. (opacity-0
- * counts as visible to Playwright, so the hover-revealed Edit needs no force.)
- */
-async function clickCardAction(page: Page, commentText: string, actionName: string) {
-  const card = getCard(page, commentText);
-  await card.getByText(commentText).first().click();
-  const scope =
-    actionName === 'Edit' ? card.locator('.group\\/root') : card.locator('[data-thread-bar]');
-  const button =
-    actionName === 'Delete'
-      ? scope.getByRole('button', { name: /^Delete( thread)?$/ })
-      : scope.getByRole('button', { name: actionName, exact: true });
-  await button.click();
-}
-
-async function clickReplyAction(reply: Locator, actionName: string) {
-  await expect(reply).toBeVisible();
-  await reply.hover();
-  // Opacity-0 until the reply row is hovered or focused, so the click is forced.
-  await reply.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
 /**

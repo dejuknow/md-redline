@@ -146,6 +146,33 @@ test.describe('Margin notes', () => {
       .toContain('Reply from a compact card');
   });
 
+  test('a card is a tab stop: Enter selects it and Tab then reaches its actions', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    await addComment(page, 'valid credentials', 'Keyboard card');
+
+    // An unselected card holds no button, so the card itself has to take focus
+    // for a keyboard to get anywhere near its actions.
+    const wrapper = page.locator('[data-comment-card-id]', { hasText: 'Keyboard card' });
+    const card = wrapper.locator('.group.rounded-lg');
+    await expect(card).not.toHaveClass(/ring-1/);
+    await expect(wrapper.getByRole('button')).toHaveCount(0);
+
+    await wrapper.focus();
+    await page.keyboard.press('Enter');
+    await expect(card).toHaveClass(/ring-1/);
+
+    // Tab walks into the selected card. Edit is opacity-0 until its row is
+    // hovered or focused, and focus alone has to bring it back.
+    await page.keyboard.press('Tab');
+    const edit = wrapper.getByRole('button', { name: 'Edit' });
+    await expect(edit).toBeFocused();
+    await expect(edit.locator('..')).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Tab');
+    await expect(wrapper.getByRole('button', { name: 'Write a reply...' })).toBeFocused();
+  });
+
   test('hiding the rail hides the layer; narrow windows never show it', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Margin note three');

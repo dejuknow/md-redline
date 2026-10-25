@@ -2291,26 +2291,35 @@ in the highlighter color, not a monospace chip; a resolved comment's quote switc
 muted, borderless variant (`.comment-quote-resolved`). The status pill is amber (anchor tint)
 for Open and neutral surface-inset for Resolved, and the Resolve action uses the green
 success intent (recolored from crimson so it does not read as destructive next to Delete;
-toasts and the review banner carry the crimson budget instead). Keyboard focus on a
-card (`ThreadCard.tsx`) shows a `focus-visible` ring in `--theme-accent-ring` in place of the
-browser's native outline. Card actions are split by what they act on, and only the selected
+toasts and the review banner carry the crimson budget instead). Every card is a tab stop
+(`ThreadCard.tsx`, `tabIndex={0}`), and it shows a `focus-visible` ring in
+`--theme-accent-ring` in place of the browser's native outline. Enter or Space on the
+focused card itself selects it, the same as a click (a key that bubbles up from a button or
+textarea inside it is left to that control); Tab then walks into its actions. Card actions
+are split by what they act on, and only the selected
 card has any. An unselected card (any margin card but the active one, and every card in the
 List view and the Mermaid thread panel, which never compact) renders no action buttons at
 all, not even hidden ones, so its footer is just the byline; its reply rows get none either.
 The exception is the anchor-repair pair, "Keep this anchor" and "Re-anchor to selection",
-which sit in a row under the byline, always visible, on any card that needs them. A
+which sit in a row under the byline, always visible, on any card that needs them (a compact
+card included, since "Re-anchor to selection" must work without selecting the card and
+collapsing the text selection). A
 selected card has three scopes. The first comment's own **Edit** (absent on a resolved
 comment and on one an agent wrote) sits on its byline row, and each reply's **Edit** (absent
 on a reply stamped `agent: true`) and trash sit on that reply's row; both fade in on hover
 or keyboard focus of their row, by opacity rather than `invisible`, so Tab can reach them
-and focusing one reveals it. The card then ends with a "Write a reply..." field, shown on
+and focusing one reveals it. Hover variants only apply where the input can hover, so on a
+device that cannot (`@media (hover: none)`) they are always visible. The card then ends
+with a "Write a reply..." field, shown on
 every open card whatever its reply count (hidden while resolved), styled like the reply
 composer and sitting where it opens, and a **thread bar**: a hairline across the full card
 width over a row with **Resolve** (**Reopen** on a resolved card; only with the resolve
 workflow on) at the left, aligned to the card's content edge, and the trash at the right,
-labelled "Delete thread" when the comment has replies and "Delete" when it has none. The
-field and the thread bar both hide while the comment editor, a reply editor or the reply
-composer is open. There is no footer Reply button in any state.
+labelled "Delete thread" when the comment has replies and "Delete" when it has none. While
+the comment editor, a reply editor or the reply composer is open, every one of those steps
+aside (the first comment's Edit, the reply rows' actions, the anchor-repair pair, the reply
+field and the thread bar), because a click would switch editors and lose the draft. There
+is no footer Reply button in any state.
 
 Overlay surfaces (command palette, settings, file opener, keyboard shortcuts, confirm dialog)
 share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and

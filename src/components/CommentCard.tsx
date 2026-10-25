@@ -51,7 +51,8 @@ interface Props {
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
   /** Margin-notes compact rendering: the replies thread collapses to a summary
    * line. Editor surfaces (the edit textarea and reply composer) still render
-   * when triggered. A compact card is never selected, so it has no actions. */
+   * when triggered. A compact card is never selected, so it has no actions
+   * apart from the anchor-repair buttons. */
   compact?: boolean;
   /** Reply IDs that arrived from outside the app since the user last opened
    * this card. Drives the "new" emphasis on the compact summary line, which is
@@ -274,17 +275,17 @@ export const CommentCard = memo(function CommentCard({
   // trash sit on that reply's row. Resolve, Reopen and Delete act on the whole
   // thread, so they share the thread bar that closes the card. An unselected
   // card renders none of them, not even hidden ones, so it holds no empty row
-  // for buttons nobody can see.
+  // for buttons nobody can see. All of them step aside while an editor or the
+  // composer is open: a click would switch editors and lose the draft.
   const editorOpen = isEditing || isEditingReply || isReplying;
-  const showRootEdit =
-    isActive && !isResolved && !comment.agentInitiated && !isEditing && !isEditingReply;
-  // The two anchor-repair buttons are the exception: a card needing repair has
-  // to say so without being hovered or selected.
+  const showRootEdit = isActive && !isResolved && !comment.agentInitiated && !editorOpen;
+  // The two anchor-repair buttons are the exception to "selected only": a card
+  // needing repair has to say so without being hovered or selected.
   const showKeepAnchor = Boolean(comment.recoveredAnchor && onReanchorToSelection);
   const showReanchor = Boolean(
     showAnchorContext && selectionText && selectionText.trim().length > 0 && onReanchorToSelection,
   );
-  const showAnchorRepair = (showKeepAnchor || showReanchor) && !isEditing && !isEditingReply;
+  const showAnchorRepair = (showKeepAnchor || showReanchor) && !editorOpen;
   const editingReply = editingReplyId
     ? (replies.find((reply) => reply.id === editingReplyId) ?? null)
     : null;
@@ -538,11 +539,13 @@ export const CommentCard = memo(function CommentCard({
         </span>
 
         {/* Opacity rather than `invisible`: an invisible button leaves the tab
-            order, so keyboard focus could never reach it to reveal it. A
-            comment the agent wrote (mdr_ask, mdr_comment) is its text, like an
-            agent's reply, so it gets no Edit. */}
+            order, so keyboard focus could never reach it to reveal it. Hover
+            variants only apply where the input can hover, so a touch device
+            gets the always-visible rule instead. A comment the agent wrote
+            (mdr_ask, mdr_comment) is its text, like an agent's reply, so it
+            gets no Edit. */}
         {showRootEdit && (
-          <div className="opacity-0 transition-opacity group-hover/root:opacity-100 group-focus-within/root:opacity-100">
+          <div className="opacity-0 transition-opacity group-hover/root:opacity-100 group-focus-within/root:opacity-100 [@media(hover:none)]:opacity-100">
             <ActionButton
               onClick={(e) => {
                 e.stopPropagation();
@@ -668,11 +671,12 @@ export const CommentCard = memo(function CommentCard({
                         {reply.author}
                         {replyTimeAgo && <> &middot; {replyTimeAgo}</>}
                       </span>
-                      {isActive && !isResolved && (
+                      {isActive && !isResolved && !editorOpen && (
                         // Opacity, not `invisible`, so Tab can reach the
-                        // buttons and focusing one reveals the row's actions.
+                        // buttons and focusing one reveals the row's actions;
+                        // always visible where there is no hover.
                         <div
-                          className="flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:opacity-100 group-focus-within/reply:opacity-100"
+                          className="flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:opacity-100 group-focus-within/reply:opacity-100 [@media(hover:none)]:opacity-100"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {/* An agent's words aren't the reader's to rewrite,

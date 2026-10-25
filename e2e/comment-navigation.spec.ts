@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { addComment } from './helpers/comments';
+import { addComment, clickCardAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -24,32 +24,6 @@ async function openFixture(page: Page) {
   await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
     timeout: 10_000,
   });
-}
-
-function getCard(page: Page, commentText: string) {
-  return page.locator('.group.rounded-lg', { hasText: commentText });
-}
-
-/**
- * Select a card, then click one of its action buttons. An unselected card
- * renders no actions at all, so clicking the comment text comes first. Edit is
- * the first comment's own and sits on its byline row; Resolve, Reopen and
- * Delete act on the whole thread and live in the thread bar, where Delete
- * reads "Delete thread" once the comment has replies. The click is not forced:
- * selecting the card re-lays it out, and Playwright's wait for the button to
- * settle is what keeps the click from landing where it used to be. (opacity-0
- * counts as visible to Playwright, so the hover-revealed Edit needs no force.)
- */
-async function clickCardAction(page: Page, commentText: string, actionName: string) {
-  const card = getCard(page, commentText);
-  await card.getByText(commentText).first().click();
-  const scope =
-    actionName === 'Edit' ? card.locator('.group\\/root') : card.locator('[data-thread-bar]');
-  const button =
-    actionName === 'Delete'
-      ? scope.getByRole('button', { name: /^Delete( thread)?$/ })
-      : scope.getByRole('button', { name: actionName, exact: true });
-  await button.click();
 }
 
 /** Enable a boolean setting via the Settings panel toggle */

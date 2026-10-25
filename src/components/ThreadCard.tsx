@@ -113,7 +113,20 @@ export function ThreadCard({
   return (
     <div
       ref={divRef}
-      tabIndex={-1}
+      // A tab stop of its own: an unselected card holds no button, so this is
+      // the only way a key reaches it, and through it the actions that appear
+      // once it is selected. Programmatic focus (requestCommentFocus) works
+      // the same as it did at -1.
+      tabIndex={0}
+      onKeyDown={(e) => {
+        // Only when the card itself has focus. The same keys on a button or
+        // textarea inside it bubble up here and belong to that control.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(thread.id);
+        }
+      }}
       data-comment-card-id={thread.id}
       className="outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-primary-ring"
     >

@@ -762,6 +762,81 @@ describe('CommentCard: action scope', () => {
       const keep = screen.getByRole('button', { name: 'Keep this anchor' });
       expect(keep.closest('.opacity-0')).toBeNull();
     });
+
+    it('keeps root Edit visible on a device that cannot hover', () => {
+      // Tailwind's hover variants only apply where the primary input can hover,
+      // so without this rule a touch device sees nothing yet taps a hidden Edit.
+      renderCard({ comment: reviewer, isActive: true });
+      const wrapper = screen.getByRole('button', { name: /^edit$/i }).parentElement!;
+      expect(wrapper.className).toContain('[@media(hover:none)]:opacity-100');
+    });
+
+    it('keeps a reply’s actions visible on a device that cannot hover', async () => {
+      const { container } = renderCard({ comment: withReplies, isActive: true });
+      await screen.findByText('Looks right.');
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+      const wrapper = within(reply).getByRole('button', { name: 'Delete' }).parentElement!;
+      expect(wrapper.className).toContain('[@media(hover:none)]:opacity-100');
+    });
+  });
+
+  describe('while an editor or the composer is open', () => {
+    // Edit, the reply rows' actions and the anchor repair buttons would switch
+    // editors under the open one, and the draft in it would be lost. The reply
+    // field and the thread bar already hide for the same reason.
+    const twoReplies: MdComment = {
+      ...reviewer,
+      anchorStale: true,
+      recoveredAnchor: 'The replacement text',
+      replies: [
+        { id: 'r1', text: 'Looks right.', author: 'Bob', timestamp: stamp },
+        { id: 'r2', text: 'Agreed.', author: 'Carol', timestamp: stamp },
+      ],
+    };
+    const editors = [
+      ['the comment editor', { mode: 'comment-edit', token: 1 }],
+      ['a reply editor', { mode: 'reply-edit', replyId: 'r1', token: 1 }],
+      ['the reply composer', { mode: 'reply-compose', token: 1 }],
+    ] as const;
+
+    it('shows all of them when nothing is open', async () => {
+      const { container } = renderCard({
+        comment: twoReplies,
+        isActive: true,
+        onReanchorToSelection: vi.fn(),
+      });
+      await screen.findByText('Agreed.');
+      const root = container.querySelector<HTMLElement>('.group\\/root')!;
+      expect(within(root).queryByRole('button', { name: /^edit$/i })).not.toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep this anchor' })).not.toBeNull();
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r2"]')!;
+      expect(within(reply).queryAllByRole('button')).toHaveLength(2);
+    });
+
+    it.each(editors)('hides root Edit while %s is open', async (_name, editor) => {
+      renderCard({ comment: twoReplies, isActive: true, editor });
+      await screen.findByText('Agreed.');
+      const root = document.querySelector<HTMLElement>('.group\\/root')!;
+      expect(within(root).queryByRole('button', { name: /^edit$/i })).toBeNull();
+    });
+
+    it.each(editors)('hides another reply’s actions while %s is open', async (_name, editor) => {
+      const { container } = renderCard({ comment: twoReplies, isActive: true, editor });
+      await screen.findByText('Agreed.');
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r2"]')!;
+      expect(within(reply).queryAllByRole('button')).toHaveLength(0);
+    });
+
+    it.each(editors)('hides the anchor repair buttons while %s is open', async (_name, editor) => {
+      renderCard({
+        comment: twoReplies,
+        isActive: true,
+        editor,
+        onReanchorToSelection: vi.fn(),
+      });
+      await screen.findByText('Agreed.');
+      expect(screen.queryByRole('button', { name: 'Keep this anchor' })).toBeNull();
+    });
   });
 
   describe('the thread bar', () => {
