@@ -195,21 +195,21 @@ describe('CommentCard — agent-initiated comment', () => {
     expect(screen.queryByText(/awaiting your reply/i)).toBeNull();
   });
 
-  it('renders the Delete action when active', () => {
+  it('renders the thread Delete when active', () => {
     renderCard({ isActive: true });
-    const deleteBtn = screen.queryByRole('button', { name: /delete/i });
+    const deleteBtn = screen.queryByRole('button', { name: 'Delete' });
     expect(deleteBtn).not.toBeNull();
   });
 
-  it('renders the Reply action when active', () => {
+  it('offers the reply field, not a footer Reply, when active', () => {
     renderCard({ isActive: true });
-    const replyBtn = screen.queryByRole('button', { name: /^reply$/i });
-    expect(replyBtn).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Write a reply...' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^reply$/i })).toBeNull();
   });
 
   it('offers no Edit when active, since the text is the agent’s (#174)', () => {
     // An mdr_ask question or mdr_comment note falls under the same rule as an
-    // agent's reply. Delete and Reply stay (see the two tests above).
+    // agent's reply. Delete and the reply field stay (see the two tests above).
     renderCard({ isActive: true });
     const editBtn = screen.queryByRole('button', { name: /^edit$/i });
     expect(editBtn).toBeNull();
@@ -223,11 +223,11 @@ describe('CommentCard — user-authored comment', () => {
     author: 'Alice',
   };
 
-  it('renders Delete, Edit, and Reply when active', () => {
+  it('renders Delete, Edit, and the reply field when active', () => {
     renderCard({ comment: userComment, isActive: true });
-    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: /^reply$/i })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Write a reply...' })).not.toBeNull();
   });
 });
 
@@ -417,9 +417,9 @@ describe('CommentCard: compact mode', () => {
   });
 
   it('compact still renders the reply composer when reply-compose is active', async () => {
-    // The action bar is reachable on a compact (inactive) margin card, so the
-    // composer it triggers must render there too — otherwise Reply is a dead
-    // button. It is deliberately not compact-gated, unlike the replies thread.
+    // The composer is an explicit editor surface, deliberately not
+    // compact-gated like the replies thread, so a compose request that lands
+    // on a compact (inactive) margin card still has somewhere to render.
     renderCard({
       comment: baseComment,
       compact: true,
@@ -479,11 +479,13 @@ describe('CommentCard: reply actions in a thread', () => {
     expect(replyButtons()).toHaveLength(0);
   });
 
-  it('keeps Reply in the footer of a compact card, whose thread is a summary line', async () => {
+  it('renders no reply control on a compact card, whose thread is a summary line', async () => {
+    // Clicking the summary selects the card, and the selected card carries the
+    // reply field. Until then there is nothing to reach for.
     renderCard({ comment: answered, compact: true });
-    const summary = await screen.findByTestId('reply-summary');
-    expect(replyButtons()).toHaveLength(1);
-    expect(follows(replyButtons()[0], summary)).toBe(true);
+    await screen.findByTestId('reply-summary');
+    expect(replyButtons()).toHaveLength(0);
+    expect(replyField()).toBeNull();
   });
 
   it('swaps the reply field for the composer while it is open', async () => {
@@ -509,12 +511,54 @@ describe('CommentCard: reply actions in a thread', () => {
     expect(within(reply).queryByRole('button', { name: /delete/i })).not.toBeNull();
   });
 
-  it('reveals an unselected card’s footer actions to keyboard focus', async () => {
-    // The footer fades in on hover. Without a focus rule, Tab lands on
-    // buttons that stay invisible.
-    renderCard({ comment: { ...reviewerComment, replies: [] }, isActive: false });
-    const edit = await screen.findByRole('button', { name: /^edit$/i });
-    expect(edit.parentElement!.className).toContain('focus-within:opacity-100');
+  it('reveals a reply’s actions to keyboard focus as well as hover', async () => {
+    // `invisible` takes a button out of the tab order, so Tab could never reach
+    // it to reveal it. Opacity keeps it focusable and focus-within shows it.
+    const { container } = renderCard({ comment: answered, isActive: true });
+    await screen.findByText('Per-tenant, yes.');
+    const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+    const actions = within(reply).getByRole('button', { name: 'Delete reply' }).parentElement!;
+    expect(actions.className).toContain('opacity-0');
+    expect(actions.className).toContain('group-hover/reply:opacity-100');
+    expect(actions.className).toContain('group-focus-within/reply:opacity-100');
+    expect(actions.className).not.toContain('invisible');
+  });
+
+  it('shows no actions on a reply of an unselected card whose thread shows in full', async () => {
+    // The List view never compacts its cards, so an unselected card renders its
+    // whole thread. Its reply rows get no Edit or trash until it is selected.
+    const own: MdComment = {
+      ...reviewerComment,
+      replies: [
+        {
+          id: 'r1',
+          text: 'Thanks.',
+          author: 'Alice',
+          timestamp: new Date().toISOString(),
+          agent: false,
+        },
+      ],
+    };
+    const { container } = renderCard({ comment: own, isActive: false });
+    await screen.findByText('Thanks.');
+    const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+    expect(within(reply).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('deletes just that reply from the reply row’s trash', async () => {
+    const onDeleteReply = vi.fn();
+    const onDelete = vi.fn();
+    const { container } = renderCard({
+      comment: answered,
+      isActive: true,
+      onDeleteReply,
+      onDelete,
+    });
+    await screen.findByText('Per-tenant, yes.');
+    const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+    fireEvent.click(within(reply).getByRole('button', { name: 'Delete reply' }));
+    expect(onDeleteReply).toHaveBeenCalledWith('cmt_1', 'r1');
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it('keeps Edit and Delete on the reviewer’s own reply', async () => {
@@ -549,6 +593,356 @@ describe('CommentCard: reply actions in a thread', () => {
     const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
     expect(within(reply).queryByRole('button', { name: /^edit$/i })).not.toBeNull();
     expect(within(reply).queryByRole('button', { name: /delete/i })).not.toBeNull();
+  });
+});
+
+describe('CommentCard: action scope', () => {
+  const stamp = new Date().toISOString();
+  const reviewer: MdComment = { ...baseComment, agentInitiated: false, author: 'Alice' };
+  const withReplies: MdComment = {
+    ...reviewer,
+    replies: [{ id: 'r1', text: 'Looks right.', author: 'Bob', timestamp: stamp }],
+  };
+
+  const actionNames = /^(reply|edit|resolve|reopen|delete|delete thread)$/i;
+  const actionButtons = () => screen.queryAllByRole('button', { name: actionNames });
+  const replyField = () => screen.queryByRole('button', { name: 'Write a reply...' });
+  const resolvedReviewer: MdComment = { ...reviewer, status: 'resolved' };
+
+  describe('an unselected card', () => {
+    it('renders no action buttons, compact', async () => {
+      renderCard({ comment: withReplies, compact: true, onResolve: vi.fn() });
+      await screen.findByTestId('reply-summary');
+      expect(actionButtons()).toHaveLength(0);
+      expect(replyField()).toBeNull();
+    });
+
+    it('renders no action buttons, not compact, with replies', async () => {
+      // The List view and the Mermaid thread panel show an unselected card's
+      // full thread. Neither the card nor its reply rows get any button.
+      const { container } = renderCard({ comment: withReplies, onResolve: vi.fn() });
+      await screen.findByText('Looks right.');
+      expect(actionButtons()).toHaveLength(0);
+      expect(replyField()).toBeNull();
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+      expect(within(reply).queryAllByRole('button')).toHaveLength(0);
+    });
+
+    it('renders no Reopen on a resolved card', async () => {
+      renderCard({ comment: resolvedReviewer, onUnresolve: vi.fn() }, { enableResolve: true });
+      await waitFor(() => expect(screen.queryByText('Resolved')).toBeTruthy());
+      expect(actionButtons()).toHaveLength(0);
+    });
+
+    it('holds no button at all, hidden or hover-revealed, behind the byline', () => {
+      const { container } = renderCard({ comment: reviewer, onResolve: vi.fn() });
+      expect(container.querySelector('button')).toBeNull();
+      expect(container.innerHTML).not.toContain('group-hover:opacity-100');
+    });
+
+    it('keeps Keep this anchor visible when a recovery applies', () => {
+      const onReanchorToSelection = vi.fn();
+      renderCard({
+        comment: {
+          ...reviewer,
+          anchorStale: true,
+          recoveredAnchor: 'The replacement text',
+          cleanOffset: 12,
+        },
+        compact: true,
+        onReanchorToSelection,
+      });
+      const keep = screen.getByRole('button', { name: 'Keep this anchor' });
+      expect(keep.closest('.opacity-0')).toBeNull();
+      fireEvent.click(keep);
+      expect(onReanchorToSelection).toHaveBeenCalledWith('cmt_1', 'The replacement text', 12);
+    });
+
+    it('keeps Re-anchor to selection visible when a selection exists', () => {
+      const onReanchorToSelection = vi.fn();
+      renderCard({
+        comment: { ...reviewer, anchorStale: true, contextBefore: 'a ', contextAfter: ' b' },
+        showAnchorContext: true,
+        selectionText: 'new anchor',
+        selectionOffset: 5,
+        onReanchorToSelection,
+      });
+      const btn = screen.getByRole('button', { name: 'Re-anchor to selection' });
+      expect(btn.closest('.opacity-0')).toBeNull();
+      fireEvent.click(btn);
+      expect(onReanchorToSelection).toHaveBeenCalledWith('cmt_1', 'new anchor', 5);
+    });
+
+    it('shows no repair button when nothing applies', () => {
+      renderCard({ comment: reviewer, onReanchorToSelection: vi.fn() });
+      expect(screen.queryByRole('button', { name: 'Keep this anchor' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Re-anchor to selection' })).toBeNull();
+    });
+  });
+
+  describe('a selected card', () => {
+    it('shows the reply field with no replies, and no footer Reply', () => {
+      renderCard({ comment: reviewer, isActive: true });
+      expect(replyField()).not.toBeNull();
+      expect(screen.queryByRole('button', { name: /^reply$/i })).toBeNull();
+    });
+
+    it('hides the reply field while resolved', async () => {
+      renderCard(
+        { comment: resolvedReviewer, isActive: true, onUnresolve: vi.fn() },
+        { enableResolve: true },
+      );
+      await waitFor(() => expect(screen.queryByText('Resolved')).toBeTruthy());
+      expect(replyField()).toBeNull();
+    });
+
+    it('hides the reply field while editing the comment or a reply', () => {
+      renderCard({
+        comment: withReplies,
+        isActive: true,
+        editor: { mode: 'comment-edit', token: 1 },
+      });
+      expect(replyField()).toBeNull();
+      cleanup();
+      renderCard({
+        comment: withReplies,
+        isActive: true,
+        editor: { mode: 'reply-edit', replyId: 'r1', token: 1 },
+      });
+      expect(replyField()).toBeNull();
+    });
+
+    it('puts Edit on the first comment’s byline row', () => {
+      const { container } = renderCard({ comment: reviewer, isActive: true });
+      const edit = screen.getByRole('button', { name: /^edit$/i });
+      const row = container.querySelector<HTMLElement>('.group\\/root')!;
+      expect(row).not.toBeNull();
+      expect(row.contains(edit)).toBe(true);
+      expect(row.textContent).toContain('Alice');
+    });
+
+    it('reveals root Edit on hover or keyboard focus of its row, by opacity', () => {
+      renderCard({ comment: reviewer, isActive: true });
+      const wrapper = screen.getByRole('button', { name: /^edit$/i }).parentElement!;
+      expect(wrapper.className).toContain('opacity-0');
+      expect(wrapper.className).toContain('group-hover/root:opacity-100');
+      expect(wrapper.className).toContain('group-focus-within/root:opacity-100');
+      expect(wrapper.className).toContain('transition-opacity');
+      // `invisible` would drop it from the tab order, so focus could never
+      // reveal it.
+      expect(wrapper.className).not.toContain('invisible');
+    });
+
+    it('offers no root Edit on an agent-initiated comment', () => {
+      renderCard({ comment: { ...reviewer, agentInitiated: true }, isActive: true });
+      expect(screen.queryByRole('button', { name: /^edit$/i })).toBeNull();
+    });
+
+    it('offers no root Edit on a resolved comment', async () => {
+      renderCard({ comment: resolvedReviewer, isActive: true }, { enableResolve: true });
+      await waitFor(() => expect(screen.queryByText('Resolved')).toBeTruthy());
+      expect(screen.queryByRole('button', { name: /^edit$/i })).toBeNull();
+    });
+
+    it('opens the comment editor from root Edit without activating the card', () => {
+      const onRequestCommentEdit = vi.fn();
+      const onActivate = vi.fn();
+      renderCard({ comment: reviewer, isActive: true, onRequestCommentEdit, onActivate });
+      fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+      expect(onRequestCommentEdit).toHaveBeenCalledWith('cmt_1');
+      expect(onActivate).not.toHaveBeenCalled();
+    });
+
+    it('keeps the anchor repair buttons visible on a selected card too', () => {
+      renderCard({
+        comment: { ...reviewer, anchorStale: true, recoveredAnchor: 'The replacement text' },
+        isActive: true,
+        onReanchorToSelection: vi.fn(),
+      });
+      const keep = screen.getByRole('button', { name: 'Keep this anchor' });
+      expect(keep.closest('.opacity-0')).toBeNull();
+    });
+
+    it('keeps root Edit visible on a device that cannot hover', () => {
+      // Tailwind's hover variants only apply where the primary input can hover,
+      // so without this rule a touch device sees nothing yet taps a hidden Edit.
+      renderCard({ comment: reviewer, isActive: true });
+      const wrapper = screen.getByRole('button', { name: /^edit$/i }).parentElement!;
+      expect(wrapper.className).toContain('[@media(hover:none)]:opacity-100');
+    });
+
+    it('keeps a reply’s actions visible on a device that cannot hover', async () => {
+      const { container } = renderCard({ comment: withReplies, isActive: true });
+      await screen.findByText('Looks right.');
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r1"]')!;
+      const wrapper = within(reply).getByRole('button', { name: 'Delete reply' }).parentElement!;
+      expect(wrapper.className).toContain('[@media(hover:none)]:opacity-100');
+    });
+  });
+
+  describe('while an editor or the composer is open', () => {
+    // Edit, the reply rows' actions and the anchor repair buttons would switch
+    // editors under the open one, and the draft in it would be lost. The reply
+    // field and the thread bar already hide for the same reason.
+    const twoReplies: MdComment = {
+      ...reviewer,
+      anchorStale: true,
+      recoveredAnchor: 'The replacement text',
+      replies: [
+        { id: 'r1', text: 'Looks right.', author: 'Bob', timestamp: stamp },
+        { id: 'r2', text: 'Agreed.', author: 'Carol', timestamp: stamp },
+      ],
+    };
+    const editors = [
+      ['the comment editor', { mode: 'comment-edit', token: 1 }],
+      ['a reply editor', { mode: 'reply-edit', replyId: 'r1', token: 1 }],
+      ['the reply composer', { mode: 'reply-compose', token: 1 }],
+    ] as const;
+
+    it('shows all of them when nothing is open', async () => {
+      const { container } = renderCard({
+        comment: twoReplies,
+        isActive: true,
+        onReanchorToSelection: vi.fn(),
+      });
+      await screen.findByText('Agreed.');
+      const root = container.querySelector<HTMLElement>('.group\\/root')!;
+      expect(within(root).queryByRole('button', { name: /^edit$/i })).not.toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep this anchor' })).not.toBeNull();
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r2"]')!;
+      expect(within(reply).queryAllByRole('button')).toHaveLength(2);
+    });
+
+    it.each(editors)('hides root Edit while %s is open', async (_name, editor) => {
+      renderCard({ comment: twoReplies, isActive: true, editor });
+      await screen.findByText('Agreed.');
+      const root = document.querySelector<HTMLElement>('.group\\/root')!;
+      expect(within(root).queryByRole('button', { name: /^edit$/i })).toBeNull();
+    });
+
+    it.each(editors)('hides another reply’s actions while %s is open', async (_name, editor) => {
+      const { container } = renderCard({ comment: twoReplies, isActive: true, editor });
+      await screen.findByText('Agreed.');
+      const reply = container.querySelector<HTMLElement>('[data-reply-id="r2"]')!;
+      expect(within(reply).queryAllByRole('button')).toHaveLength(0);
+    });
+
+    it.each(editors)('hides the anchor repair buttons while %s is open', async (_name, editor) => {
+      renderCard({
+        comment: twoReplies,
+        isActive: true,
+        editor,
+        onReanchorToSelection: vi.fn(),
+      });
+      await screen.findByText('Agreed.');
+      expect(screen.queryByRole('button', { name: 'Keep this anchor' })).toBeNull();
+    });
+  });
+
+  describe('the thread bar', () => {
+    const threadBar = (container: HTMLElement) =>
+      container.querySelector<HTMLElement>('[data-thread-bar]');
+
+    it('is the last element of a selected card, under a full-width hairline', async () => {
+      const { container } = renderCard({ comment: withReplies, isActive: true });
+      await screen.findByText('Looks right.');
+      const bar = threadBar(container)!;
+      expect((container.firstChild as HTMLElement).lastElementChild).toBe(bar);
+      expect(bar.className).toContain('border-t');
+      expect(bar.className).toContain('border-border-subtle');
+    });
+
+    it('is absent from an unselected card', () => {
+      const { container } = renderCard({ comment: reviewer, onResolve: vi.fn() });
+      expect(threadBar(container)).toBeNull();
+    });
+
+    it('Resolve calls onResolve, without activating the card', async () => {
+      const onResolve = vi.fn();
+      const onActivate = vi.fn();
+      renderCard({ comment: reviewer, isActive: true, onResolve, onActivate });
+      fireEvent.click(await screen.findByRole('button', { name: 'Resolve' }));
+      expect(onResolve).toHaveBeenCalledWith('cmt_1');
+      expect(onActivate).not.toHaveBeenCalled();
+    });
+
+    it('puts Resolve on the left and the trash on the right', () => {
+      const { container } = renderCard({ comment: reviewer, isActive: true, onResolve: vi.fn() });
+      const bar = threadBar(container)!;
+      const resolve = screen.getByRole('button', { name: 'Resolve' });
+      const trash = screen.getByRole('button', { name: 'Delete' });
+      expect(bar.firstElementChild!.contains(resolve)).toBe(true);
+      expect(bar.lastElementChild!.contains(trash)).toBe(true);
+    });
+
+    it('keeps the trash on the right when there is no Resolve', () => {
+      const { container } = renderCard({ comment: reviewer, isActive: true });
+      const bar = threadBar(container)!;
+      const trash = screen.getByRole('button', { name: 'Delete' });
+      expect(bar.lastElementChild!.contains(trash)).toBe(true);
+      expect(bar.lastElementChild!.className).toContain('ml-auto');
+    });
+
+    it('shows Reopen on a resolved card and calls onUnresolve', async () => {
+      const onUnresolve = vi.fn();
+      renderCard(
+        { comment: resolvedReviewer, isActive: true, onUnresolve, onResolve: vi.fn() },
+        { enableResolve: true },
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Reopen' }));
+      expect(onUnresolve).toHaveBeenCalledWith('cmt_1');
+      expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull();
+    });
+
+    it('labels the trash "Delete thread" when the comment has replies', async () => {
+      const onDelete = vi.fn();
+      renderCard({ comment: withReplies, isActive: true, onDelete });
+      const trash = await screen.findByRole('button', { name: 'Delete thread' });
+      expect(trash.getAttribute('title')).toBe('Delete thread');
+      fireEvent.click(trash);
+      expect(onDelete).toHaveBeenCalledWith('cmt_1');
+    });
+
+    it('labels the trash "Delete" when there are no replies', () => {
+      const onDelete = vi.fn();
+      renderCard({ comment: reviewer, isActive: true, onDelete });
+      const trash = screen.getByRole('button', { name: 'Delete' });
+      expect(trash.getAttribute('title')).toBe('Delete');
+      fireEvent.click(trash);
+      expect(onDelete).toHaveBeenCalledWith('cmt_1');
+    });
+
+    it('keeps the trash but drops Resolve when the resolve workflow is off', async () => {
+      renderCard(
+        { comment: reviewer, isActive: true, onResolve: vi.fn(), onUnresolve: vi.fn() },
+        { enableResolve: false },
+      );
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull());
+      expect(screen.queryByRole('button', { name: 'Reopen' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeNull();
+    });
+
+    it('shows no Resolve when the surface wires no resolve handler', () => {
+      renderCard({ comment: reviewer, isActive: true });
+      expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeNull();
+    });
+
+    it.each([
+      ['the comment editor', { mode: 'comment-edit', token: 1 }],
+      ['a reply editor', { mode: 'reply-edit', replyId: 'r1', token: 1 }],
+      ['the reply composer', { mode: 'reply-compose', token: 1 }],
+    ] as const)('is hidden while %s is open', (_name, editor) => {
+      const { container } = renderCard({
+        comment: withReplies,
+        isActive: true,
+        onResolve: vi.fn(),
+        editor,
+      });
+      expect(threadBar(container)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Delete thread' })).toBeNull();
+    });
   });
 });
 

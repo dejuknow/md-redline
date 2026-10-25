@@ -251,6 +251,37 @@ export function useComments(params: UseCommentsParams) {
     [setRawMarkdown, saveFile, rawMarkdownRef],
   );
 
+  // An Undo toast outlives the render that showed it, so its click handler
+  // reads the active file path through a ref rather than closing over the one
+  // from the moment of the delete.
+  const activeFilePathRef = useRef(activeFilePath);
+  activeFilePathRef.current = activeFilePath;
+
+  // After a single comment or reply is deleted, offer to put it back. The undo
+  // restores the whole pre-delete document, so it only runs when nothing else
+  // has touched the file since: the same file is still open and the markdown is
+  // exactly what the delete wrote. Anything else (an agent edit, another comment
+  // action, a different tab) would be silently overwritten by `before`.
+  const offerDeleteUndo = useCallback(
+    (message: string, before: string, after: string, onRestored?: () => void) => {
+      const filePath = activeFilePathRef.current;
+      showToast(message, 'info', {
+        label: 'Undo',
+        onClick: () => {
+          if (activeFilePathRef.current !== filePath || rawMarkdownRef.current !== after) {
+            showToast("Couldn't undo. The file changed after the delete.", 'error');
+            return;
+          }
+          // The path check above means this delete-time writer still targets
+          // the open file, and saveFileAt reads the file's mtime when it runs.
+          updateAndSave(before);
+          onRestored?.();
+        },
+      });
+    },
+    [showToast, rawMarkdownRef, updateAndSave],
+  );
+
   const handleAddComment = useCallback(
     (
       anchor: string,
@@ -313,10 +344,18 @@ export function useComments(params: UseCommentsParams) {
 
   const handleDelete = useCallback(
     (id: string) => {
-      updateAndSave(removeComment(rawMarkdownRef.current ?? '', id));
+      const before = rawMarkdownRef.current ?? '';
+      const after = removeComment(before, id);
+      updateAndSave(after);
       setActiveCommentId((prev) => (prev === id ? null : prev));
+      // Nothing was removed (unknown id): there is nothing to undo, and a toast
+      // would replace a still-live Undo for a real delete.
+      if (after === before) return;
+      // The same request "Jump to agent question" makes: scroll to the card,
+      // focus it, and select it in Anchored density.
+      offerDeleteUndo('Comment deleted.', before, after, () => requestCommentFocus(id, 'jump'));
     },
-    [updateAndSave, rawMarkdownRef],
+    [updateAndSave, rawMarkdownRef, offerDeleteUndo, requestCommentFocus],
   );
 
   const handleEdit = useCallback(
@@ -342,9 +381,13 @@ export function useComments(params: UseCommentsParams) {
 
   const handleDeleteReply = useCallback(
     (commentId: string, replyId: string) => {
-      updateAndSave(removeReply(rawMarkdownRef.current ?? '', commentId, replyId));
+      const before = rawMarkdownRef.current ?? '';
+      const after = removeReply(before, commentId, replyId);
+      updateAndSave(after);
+      if (after === before) return;
+      offerDeleteUndo('Reply deleted.', before, after);
     },
-    [updateAndSave, rawMarkdownRef],
+    [updateAndSave, rawMarkdownRef, offerDeleteUndo],
   );
 
   const handleBulkDelete = useCallback(() => {

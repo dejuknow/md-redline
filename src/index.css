@@ -1353,6 +1353,20 @@ body {
       opacity: 0;
     }
   }
+  /* A toast's countdown bar. Toast.tsx sets the duration and pauses it along
+     with the dismiss clock; with reduced motion the bar stays full and the
+     clock still runs. */
+  .toast-countdown {
+    transform-origin: left;
+    animation-name: toast-countdown;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+  }
+  @keyframes toast-countdown {
+    to {
+      transform: scaleX(0);
+    }
+  }
 }
 
 /* ========== Raw View Styles ========== */

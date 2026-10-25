@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { addComment } from './helpers/comments';
+import { addComment, clickCardAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -24,16 +24,6 @@ async function openFixture(page: Page) {
   await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
     timeout: 10_000,
   });
-}
-
-function getCard(page: Page, commentText: string) {
-  return page.locator('.group.rounded-lg', { hasText: commentText });
-}
-
-async function clickCardAction(page: Page, commentText: string, actionName: string) {
-  const card = getCard(page, commentText);
-  await card.hover();
-  await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
 /** Enable a boolean setting via the Settings panel toggle */

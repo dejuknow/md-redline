@@ -1,7 +1,8 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { clickCardAction, clickReplyAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 import { withMod } from './helpers/shortcuts';
@@ -121,32 +122,6 @@ async function clickVisibleProsePointOutsideCommentForm(page: Page) {
 }
 
 /**
- * Get the comment card container that holds a comment with the given text.
- * Uses the data structure: card > div.px-3.py-2 > p (comment text)
- */
-function getCard(page: Page, commentText: string) {
-  return page.locator('.group.rounded-lg', { hasText: commentText });
-}
-
-/**
- * Hover on a card and click an action button.
- * Action buttons have opacity-0 until hover, so we must force-click.
- * For actions inside the overflow menu (e.g. Delete), opens the ··· menu first.
- */
-async function clickCardAction(page: Page, commentText: string, actionName: string) {
-  const card = getCard(page, commentText);
-  await card.hover();
-  // Force click since the button may be opacity-0 until CSS hover fully applies
-  await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
-}
-
-async function clickReplyAction(reply: Locator, actionName: string) {
-  await expect(reply).toBeVisible();
-  await reply.hover();
-  await reply.getByRole('button', { name: actionName, exact: true }).click({ force: true });
-}
-
-/**
  * Bulk actions (Delete All) and search live on the List surface only; the
  * default Anchored density renders margin cards without that chrome.
  */
@@ -217,6 +192,32 @@ test.describe('Comment lifecycle', () => {
     await clickCardAction(page, 'Mention cost factor', 'Delete');
 
     await expect(page.getByText('Mention cost factor')).not.toBeVisible();
+  });
+
+  test('undo in the toast brings back a deleted comment', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+    const highlight = page.locator('mark.comment-highlight', { hasText: 'hashed with bcrypt' });
+    await expect(highlight).toBeVisible();
+
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+
+    await expect(page.getByText('Mention cost factor')).not.toBeVisible();
+    await expect(highlight).toHaveCount(0);
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+    const toast = page.getByRole('status').filter({ hasText: 'Comment deleted.' });
+    await expect(toast).toBeVisible();
+
+    await toast.getByRole('button', { name: 'Undo' }).click();
+
+    await expect(getCard(page, 'Mention cost factor')).toBeVisible();
+    await expect(highlight).toBeVisible();
+    // The restore is written back to disk, not just to the page.
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('Mention cost factor');
   });
 
   test('delete all shows confirm dialog and cancelling keeps comments', async ({ page }) => {
@@ -344,32 +345,39 @@ test.describe('Comment editing and replies', () => {
     // compact (inactive) card collapses its reply thread to a count instead
     // of rendering replies inline.
     await card.getByText('Is this still best practice?').click();
-    // Click the "Reply" text button at the bottom of the card
-    await card.getByRole('button', { name: 'Reply' }).click();
+    // Open the composer from the reply field at the bottom of the card
+    await card.getByRole('button', { name: 'Write a reply...' }).click();
 
     const replyArea = card.getByPlaceholder('Write a reply...');
     await expect(replyArea).toBeVisible();
     await replyArea.fill('Yes, still recommended per OWASP.');
 
-    // Click the Reply submit button (the one inside the reply form, not the trigger)
+    // Click the Reply submit button (the one inside the reply form, not the field)
     await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
 
     await expect(page.getByText('Yes, still recommended per OWASP.')).toBeVisible();
   });
 
-  test('a later reply goes through the field under the thread', async ({ page }) => {
+  test('every reply goes through the field, and no footer Reply exists', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'double-submit cookie pattern', 'Thread reply field');
 
     const card = getCard(page, 'Thread reply field');
     await card.getByText('Thread reply field').click();
-    await card.getByRole('button', { name: 'Reply' }).click();
+    // A selected open card offers the field whatever its reply count, and never
+    // a footer Reply button.
+    await expect(card.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
+    // The thread bar's trash deletes the whole thread, and says so once there
+    // is more than the comment in it.
+    const threadBar = card.locator('[data-thread-bar]');
+    await expect(threadBar.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Write a reply...' }).click();
     await card.getByPlaceholder('Write a reply...').fill('First reply');
     await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
     await expect(card.locator('[data-reply-id]')).toHaveCount(1);
+    await expect(threadBar.getByRole('button', { name: 'Delete thread' })).toBeVisible();
 
-    // With a reply in the thread, Reply leaves the footer for a field at the
-    // end of the thread.
+    // With a reply in the thread the field sits under it.
     await expect(card.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
     await card.getByRole('button', { name: 'Write a reply...' }).click();
     await card.getByPlaceholder('Write a reply...').fill('Second reply');
@@ -388,7 +396,7 @@ test.describe('Comment editing and replies', () => {
     // compact (inactive) card collapses its reply thread to a count instead
     // of rendering replies inline (needed below for the [data-reply-id] node).
     await card.getByText('Reply lifecycle').click();
-    await card.getByRole('button', { name: 'Reply' }).click();
+    await card.getByRole('button', { name: 'Write a reply...' }).click();
 
     const replyArea = card.getByPlaceholder('Write a reply...');
     await expect(replyArea).toBeVisible();
@@ -407,7 +415,7 @@ test.describe('Comment editing and replies', () => {
     await expect(reply).toContainText('Updated reply text');
     await expect(reply).not.toContainText('Initial reply text');
 
-    await clickReplyAction(reply, 'Delete');
+    await clickReplyAction(reply, 'Delete reply');
     await expect(card.locator('[data-reply-id]')).toHaveCount(0);
   });
 
@@ -421,7 +429,7 @@ test.describe('Comment editing and replies', () => {
     // compact (inactive) card collapses its reply thread to a count instead
     // of rendering replies inline (needed below for the [data-reply-id] node).
     await secondCard.getByText('Second comment').click();
-    await secondCard.getByRole('button', { name: 'Reply' }).click();
+    await secondCard.getByRole('button', { name: 'Write a reply...' }).click();
     await secondCard.getByPlaceholder('Write a reply...').fill('Second reply');
     await secondCard.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
 
@@ -429,6 +437,9 @@ test.describe('Comment editing and replies', () => {
     await clickCardAction(page, 'First comment', 'Edit');
     await expect(firstCard.locator('textarea')).toHaveCount(1);
 
+    // Selecting the first card collapsed the second one's thread; select it
+    // again so its reply row, and that row's Edit, are on screen.
+    await secondCard.getByText('Second comment').click();
     const secondReply = secondCard.locator('[data-reply-id]').first();
     await expect(secondCard.locator('[data-reply-id]')).toHaveCount(1);
     await clickReplyAction(secondReply, 'Edit');

@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export async function selectText(page: Page, text: string) {
   await page.evaluate((targetText) => {
@@ -73,4 +73,45 @@ export async function openCommentsDrawer(page: Page) {
  */
 export async function switchToListDensity(page: Page) {
   await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+}
+
+/**
+ * The comment card container that holds a comment with the given text. Matches
+ * on the card root's `group` and `rounded-lg` classes, so it is the same element
+ * whichever surface (margin rail, List, drawer, popover) draws it.
+ */
+export function getCard(page: Page, commentText: string) {
+  return page.locator('.group.rounded-lg', { hasText: commentText });
+}
+
+/**
+ * Select a card, then click one of its action buttons. An unselected card
+ * renders no actions at all, so clicking the comment text comes first. Edit is
+ * the first comment's own and sits on its byline row; Resolve, Reopen and
+ * Delete act on the whole thread and live in the thread bar, where Delete
+ * reads "Delete thread" once the comment has replies. The click is not forced:
+ * selecting the card re-lays it out, and Playwright's wait for the button to
+ * settle is what keeps the click from landing where it used to be. (opacity-0
+ * counts as visible to Playwright, so the hover-revealed Edit needs no force.)
+ */
+export async function clickCardAction(page: Page, commentText: string, actionName: string) {
+  const card = getCard(page, commentText);
+  await card.getByText(commentText).first().click();
+  const scope =
+    actionName === 'Edit' ? card.locator('.group\\/root') : card.locator('[data-thread-bar]');
+  const button =
+    actionName === 'Delete'
+      ? scope.getByRole('button', { name: /^Delete( thread)?$/ })
+      : scope.getByRole('button', { name: actionName, exact: true });
+  await button.click();
+}
+
+/**
+ * Click Edit or Delete on one reply row of a selected card. The row's actions
+ * are opacity-0 until it is hovered or focused, so the click is forced.
+ */
+export async function clickReplyAction(reply: Locator, actionName: string) {
+  await expect(reply).toBeVisible();
+  await reply.hover();
+  await reply.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }

@@ -46,6 +46,9 @@ export interface ThreadCardProps {
   unreadReplyIds?: ReadonlySet<string>;
 }
 
+/** How much of the anchor a card's accessible name quotes. */
+const ANCHOR_LABEL_MAX = 60;
+
 /**
  * Renders a single comment thread (anchor, body, replies, reply composer) using CommentCard.
  *
@@ -110,10 +113,34 @@ export function ThreadCard({
     ? (externalCloseEditor ?? (() => {}))
     : () => setInternalEditor(null);
 
+  // A focusable element needs a role and a name, or a screen reader lands on
+  // unnamed text. The anchor is cut short so the name stays a label.
+  const anchorText = thread.recoveredAnchor ?? thread.anchor;
+  const anchorLabel =
+    anchorText.length > ANCHOR_LABEL_MAX
+      ? `${anchorText.slice(0, ANCHOR_LABEL_MAX)}...`
+      : anchorText;
+
   return (
     <div
       ref={divRef}
-      tabIndex={-1}
+      role="article"
+      aria-label={`Comment by ${thread.author} on "${anchorLabel}"`}
+      aria-current={active ? 'true' : undefined}
+      // A tab stop of its own: an unselected card holds no button, so this is
+      // the only way a key reaches it, and through it the actions that appear
+      // once it is selected. Programmatic focus (requestCommentFocus) works
+      // the same as it did at -1.
+      tabIndex={0}
+      onKeyDown={(e) => {
+        // Only when the card itself has focus. The same keys on a button or
+        // textarea inside it bubble up here and belong to that control.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(thread.id);
+        }
+      }}
       data-comment-card-id={thread.id}
       className="outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-primary-ring"
     >

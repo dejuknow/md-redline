@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { clickCardAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
 import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
@@ -71,16 +72,6 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
   await expect(page.getByText(commentText, { exact: true })).toBeVisible();
 }
 
-function getCard(page: Page, commentText: string) {
-  return page.locator('.group.rounded-lg', { hasText: commentText });
-}
-
-async function clickCardAction(page: Page, commentText: string, actionName: string) {
-  const card = getCard(page, commentText);
-  await card.hover();
-  await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
-}
-
 /**
  * Resolved comments leave the Anchored margin (they have no highlight to
  * anchor to) and live on the List surface instead; switch density to see them.
@@ -118,8 +109,9 @@ test.describe('Resolve workflow toggle', () => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Default mode comment');
 
+    // Only the selected card carries actions, so select it first.
     const card = getCard(page, 'Default mode comment');
-    await card.hover();
+    await card.getByText('Default mode comment').click();
     await expect(card.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
   });
 
@@ -127,16 +119,18 @@ test.describe('Resolve workflow toggle', () => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'Resolve test comment');
 
-    // By default resolve is off — no Resolve button on card
+    // By default resolve is off, so no Resolve button on the selected card (an
+    // unselected card has no action buttons at all, so select it to mean it)
     const card = getCard(page, 'Resolve test comment');
-    await card.hover();
+    await card.getByText('Resolve test comment').click();
+    await expect(card.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Resolve', exact: true })).not.toBeVisible();
 
     // Enable resolve workflow
     await toggleSetting(page, 'Enable resolve workflow');
 
     // Now the Resolve button should appear
-    await card.hover();
+    await card.getByText('Resolve test comment').click();
     await expect(card.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
   });
 
@@ -195,7 +189,7 @@ test.describe('Resolve workflow toggle', () => {
     await card.getByText('Resolved reply test').click();
 
     // Add a reply
-    await card.getByRole('button', { name: 'Reply' }).click();
+    await card.getByRole('button', { name: 'Write a reply...' }).click();
     const replyArea = card.getByPlaceholder('Write a reply...');
     await replyArea.fill('A reply');
     await card.locator('textarea + div').getByRole('button', { name: 'Reply' }).click();
@@ -213,13 +207,16 @@ test.describe('Resolve workflow toggle', () => {
     await switchToListDensity(page);
     await expect(card.getByText('Resolved', { exact: true })).toBeVisible();
 
-    // After resolving, reply edit/delete should be hidden
+    // After resolving, reply edit/delete should be hidden. Select the card so
+    // the assertion holds for the one state that could show them.
+    await card.getByText('Resolved reply test').click();
     await reply.hover();
     await expect(reply.getByRole('button', { name: 'Edit' })).not.toBeVisible();
+    await expect(reply.getByRole('button')).toHaveCount(0);
 
     // Primary comment should still have Reopen and Delete
-    await card.hover();
     await expect(card.getByRole('button', { name: 'Reopen' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Delete thread' })).toBeVisible();
   });
 
   test('hiding resolve actions when toggle is turned off', async ({ page }) => {
@@ -230,12 +227,13 @@ test.describe('Resolve workflow toggle', () => {
     await addComment(page, 'valid credentials', 'Toggle off test');
 
     const card = getCard(page, 'Toggle off test');
-    await card.hover();
+    await card.getByText('Toggle off test').click();
     await expect(card.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
 
     await toggleSetting(page, 'Enable resolve workflow');
 
-    await card.hover();
+    await card.getByText('Toggle off test').click();
+    await expect(card.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Resolve', exact: true })).not.toBeVisible();
   });
 });

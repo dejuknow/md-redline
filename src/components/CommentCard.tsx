@@ -51,7 +51,8 @@ interface Props {
   onReanchorToSelection?: (commentId: string, newAnchor: string, hintOffset?: number) => void;
   /** Margin-notes compact rendering: the replies thread collapses to a summary
    * line. Editor surfaces (the edit textarea and reply composer) still render
-   * when triggered, since the hover action bar is reachable on compact cards. */
+   * when triggered. A compact card is never selected, so it has no actions
+   * apart from the anchor-repair buttons. */
   compact?: boolean;
   /** Reply IDs that arrived from outside the app since the user last opened
    * this card. Drives the "new" emphasis on the compact summary line, which is
@@ -245,8 +246,7 @@ export const CommentCard = memo(function CommentCard({
     onCloseEditor();
   };
 
-  // Both Reply triggers, the footer's and the thread's reply field, open the
-  // composer the same way.
+  // The reply field opens the composer.
   const handleReplyTrigger: MouseEventHandler<HTMLButtonElement> = (e) => {
     e.stopPropagation();
     onRequestReplyCompose(comment.id);
@@ -268,13 +268,24 @@ export const CommentCard = memo(function CommentCard({
   const unreadReplies = unreadReplyIds ? replies.filter((r) => unreadReplyIds.has(r.id)) : [];
   const hasUnread = unreadReplies.length > 0;
   const summaryReplies = hasUnread ? unreadReplies : replies;
-  // Reply answers the last message in the thread, so once the thread renders
-  // in full the trigger sits under it, as the reply field below. Left in the
-  // footer it reads as a reply to the comment, sitting above the agent answer
-  // the reader is responding to. A compact card collapses its thread to a
-  // summary line, so its footer keeps the trigger.
   const threadShown = !compact && replies.length > 0;
   const isEditingReply = editingReplyId !== null;
+  // Actions live on the selected card only, split by what they act on. Edit is
+  // the first comment's own and sits on its byline row. A reply's Edit and
+  // trash sit on that reply's row. Resolve, Reopen and Delete act on the whole
+  // thread, so they share the thread bar that closes the card. An unselected
+  // card renders none of them, not even hidden ones, so it holds no empty row
+  // for buttons nobody can see. All of them step aside while an editor or the
+  // composer is open: a click would switch editors and lose the draft.
+  const editorOpen = isEditing || isEditingReply || isReplying;
+  const showRootEdit = isActive && !isResolved && !comment.agentInitiated && !editorOpen;
+  // The two anchor-repair buttons are the exception to "selected only": a card
+  // needing repair has to say so without being hovered or selected.
+  const showKeepAnchor = Boolean(comment.recoveredAnchor && onReanchorToSelection);
+  const showReanchor = Boolean(
+    showAnchorContext && selectionText && selectionText.trim().length > 0 && onReanchorToSelection,
+  );
+  const showAnchorRepair = (showKeepAnchor || showReanchor) && !editorOpen;
   const editingReply = editingReplyId
     ? (replies.find((reply) => reply.id === editingReplyId) ?? null)
     : null;
@@ -514,8 +525,9 @@ export const CommentCard = memo(function CommentCard({
         )}
       </div>
 
-      {/* Footer: author, time, actions */}
-      <div className="px-3 pb-2 flex items-center flex-wrap gap-y-1">
+      {/* Footer: the first comment's byline. Selected, it also carries that
+          comment's own Edit, revealed by hovering or focusing this row. */}
+      <div className="group/root px-3 pb-2 flex items-center flex-wrap gap-y-1">
         <span className="text-xs text-content-muted flex items-center gap-1.5 mr-auto">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
@@ -526,103 +538,68 @@ export const CommentCard = memo(function CommentCard({
           {commentTimeAgo && <> &middot; {commentTimeAgo}</>}
         </span>
 
-        {!isEditing && !isEditingReply && (
-          <div
-            className={`flex items-center gap-1 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}
-          >
-            {!isResolved && (
-              <>
-                {!threadShown && <ActionButton onClick={handleReplyTrigger}>Reply</ActionButton>}
-                {/* A comment the agent wrote (mdr_ask, mdr_comment) is its
-                    text, like an agent's reply, so it gets no Edit. */}
-                {!comment.agentInitiated && (
-                  <ActionButton
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRequestCommentEdit(comment.id);
-                    }}
-                  >
-                    Edit
-                  </ActionButton>
-                )}
-              </>
-            )}
-            {isResolved
-              ? onUnresolve && (
-                  <ActionButton
-                    intent="primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUnresolve(comment.id);
-                    }}
-                  >
-                    Reopen
-                  </ActionButton>
-                )
-              : onResolve && (
-                  <ActionButton
-                    intent="success"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onResolve(comment.id);
-                    }}
-                  >
-                    Resolve
-                  </ActionButton>
-                )}
-            {/* A recovered comment is attached but pointing somewhere it was
-                never written against, and the marker on disk still holds the
-                stale anchor. Without this it is the one detached state with no
-                way out: excluded from "Needs re-anchoring", so no re-anchor
-                button, no orphan toast, and nothing the reviewer can act on.
-                One click writes the recovery into the file and ends it. */}
-            {comment.recoveredAnchor && onReanchorToSelection && (
-              <ActionButton
-                intent="primary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReanchorToSelection(
-                    comment.id,
-                    comment.recoveredAnchor!,
-                    comment.cleanOffset ?? undefined,
-                  );
-                }}
-                title={`Write this anchor into the file, replacing "${comment.anchor}"`}
-              >
-                Keep this anchor
-              </ActionButton>
-            )}
-            {showAnchorContext &&
-              selectionText &&
-              selectionText.trim().length > 0 &&
-              onReanchorToSelection && (
-                <span data-preserve-selection>
-                  <ActionButton
-                    intent="primary"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onReanchorToSelection(
-                        comment.id,
-                        selectionText,
-                        selectionOffset ?? undefined,
-                      );
-                    }}
-                    title="Bind this comment to the currently selected text"
-                  >
-                    Re-anchor to selection
-                  </ActionButton>
-                </span>
-              )}
-            <DeleteIconButton
+        {/* Opacity rather than `invisible`: an invisible button leaves the tab
+            order, so keyboard focus could never reach it to reveal it. Hover
+            variants only apply where the input can hover, so a touch device
+            gets the always-visible rule instead. A comment the agent wrote
+            (mdr_ask, mdr_comment) is its text, like an agent's reply, so it
+            gets no Edit. */}
+        {showRootEdit && (
+          <div className="opacity-0 transition-opacity group-hover/root:opacity-100 group-focus-within/root:opacity-100 [@media(hover:none)]:opacity-100">
+            <ActionButton
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete(comment.id);
+                onRequestCommentEdit(comment.id);
               }}
-            />
+            >
+              Edit
+            </ActionButton>
           </div>
         )}
       </div>
+
+      {/* Anchor repair, always visible under the byline on any card that needs
+          it. A recovered comment is attached but pointing somewhere it was
+          never written against, and the marker on disk still holds the stale
+          anchor. Without "Keep this anchor" it is the one detached state with
+          no way out: excluded from "Needs re-anchoring", so no re-anchor
+          button, no orphan toast, and nothing the reviewer can act on. One
+          click writes the recovery into the file and ends it. */}
+      {showAnchorRepair && (
+        <div className="-mt-1 pl-1 pr-3 pb-2 flex items-center flex-wrap gap-1">
+          {showKeepAnchor && (
+            <ActionButton
+              intent="primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReanchorToSelection!(
+                  comment.id,
+                  comment.recoveredAnchor!,
+                  comment.cleanOffset ?? undefined,
+                );
+              }}
+              title={`Write this anchor into the file, replacing "${comment.anchor}"`}
+            >
+              Keep this anchor
+            </ActionButton>
+          )}
+          {showReanchor && (
+            <span data-preserve-selection>
+              <ActionButton
+                intent="primary"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReanchorToSelection!(comment.id, selectionText!, selectionOffset ?? undefined);
+                }}
+                title="Bind this comment to the currently selected text"
+              >
+                Re-anchor to selection
+              </ActionButton>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Replies thread */}
       {threadShown && (
@@ -694,9 +671,12 @@ export const CommentCard = memo(function CommentCard({
                         {reply.author}
                         {replyTimeAgo && <> &middot; {replyTimeAgo}</>}
                       </span>
-                      {!isResolved && (
+                      {isActive && !isResolved && !editorOpen && (
+                        // Opacity, not `invisible`, so Tab can reach the
+                        // buttons and focusing one reveals the row's actions;
+                        // always visible where there is no hover.
                         <div
-                          className="invisible flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:visible group-hover/reply:opacity-100 group-focus-within/reply:visible group-focus-within/reply:opacity-100"
+                          className="flex shrink-0 items-center gap-1 pl-2 opacity-0 transition-opacity group-hover/reply:opacity-100 group-focus-within/reply:opacity-100 [@media(hover:none)]:opacity-100"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {/* An agent's words aren't the reader's to rewrite,
@@ -714,7 +694,10 @@ export const CommentCard = memo(function CommentCard({
                               Edit
                             </ActionButton>
                           )}
+                          {/* Named for its scope, beside the thread bar's
+                              "Delete thread". */}
                           <DeleteIconButton
+                            label="Delete reply"
                             onClick={() => {
                               onDeleteReply(comment.id, reply.id);
                             }}
@@ -730,15 +713,15 @@ export const CommentCard = memo(function CommentCard({
         </div>
       )}
 
-      {/* Reply field for a full thread (see `threadShown`). It spans the card
-          so it reads as adding to the whole thread, where a text button under
-          the last reply read as one of that reply's actions. It sits where the
-          composer opens and matches its box, so a click only focuses it. Only
-          the selected card shows it: the List view never compacts its cards,
-          and a hover-revealed field there would hold an empty row on every
-          card with replies. */}
-      {threadShown && isActive && !isResolved && !isReplying && !isEditing && !isEditingReply && (
-        <div className="px-3 pb-3">
+      {/* Reply field, the one way to reply. It spans the card so it reads as
+          adding to the whole thread, where a text button under the last reply
+          read as one of that reply's actions. It sits where the composer opens
+          and matches its box, so a click only focuses it. Only the selected
+          card shows it, whatever its reply count: the List view never compacts
+          its cards, and an always-rendered field there would hold a row on
+          every card. */}
+      {isActive && !isResolved && !editorOpen && (
+        <div className="px-3 pb-2">
           <button
             type="button"
             onClick={handleReplyTrigger}
@@ -796,12 +779,10 @@ export const CommentCard = memo(function CommentCard({
       )}
 
       {/* Reply input (shown when replying; the trigger is the reply field
-          under a full thread, else Reply in the action bar above).
-          Deliberately not compact-gated, unlike the collapsed replies thread:
-          the composer is an explicit editor surface, opened only by a Reply
-          click, which is reachable on a compact (inactive) margin card exactly
-          like the Edit textarea above. Gating it on !compact left Reply dead
-          on inactive anchored cards while Edit worked. */}
+          above). Deliberately not compact-gated, unlike the collapsed replies
+          thread: the composer is an explicit editor surface, like the Edit
+          textarea above, so a compose request that reaches a compact card
+          still has somewhere to render. */}
       {!isResolved && isReplying && (
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
           <textarea
@@ -853,17 +834,72 @@ export const CommentCard = memo(function CommentCard({
           </div>
         </div>
       )}
+
+      {/* Thread bar, the selected card's last element: what acts on the whole
+          thread, apart from the first comment's own Edit on its byline row.
+          The hairline spans the card edge to edge (the card has no padding of
+          its own), and px-1 plus a button's own px-2 lands the Resolve text on
+          the same 12px content edge as the rest of the card. Hidden while an
+          editor or the composer is open, like the reply field. */}
+      {isActive && !editorOpen && (
+        <div
+          data-thread-bar
+          role="group"
+          aria-label="Thread actions"
+          className="flex items-center border-t border-border-subtle px-1 pt-1.5 pb-2"
+        >
+          {resolveEnabled &&
+            (isResolved
+              ? onUnresolve && (
+                  <ActionButton
+                    intent="primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUnresolve(comment.id);
+                    }}
+                  >
+                    Reopen
+                  </ActionButton>
+                )
+              : onResolve && (
+                  <ActionButton
+                    intent="success"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onResolve(comment.id);
+                    }}
+                  >
+                    Resolve
+                  </ActionButton>
+                ))}
+          <span className="ml-auto">
+            <DeleteIconButton
+              label={replies.length > 0 ? 'Delete thread' : 'Delete'}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(comment.id);
+              }}
+            />
+          </span>
+        </div>
+      )}
     </div>
   );
 });
 
-function DeleteIconButton({ onClick }: { onClick: MouseEventHandler<HTMLButtonElement> }) {
+function DeleteIconButton({
+  onClick,
+  label = 'Delete',
+}: {
+  onClick: MouseEventHandler<HTMLButtonElement>;
+  label?: string;
+}) {
   return (
     <button
       onClick={onClick}
       className="p-1 rounded text-content-muted hover:text-danger hover:bg-tint-danger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      title="Delete"
-      aria-label="Delete"
+      title={label}
+      aria-label={label}
     >
       <svg
         className="w-3.5 h-3.5"

@@ -4,7 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
-import { addComment } from './helpers/comments';
+import { addComment, clickCardAction, getCard } from './helpers/comments';
 import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,16 +50,6 @@ async function openFixture(page: Page) {
 
 function popover(page: Page) {
   return page.locator('[data-comment-popover]');
-}
-
-function getCard(page: Page, commentText: string) {
-  return page.locator('.group.rounded-lg', { hasText: commentText });
-}
-
-async function clickCardAction(page: Page, commentText: string, actionName: string) {
-  const card = getCard(page, commentText);
-  await card.hover();
-  await card.getByRole('button', { name: actionName, exact: true }).click({ force: true });
 }
 
 /** Enable a boolean setting via the Settings panel toggle */
@@ -128,7 +118,7 @@ test.describe('Highlight popover (rail-hidden contexts)', () => {
     const pop = popover(page);
     await expect(pop).toBeVisible();
 
-    await pop.getByRole('button', { name: 'Reply' }).click();
+    await pop.getByRole('button', { name: 'Write a reply...' }).click();
     await pop.locator('textarea').fill('Reply from the popover');
     await page.keyboard.press(withMod('Enter'));
 
