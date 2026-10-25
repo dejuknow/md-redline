@@ -7,6 +7,10 @@ interface Props {
   onDismiss: () => void;
   action?: ToastAction;
   kind?: ToastKind;
+  /** Changes on every showToast call, so a toast repeating the last one's
+   *  text (two deletes in a row) still gets its own 5s and cancels the last
+   *  one's pending fade-out. */
+  toastId?: number;
 }
 
 // One neutral bar for every toast; the meaning lives in the icon color. The bar
@@ -35,7 +39,7 @@ const KIND_STYLES: Record<ToastKind, { iconColor: string; icon: string }> = {
   },
 };
 
-export function Toast({ message, visible, onDismiss, action, kind = 'info' }: Props) {
+export function Toast({ message, visible, onDismiss, action, kind = 'info', toastId }: Props) {
   const [show, setShow] = useState(false);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -64,7 +68,7 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info' }: Pr
     } else {
       setShow(false);
     }
-  }, [visible, message, onDismiss]);
+  }, [visible, message, toastId, onDismiss]);
 
   if (!visible) return null;
 

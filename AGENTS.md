@@ -1375,12 +1375,16 @@ toast "Comment deleted." or "Reply deleted." with an **Undo** action (the toast
 lasts 5 seconds). Undo restores the whole pre-delete document, so it runs only
 when nothing else has touched the file since: the same file must still be the
 active one and the raw markdown must still equal what the delete wrote
-(`rawMarkdownRef`, read at click time). Undoing a comment also makes it the
-active comment again. If either check fails (an agent edit, another comment
+(`rawMarkdownRef`, read at click time). Undoing a comment also brings it back
+into view with `requestCommentFocus(id, 'jump')`, the request "Jump to agent
+question" makes. If either check fails (an agent edit, another comment
 action, a tab switch), nothing is written and an error toast says "Couldn't
 undo. The file changed after the delete." A delete that removed nothing (an id
 that no longer exists) shows no toast. The bulk **Delete all** flow keeps its
-`ConfirmDialog` and has no Undo.
+`ConfirmDialog` and has no Undo. Each `showToast` call gets a fresh `id` that
+`Toast` keys its timers on, so a second delete in a row (same "Comment
+deleted." text) gets its own 5 seconds and isn't hidden by the first toast's
+fade-out.
 
 Tab badges count user and agent-initiated comments alike (`tabCommentCounts`
 in App). Whether a resolved user comment counts follows the resolve workflow.

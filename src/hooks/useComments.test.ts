@@ -731,8 +731,9 @@ describe('useComments', () => {
         });
       });
 
-      it('Undo restores the exact pre-delete markdown and re-activates the comment', () => {
-        const { result, setRawMarkdown, saveFile, showToast, rawMarkdownRef } = setup(commentRaw);
+      it('Undo restores the exact pre-delete markdown and brings the comment back into view', () => {
+        const { result, params, setRawMarkdown, saveFile, showToast, rawMarkdownRef } =
+          setup(commentRaw);
         act(() => result.current.setActiveCommentId('c1'));
 
         act(() => result.current.handleDelete('c1'));
@@ -748,7 +749,11 @@ describe('useComments', () => {
         expect(saveFile).toHaveBeenCalledTimes(1);
         expect(saveFile).toHaveBeenCalledWith(commentRaw);
         expect(rawMarkdownRef.current).toBe(commentRaw);
-        expect(result.current.activeCommentId).toBe('c1');
+        // The same request "Jump to agent question" makes: it scrolls to the
+        // card, focuses it, and selects it in Anchored density. Setting the
+        // active id directly would skip that, since the jump only selects a
+        // card that isn't already active.
+        expect(params.requestCommentFocus).toHaveBeenCalledWith('c1', 'jump');
         // No error toast: only the delete toast was shown.
         expect(showToast).toHaveBeenCalledTimes(1);
       });
@@ -787,6 +792,7 @@ describe('useComments', () => {
         expect(setRawMarkdown).not.toHaveBeenCalled();
         expect(saveFile).not.toHaveBeenCalled();
         expect(result.current.activeCommentId).toBeNull();
+        expect(params.requestCommentFocus).not.toHaveBeenCalled();
         expect(showToast).toHaveBeenLastCalledWith(UNDO_ERROR, 'error');
       });
 

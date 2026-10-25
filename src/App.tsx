@@ -3672,6 +3672,7 @@ export default function App() {
 
         {/* Toast notification (Feature 8) */}
         <Toast
+          toastId={toast.id}
           message={toast.message}
           visible={toast.visible}
           onDismiss={dismissToast}

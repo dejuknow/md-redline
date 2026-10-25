@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 export interface ToastAction {
   label: string;
@@ -14,6 +14,8 @@ export type ToastKind = 'success' | 'error' | 'info';
 export type ShowToast = (message: string, kind?: ToastKind, action?: ToastAction) => void;
 
 export interface ToastState {
+  /** New on every showToast call, even one repeating the last message. */
+  id: number;
   message: string;
   visible: boolean;
   kind: ToastKind;
@@ -21,13 +23,16 @@ export interface ToastState {
 }
 
 export function useToast() {
+  const nextIdRef = useRef(0);
   const [toast, setToast] = useState<ToastState>({
+    id: 0,
     message: '',
     visible: false,
     kind: 'info',
   });
   const showToast = useCallback<ShowToast>((message, kind = 'info', action) => {
-    setToast({ message, visible: true, kind, action });
+    nextIdRef.current += 1;
+    setToast({ id: nextIdRef.current, message, visible: true, kind, action });
   }, []);
   const dismissToast = useCallback(() => {
     setToast((prev) => ({ ...prev, visible: false }));

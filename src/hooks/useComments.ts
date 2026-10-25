@@ -252,12 +252,10 @@ export function useComments(params: UseCommentsParams) {
   );
 
   // An Undo toast outlives the render that showed it, so its click handler
-  // reads the file path and the writer through refs rather than closing over
-  // the values from the moment of the delete.
+  // reads the active file path through a ref rather than closing over the one
+  // from the moment of the delete.
   const activeFilePathRef = useRef(activeFilePath);
   activeFilePathRef.current = activeFilePath;
-  const updateAndSaveRef = useRef(updateAndSave);
-  updateAndSaveRef.current = updateAndSave;
 
   // After a single comment or reply is deleted, offer to put it back. The undo
   // restores the whole pre-delete document, so it only runs when nothing else
@@ -274,12 +272,14 @@ export function useComments(params: UseCommentsParams) {
             showToast("Couldn't undo. The file changed after the delete.", 'error');
             return;
           }
-          updateAndSaveRef.current(before);
+          // The path check above means this delete-time writer still targets
+          // the open file, and saveFileAt reads the file's mtime when it runs.
+          updateAndSave(before);
           onRestored?.();
         },
       });
     },
-    [showToast, rawMarkdownRef],
+    [showToast, rawMarkdownRef, updateAndSave],
   );
 
   const handleAddComment = useCallback(
@@ -351,9 +351,11 @@ export function useComments(params: UseCommentsParams) {
       // Nothing was removed (unknown id): there is nothing to undo, and a toast
       // would replace a still-live Undo for a real delete.
       if (after === before) return;
-      offerDeleteUndo('Comment deleted.', before, after, () => setActiveCommentId(id));
+      // The same request "Jump to agent question" makes: scroll to the card,
+      // focus it, and select it in Anchored density.
+      offerDeleteUndo('Comment deleted.', before, after, () => requestCommentFocus(id, 'jump'));
     },
-    [updateAndSave, rawMarkdownRef, offerDeleteUndo],
+    [updateAndSave, rawMarkdownRef, offerDeleteUndo, requestCommentFocus],
   );
 
   const handleEdit = useCallback(
