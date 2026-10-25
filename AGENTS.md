@@ -1367,6 +1367,21 @@ The kebab is hidden entirely when the file has no comments. These duplicate
 density and the drawer, so the kebab is the one route that works in Anchored
 density too.
 
+**Deleting a comment or a reply can be undone.** Every single-delete route (the
+card's trash icon, the `D` key, the command palette, the highlight's and card's
+context menus) goes through `handleDelete` / `handleDeleteReply` in
+`useComments.ts`, which still write straight to disk with no confirm and then
+toast "Comment deleted." or "Reply deleted." with an **Undo** action (the toast
+lasts 5 seconds). Undo restores the whole pre-delete document, so it runs only
+when nothing else has touched the file since: the same file must still be the
+active one and the raw markdown must still equal what the delete wrote
+(`rawMarkdownRef`, read at click time). Undoing a comment also makes it the
+active comment again. If either check fails (an agent edit, another comment
+action, a tab switch), nothing is written and an error toast says "Couldn't
+undo. The file changed after the delete." A delete that removed nothing (an id
+that no longer exists) shows no toast. The bulk **Delete all** flow keeps its
+`ConfirmDialog` and has no Undo.
+
 Tab badges count user and agent-initiated comments alike (`tabCommentCounts`
 in App). Whether a resolved user comment counts follows the resolve workflow.
 With it on, a resolved comment is out of the tab badge, the Send set
@@ -2138,7 +2153,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 | `P` / `K` | Previous comment |
 | `Cmd+Enter` | Start commenting on selection (or commit the open block when editing) |
 | `Cmd+Shift+M` | Lock selection for commenting |
-| `D` | Delete active comment |
+| `D` | Delete active comment (undo from the toast while the file is unchanged) |
 | `A` / `X` | Resolve active comment |
 | `U` | Reopen active comment |
 | `Cmd+F` | Find in document |
@@ -2294,7 +2309,7 @@ inline edit mode),
 file ops (reload, open, mark reviewed), settings, keyboard help, all themes,
 comment bulk ops (resolve all, clear resolved, delete all, hand off to agent),
 active comment ops
-(resolve, reopen, delete), heading jump, diagram view (open diagram in fullscreen),
+(resolve, reopen, delete; a delete offers Undo in its toast), heading jump, diagram view (open diagram in fullscreen),
 agent asks (jump to next agent question, which shows the pending count and cycles
 through questions on repeat invocations).
 

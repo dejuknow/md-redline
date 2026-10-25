@@ -219,6 +219,32 @@ test.describe('Comment lifecycle', () => {
     await expect(page.getByText('Mention cost factor')).not.toBeVisible();
   });
 
+  test('undo in the toast brings back a deleted comment', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+    const highlight = page.locator('mark.comment-highlight', { hasText: 'hashed with bcrypt' });
+    await expect(highlight).toBeVisible();
+
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+
+    await expect(page.getByText('Mention cost factor')).not.toBeVisible();
+    await expect(highlight).toHaveCount(0);
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+    const toast = page.getByRole('status').filter({ hasText: 'Comment deleted.' });
+    await expect(toast).toBeVisible();
+
+    await toast.getByRole('button', { name: 'Undo' }).click();
+
+    await expect(getCard(page, 'Mention cost factor')).toBeVisible();
+    await expect(highlight).toBeVisible();
+    // The restore is written back to disk, not just to the page.
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('Mention cost factor');
+  });
+
   test('delete all shows confirm dialog and cancelling keeps comments', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'First comment');
