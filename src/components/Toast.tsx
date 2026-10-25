@@ -149,7 +149,7 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
       }}
     >
       <div
-        className="relative overflow-hidden flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-lg"
+        className={`relative flex items-center gap-2 px-4 pt-2.5 ${action ? 'pb-4' : 'pb-2.5'} text-sm font-medium rounded-lg shadow-lg`}
         style={{ background: TOAST_BG, color: TOAST_FG }}
       >
         <svg
@@ -191,19 +191,26 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
         </button>
         {/* Runs down over the toast's time so it is plain it will close on its
             own. Only a toast with a button gets one: with nothing to act on,
-            there is nothing to race. Keyed per toast so a new one restarts it.
-            Reduced motion leaves it static (index.css). */}
+            there is nothing to race. It sits inset on a faint track, with its
+            own strip of padding, because a line flush with the bottom edge
+            read as the toast's border rather than a countdown. Keyed per toast
+            so a new one restarts it. Reduced motion leaves it static
+            (index.css). */}
         {action && (
           <div
-            key={`${toastId ?? 0}:${message}`}
-            data-toast-countdown
             aria-hidden="true"
-            className="toast-countdown absolute inset-x-0 bottom-0 h-0.5 bg-current opacity-40"
-            style={{
-              animationDuration: `${TOAST_DURATION_MS}ms`,
-              animationPlayState: paused ? 'paused' : 'running',
-            }}
-          />
+            className="absolute left-4 right-4 bottom-1.5 h-[3px] rounded-full overflow-hidden bg-current/15"
+          >
+            <div
+              key={`${toastId ?? 0}:${message}`}
+              data-toast-countdown
+              className="toast-countdown h-full w-full rounded-full bg-current opacity-70"
+              style={{
+                animationDuration: `${TOAST_DURATION_MS}ms`,
+                animationPlayState: paused ? 'paused' : 'running',
+              }}
+            />
+          </div>
         )}
       </div>
     </div>

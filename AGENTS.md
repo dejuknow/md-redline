@@ -1384,8 +1384,9 @@ that no longer exists) shows no toast. The bulk **Delete all** flow keeps its
 `ConfirmDialog` and has no Undo. Each `showToast` call gets a fresh `id` that
 `Toast` keys its timers on, so a second delete in a row (same "Comment
 deleted." text) gets its own 5 seconds and isn't hidden by the first toast's
-fade-out. Any toast with an action (Undo, View diff) shows a thin countdown bar along
-its bottom edge that runs down over those 5 seconds, so it is clear the toast closes on
+fade-out. Any toast with an action (Undo, View diff) shows a thin countdown bar, inset on a
+faint track in its own strip at the bottom (flush with the edge it read as a border), that
+runs down over those 5 seconds, so it is clear the toast closes on
 its own; a toast with nothing to act on has none. Pointing at a toast, or focusing a
 control inside it, pauses both the bar and the dismiss clock, and leaving resumes with
 the time that was left. With reduced motion the bar stays full and the clock still runs
