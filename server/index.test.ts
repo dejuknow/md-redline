@@ -166,6 +166,14 @@ async function waitForPrefs(
   return JSON.parse(await readFile(prefsPath, 'utf-8'));
 }
 
+// The pick-file handler persists the picked directory fire-and-forget, so a test
+// that never reads the result still has to wait for the write before removing
+// its temp home, or the write can land mid-removal (ENOTEMPTY on Windows).
+async function waitForTrustedRoot(realHome: string, root: string): Promise<void> {
+  const parsed = await waitForPrefs(realHome, (p) => p.trustedRoots?.includes(root));
+  expect(parsed.trustedRoots).toContain(root);
+}
+
 beforeAll(async () => {
   cwdRoot = await mkdtemp(join(tmpdir(), 'md-redline-server-cwd-'));
   fakeHome = await mkdtemp(join(tmpdir(), 'md-redline-server-home-'));
@@ -1142,8 +1150,7 @@ describe('/api/pick-file', () => {
     const argsJoined = calls[0].args.join(' ');
     expect(argsJoined).toContain(`default location POSIX file "${targetPath}"`);
 
-    // Allow fire-and-forget addTrustedRoot to flush before removing the temp dir.
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForTrustedRoot(realHome, externalDir);
     await rm(realHome, { recursive: true, force: true });
   });
 
@@ -1169,8 +1176,7 @@ describe('/api/pick-file', () => {
     // Quotes should be backslash-escaped, backslashes doubled.
     expect(argsJoined).toContain('/tmp/has \\"quote\\" and \\\\back/file.md');
 
-    // Allow fire-and-forget addTrustedRoot to flush before removing the temp dir.
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForTrustedRoot(realHome, externalDir);
     await rm(realHome, { recursive: true, force: true });
   });
 
@@ -1190,8 +1196,7 @@ describe('/api/pick-file', () => {
     const argsJoined = calls[0].args.join(' ');
     expect(argsJoined).not.toContain('default location');
 
-    // Allow fire-and-forget addTrustedRoot to flush before removing the temp dir.
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForTrustedRoot(realHome, externalDir);
     await rm(realHome, { recursive: true, force: true });
   });
 });
