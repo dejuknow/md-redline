@@ -30,6 +30,14 @@ export interface CommentExpectation {
    * pre-existing fixture means.
    */
   expectedMarker?: MarkerDisposition;
+  /**
+   * For a `skip` comment: its marker has to come through untouched, still in
+   * the file with the status and replies it had. A skipped comment is not
+   * scored otherwise, so an agent that deleted or replied to a resolved thread
+   * it was meant to leave alone went unseen (#167). Opt-in, because some cases
+   * accept either outcome (11 lets a resolved marker be removed).
+   */
+  leaveUntouched?: boolean;
   /** Content assertions near the anchor after the agent acts */
   contentHints?: {
     shouldContain?: string[];

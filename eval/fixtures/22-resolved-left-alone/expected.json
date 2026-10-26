@@ -1,0 +1,36 @@
+{
+  "markerMode": "remove",
+  "requiresAgent": "claude-cli-remove",
+  "totalComments": 2,
+  "actionableComments": 1,
+  "comments": [
+    {
+      "id": "eval-22-c1",
+      "expectedAction": "address",
+      "contentHints": {
+        "shouldContain": ["session_id"],
+        "shouldNotContain": ["is called sid", "must send sid"]
+      }
+    },
+    {
+      "id": "eval-22-c2",
+      "expectedAction": "skip",
+      "leaveUntouched": true
+    }
+  ],
+  "contentShouldChange": true,
+  "contentAssertions": [
+    {
+      "type": "contains",
+      "value": "Refresh tokens are rotated on every use. A reused refresh token revokes the whole session family."
+    },
+    {
+      "type": "not_contains",
+      "value": "30 days"
+    },
+    {
+      "type": "contains",
+      "value": "Sessions expire after 12 hours of inactivity."
+    }
+  ]
+}

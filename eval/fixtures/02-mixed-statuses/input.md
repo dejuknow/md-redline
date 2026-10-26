@@ -15,3 +15,13 @@ Every response includes the following headers:
 ## Exceeded Limits
 
 When rate limits are exceeded the API returns an error. Clients should implement exponential backoff.
+
+## Plan Limits
+
+| Plan | Requests per minute | Requests per hour |
+|------|---------------------|-------------------|
+| Free | 60 | 1,000 |
+| Pro | 600 | 20,000 |
+| Enterprise | 3,000 | 100,000 |
+
+The same limits apply to every endpoint.

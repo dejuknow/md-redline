@@ -100,10 +100,35 @@ export function score(
         details.push(`parsing: ${exp.id} — marker preserved but ${missing}`);
       }
     }
-    parsingScore = actionable.length > 0 ? correct / actionable.length : 1.0;
-    details.push(
-      `parsing: ${correct}/${actionable.length} markers correctly handled (${markerMode})`,
+    // Skipped comments that must come through untouched count here too: a
+    // marker deleted, replied to or resolved when it should have been left
+    // alone is a marker handled wrongly.
+    const inputById = new Map(inputParsed.comments.map((c) => [c.id, c]));
+    const untouched = expected.comments.filter(
+      (c) => c.expectedAction === 'skip' && c.leaveUntouched,
     );
+    for (const exp of untouched) {
+      const before = inputById.get(exp.id);
+      const after = outputById.get(exp.id);
+      if (!after) {
+        details.push(`parsing: ${exp.id} — marker should have been left alone but was deleted`);
+        continue;
+      }
+      const sameStatus = !before || getEffectiveStatus(before) === getEffectiveStatus(after);
+      const sameReplies = (before?.replies?.length ?? 0) === (after.replies?.length ?? 0);
+      if (sameStatus && sameReplies) {
+        correct++;
+        details.push(`parsing: ${exp.id} — marker left alone`);
+      } else {
+        const changed = [!sameStatus && 'status changed', !sameReplies && 'replies changed']
+          .filter(Boolean)
+          .join(', ');
+        details.push(`parsing: ${exp.id} — marker should have been left alone but ${changed}`);
+      }
+    }
+    const handled = actionable.length + untouched.length;
+    parsingScore = handled > 0 ? correct / handled : 1.0;
+    details.push(`parsing: ${correct}/${handled} markers correctly handled (${markerMode})`);
   }
 
   // --- 2. Execution: Did content changes address the feedback? ---

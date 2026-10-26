@@ -796,3 +796,70 @@ describe('answered disposition (a question inside a remove-mode case)', () => {
     expect(result.scores.anchorIntegrity).toBe(0);
   });
 });
+
+describe('a skipped comment that must be left untouched (#167)', () => {
+  // c1 is an open comment the agent addresses (its marker removed in remove
+  // mode); c2 is resolved, carries the agent's earlier reply, and is finished.
+  const settled = (overrides: Record<string, unknown> = {}) =>
+    makeMarker({
+      id: 'c2',
+      anchor: 'world',
+      text: 'add the timeout',
+      status: 'resolved',
+      replies: [{ id: 'r1', text: 'Done.', author: 'Claude', timestamp: '2024-01-02T00:00:00Z' }],
+      ...overrides,
+    });
+  const input = `${makeMarker({ id: 'c1', anchor: 'hello' })}hello ${settled()}world`;
+  const expected = makeExpected({
+    totalComments: 2,
+    actionableComments: 1,
+    comments: [
+      { id: 'c1', expectedAction: 'address' },
+      { id: 'c2', expectedAction: 'skip', leaveUntouched: true },
+    ],
+  });
+
+  it('credits a marker that came through with its status and replies', () => {
+    const result = score('t', input, `hello there ${settled()}world`, expected);
+    expect(result.scores.parsing).toBe(1);
+    expect(result.details).toContain('parsing: c2 — marker left alone');
+  });
+
+  it('gives no credit when the marker was deleted', () => {
+    const result = score('t', input, 'hello there world', expected);
+    expect(result.scores.parsing).toBe(0.5);
+  });
+
+  it('gives no credit when the agent replied to it', () => {
+    const replied = settled({
+      replies: [
+        { id: 'r1', text: 'Done.', author: 'Claude', timestamp: '2024-01-02T00:00:00Z' },
+        { id: 'r2', text: 'Already handled.', author: 'Claude' },
+      ],
+    });
+    const result = score('t', input, `hello there ${replied}world`, expected);
+    expect(result.scores.parsing).toBe(0.5);
+    expect(result.details.some((d) => d.includes('c2') && d.includes('replies changed'))).toBe(
+      true,
+    );
+  });
+
+  it('gives no credit when the agent reopened it', () => {
+    const reopened = settled({ status: 'open' });
+    const result = score('t', input, `hello there ${reopened}world`, expected);
+    expect(result.scores.parsing).toBe(0.5);
+  });
+
+  it('leaves a skipped comment without the flag unscored, as before', () => {
+    const lenient = makeExpected({
+      totalComments: 2,
+      actionableComments: 1,
+      comments: [
+        { id: 'c1', expectedAction: 'address' },
+        { id: 'c2', expectedAction: 'skip' },
+      ],
+    });
+    const result = score('t', input, 'hello there world', lenient);
+    expect(result.scores.parsing).toBe(1);
+  });
+});
