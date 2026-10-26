@@ -49,6 +49,32 @@ function startFakeServer(): Promise<{ port: number }> {
   });
 }
 
+/**
+ * A named port that is held but is not mdr: every path 404s, `/api/config`
+ * included, which `checkServer` rejects the same way it rejects a closed port.
+ * Held until afterEach on purpose. A port bound, read back and released is free
+ * for any other test file's fake server (they bind port 0 in parallel) until
+ * the CLI gets around to probing it, and one that lands there answers as mdr.
+ */
+function holdDeadPort(): Promise<number> {
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer((_req, res) => {
+      res.writeHead(404);
+      res.end();
+    });
+    servers.push(server);
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('no port assigned'));
+        return;
+      }
+      resolvePromise(address.port);
+    });
+  });
+}
+
 /** The scratch temp dir for this test, created on first use. */
 function scratchDir(): string {
   scratch ??= mkdtempSync(join(tmpdir(), 'mdr-find-'));
@@ -129,7 +155,7 @@ describe('choosing which running server to act on', () => {
     // starts a server on the named port instead.
     const recorded = await startFakeServer();
     writePortFile(recorded.port);
-    const deadPort = await unusedPort();
+    const deadPort = await holdDeadPort();
 
     expect(await findServer({ MD_REDLINE_PORT: String(deadPort) })).toBe('none');
   });
@@ -139,7 +165,7 @@ describe('choosing which running server to act on', () => {
     // Next.js app must not stop mdr finding the server that is running.
     const recorded = await startFakeServer();
     writePortFile(recorded.port);
-    const deadPort = await unusedPort();
+    const deadPort = await holdDeadPort();
 
     expect(await findServer({ PORT: String(deadPort) })).toBe(String(recorded.port));
   });
@@ -152,8 +178,8 @@ describe('choosing which running server to act on', () => {
     expect(await findServer()).toBe(String(recorded.port));
   });
 
-  it('reports none when the named port is dead and nothing is recorded', async () => {
-    const deadPort = await deadPortBlock();
+  it('reports none when the named port is not answering and nothing is recorded', async () => {
+    const deadPort = await holdDeadPort();
 
     expect(await findServer({ MD_REDLINE_PORT: String(deadPort) })).toBe('none');
   });
@@ -182,31 +208,6 @@ async function unusedPort(): Promise<number> {
   });
   await new Promise((r) => server.close(r));
   return port;
-}
-
-/**
- * A port to name where nothing answers, on it or on the nine above it that
- * findServerPort also scans. Picked below every OS's ephemeral range (Linux
- * starts at 32768, macOS and Windows at 49152) because the fake servers other
- * test files start in parallel bind port 0 and land inside it. A free port
- * from inside that range failed on macOS CI: another file's fake server took a
- * neighbour, the scan found it, and the command reported it instead of "none".
- */
-async function deadPortBlock(): Promise<number> {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const base = 20_000 + Math.floor(Math.random() * 12_000);
-    const free = await Promise.all(Array.from({ length: 10 }, (_, i) => portIsFree(base + i)));
-    if (free.every(Boolean)) return base;
-  }
-  throw new Error('no free port block below the ephemeral range');
-}
-
-function portIsFree(port: number): Promise<boolean> {
-  return new Promise((resolvePromise) => {
-    const server = createServer();
-    server.once('error', () => resolvePromise(false));
-    server.listen(port, '127.0.0.1', () => server.close(() => resolvePromise(true)));
-  });
 }
 
 /**
