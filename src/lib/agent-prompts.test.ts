@@ -172,8 +172,40 @@ describe('buildAddressCommentsPrompt - answering versus editing', () => {
         commentCounts: new Map([['/tmp/spec.md', 1]]),
         enableResolve,
       });
-      expect(prompt).toContain('already carries a reply authored by you');
-      expect(prompt).toContain('do not reply again');
+      expect(prompt).toContain('already carried a reply from you');
+      expect(prompt).toContain('without replying');
+    },
+  );
+
+  it.each([true, false])(
+    'judges what is settled from the file as first read (resolve=%s)',
+    (enableResolve) => {
+      // Step 3 replies to every addressed comment (and resolve mode resolves
+      // it), so by step 4 a comment just handled looks settled by either rule
+      // unless the rules are judged from the file as first read (#167).
+      const prompt = buildAddressCommentsPrompt({
+        filePaths: ['/tmp/spec.md'],
+        commentCounts: new Map([['/tmp/spec.md', 1]]),
+        enableResolve,
+      });
+      expect(prompt).toContain('as you first read it, before any of your edits');
+      expect(prompt).not.toContain('already carries a reply authored by you');
+    },
+  );
+
+  it.each([true, false])(
+    'leaves resolved markers alone in both modes (resolve=%s)',
+    (enableResolve) => {
+      // Remove mode never mentioned status, and neither mode said a resolved
+      // thread was finished, so agents replied to the reader's closing reply
+      // (eval cases 22 and 23).
+      const prompt = buildAddressCommentsPrompt({
+        filePaths: ['/tmp/spec.md'],
+        commentCounts: new Map([['/tmp/spec.md', 1]]),
+        enableResolve,
+      });
+      expect(prompt).toContain('a comment whose marker has `"status":"resolved"` is finished');
+      expect(prompt).toContain('even if my reply is the latest in its thread');
     },
   );
 
