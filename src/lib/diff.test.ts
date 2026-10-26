@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDiff } from './diff';
+import { computeDiff, myersLineDiff, MAX_EDIT_DISTANCE, type DiffLine } from './diff';
 
 describe('computeDiff', () => {
   it('returns all same lines for identical inputs', () => {
@@ -160,5 +160,110 @@ describe('computeDiff', () => {
     // Middle should be all removed + all added
     expect(diff.filter((l) => l.type === 'removed').length).toBe(1200);
     expect(diff.filter((l) => l.type === 'added').length).toBe(1200);
+  });
+
+  it('marks only the changed lines when the edits in a large file are far apart (#188)', () => {
+    // The changed middle runs from line 10 to line 2900, far past the
+    // one-million-cell table the LCS diff allows. It used to come back as
+    // 2,891 lines removed and 2,891 added.
+    const oldLines = Array.from({ length: 3000 }, (_, i) => `Line ${i + 1}.`);
+    const newLines = [...oldLines];
+    newLines[9] = 'Line 10, edited.';
+    newLines[2899] = 'Line 2900, edited.';
+
+    const diff = computeDiff(oldLines.join('\n'), newLines.join('\n'));
+
+    expect(diff.filter((l) => l.type === 'removed').map((l) => l.text)).toEqual([
+      'Line 10.',
+      'Line 2900.',
+    ]);
+    expect(diff.filter((l) => l.type === 'added').map((l) => l.text)).toEqual([
+      'Line 10, edited.',
+      'Line 2900, edited.',
+    ]);
+    expect(diff.filter((l) => l.type === 'same')).toHaveLength(2998);
+  });
+});
+
+describe('myersLineDiff', () => {
+  // A seeded generator, so a failure names a case that reruns the same way.
+  function rng(seed: number) {
+    return () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  // Few distinct lines, so repeats and ambiguous alignments are common.
+  const randomLines = (next: () => number) =>
+    Array.from({ length: Math.floor(next() * 13) }, () => `l${Math.floor(next() * 4)}`);
+
+  function lcsLength(a: string[], b: string[]): number {
+    const row = new Array(b.length + 1).fill(0);
+    for (const x of a) {
+      let diag = 0;
+      for (let j = 1; j <= b.length; j++) {
+        const up = row[j];
+        row[j] = x === b[j - 1] ? diag + 1 : Math.max(row[j], row[j - 1]);
+        diag = up;
+      }
+    }
+    return row[b.length];
+  }
+
+  const side = (diff: DiffLine[], kind: 'removed' | 'added') =>
+    diff.filter((l) => l.type === 'same' || l.type === kind);
+
+  it('agrees with the LCS diff and rebuilds both texts on 3,000 random pairs', () => {
+    const next = rng(188);
+    for (let run = 0; run < 3000; run++) {
+      const a = randomLines(next);
+      const b = randomLines(next);
+      const diff = myersLineDiff(a, b, Infinity)!;
+      const context = `run ${run}: ${JSON.stringify(a)} -> ${JSON.stringify(b)}`;
+
+      // Minimal: as many unchanged lines as a longest common subsequence.
+      expect(diff.filter((l) => l.type === 'same').length, context).toBe(lcsLength(a, b));
+      // Both texts come back exactly, numbered 1..N and 1..M without gaps.
+      const oldSide = side(diff, 'removed');
+      expect(
+        oldSide.map((l) => l.text),
+        context,
+      ).toEqual(a);
+      expect(
+        oldSide.map((l) => l.oldLineNo),
+        context,
+      ).toEqual(a.map((_, i) => i + 1));
+      const newSide = side(diff, 'added');
+      expect(
+        newSide.map((l) => l.text),
+        context,
+      ).toEqual(b);
+      expect(
+        newSide.map((l) => l.newLineNo),
+        context,
+      ).toEqual(b.map((_, i) => i + 1));
+      // Within each run of changes, removed lines come first.
+      for (let i = 1; i < diff.length; i++) {
+        expect(diff[i - 1].type === 'added' && diff[i].type === 'removed', context).toBe(false);
+      }
+    }
+  });
+
+  it('gives up past the edit limit, so the caller can fall back', () => {
+    expect(myersLineDiff(['a', 'b', 'c'], ['x', 'y', 'z'], 5)).toBeNull();
+    expect(myersLineDiff(['a', 'b', 'c'], ['x', 'y', 'z'], 6)).not.toBeNull();
+  });
+
+  it('keeps the remove-then-add fallback for a large middle that is mostly new', () => {
+    // 3,000 lines with nothing in common is far past MAX_EDIT_DISTANCE.
+    const oldLines = Array.from({ length: 3000 }, (_, i) => `old ${i}`);
+    const newLines = Array.from({ length: 3000 }, (_, i) => `new ${i}`);
+    expect(oldLines.length + newLines.length).toBeGreaterThan(MAX_EDIT_DISTANCE);
+
+    const diff = computeDiff(oldLines.join('\n'), newLines.join('\n'));
+    expect(diff.slice(0, 3000).every((l) => l.type === 'removed')).toBe(true);
+    expect(diff.slice(3000).every((l) => l.type === 'added')).toBe(true);
   });
 });

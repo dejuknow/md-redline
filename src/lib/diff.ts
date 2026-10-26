@@ -6,11 +6,8 @@ export interface DiffLine {
 }
 
 /**
- * Simple line-based diff using the longest common subsequence algorithm.
- * Returns an array of DiffLine objects for rendering.
- *
- * For large files (where the DP table would exceed 1M cells), uses a
- * hash-based pre-filtering approach to keep memory usage bounded.
+ * Line-based diff for rendering. Uses the longest common subsequence table
+ * while it stays under 1M cells; larger inputs go to `computeDiffLargeFile`.
  */
 export function computeDiff(oldText: string, newText: string): DiffLine[] {
   const oldLines = oldText.split('\n');
@@ -72,8 +69,8 @@ function lcsBasedDiff(oldLines: string[], newLines: string[]): DiffLine[] {
 }
 
 /**
- * For large files: strip common prefix/suffix, then apply LCS to the
- * remaining (typically much smaller) changed region.
+ * For large files: strip the common prefix and suffix, then diff the middle,
+ * by LCS when its table fits in 1M cells and by Myers otherwise.
  */
 function computeDiffLargeFile(oldLines: string[], newLines: string[]): DiffLine[] {
   const result: DiffLine[] = [];
@@ -103,9 +100,15 @@ function computeDiffLargeFile(oldLines: string[], newLines: string[]): DiffLine[
   const oldMiddle = oldLines.slice(prefixLen, oldLines.length - suffixLen);
   const newMiddle = newLines.slice(prefixLen, newLines.length - suffixLen);
 
-  if (oldMiddle.length * newMiddle.length <= 1_000_000) {
-    // Middle is small enough for standard LCS
-    const middleDiff = lcsBasedDiff(oldMiddle, newMiddle);
+  // The LCS table grows with the size of the middle; Myers grows with the
+  // number of changed lines instead, so two small edits a thousand lines apart
+  // still come back as two edits (#188). Only a middle that really is mostly
+  // changed falls back to remove-then-add.
+  const middleDiff =
+    oldMiddle.length * newMiddle.length <= 1_000_000
+      ? lcsBasedDiff(oldMiddle, newMiddle)
+      : myersLineDiff(oldMiddle, newMiddle, MAX_EDIT_DISTANCE);
+  if (middleDiff) {
     for (const line of middleDiff) {
       result.push({
         ...line,
@@ -114,7 +117,6 @@ function computeDiffLargeFile(oldLines: string[], newLines: string[]): DiffLine[
       });
     }
   } else {
-    // Still too large — fall back to simple remove-then-add
     for (let i = 0; i < oldMiddle.length; i++) {
       result.push({ type: 'removed', text: oldMiddle[i], oldLineNo: prefixLen + i + 1 });
     }
@@ -135,5 +137,122 @@ function computeDiffLargeFile(oldLines: string[], newLines: string[]): DiffLine[
     });
   }
 
+  return result;
+}
+
+/**
+ * The most removed plus added lines `myersLineDiff` will search for. Its
+ * backtracking trace holds about this many squared entries, so 2,000 keeps it
+ * near 16 MB; past it, the changed region is mostly new text anyway and the
+ * remove-then-add fallback reads about as well.
+ */
+export const MAX_EDIT_DISTANCE = 2_000;
+
+/**
+ * Line diff by Myers' algorithm: O((N + M) * D) time for D removed plus added
+ * lines, where the LCS table costs O(N * M) whatever changed. The result is
+ * minimal, keeping as many lines the same as the LCS diff does. Returns null
+ * when more than `maxEdits` lines would have to change. Line numbers start at
+ * 1, and within each change removed lines come before added ones, as the diff
+ * view expects.
+ */
+export function myersLineDiff(
+  oldLines: readonly string[],
+  newLines: readonly string[],
+  maxEdits: number,
+): DiffLine[] | null {
+  // Compare small integers instead of strings: each distinct line gets an id.
+  const ids = new Map<string, number>();
+  const intern = (line: string) => {
+    let id = ids.get(line);
+    if (id === undefined) {
+      id = ids.size;
+      ids.set(line, id);
+    }
+    return id;
+  };
+  const a = Int32Array.from(oldLines, intern);
+  const b = Int32Array.from(newLines, intern);
+  const n = a.length;
+  const m = b.length;
+  const max = n + m;
+  const offset = max + 1;
+  // v[offset + k]: the furthest x reached on diagonal k (k = x - y).
+  const v = new Int32Array(2 * max + 3);
+  // trace[d]: diagonals -(d+1)..(d+1) of v as they stood before step d, all
+  // that backtracking needs from that step.
+  const trace: Int32Array[] = [];
+
+  let found = -1;
+  for (let d = 0; d <= Math.min(max, maxEdits) && found < 0; d++) {
+    trace.push(v.slice(offset - d - 1, offset + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let x =
+        k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])
+          ? v[offset + k + 1]
+          : v[offset + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      v[offset + k] = x;
+      if (x >= n && y >= m) {
+        found = d;
+        break;
+      }
+    }
+  }
+  if (found < 0) return null;
+
+  // Walk back from the end, emitting in reverse.
+  const reversed: DiffLine[] = [];
+  let x = n;
+  let y = m;
+  for (let d = found; d >= 0; d--) {
+    const prev = trace[d];
+    const at = (k: number) => prev[k + d + 1];
+    const k = x - y;
+    const prevK = k === -d || (k !== d && at(k - 1) < at(k + 1)) ? k + 1 : k - 1;
+    const prevX = d === 0 ? 0 : at(prevK);
+    const prevY = prevX - prevK;
+    while (x > prevX && y > prevY) {
+      reversed.push({ type: 'same', text: oldLines[x - 1], oldLineNo: x, newLineNo: y });
+      x--;
+      y--;
+    }
+    if (d > 0) {
+      if (x === prevX) {
+        reversed.push({ type: 'added', text: newLines[y - 1], newLineNo: y });
+      } else {
+        reversed.push({ type: 'removed', text: oldLines[x - 1], oldLineNo: x });
+      }
+    }
+    x = prevX;
+    y = prevY;
+  }
+  reversed.reverse();
+  return removedBeforeAdded(reversed);
+}
+
+/** Reorder each run of changed lines so its removed lines come first. */
+function removedBeforeAdded(lines: DiffLine[]): DiffLine[] {
+  const result: DiffLine[] = [];
+  let removed: DiffLine[] = [];
+  let added: DiffLine[] = [];
+  const flush = () => {
+    result.push(...removed, ...added);
+    removed = [];
+    added = [];
+  };
+  for (const line of lines) {
+    if (line.type === 'removed') removed.push(line);
+    else if (line.type === 'added') added.push(line);
+    else {
+      flush();
+      result.push(line);
+    }
+  }
+  flush();
   return result;
 }
