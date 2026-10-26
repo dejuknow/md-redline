@@ -151,3 +151,51 @@ describe('the highlight menu on a comment the agent wrote (#174)', () => {
     expect(labels([comment(false)])).toContain('Edit');
   });
 });
+
+describe('Reopen with the resolve workflow off (#159)', () => {
+  // setup() runs with enableResolve off. A resolved marker is finished in
+  // either mode, so its menus offer Reopen; Resolve stays a resolve-mode action.
+  const comment = (status: 'open' | 'resolved'): MdComment => ({
+    id: 'c1',
+    anchor: 'cached per tenant',
+    text: 'Should this be per tenant or global?',
+    author: 'Alice',
+    timestamp: new Date().toISOString(),
+    status,
+  });
+
+  function highlightLabels(c: MdComment) {
+    const { result } = setup({} as SelectionInfo, undefined, [c]);
+    act(() => {
+      result.current.handleViewerContextMenu({ type: 'highlight', commentIds: ['c1'], x: 0, y: 0 });
+    });
+    return result.current.ctxMenuItems.map((item) => (item as { label?: string }).label);
+  }
+
+  function cardLabels(c: MdComment) {
+    const { result } = setup({} as SelectionInfo, undefined, [c]);
+    act(() => {
+      result.current.handleSidebarContextMenu({ commentId: 'c1', x: 0, y: 0 });
+    });
+    return result.current.sidebarCtxMenuItems.map((item) => (item as { label?: string }).label);
+  }
+
+  it('offers Reopen, not Edit or Reply, on a resolved highlight', () => {
+    const items = highlightLabels(comment('resolved'));
+    expect(items).toContain('Reopen');
+    expect(items).not.toContain('Edit');
+    expect(items).not.toContain('Reply');
+    expect(items[0]).toBe('Reopen');
+  });
+
+  it('offers neither Resolve nor Reopen on an open highlight', () => {
+    const items = highlightLabels(comment('open'));
+    expect(items).not.toContain('Resolve');
+    expect(items).not.toContain('Reopen');
+  });
+
+  it('offers Reopen on a resolved card and no Resolve on an open one', () => {
+    expect(cardLabels(comment('resolved'))).toContain('Reopen');
+    expect(cardLabels(comment('open'))).not.toContain('Resolve');
+  });
+});

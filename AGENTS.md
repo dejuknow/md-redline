@@ -108,7 +108,7 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
   agent, which is the accepted cost. `CommentCard` reads the stamp too: a reply
   stamped `true` gets no Edit, though it keeps its trash. It does not fall back on
   names, so an unstamped reply keeps both.
-- `status` — `open` or `resolved` (only present when resolve workflow is enabled); a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
+- `status` — `open` or `resolved`, written by the resolve workflow. A `resolved` marker counts as resolved whether or not the reader has the workflow on (#159): the workflow only decides what happens to a comment once it is addressed, marked resolved or removed from the file; a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
 - `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`). Like a reply stamped `agent: true`, such a comment gets no Edit, on its card or in the highlight's context menu; Delete and the reply field stay.
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
@@ -929,7 +929,7 @@ per session:
   clickable to jump to the first question card.
   A comment counts as unsent until it is sent; a sent one counts as unsent again only
   when the reviewer's last reply on it is not recorded in `sentReplyIds` (a resolved
-  thread is skipped while the resolve workflow is on). A reply is recorded by its id plus
+  thread is skipped in either mode). A reply is recorded by its id plus
   a hash of its text, so an edit made after sending counts as new. So a reply on a sent
   thread turns Send on once, sending it turns Send off until the reviewer writes or edits
   a reply, and Send & finish never repeats a reply that already went out. What the tab
@@ -1360,7 +1360,7 @@ which their tooltips name; disabled when the file has no comments), the density
 segmented control, the open count, and an overflow kebab
 (`[data-rail-actions]`). The kebab opens a `ContextMenu` with the bulk actions:
 **Resolve all open** (resolve workflow on, open comments exist), **Clear
-resolved** (resolve workflow on, resolved comments exist), and **Delete all
+resolved** (resolved comments exist, in either mode), and **Delete all
 comments...** (always, behind the same `ConfirmDialog` the list footer uses).
 The kebab is hidden entirely when the file has no comments. These duplicate
 `CommentListSurface`'s footer buttons on purpose: the footer only exists in List
@@ -1415,17 +1415,21 @@ the time that was left. With reduced motion the bar stays full and the clock sti
 (`.toast-countdown` in `index.css`).
 
 Tab badges count user and agent-initiated comments alike (`tabCommentCounts`
-in App). Whether a resolved user comment counts follows the resolve workflow.
-With it on, a resolved comment is out of the tab badge, the Send set
-(`commentIdsByFile`, which feeds the Review banner) and `commentCount`, and a
-tab with no open comments but some resolved ones draws a quiet outlined "N
-resolved" badge instead (`resolvedCommentCounts`, user comments only; same in
-the tab strip and the overflow tab list). With it off, resolved comments stay
-in all of those counts and no "N resolved" badge is drawn, because the
-highlight, card and List view still show a resolved marker as open with a reply field,
-and leaving it out of Send would silently drop a reply typed there. A resolved
-agent question is out of the agent count in both modes, since "Awaiting your
-reply" only surfaces open ones. The handoff button keeps the sendable-only map. Inline code in prose
+in App). A resolved comment is out of the tab badge, the Send set
+(`commentIdsByFile`, which feeds the Review banner), `commentCount` and `N`/`P`
+navigation in either mode, and a tab with no open comments but some resolved
+ones draws a quiet outlined "N resolved" badge instead (`resolvedCommentCounts`,
+user comments only; same in the tab strip and the overflow tab list). Resolve
+mode off still meets resolved markers: a file resolved in an earlier
+resolve-mode session, a session an agent started with `enableResolve: true`, a
+collaborator's file, or a hand edit. Every surface shows those as resolved too
+(the highlight's faint trace, the card's Resolved pill and muted style with no
+reply field, the List view's Open/Resolved split), so no reply field is
+offered that Send would never carry (#159). **Reopen** works in both modes
+(card, context menus, palette, `U`), so a reader with the workflow off can push
+back on a thread an agent closed; **Resolve** and the bulk resolve actions stay
+resolve-mode only. A resolved agent question is out of the agent count in both
+modes, since "Awaiting your reply" only surfaces open ones. The handoff button keeps the sendable-only map. Inline code in prose
 renders neutral (`--theme-text` on `--theme-bg-inset`), never the crimson
 accent:
 
@@ -1556,7 +1560,8 @@ accent:
   animate over 150ms via `.margin-note-pos`, disabled under
   `prefers-reduced-motion`.
 - **List**: a pinned instance of `CommentListSurface`, with full search, status
-  filter (All / Open / Resolved), sort, and bulk actions. Filters and search
+  filter (All / Open / Resolved; with the resolve workflow off, only while the
+  file has a resolved comment), sort, and bulk actions. Filters and search
   share a single header row (search input placeholder is "Search"). The same
   component backs the comments drawer (below), so behavior is identical in
   both places.
@@ -2233,7 +2238,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 ### Settings panel
 
 - **Author name** — name attached to comments and replies
-- **Enable resolve workflow** — adds resolve/reopen actions (off for AI agent workflows)
+- **Enable resolve workflow** — adds the Resolve action and the open/resolved split, and has agents mark addressed comments resolved instead of removing them (off for AI agent workflows). Reopen and the resolved display work in both modes (#159)
 - **Quick comment**: skip the selection pill and open the comment form immediately on text selection
 - **Comment max length** — character limit per comment (long markers confuse AI parsers)
 - **Show templates by default** — when Quick comment opens the form immediately, also show the template picker. When the selection pill is used, the form opens with the grid hidden; toggle it with the footer button to show templates.
@@ -2343,7 +2348,8 @@ Comment cards (`CommentCard.tsx`) carry the same red-pen language into the rail,
 popover. The anchor excerpt is a serif italic pull-quote (`.comment-quote`) with a left rule
 in the highlighter color, not a monospace chip; a resolved comment's quote switches to a
 muted, borderless variant (`.comment-quote-resolved`). The status pill is amber (anchor tint)
-for Open and neutral surface-inset for Resolved, and the Resolve action uses the green
+for Open and neutral surface-inset for Resolved (with the resolve workflow off, only a
+resolved comment carries one), and the Resolve action uses the green
 success intent (recolored from crimson so it does not read as destructive next to Delete;
 toasts and the review banner carry the crimson budget instead). Every card is a tab stop
 (`ThreadCard.tsx`, `tabIndex={0}`) with `role="article"`, an accessible name of the form
@@ -2369,8 +2375,8 @@ device that cannot (`@media (hover: none)`) they are always visible. The card th
 with a "Write a reply..." field, shown on
 every open card whatever its reply count (hidden while resolved), styled like the reply
 composer and sitting where it opens, and a **thread bar**: a hairline across the full card
-width over a row with **Resolve** (**Reopen** on a resolved card; only with the resolve
-workflow on) at the left, aligned to the card's content edge, and the trash at the right,
+width over a row with **Resolve** (only with the resolve workflow on) or **Reopen** (on a
+resolved card, in either mode) at the left, aligned to the card's content edge, and the trash at the right,
 labelled "Delete thread" when the comment has replies and "Delete" when it has none. While
 the comment editor, a reply editor or the reply composer is open, every one of those steps
 aside (the first comment's Edit, the reply rows' actions, the anchor-repair pair, the reply
@@ -2395,8 +2401,9 @@ active comment ops
 agent asks (jump to next agent question, which shows the pending count and cycles
 through questions on repeat invocations).
 
-The bulk ops mirror the rail kebab's gating: resolve-all and clear-resolved need
-the resolve workflow on plus a non-zero open / resolved count, and delete-all is
+The bulk ops mirror the rail kebab's gating: resolve-all needs the resolve
+workflow on plus a non-zero open count, clear-resolved needs a non-zero resolved
+count in either mode (#159), and delete-all is
 gated on the TOTAL comment count rather than the open count, so it still appears
 for a file whose comments are all resolved. Delete-all opens the same
 `ConfirmDialog` the rail kebab and list footer use (owned by `App`) instead of

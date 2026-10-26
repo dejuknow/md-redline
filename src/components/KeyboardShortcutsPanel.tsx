@@ -42,7 +42,7 @@ const sections: Section[] = [
       { keys: 'D', label: 'Delete active comment' },
       { keys: `${mod}Z`, label: 'Undo delete or diff reset' },
       { keys: 'A / X', label: 'Resolve active comment', condition: 'resolve' },
-      { keys: 'U', label: 'Reopen active comment', condition: 'resolve' },
+      { keys: 'U', label: 'Reopen active comment' },
     ],
   },
   {

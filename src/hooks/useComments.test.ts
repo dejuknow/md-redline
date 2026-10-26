@@ -172,14 +172,13 @@ describe('useComments', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 3. Resolved comments: counted or gone depending on the resolve workflow
+  // 3. Resolved comments count as gone in either mode
   // -----------------------------------------------------------------------
-  // With the resolve workflow on, a resolved comment counts as gone: it leaves
-  // the tab badge and the Send set (commentIdsByFile). With it off, the
-  // highlight, card and List view still show a resolved marker as open (with
-  // Reply), so it stays counted and sendable. Excluding it would silently drop
-  // a reply typed there. A resolved agent question is out of the agent count in
-  // both modes, since "Awaiting your reply" only surfaces open ones.
+  // A resolved comment leaves the tab badge and the Send set
+  // (commentIdsByFile) whether or not the resolve workflow is on (#159): every
+  // surface shows it as resolved with no reply field, so nothing typed on it
+  // could be lost. A resolved agent question is out of the agent count in both
+  // modes, since "Awaiting your reply" only surfaces open ones.
   describe.each([
     {
       mode: 'on',
@@ -192,9 +191,9 @@ describe('useComments', () => {
     {
       mode: 'off',
       enableResolve: false,
-      badge: 3,
-      ids: ['c1', 'c2', 'c3'],
-      otherIds: ['o1', 'o2', 'o3'],
+      badge: 2,
+      ids: ['c1', 'c3'],
+      otherIds: ['o1', 'o3'],
       agentBadge: 0,
     },
   ])(
@@ -329,7 +328,7 @@ describe('useComments', () => {
       expect(result.current.commentIdsByFile.get('file.md')).toEqual([]);
     });
 
-    it('keeps both comments counted and sendable with enableResolve off', () => {
+    it('reads 0 with enableResolve off too', () => {
       const params = defaultParams({
         rawMarkdown: resolvedRaw,
         enableResolve: false,
@@ -338,13 +337,13 @@ describe('useComments', () => {
       });
       const { result } = renderHook(() => useComments(params));
 
-      expect(result.current.commentCounts.get('file.md')).toBe(2);
-      expect(result.current.commentIdsByFile.get('file.md')).toEqual(['c1', 'c2']);
+      expect(result.current.commentCounts.get('file.md')).toBe(0);
+      expect(result.current.commentIdsByFile.get('file.md')).toEqual([]);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 3b. resolvedCommentCounts (the "N resolved" tab badge) needs resolve on
+  // 3b. resolvedCommentCounts (the "N resolved" tab badge), in either mode
   // -----------------------------------------------------------------------
   describe('resolvedCommentCounts', () => {
     const resolvedRaw = rawWithComments(
@@ -396,7 +395,7 @@ describe('useComments', () => {
       expect(result.current.resolvedCommentCounts.get('other.md')).toBe(2);
     });
 
-    it('is empty when enableResolve is false', () => {
+    it('counts them the same when enableResolve is false', () => {
       const params = defaultParams({
         rawMarkdown: resolvedRaw,
         enableResolve: false,
@@ -408,7 +407,8 @@ describe('useComments', () => {
       });
       const { result } = renderHook(() => useComments(params));
 
-      expect(result.current.resolvedCommentCounts.size).toBe(0);
+      expect(result.current.resolvedCommentCounts.get('file.md')).toBe(2);
+      expect(result.current.resolvedCommentCounts.get('other.md')).toBe(2);
     });
   });
 
@@ -437,11 +437,11 @@ describe('useComments', () => {
       expect(result.current.commentCount).toBe(2);
     });
 
-    it('returns total comments, resolved included, when enableResolve is false', () => {
+    it('leaves resolved comments out when enableResolve is false too', () => {
       const params = defaultParams({ rawMarkdown: raw, enableResolve: false });
       const { result } = renderHook(() => useComments(params));
 
-      expect(result.current.commentCount).toBe(3);
+      expect(result.current.commentCount).toBe(2);
     });
   });
 

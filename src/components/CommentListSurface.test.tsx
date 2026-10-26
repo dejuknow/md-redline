@@ -213,28 +213,60 @@ describe('CommentListSurface - answered count', () => {
     return renderSurface(props);
   }
 
+  // Two open comments: remove mode has no resolved state of its own, so a
+  // file without a resolved marker keeps the flat footer.
+  const SECOND_OPEN: MdComment = {
+    ...OPEN_COMMENT,
+    id: 'also-open',
+    anchor: 'third anchor',
+    text: 'This one is open too',
+  };
+
   it('reports how many comments an agent has answered, in remove mode', async () => {
     // Remove mode's footer is otherwise a flat total, so a review with
     // surviving question markers gives the reader no sense of progress.
-    renderRemoveMode({ answeredCommentIds: new Set(['still-open']) });
+    renderRemoveMode({
+      comments: [OPEN_COMMENT, SECOND_OPEN],
+      answeredCommentIds: new Set(['still-open']),
+    });
     const footer = await screen.findByText(/2 comments/);
     expect(footer.textContent).toMatch(/1 answered/);
   });
 
   it('says nothing when none are answered', async () => {
-    renderRemoveMode({ answeredCommentIds: new Set<string>() });
+    renderRemoveMode({
+      comments: [OPEN_COMMENT, SECOND_OPEN],
+      answeredCommentIds: new Set<string>(),
+    });
     const footer = await screen.findByText(/2 comments/);
     expect(footer.textContent).not.toMatch(/answered/);
   });
 
-  it('counts a resolved-in-data comment in remove mode, matching the card', async () => {
-    // RESOLVED_COMMENT carries status:'resolved' in its data. In remove mode
-    // that status means nothing, and the card shows the pill, so the footer
-    // has to count it. Gating the exclusion on the status alone made the two
-    // disagree about the same comment.
-    renderRemoveMode({ answeredCommentIds: new Set(['settled']) });
-    const footer = await screen.findByText(/2 comments/);
-    expect(footer.textContent).toMatch(/1 answered/);
+  it('offers no Open/Resolved split in remove mode when nothing is resolved', async () => {
+    renderRemoveMode({ comments: [OPEN_COMMENT, SECOND_OPEN], onBulkDeleteResolved: vi.fn() });
+    await screen.findByText(/2 comments/);
+    expect(screen.queryByRole('button', { name: /^Resolved/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear Resolved' })).toBeNull();
+  });
+
+  it('splits a resolved marker out in remove mode, as resolve mode does (#159)', async () => {
+    // RESOLVED_COMMENT carries status:'resolved'. That is finished in either
+    // mode, so remove mode shows the same split, leaves it out of the answered
+    // count like the card does, and keeps it under its own divider.
+    renderRemoveMode({
+      answeredCommentIds: new Set(['settled']),
+      onBulkResolve: vi.fn(),
+      onBulkDeleteResolved: vi.fn(),
+    });
+    const footer = await screen.findByText(/1 open/);
+    expect(footer.textContent).toMatch(/1 resolved/);
+    expect(footer.textContent).not.toMatch(/answered/);
+    expect(screen.getByRole('button', { name: /^Resolved/ })).toBeTruthy();
+    expect(screen.getByText('Resolved (1)')).toBeTruthy();
+    // Remove mode keeps Delete All and gains Clear Resolved, but not Resolve All.
+    expect(screen.getByRole('button', { name: 'Delete All' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Clear Resolved' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Resolve All' })).toBeNull();
   });
 
   it('counts answered questions in resolve mode too', async () => {

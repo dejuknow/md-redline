@@ -152,9 +152,7 @@ describe('MarkdownViewer: mermaid sequence-diagram comment highlights', () => {
       contextAfter: '/login',
     };
 
-    const { container } = render(
-      <MarkdownViewer {...baseProps()} comments={[comment]} enableResolve />,
-    );
+    const { container } = render(<MarkdownViewer {...baseProps()} comments={[comment]} />);
     const svgText = await waitForMermaidText(container);
 
     expect(svgText.classList.contains('mermaid-comment-highlight')).toBe(false);
@@ -200,9 +198,7 @@ describe('MarkdownViewer: mermaid flowchart foreignObject labels', () => {
       status: 'resolved',
     };
 
-    const { container } = render(
-      <MarkdownViewer {...flowchartProps()} comments={[comment]} enableResolve />,
-    );
+    const { container } = render(<MarkdownViewer {...flowchartProps()} comments={[comment]} />);
     await waitForLabel(container);
 
     await waitFor(() => {
@@ -228,9 +224,7 @@ describe('MarkdownViewer: mermaid flowchart foreignObject labels', () => {
       timestamp: '2026-04-11T00:00:00.000Z',
     };
 
-    const { container } = render(
-      <MarkdownViewer {...flowchartProps()} comments={[comment]} enableResolve />,
-    );
+    const { container } = render(<MarkdownViewer {...flowchartProps()} comments={[comment]} />);
     await waitForLabel(container);
 
     await waitFor(() => {

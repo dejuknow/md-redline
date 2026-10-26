@@ -152,19 +152,20 @@ export function useComments(params: UseCommentsParams) {
   // and surfaced separately via the "Awaiting your reply" section, and they
   // must NOT be sent back to the agent as part of a user batch.
   //
-  // A resolved comment only counts as gone while the resolve workflow is on.
-  // With it off, the highlight, card and List view still show a resolved
-  // marker as open (with Reply), so it stays in the badge and the Send set;
-  // dropping it would silently lose a reply typed there. Agent questions are
-  // the exception: "Awaiting your reply" only surfaces open ones in either
-  // mode, so a resolved question never counts.
+  // A resolved comment is finished in either mode (#159), so it leaves the
+  // badge and the Send set whether or not the resolve workflow is on. Resolve
+  // mode only decides what happens to a comment once it is addressed. A file
+  // can carry resolved markers with the workflow off: one resolved in an
+  // earlier resolve-mode session, by an agent session started with it on, by
+  // a collaborator, or by hand. Every surface shows those as resolved too, so
+  // nothing offers a reply that would never be sent.
   const { commentCounts, resolvedCommentCounts, commentIdsByFile, agentCommentCounts } =
     useMemo(() => {
       const counts = new Map<string, number>();
       const resolvedCounts = new Map<string, number>();
       const idsByFile = new Map<string, string[]>();
       const agentCounts = new Map<string, number>();
-      const isCounted = (c: MdComment) => !enableResolve || getEffectiveStatus(c) !== 'resolved';
+      const isCounted = (c: MdComment) => getEffectiveStatus(c) !== 'resolved';
       for (const tab of tabs) {
         if (tab.filePath === activeFilePath) {
           const userComments = comments.filter((c) => !c.agentInitiated);
@@ -174,12 +175,10 @@ export function useComments(params: UseCommentsParams) {
             tab.filePath,
             countedComments.map((c) => c.id),
           );
-          if (enableResolve) {
-            resolvedCounts.set(
-              tab.filePath,
-              userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
-            );
-          }
+          resolvedCounts.set(
+            tab.filePath,
+            userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+          );
           const agentComments = comments.filter(
             (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
           );
@@ -194,12 +193,10 @@ export function useComments(params: UseCommentsParams) {
               tab.filePath,
               countedTabComments.map((c) => c.id),
             );
-            if (enableResolve) {
-              resolvedCounts.set(
-                tab.filePath,
-                userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
-              );
-            }
+            resolvedCounts.set(
+              tab.filePath,
+              userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
+            );
             const agentTabComments = tabComments.filter(
               (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
             );
@@ -215,7 +212,7 @@ export function useComments(params: UseCommentsParams) {
         commentIdsByFile: idsByFile,
         agentCommentCounts: agentCounts,
       };
-    }, [tabs, activeFilePath, comments, enableResolve]);
+    }, [tabs, activeFilePath, comments]);
 
   // Threads the reviewer replied to after the agent's last reply, each mapped
   // to that reply's key (id plus a hash of its text). A sent thread is pending
@@ -233,16 +230,14 @@ export function useComments(params: UseCommentsParams) {
         }
       }
       const userTabComments = tabComments.filter((c) => !c.agentInitiated);
-      for (const [id, replyKey] of computeUserRepliedLast(userTabComments, enableResolve)) {
+      for (const [id, replyKey] of computeUserRepliedLast(userTabComments)) {
         lastReplyKeys.set(id, replyKey);
       }
     }
     return lastReplyKeys;
-  }, [tabs, activeFilePath, comments, enableResolve]);
+  }, [tabs, activeFilePath, comments]);
 
-  const commentCount = enableResolve
-    ? comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length
-    : comments.length;
+  const commentCount = comments.filter((c) => getEffectiveStatus(c) !== 'resolved').length;
 
   // Core update helper — synchronously updates the ref so back-to-back
   // mutations (e.g. rapid keyboard shortcuts) each read the latest state.
@@ -504,10 +499,10 @@ export function useComments(params: UseCommentsParams) {
     [cleanMarkdown, comments],
   );
 
+  // Open comments only, in either mode: a resolved one has no card in the
+  // Anchored rail to land on.
   const handleJumpToNext = useCallback(() => {
-    const navigable = enableResolve
-      ? orderedComments.filter((c) => getEffectiveStatus(c) === 'open')
-      : orderedComments;
+    const navigable = orderedComments.filter((c) => getEffectiveStatus(c) === 'open');
     if (navigable.length === 0) return;
 
     const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
@@ -516,12 +511,10 @@ export function useComments(params: UseCommentsParams) {
     setActiveCommentId(next.id);
     viewerRef.current?.scrollToComment(next.id);
     rawViewRef.current?.scrollToComment(next.id);
-  }, [orderedComments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
+  }, [orderedComments, activeCommentId, viewerRef, rawViewRef]);
 
   const handleJumpToPrev = useCallback(() => {
-    const navigable = enableResolve
-      ? orderedComments.filter((c) => getEffectiveStatus(c) === 'open')
-      : orderedComments;
+    const navigable = orderedComments.filter((c) => getEffectiveStatus(c) === 'open');
     if (navigable.length === 0) return;
 
     const currentIdx = activeCommentId ? navigable.findIndex((c) => c.id === activeCommentId) : -1;
@@ -530,7 +523,7 @@ export function useComments(params: UseCommentsParams) {
     setActiveCommentId(prev.id);
     viewerRef.current?.scrollToComment(prev.id);
     rawViewRef.current?.scrollToComment(prev.id);
-  }, [orderedComments, activeCommentId, enableResolve, viewerRef, rawViewRef]);
+  }, [orderedComments, activeCommentId, viewerRef, rawViewRef]);
 
   return {
     activeCommentId,

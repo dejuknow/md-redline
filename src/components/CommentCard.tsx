@@ -141,7 +141,10 @@ export const CommentCard = memo(function CommentCard({
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
   const resolveEnabled = settings.enableResolve;
   const status = getEffectiveStatus(comment);
-  const isResolved = resolveEnabled && status === 'resolved';
+  // Resolved in either mode (#159). Resolve mode only decides whether an
+  // addressed comment is marked resolved or removed; a resolved marker in a
+  // file read with the workflow off is just as finished.
+  const isResolved = status === 'resolved';
   // Shown in BOTH modes, and gated on resolution rather than on the mode.
   // Resolve mode reports per-comment state for an EDIT, which ends resolved,
   // but a question is told to stay open, so an answered question shows "Open"
@@ -344,11 +347,7 @@ export const CommentCard = memo(function CommentCard({
           title: `Anchor text was rewritten. Following the marker to the text that replaced it.\n\nOriginally anchored to: "${comment.anchor}"`,
         }
       : anchorDetached
-        ? // `status`, not `isResolved`: the latter also requires the resolve
-          // setting to be on, while detectMissingAnchors — whose behavior this
-          // badge exists to explain — keys off effective status alone. Gating
-          // on the setting makes the badge disagree with the rail.
-          status === 'resolved'
+        ? isResolved
           ? {
               label: 'Changed',
               className: QUIET_BADGE,
@@ -429,7 +428,9 @@ export const CommentCard = memo(function CommentCard({
               {anchorBadge.label}
             </span>
           )}
-          {resolveEnabled && (
+          {/* With the workflow off, only a resolved comment has a status
+              worth naming: there, open is simply what a comment is. */}
+          {(resolveEnabled || isResolved) && (
             <span
               className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${STATUS_CONFIG[status].className}`}
             >
@@ -848,30 +849,33 @@ export const CommentCard = memo(function CommentCard({
           aria-label="Thread actions"
           className="flex items-center border-t border-border-subtle px-1 pt-1.5 pb-2"
         >
-          {resolveEnabled &&
-            (isResolved
-              ? onUnresolve && (
-                  <ActionButton
-                    intent="primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUnresolve(comment.id);
-                    }}
-                  >
-                    Reopen
-                  </ActionButton>
-                )
-              : onResolve && (
-                  <ActionButton
-                    intent="success"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onResolve(comment.id);
-                    }}
-                  >
-                    Resolve
-                  </ActionButton>
-                ))}
+          {/* Reopen in either mode, so a reader with the workflow off can
+              push back on a thread an agent closed. Resolve itself stays a
+              resolve-mode action. */}
+          {isResolved
+            ? onUnresolve && (
+                <ActionButton
+                  intent="primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUnresolve(comment.id);
+                  }}
+                >
+                  Reopen
+                </ActionButton>
+              )
+            : resolveEnabled &&
+              onResolve && (
+                <ActionButton
+                  intent="success"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onResolve(comment.id);
+                  }}
+                >
+                  Resolve
+                </ActionButton>
+              )}
           <span className="ml-auto">
             <DeleteIconButton
               label={replies.length > 0 ? 'Delete thread' : 'Delete'}
