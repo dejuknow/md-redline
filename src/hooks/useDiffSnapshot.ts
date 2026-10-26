@@ -115,15 +115,18 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
     [activeFilePath, rawMarkdownRef],
   );
 
-  /** Set the active file's reference to a specific value (used by Undo). */
+  /**
+   * Set a file's reference to a specific value (used by Undo). The file is
+   * the active one unless named, so an undo can target the file it came from.
+   */
   const restoreReference = useCallback(
-    (ref: DiffReference | null) => {
-      if (!activeFilePath) return;
+    (ref: DiffReference | null, path: string | null = activeFilePath) => {
+      if (!path) return;
       // Same mirror-then-updater shape as captureReference; see its comment.
       const apply = (base: Map<string, DiffReference>) => {
         const next = new Map(base);
-        if (ref) next.set(activeFilePath, ref);
-        else next.delete(activeFilePath);
+        if (ref) next.set(path, ref);
+        else next.delete(path);
         return next;
       };
       refsRef.current = apply(refsRef.current);

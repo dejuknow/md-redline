@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useComments, type UseCommentsParams } from './useComments';
+import { useUndoSlot, type UndoEntry } from './useUndoSlot';
 
 // ---------------------------------------------------------------------------
 // Helpers: build raw markdown strings with embedded comment markers
@@ -30,6 +31,22 @@ function rawWithComments(
 // Default params factory
 // ---------------------------------------------------------------------------
 
+/** A working one-entry slot, so a toast's Undo behaves in any test. */
+function fakeUndoSlot(): UseCommentsParams['undoSlot'] {
+  let held: UndoEntry | null = null;
+  return {
+    offer: (e) => {
+      held = e;
+    },
+    holds: (e) => held === e,
+    take: (e) => {
+      if (held !== e) return false;
+      held = null;
+      return true;
+    },
+  };
+}
+
 function defaultParams(overrides: Partial<UseCommentsParams> = {}): UseCommentsParams {
   return {
     rawMarkdown: '',
@@ -51,6 +68,7 @@ function defaultParams(overrides: Partial<UseCommentsParams> = {}): UseCommentsP
     clearSelection: vi.fn(),
     setAutoExpandForm: vi.fn(),
     requestCommentFocus: vi.fn(),
+    undoSlot: fakeUndoSlot(),
     ...overrides,
   };
 }
@@ -681,6 +699,7 @@ describe('useComments', () => {
   // -----------------------------------------------------------------------
   describe('undo a delete', () => {
     const UNDO_ERROR = "Couldn't undo. The file changed after the delete.";
+    const OTHER_FILE_ERROR = "Couldn't undo. The delete was in another file.";
 
     function setup(raw: string, overrides: Partial<UseCommentsParams> = {}) {
       const setRawMarkdown = vi.fn();
@@ -696,7 +715,15 @@ describe('useComments', () => {
         activeFilePath: 'a.md',
         ...overrides,
       });
-      const hook = renderHook((p: UseCommentsParams) => useComments(p), { initialProps: params });
+      // The real undo slot, as App wires it, so Cmd+Z and the palette (its
+      // undoLast and available) are tested against what the delete offered.
+      const hook = renderHook(
+        (p: UseCommentsParams) => {
+          const slot = useUndoSlot(p.activeFilePath);
+          return { ...useComments({ ...p, undoSlot: slot }), slot };
+        },
+        { initialProps: params },
+      );
       return { ...hook, params, setRawMarkdown, saveFile, showToast, rawMarkdownRef };
     }
 
@@ -754,8 +781,9 @@ describe('useComments', () => {
         // active id directly would skip that, since the jump only selects a
         // card that isn't already active.
         expect(params.requestCommentFocus).toHaveBeenCalledWith('c1', 'jump');
-        // No error toast: only the delete toast was shown.
-        expect(showToast).toHaveBeenCalledTimes(1);
+        // No error toast: the delete toast, then the confirmation.
+        expect(showToast).toHaveBeenCalledTimes(2);
+        expect(showToast).toHaveBeenLastCalledWith('Comment restored.', 'info');
       });
 
       it('Undo does not write when the markdown changed after the delete', () => {
@@ -793,7 +821,14 @@ describe('useComments', () => {
         expect(saveFile).not.toHaveBeenCalled();
         expect(result.current.activeCommentId).toBeNull();
         expect(params.requestCommentFocus).not.toHaveBeenCalled();
-        expect(showToast).toHaveBeenLastCalledWith(UNDO_ERROR, 'error');
+        expect(showToast).toHaveBeenLastCalledWith(OTHER_FILE_ERROR, 'error');
+
+        // The delete is still kept: back on its own file, Cmd+Z restores it.
+        rerender({ ...params, activeFilePath: 'a.md' });
+        act(() => {
+          result.current.slot.undoLast();
+        });
+        expect(setRawMarkdown).toHaveBeenCalledWith(commentRaw);
       });
 
       it('Undo still works after a re-render that keeps the same file', () => {
@@ -845,7 +880,8 @@ describe('useComments', () => {
         expect(setRawMarkdown).toHaveBeenCalledWith(replyRaw);
         expect(saveFile).toHaveBeenCalledWith(replyRaw);
         expect(rawMarkdownRef.current).toBe(replyRaw);
-        expect(showToast).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledTimes(2);
+        expect(showToast).toHaveBeenLastCalledWith('Reply restored.', 'info');
       });
 
       it('Undo does not touch the active comment', () => {
@@ -886,7 +922,7 @@ describe('useComments', () => {
 
         expect(setRawMarkdown).not.toHaveBeenCalled();
         expect(saveFile).not.toHaveBeenCalled();
-        expect(showToast).toHaveBeenLastCalledWith(UNDO_ERROR, 'error');
+        expect(showToast).toHaveBeenLastCalledWith(OTHER_FILE_ERROR, 'error');
       });
 
       it('does not offer Undo when the reply id matches nothing', () => {
@@ -895,6 +931,198 @@ describe('useComments', () => {
         act(() => result.current.handleDeleteReply('c1', 'missing'));
 
         expect(showToast).not.toHaveBeenCalled();
+      });
+    });
+
+    // Cmd+Z and the palette's "Undo delete": the same restore, without
+    // the toast's 5 seconds.
+    describe('undo the last delete after its toast', () => {
+      const twoCommentRaw = `Hello ${makeComment({ id: 'c1', anchor: 'Hello' })}world ${makeComment(
+        { id: 'c2', anchor: 'world' },
+      )}`;
+
+      it('does nothing when nothing was deleted', () => {
+        const { result, setRawMarkdown, showToast } = setup(commentRaw);
+
+        let handled = true;
+        act(() => {
+          handled = result.current.slot.undoLast();
+        });
+
+        expect(handled).toBe(false);
+        expect(result.current.slot.available).toBeNull();
+        expect(setRawMarkdown).not.toHaveBeenCalled();
+        expect(showToast).not.toHaveBeenCalled();
+      });
+
+      it('restores a deleted comment, brings it into view, and confirms', () => {
+        const { result, params, setRawMarkdown, saveFile, showToast } = setup(commentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        expect(result.current.slot.available?.what).toBe('delete');
+        setRawMarkdown.mockClear();
+        saveFile.mockClear();
+
+        let handled = false;
+        act(() => {
+          handled = result.current.slot.undoLast();
+        });
+
+        expect(handled).toBe(true);
+        expect(setRawMarkdown).toHaveBeenCalledWith(commentRaw);
+        expect(saveFile).toHaveBeenCalledWith(commentRaw);
+        expect(params.requestCommentFocus).toHaveBeenCalledWith('c1', 'jump');
+        expect(showToast).toHaveBeenLastCalledWith('Comment restored.', 'info');
+        expect(result.current.slot.available).toBeNull();
+      });
+
+      it('restores a deleted reply and confirms', () => {
+        const { result, setRawMarkdown, showToast } = setup(replyRaw);
+
+        act(() => result.current.handleDeleteReply('c1', 'r1'));
+        act(() => {
+          result.current.slot.undoLast();
+        });
+
+        expect(setRawMarkdown).toHaveBeenLastCalledWith(replyRaw);
+        expect(showToast).toHaveBeenLastCalledWith('Reply restored.', 'info');
+      });
+
+      it('undoes only the most recent delete', () => {
+        const { result, setRawMarkdown, rawMarkdownRef } = setup(twoCommentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        const afterFirst = rawMarkdownRef.current;
+        act(() => result.current.handleDelete('c2'));
+        setRawMarkdown.mockClear();
+
+        let first = false;
+        let second = true;
+        act(() => {
+          first = result.current.slot.undoLast();
+        });
+        act(() => {
+          second = result.current.slot.undoLast();
+        });
+
+        expect(first).toBe(true);
+        expect(second).toBe(false);
+        expect(setRawMarkdown).toHaveBeenCalledTimes(1);
+        expect(setRawMarkdown).toHaveBeenCalledWith(afterFirst);
+      });
+
+      it('refuses and forgets the delete when the markdown changed after it', () => {
+        const { result, rerender, params, setRawMarkdown, saveFile, showToast, rawMarkdownRef } =
+          setup(commentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        const edited = `${rawMarkdownRef.current} edited elsewhere`;
+        rawMarkdownRef.current = edited;
+        rerender({ ...params, rawMarkdown: edited });
+        // Still offered: running it is how the reader learns why nothing came back.
+        expect(result.current.slot.available?.what).toBe('delete');
+        setRawMarkdown.mockClear();
+        saveFile.mockClear();
+
+        let handled = false;
+        act(() => {
+          handled = result.current.slot.undoLast();
+        });
+
+        // Handled, so the key press still says why nothing came back.
+        expect(handled).toBe(true);
+        expect(setRawMarkdown).not.toHaveBeenCalled();
+        expect(saveFile).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenLastCalledWith(UNDO_ERROR, 'error');
+        showToast.mockClear();
+
+        let again = true;
+        act(() => {
+          again = result.current.slot.undoLast();
+        });
+        expect(again).toBe(false);
+        expect(showToast).not.toHaveBeenCalled();
+      });
+
+      it('leaves the delete alone while another file is open, and undoes it back on its own file', () => {
+        const { result, rerender, params, setRawMarkdown, showToast, rawMarkdownRef } =
+          setup(commentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        const afterDelete = rawMarkdownRef.current;
+        showToast.mockClear();
+        setRawMarkdown.mockClear();
+
+        rawMarkdownRef.current = 'Other file';
+        rerender({ ...params, activeFilePath: 'b.md', rawMarkdown: 'Other file' });
+        expect(result.current.slot.available).toBeNull();
+        let elsewhere = true;
+        act(() => {
+          elsewhere = result.current.slot.undoLast();
+        });
+        expect(elsewhere).toBe(false);
+        expect(setRawMarkdown).not.toHaveBeenCalled();
+        expect(showToast).not.toHaveBeenCalled();
+
+        rawMarkdownRef.current = afterDelete;
+        rerender({ ...params, activeFilePath: 'a.md', rawMarkdown: afterDelete });
+        expect(result.current.slot.available?.what).toBe('delete');
+        let back = false;
+        act(() => {
+          back = result.current.slot.undoLast();
+        });
+        expect(back).toBe(true);
+        expect(setRawMarkdown).toHaveBeenCalledWith(commentRaw);
+      });
+
+      it('reports whether it is still the last change to its file', () => {
+        const { result, rerender, params, rawMarkdownRef } = setup(commentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        const afterDelete = rawMarkdownRef.current;
+        const offered = result.current.slot.available;
+        expect(offered?.isCurrent?.()).toBe(true);
+
+        rawMarkdownRef.current = `${afterDelete} edited elsewhere`;
+        expect(offered?.isCurrent?.()).toBe(false);
+
+        // Same text, but another file is open.
+        rawMarkdownRef.current = afterDelete;
+        rerender({ ...params, activeFilePath: 'b.md' });
+        expect(offered?.isCurrent?.()).toBe(false);
+      });
+
+      it("the toast's Undo does nothing once the delete was undone another way", () => {
+        const { result, setRawMarkdown, showToast } = setup(commentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        const toastUndo = undoAction(showToast);
+        act(() => {
+          result.current.slot.undoLast();
+        });
+        setRawMarkdown.mockClear();
+        showToast.mockClear();
+
+        act(() => toastUndo.onClick());
+
+        expect(setRawMarkdown).not.toHaveBeenCalled();
+        expect(showToast).not.toHaveBeenCalled();
+      });
+
+      it("there is nothing left to undo after the toast's Undo", () => {
+        const { result, setRawMarkdown, showToast } = setup(commentRaw);
+
+        act(() => result.current.handleDelete('c1'));
+        act(() => undoAction(showToast).onClick());
+        setRawMarkdown.mockClear();
+
+        let handled = true;
+        act(() => {
+          handled = result.current.slot.undoLast();
+        });
+
+        expect(handled).toBe(false);
+        expect(setRawMarkdown).not.toHaveBeenCalled();
       });
     });
 

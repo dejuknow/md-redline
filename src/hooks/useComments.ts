@@ -34,6 +34,7 @@ import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import type { ShowToast } from './useToast';
+import type { UndoEntry, UndoSlot } from './useUndoSlot';
 
 interface TabInfo {
   filePath: string;
@@ -75,6 +76,8 @@ export interface UseCommentsParams {
   clearSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
   requestCommentFocus: (commentId: string, origin?: CommentFocusOrigin) => void;
+  /** Where a delete leaves its undo for Cmd+Z and the palette (useUndoSlot). */
+  undoSlot: Pick<UndoSlot, 'offer' | 'holds' | 'take'>;
 }
 
 export function useComments(params: UseCommentsParams) {
@@ -96,6 +99,7 @@ export function useComments(params: UseCommentsParams) {
     clearSelection,
     setAutoExpandForm,
     requestCommentFocus,
+    undoSlot: { offer: offerUndo, holds: undoHolds, take: takeUndo },
   } = params;
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -257,18 +261,40 @@ export function useComments(params: UseCommentsParams) {
   const activeFilePathRef = useRef(activeFilePath);
   activeFilePathRef.current = activeFilePath;
 
-  // After a single comment or reply is deleted, offer to put it back. The undo
-  // restores the whole pre-delete document, so it only runs when nothing else
-  // has touched the file since: the same file is still open and the markdown is
-  // exactly what the delete wrote. Anything else (an agent edit, another comment
-  // action, a different tab) would be silently overwritten by `before`.
+  // After a single comment or reply is deleted, offer to put it back: in the
+  // toast, and through the shared undo slot (Cmd+Z, the palette) once the
+  // toast is gone. The undo restores the whole pre-delete document, so it only
+  // runs when nothing else has touched the file since: the same file is still
+  // open and the markdown is exactly what the delete wrote. Anything else (an
+  // agent edit, another comment action, a different tab) would be silently
+  // overwritten by `before`.
   const offerDeleteUndo = useCallback(
-    (message: string, before: string, after: string, onRestored?: () => void) => {
+    (
+      kind: 'comment-delete' | 'reply-delete',
+      message: string,
+      restoredMessage: string,
+      before: string,
+      after: string,
+      onRestored?: () => void,
+    ) => {
       const filePath = activeFilePathRef.current;
-      showToast(message, 'info', {
-        label: 'Undo',
-        onClick: () => {
-          if (activeFilePathRef.current !== filePath || rawMarkdownRef.current !== after) {
+      const entry: UndoEntry = {
+        kind,
+        what: 'delete',
+        filePath,
+        run: () => {
+          // Already undone (the toast's Undo after Cmd+Z), or a newer undo
+          // replaced it.
+          if (!undoHolds(entry)) return;
+          // Only the toast's Undo gets here from another file. The delete
+          // stays kept, so Cmd+Z still undoes it once its own file is back.
+          if (activeFilePathRef.current !== filePath) {
+            showToast("Couldn't undo. The delete was in another file.", 'error');
+            return;
+          }
+          // On its own file the delete is used up whether or not it restores.
+          takeUndo(entry);
+          if (rawMarkdownRef.current !== after) {
             showToast("Couldn't undo. The file changed after the delete.", 'error');
             return;
           }
@@ -276,10 +302,14 @@ export function useComments(params: UseCommentsParams) {
           // the open file, and saveFileAt reads the file's mtime when it runs.
           updateAndSave(before);
           onRestored?.();
+          showToast(restoredMessage, 'info');
         },
-      });
+        isCurrent: () => activeFilePathRef.current === filePath && rawMarkdownRef.current === after,
+      };
+      offerUndo(entry);
+      showToast(message, 'info', { label: 'Undo', onClick: entry.run });
     },
-    [showToast, rawMarkdownRef, updateAndSave],
+    [showToast, rawMarkdownRef, updateAndSave, offerUndo, undoHolds, takeUndo],
   );
 
   const handleAddComment = useCallback(
@@ -353,7 +383,14 @@ export function useComments(params: UseCommentsParams) {
       if (after === before) return;
       // The same request "Jump to agent question" makes: scroll to the card,
       // focus it, and select it in Anchored density.
-      offerDeleteUndo('Comment deleted.', before, after, () => requestCommentFocus(id, 'jump'));
+      offerDeleteUndo(
+        'comment-delete',
+        'Comment deleted.',
+        'Comment restored.',
+        before,
+        after,
+        () => requestCommentFocus(id, 'jump'),
+      );
     },
     [updateAndSave, rawMarkdownRef, offerDeleteUndo, requestCommentFocus],
   );
@@ -385,7 +422,7 @@ export function useComments(params: UseCommentsParams) {
       const after = removeReply(before, commentId, replyId);
       updateAndSave(after);
       if (after === before) return;
-      offerDeleteUndo('Reply deleted.', before, after);
+      offerDeleteUndo('reply-delete', 'Reply deleted.', 'Reply restored.', before, after);
     },
     [updateAndSave, rawMarkdownRef, offerDeleteUndo],
   );

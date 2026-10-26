@@ -69,6 +69,7 @@ import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
 import { MermaidFullscreenModal } from './components/MermaidFullscreenModal';
 import { usePaneLayout } from './hooks/usePaneLayout';
 import { useToast, type ShowToast } from './hooks/useToast';
+import { useUndoSlot, type UndoEntry } from './hooks/useUndoSlot';
 import { useUpdateNotice } from './hooks/useUpdateNotice';
 import { useModalState } from './hooks/useModalState';
 import { useSearch } from './hooks/useSearch';
@@ -522,6 +523,17 @@ export default function App() {
 
   // Toast notification state
   const { toast, showToast, dismissToast } = useToast();
+  // One level of undo for whatever a toast last offered to undo (a delete, a
+  // diff reset), so Cmd+Z and the palette can still undo it after the toast.
+  const undoSlot = useUndoSlot(activeFilePath);
+  const {
+    offer: offerUndo,
+    peek: peekUndo,
+    holds: holdsUndo,
+    take: takeUndo,
+    undoLast,
+    available: undoAvailable,
+  } = undoSlot;
   showToastRef.current = showToast;
   const { latest: updateLatest, dismiss: dismissUpdateNotice, reloadReady } = useUpdateNotice();
 
@@ -670,6 +682,69 @@ export default function App() {
   useLayoutEffect(() => {
     activeFilePathRef.current = activeFilePath;
   }, [activeFilePath]);
+
+  // Reset the diff to the file as it is now (marking it reviewed, or emptying
+  // its open comments) and offer to undo that: in the toast, and through the
+  // undo slot (Cmd+Z, the palette) once the toast is gone. Putting the old
+  // reference back never touches the file, so the toast's Undo still lands on
+  // the right file after a tab switch. It only checks that nothing has moved
+  // that file's reference since: a handoff captures one without a toast.
+  //
+  // `prior` is a delete that set the reset off (it removed the last open
+  // comment). Its own toast and undo were just replaced by this one, so this
+  // undo reverses both: the comment comes back, and the diff with it.
+  const resetDiffWithUndo = useCallback(
+    (message: string, prior: UndoEntry | null = null) => {
+      const path = activeFilePath;
+      const prev = captureReference('review');
+      if (!path) return;
+      const reset = getReference(path);
+      const entry: UndoEntry = {
+        kind: prior ? prior.kind : 'diff-reset',
+        what: prior ? prior.what : 'diff reset',
+        filePath: path,
+        run: () => {
+          if (!holdsUndo(entry)) return;
+          // A folded delete writes the open file, so from another file it
+          // refuses, and the pair stays for when its file is back. Taking
+          // the pair and leaving the delete alone would let it come back
+          // later without its diff.
+          if (prior && activeFilePathRef.current !== path) {
+            showToast("Couldn't undo. The delete was in another file.", 'error');
+            return;
+          }
+          takeUndo(entry);
+          const diffUnmoved = getReference(path) === reset;
+          if (prior) {
+            // The delete restores (or refuses) and confirms itself. The diff
+            // comes back only alongside the comment, never on its own.
+            offerUndo(prior);
+            if (diffUnmoved && prior.isCurrent?.()) restoreReference(prev, path);
+            prior.run();
+            return;
+          }
+          if (!diffUnmoved) {
+            showToast("Couldn't undo. The diff changed after the reset.", 'error');
+            return;
+          }
+          restoreReference(prev, path);
+          showToast('Diff restored.', 'info');
+        },
+      };
+      offerUndo(entry);
+      showToast(message, 'info', { label: 'Undo', onClick: entry.run });
+    },
+    [
+      activeFilePath,
+      captureReference,
+      getReference,
+      restoreReference,
+      showToast,
+      offerUndo,
+      holdsUndo,
+      takeUndo,
+    ],
+  );
   const activeIsLoadingRef = useRef(isLoading);
   useLayoutEffect(() => {
     activeIsLoadingRef.current = isLoading;
@@ -899,6 +974,7 @@ export default function App() {
     clearSelection,
     setAutoExpandForm,
     requestCommentFocus,
+    undoSlot,
   });
 
   // `commentCount` is the OPEN count while the resolve workflow is on, so the
@@ -940,20 +1016,25 @@ export default function App() {
       })
     ) {
       advancedForEpisodeRef.current = true;
-      const prevRef = captureReference('review');
-      showToast('All comments resolved. Diff reset.', 'info', {
-        label: 'Undo',
-        onClick: () => restoreReference(prevRef),
-      });
+      // A delete that is still the file's last change is what emptied the
+      // open count (a resolve, or an agent's edit, changes the text after it).
+      const prior = peekUndo();
+      const byDelete =
+        prior?.kind === 'comment-delete' && prior.filePath === activeFilePath && prior.isCurrent?.()
+          ? prior
+          : null;
+      resetDiffWithUndo(
+        byDelete ? 'Comment deleted. Diff reset.' : 'All comments resolved. Diff reset.',
+        byDelete,
+      );
     }
   }, [
     commentCount,
     activeFilePath,
     currentReference,
     settings.enableResolve,
-    captureReference,
-    restoreReference,
-    showToast,
+    resetDiffWithUndo,
+    peekUndo,
   ]);
 
   // A rail can exist in this view at all: rendered mode, not showing a diff
@@ -1496,12 +1577,8 @@ export default function App() {
   }, [diffEnabled, setDiffEnabled]);
 
   const handleMarkReviewed = useCallback(() => {
-    const prevRef = captureReference('review');
-    showToast('Diff reset.', 'info', {
-      label: 'Undo',
-      onClick: () => restoreReference(prevRef),
-    });
-  }, [captureReference, restoreReference, showToast]);
+    resetDiffWithUndo('Diff reset.');
+  }, [resetDiffWithUndo]);
 
   const mermaidBlocks = useMemo(() => collectMermaidBlocks(cleanMarkdown), [cleanMarkdown]);
 
@@ -2386,6 +2463,22 @@ export default function App() {
       // closed. (The Mermaid fullscreen modal already short-circuited above.)
       if (isInput || activeModal === 'commandPalette') return;
 
+      // Cmd+Z : Undo what the last Undo toast offered (a delete, a diff
+      // reset), after the toast is gone too. Below the input check,
+      // so a text field, the reply composer, and an inline edit keep their own
+      // undo. Not under a dialog (settings, the shortcuts panel, the file
+      // opener, a confirm, including the rail's own Delete all): the comment
+      // would come back behind it, and a Delete all confirm would go on
+      // counting without it. The find bar leaves the document in use, so it
+      // doesn't count. Nothing to undo in this file leaves the key alone.
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+        const dialogOpen =
+          (activeModal !== null && activeModal !== 'search') ||
+          document.querySelector('[role="alertdialog"]') !== null;
+        if (!dialogOpen && undoLast()) e.preventDefault();
+        return;
+      }
+
       // ? : Toggle keyboard shortcuts help
       if (e.key === '?') {
         e.preventDefault();
@@ -2463,6 +2556,7 @@ export default function App() {
     handleJumpToPrev,
     handleAddComment,
     handleDelete,
+    undoLast,
     handleResolve,
     handleUnresolve,
     viewMode,
@@ -2879,6 +2973,23 @@ export default function App() {
     handleDelete,
   ]);
 
+  // Cmd+Z's palette twin, named for what it would undo.
+  const undoCommands = useMemo(
+    (): Command[] =>
+      undoAvailable
+        ? [
+            {
+              id: 'undo-last',
+              label: `Undo ${undoAvailable.what}`,
+              shortcut: `${modKey}+Z`,
+              section: 'General',
+              onExecute: undoLast,
+            },
+          ]
+        : [],
+    [undoAvailable, undoLast],
+  );
+
   const headingCommands = useMemo(
     (): Command[] =>
       tocHeadings.map((h) => ({
@@ -2919,6 +3030,7 @@ export default function App() {
       ...viewCommands,
       ...fileCommands,
       ...generalCommands,
+      ...undoCommands,
       ...commentCommands,
       ...agentAskCommands,
       ...headingCommands,
@@ -2928,6 +3040,7 @@ export default function App() {
       viewCommands,
       fileCommands,
       generalCommands,
+      undoCommands,
       commentCommands,
       agentAskCommands,
       headingCommands,
