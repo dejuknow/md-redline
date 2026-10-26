@@ -309,6 +309,18 @@ describe('parseSettings', () => {
       expect(enabled).toEqual(expect.arrayContaining(['TOC', '/TOC', 'truncate']));
     });
 
+    it("hides sheaf's comment markers by default and shows them when the sheaf row is unticked", () => {
+      const byDefault = getEnabledHiddenCommentPrefixes(DEFAULT_HIDDEN_COMMENTS);
+      expect(byDefault).toEqual(expect.arrayContaining(['sheaf-comment', 'rd-comment']));
+      const shown = getEnabledHiddenCommentPrefixes({
+        shownTools: ['sheaf'],
+        custom: [],
+        customEnabled: true,
+      });
+      expect(shown).not.toContain('sheaf-comment');
+      expect(shown).not.toContain('rd-comment');
+    });
+
     it('leaves out your own words while they are switched off', () => {
       expect(
         getEnabledHiddenCommentPrefixes({ shownTools: [], custom: ['TODO'], customEnabled: false }),

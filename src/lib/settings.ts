@@ -130,6 +130,8 @@ export const DEFAULT_HIDDEN_COMMENT_TOOLS: HiddenCommentTool[] = [
     label: 'remark-lint',
     prefixes: ['lint disable', 'lint enable', 'lint ignore'],
   },
+  // sheaf writes `sheaf-comment` and still reads the older `rd-comment` of render-doc.
+  { id: 'sheaf', label: 'sheaf', prefixes: ['sheaf-comment', 'rd-comment'] },
   { id: 'textlint', label: 'textlint', prefixes: ['textlint-disable', 'textlint-enable'] },
   // Bare `vale` covers every form: `vale off`, `vale Style.Rule = NO`, `vale style = X`.
   { id: 'vale', label: 'Vale', prefixes: ['vale'] },
