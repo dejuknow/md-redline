@@ -863,3 +863,34 @@ describe('a skipped comment that must be left untouched (#167)', () => {
     expect(result.scores.parsing).toBe(1);
   });
 });
+
+describe('a reply the fixture already had does not count as the agent reply (#104)', () => {
+  // Like fixture 20: the comment arrives with a seeded two-reply thread.
+  const seeded = [
+    { id: 'r1', text: 'Which roles?', author: 'PM', timestamp: '2024-01-01T00:00:00Z' },
+    { id: 'r2', text: 'Admins only.', author: 'Tech Lead', timestamp: '2024-01-01T01:00:00Z' },
+  ];
+  const input = `${makeMarker({ id: 'c1', anchor: 'hello', replies: seeded })}hello world`;
+  const resolve = makeExpected({ markerMode: 'resolve' });
+  const question = makeExpected({
+    comments: [{ id: 'c1', expectedAction: 'address', expectedMarker: 'answered' }],
+  });
+
+  it('gives no credit for resolving a seeded thread without replying', () => {
+    const output = `${makeMarker({ id: 'c1', anchor: 'hello', replies: seeded, status: 'resolved' })}hello there`;
+    const result = score('t', input, output, resolve);
+    expect(result.scores.parsing).toBe(0);
+    expect(result.details).toContain('parsing: c1 — marker preserved but no reply added');
+  });
+
+  it('credits a reply the agent added to the seeded thread', () => {
+    const replies = [...seeded, { id: 'r3', text: 'Done.', author: 'Claude', timestamp: '' }];
+    const output = `${makeMarker({ id: 'c1', anchor: 'hello', replies, status: 'resolved' })}hello there`;
+    expect(score('t', input, output, resolve).scores.parsing).toBe(1);
+  });
+
+  it('gives no credit for an answered question whose only replies were seeded', () => {
+    const output = `${makeMarker({ id: 'c1', anchor: 'hello', replies: seeded })}hello world`;
+    expect(score('t', input, output, question).scores.parsing).toBe(0);
+  });
+});

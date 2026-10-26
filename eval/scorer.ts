@@ -1,5 +1,5 @@
 import { parseComments, detectMissingAnchors } from '../src/lib/comment-parser.js';
-import { getEffectiveStatus } from '../src/types.js';
+import { getEffectiveStatus, type CommentReply } from '../src/types.js';
 import type {
   ExpectedCriteria,
   ScoringResult,
@@ -24,6 +24,19 @@ const WEIGHTS: Record<keyof DimensionScores, number> = {
  * sets the default; a comment can override it, which is how a question inside
  * a remove-mode case expects to keep its marker.
  */
+/**
+ * Whether the output thread has a reply the input thread did not, matched by
+ * id. Every reply that survives parsing has one: the parser drops a reply
+ * without an id, text and author.
+ */
+function addedReply(
+  before: readonly CommentReply[] | undefined,
+  after: readonly CommentReply[] | undefined,
+): boolean {
+  const seen = new Set((before ?? []).map((r) => r.id));
+  return (after ?? []).some((r) => !seen.has(r.id));
+}
+
 function dispositionFor(exp: CommentExpectation, markerMode: MarkerMode): MarkerDisposition {
   return exp.expectedMarker ?? (markerMode === 'remove' ? 'removed' : 'resolved');
 }
@@ -40,6 +53,7 @@ export function score(
   const outputParsed = parseComments(outputRaw);
 
   const outputById = new Map(outputParsed.comments.map((c) => [c.id, c]));
+  const inputById = new Map(inputParsed.comments.map((c) => [c.id, c]));
 
   // --- 1. Parsing: Were comment markers handled correctly? ---
   // After addressing, agents should DELETE markers. Score based on whether
@@ -76,7 +90,10 @@ export function score(
         details.push(`parsing: ${exp.id} — marker was deleted but should have been ${disposition}`);
         continue;
       }
-      const hasReply = (survivor.replies?.length ?? 0) > 0;
+      // Only a reply the agent added counts (#104). A fixture can seed a
+      // thread in input.md (20 does), and the output carries those replies
+      // too, so "has a reply" alone credited an agent that wrote nothing.
+      const hasReply = addedReply(inputById.get(exp.id)?.replies, survivor.replies);
       if (disposition === 'answered') {
         // A question. The reply IS the answer, so the marker has to survive
         // carrying it; no status is required, since both modes leave a
@@ -103,7 +120,6 @@ export function score(
     // Skipped comments that must come through untouched count here too: a
     // marker deleted, replied to or resolved when it should have been left
     // alone is a marker handled wrongly.
-    const inputById = new Map(inputParsed.comments.map((c) => [c.id, c]));
     const untouched = expected.comments.filter(
       (c) => c.expectedAction === 'skip' && c.leaveUntouched,
     );
