@@ -137,7 +137,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         const comment = comments.find((c) => c.id === commentId);
         if (!comment) return false;
 
-        const isResolved = enableResolve && getEffectiveStatus(comment) === 'resolved';
+        const isResolved = getEffectiveStatus(comment) === 'resolved';
 
         // A resolved comment can be reopened, deleted or copied, but not edited
         // or replied to: every card surface hides both affordances while the
@@ -171,16 +171,18 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
               },
             ];
 
-        const resolveItems: ContextMenuEntry[] = enableResolve
-          ? [
-              // No leading rule when Edit/Reply are absent: it would open the
-              // menu on a divider.
-              ...(threadItems.length ? [{ type: 'divider' as const }] : []),
-              isResolved
-                ? { label: 'Reopen', onClick: () => handleUnresolve(commentId) }
-                : { label: 'Resolve', onClick: () => handleResolve(commentId) },
-            ]
-          : [];
+        // Reopen in either mode, Resolve only with the workflow on (#159).
+        const resolveItems: ContextMenuEntry[] =
+          isResolved || enableResolve
+            ? [
+                // No leading rule when Edit/Reply are absent: it would open the
+                // menu on a divider.
+                ...(threadItems.length ? [{ type: 'divider' as const }] : []),
+                isResolved
+                  ? { label: 'Reopen', onClick: () => handleUnresolve(commentId) }
+                  : { label: 'Resolve', onClick: () => handleResolve(commentId) },
+              ]
+            : [];
 
         const items: ContextMenuEntry[] = [
           ...threadItems,
@@ -416,13 +418,15 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       const comment = comments.find((c) => c.id === info.commentId);
       if (!comment) return;
 
-      const resolveItems: ContextMenuEntry[] = enableResolve
-        ? [
-            getEffectiveStatus(comment) === 'resolved'
-              ? { label: 'Reopen', onClick: () => handleUnresolve(info.commentId) }
-              : { label: 'Resolve', onClick: () => handleResolve(info.commentId) },
-          ]
-        : [];
+      const isResolved = getEffectiveStatus(comment) === 'resolved';
+      const resolveItems: ContextMenuEntry[] =
+        isResolved || enableResolve
+          ? [
+              isResolved
+                ? { label: 'Reopen', onClick: () => handleUnresolve(info.commentId) }
+                : { label: 'Resolve', onClick: () => handleResolve(info.commentId) },
+            ]
+          : [];
 
       const items: ContextMenuEntry[] = [
         ...resolveItems,

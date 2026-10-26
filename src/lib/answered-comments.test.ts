@@ -182,16 +182,6 @@ describe('computeUserRepliedLast', () => {
     expect(computeUserRepliedLast([c])).toEqual(new Map());
   });
 
-  it('keeps a resolved thread the reviewer replied to last when resolve is off', () => {
-    const last = stamped(false, 'r2');
-    const c = comment({
-      replies: [stamped(true, 'r1'), last],
-      status: 'resolved',
-      resolved: true,
-    });
-    expect(computeUserRepliedLast([c], false)).toEqual(new Map([['c1', replyKey(last)]]));
-  });
-
   it('excludes a thread with no replies', () => {
     expect(computeUserRepliedLast([comment()])).toEqual(new Map());
   });

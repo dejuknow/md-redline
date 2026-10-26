@@ -72,7 +72,6 @@ interface Props {
   onLocalLinkClick?: (path: string, fragment?: string) => void;
   /** Returns whether it opened a menu; the native one is suppressed only then. */
   onContextMenu?: (info: ViewerContextMenuInfo) => boolean;
-  enableResolve?: boolean;
   sentCommentIds?: string[];
   searchQuery?: string;
   searchActiveIndex?: number;
@@ -163,7 +162,6 @@ export const MarkdownViewer = memo(
       onHighlightClick,
       onLocalLinkClick,
       onContextMenu: onCtxMenu,
-      enableResolve,
       sentCommentIds,
       searchQuery,
       searchActiveIndex,
@@ -470,8 +468,9 @@ export const MarkdownViewer = memo(
         // Resolved anchors used to be dropped here, which left no trace that a
         // passage had ever been discussed. They now paint a faint dotted
         // underline instead (see comment-highlight-resolved) and still get no
-        // margin card, since marginComments filters them out in App.
-        const isResolved = enableResolve === true && getEffectiveStatus(comment) === 'resolved';
+        // margin card, since marginComments filters them out in App. Either
+        // mode: a resolved marker is finished with the workflow off too (#159).
+        const isResolved = getEffectiveStatus(comment) === 'resolved';
         const plainOffset =
           comment.cleanOffset != null ? toPlainOffset(comment.cleanOffset) : undefined;
         // Joined on an explicit NUL escape, never a raw NUL byte in the
@@ -778,7 +777,6 @@ export const MarkdownViewer = memo(
       selectionText,
       selectionOffset,
       toPlainOffset,
-      enableResolve,
       sentCommentIds,
       searchQuery,
       searchActiveIndex,

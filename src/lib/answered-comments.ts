@@ -52,22 +52,18 @@ export function replyKey(reply: NonNullable<MdComment['replies']>[number]): stri
  *
  * The key is what separates "this reply already went out" from "a newer one is
  * waiting": a sent thread counts as unsent again only for a reply the session
- * has not recorded as sent, and an edited reply is a new key. With the resolve
- * workflow on, a resolved thread is left out: a closing "thanks" must not send
- * it back. With it off, the card still shows a resolved thread as open with
- * Reply, so a reply typed there is kept like any other.
+ * has not recorded as sent, and an edited reply is a new key. A resolved thread
+ * is left out in either mode: a closing "thanks" must not send it back, and no
+ * card offers a reply field on a resolved thread to begin with (#159).
  */
-export function computeUserRepliedLast(
-  comments: readonly MdComment[],
-  enableResolve = true,
-): Map<string, string> {
+export function computeUserRepliedLast(comments: readonly MdComment[]): Map<string, string> {
   const lastReplyKeys = new Map<string, string>();
   for (const c of comments) {
     const last = c.replies?.[c.replies.length - 1];
     if (
       last !== undefined &&
       !isAgentReply(last, c.author) &&
-      (!enableResolve || getEffectiveStatus(c) !== 'resolved')
+      getEffectiveStatus(c) !== 'resolved'
     ) {
       lastReplyKeys.set(c.id, replyKey(last));
     }

@@ -294,6 +294,15 @@ describe('RailDensityControl', () => {
     expect(screen.getByText('Delete all comments…')).toBeTruthy();
   });
 
+  it('offers Clear resolved with the workflow off once the file has resolved markers (#159)', () => {
+    const onBulkDeleteResolved = vi.fn();
+    renderControl({ resolveEnabled: false, resolvedCount: 2, onBulkDeleteResolved });
+    fireEvent.click(screen.getByRole('button', { name: 'Comment actions' }));
+    expect(screen.queryByText('Resolve all open')).toBeNull();
+    fireEvent.click(screen.getByText('Clear resolved'));
+    expect(onBulkDeleteResolved).toHaveBeenCalledTimes(1);
+  });
+
   it('confirms before deleting all comments', () => {
     const onBulkDelete = vi.fn();
     renderControl({ onBulkDelete });

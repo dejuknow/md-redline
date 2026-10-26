@@ -315,7 +315,6 @@ describe('MarkdownViewer onHighlightsPainted: unpainted anchors (#99)', () => {
         selectionOffset={null}
         onHighlightClick={vi.fn()}
         onHighlightsPainted={onHighlightsPainted}
-        enableResolve
       />,
     );
 
@@ -772,7 +771,7 @@ describe('MarkdownViewer comment highlights — resolved anchors', () => {
     timestamp: new Date().toISOString(),
   };
 
-  function renderWith(comments: Parameters<typeof MarkdownViewer>[0]['comments'], resolve = true) {
+  function renderWith(comments: Parameters<typeof MarkdownViewer>[0]['comments']) {
     return render(
       <MarkdownViewer
         html={html}
@@ -781,7 +780,6 @@ describe('MarkdownViewer comment highlights — resolved anchors', () => {
         activeCommentId={null}
         selectionText={null}
         selectionOffset={null}
-        enableResolve={resolve}
         onHighlightClick={vi.fn()}
       />,
     );
@@ -840,7 +838,6 @@ describe('MarkdownViewer comment highlights — resolved anchors', () => {
         activeCommentId={null}
         selectionText={null}
         selectionOffset={null}
-        enableResolve
         onHighlightClick={onHighlightClick}
       />,
     );
@@ -871,7 +868,6 @@ describe('MarkdownViewer comment highlights — resolved anchors', () => {
         activeCommentId="c1"
         selectionText={null}
         selectionOffset={null}
-        enableResolve
         onHighlightClick={vi.fn()}
       />,
     );
@@ -883,15 +879,6 @@ describe('MarkdownViewer comment highlights — resolved anchors', () => {
     expect(container.querySelector('mark.comment-highlight-resolved-active')).toBeNull();
   });
 
-  it('treats resolved as open when the resolve feature is off', async () => {
-    const { container } = renderWith([{ ...base, id: 'c1', status: 'resolved' as const }], false);
-
-    await waitFor(() => {
-      expect(container.querySelector('mark.comment-highlight')).not.toBeNull();
-    });
-    expect(container.querySelector('mark.comment-highlight-resolved')).toBeNull();
-  });
-
   it('marks the active resolved trace without giving it the open active fill', async () => {
     const { container } = render(
       <MarkdownViewer
@@ -901,7 +888,6 @@ describe('MarkdownViewer comment highlights — resolved anchors', () => {
         activeCommentId="c1"
         selectionText={null}
         selectionOffset={null}
-        enableResolve
         onHighlightClick={vi.fn()}
       />,
     );
@@ -939,7 +925,6 @@ describe('MarkdownViewer comment highlights — overlapping resolved and open an
         activeCommentId={null}
         selectionText={null}
         selectionOffset={null}
-        enableResolve
         onHighlightClick={onHighlightClick}
       />,
     );
@@ -991,7 +976,6 @@ describe('MarkdownViewer comment highlights — overlapping resolved and open an
         activeCommentId={null}
         selectionText={null}
         selectionOffset={null}
-        enableResolve
         onHighlightClick={onHighlightClick}
       />,
     );
@@ -1082,7 +1066,7 @@ describe('MarkdownViewer viewport scroll anchor', () => {
     'Inserted paragraph three unique text xray.',
   ].join('\n');
 
-  function renderViewer(markdown: string, enableResolve?: boolean) {
+  function renderViewer(markdown: string) {
     const html = renderMarkdown(markdown);
     return render(
       <div className="overflow-y-auto" style={{ height: `${VIEWPORT_HEIGHT}px` }}>
@@ -1093,7 +1077,6 @@ describe('MarkdownViewer viewport scroll anchor', () => {
           activeCommentId={null}
           selectionText={null}
           selectionOffset={null}
-          enableResolve={enableResolve}
           onHighlightClick={vi.fn()}
         />
       </div>,
@@ -1167,8 +1150,8 @@ describe('MarkdownViewer viewport scroll anchor', () => {
     try {
       scroller.scrollTop = 300;
 
-      // Force the highlight effect to re-run (enableResolve is a dep)
-      // without changing the rendered markdown at all.
+      // Force the highlight effect to re-run (a fresh `comments` array is a
+      // dep) without changing the rendered markdown at all.
       rerender(
         <div className="overflow-y-auto" style={{ height: `${VIEWPORT_HEIGHT}px` }}>
           <MarkdownViewer
@@ -1178,7 +1161,6 @@ describe('MarkdownViewer viewport scroll anchor', () => {
             activeCommentId={null}
             selectionText={null}
             selectionOffset={null}
-            enableResolve
             onHighlightClick={vi.fn()}
           />
         </div>,

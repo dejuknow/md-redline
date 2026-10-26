@@ -980,10 +980,11 @@ export default function App() {
     undoSlot,
   });
 
-  // `commentCount` is the OPEN count while the resolve workflow is on, so the
-  // resolved tail is whatever the total has beyond it. With resolve off there
-  // is no resolved state at all.
-  const resolvedCommentCount = settings.enableResolve ? comments.length - commentCount : 0;
+  // `commentCount` is the OPEN count, so the resolved tail is whatever the
+  // total has beyond it. Counted in both modes: a file can carry resolved
+  // markers with the resolve workflow off, and they are finished there too
+  // (#159).
+  const resolvedCommentCount = comments.length - commentCount;
 
   // Bulk delete is unrecoverable, so every entry point (rail kebab, list
   // footer, command palette) confirms first. This backs the palette's.
@@ -1916,12 +1917,10 @@ export default function App() {
             deletedCount++;
             continue;
           }
-          if (settings.enableResolve) {
-            const oldStatus = getEffectiveStatus(oldC);
-            const newStatus = getEffectiveStatus(newC);
-            if (oldStatus === 'open' && newStatus === 'resolved') {
-              resolvedCount++;
-            }
+          // Either mode: an agent session started with resolve on can
+          // resolve a comment while this reader has the workflow off.
+          if (getEffectiveStatus(oldC) === 'open' && getEffectiveStatus(newC) === 'resolved') {
+            resolvedCount++;
           }
         }
         // Computed once and handed to applyExternalContent below, which would
@@ -2000,7 +1999,6 @@ export default function App() {
       getTabSnapshot,
       scheduleBackfillWrite,
       setDiffEnabled,
-      settings.enableResolve,
       showToast,
       updateTab,
     ],
@@ -2534,8 +2532,9 @@ export default function App() {
         return;
       }
 
-      // U : Unresolve/reopen active comment (only when resolve enabled)
-      if (key === 'u' && activeCommentId && settings.enableResolve) {
+      // U : Reopen active comment. Either mode: a reader with the workflow off
+      // can still push back on a thread an agent resolved (#159).
+      if (key === 'u' && activeCommentId) {
         const comment = comments.find((c) => c.id === activeCommentId);
         if (comment && getEffectiveStatus(comment) === 'resolved') {
           e.preventDefault();
@@ -2886,7 +2885,8 @@ export default function App() {
         onExecute: handleBulkResolve,
       });
     }
-    if (settings.enableResolve && resolvedCommentCount > 0) {
+    // Either mode: a file can carry resolved markers with the workflow off (#159).
+    if (resolvedCommentCount > 0) {
       cmds.push({
         id: 'delete-resolved',
         label: 'Clear resolved comments',
@@ -2928,28 +2928,27 @@ export default function App() {
       });
     }
     if (activeCommentId) {
-      if (settings.enableResolve) {
-        const activeComment = comments.find((c) => c.id === activeCommentId);
-        if (activeComment) {
-          const status = getEffectiveStatus(activeComment);
-          if (status === 'open') {
-            cmds.push({
-              id: 'resolve-active',
-              label: 'Resolve active comment',
-              shortcut: 'A',
-              section: 'Comments',
-              onExecute: () => handleResolve(activeCommentId),
-            });
-          }
-          if (status === 'resolved') {
-            cmds.push({
-              id: 'unresolve-active',
-              label: 'Reopen active comment',
-              shortcut: 'U',
-              section: 'Comments',
-              onExecute: () => handleUnresolve(activeCommentId),
-            });
-          }
+      const activeComment = comments.find((c) => c.id === activeCommentId);
+      if (activeComment) {
+        const status = getEffectiveStatus(activeComment);
+        // Resolve is a resolve-mode action; Reopen works in either mode.
+        if (status === 'open' && settings.enableResolve) {
+          cmds.push({
+            id: 'resolve-active',
+            label: 'Resolve active comment',
+            shortcut: 'A',
+            section: 'Comments',
+            onExecute: () => handleResolve(activeCommentId),
+          });
+        }
+        if (status === 'resolved') {
+          cmds.push({
+            id: 'unresolve-active',
+            label: 'Reopen active comment',
+            shortcut: 'U',
+            section: 'Comments',
+            onExecute: () => handleUnresolve(activeCommentId),
+          });
         }
       }
       cmds.push({
@@ -3671,7 +3670,6 @@ export default function App() {
                                   // takes only the path. See spec §3 non-goals.
                                   onLocalLinkClick={openTab}
                                   onContextMenu={handleViewerContextMenuUnlessOverlay}
-                                  enableResolve={settings.enableResolve}
                                   searchQuery={showSearch ? searchQuery : undefined}
                                   searchActiveIndex={activeSearchIndex}
                                   onSearchCount={handleSearchCount}
@@ -3706,7 +3704,7 @@ export default function App() {
                               onActivate={handleSidebarActivate}
                               onReply={handleReply}
                               onResolve={settings.enableResolve ? handleResolve : undefined}
-                              onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                              onUnresolve={handleUnresolve}
                               onDelete={handleDelete}
                               onEdit={handleEdit}
                               onEditReply={handleEditReply}
@@ -3739,7 +3737,7 @@ export default function App() {
                                   anchorMissing={missingAnchors.has(c.id)}
                                   onReply={handleReply}
                                   onResolve={settings.enableResolve ? handleResolve : undefined}
-                                  onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+                                  onUnresolve={handleUnresolve}
                                   onDelete={handleDelete}
                                   onEdit={handleEdit}
                                   onEditReply={handleEditReply}
@@ -3893,7 +3891,7 @@ export default function App() {
           }}
           onReply={handleReply}
           onResolve={settings.enableResolve ? handleResolve : undefined}
-          onUnresolve={settings.enableResolve ? handleUnresolve : undefined}
+          onUnresolve={handleUnresolve}
           onDelete={handleDelete}
           onEdit={handleEdit}
           onEditReply={handleEditReply}

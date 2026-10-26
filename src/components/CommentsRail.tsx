@@ -196,7 +196,8 @@ export function RailDensityControl({
   if (resolveEnabled && openCount > 0 && onBulkResolve) {
     menuItems.push({ label: 'Resolve all open', onClick: onBulkResolve });
   }
-  if (resolveEnabled && resolvedCount > 0 && onBulkDeleteResolved) {
+  // Either mode: a file can carry resolved markers with the workflow off (#159).
+  if (resolvedCount > 0 && onBulkDeleteResolved) {
     menuItems.push({ label: 'Clear resolved', onClick: onBulkDeleteResolved });
   }
   if (menuItems.length > 0) menuItems.push({ type: 'divider' });

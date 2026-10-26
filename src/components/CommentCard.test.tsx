@@ -58,14 +58,9 @@ const baseComment: MdComment = {
   agentInitiated: true,
 };
 
-function renderCard(
+function cardProps(
   props: Partial<Parameters<typeof CommentCard>[0]> = {},
-  mockSettings?: Record<string, unknown>,
-) {
-  fetchPreferences.mockReset();
-  fetchPreferences.mockResolvedValue({
-    settings: mockSettings || {},
-  });
+): Parameters<typeof CommentCard>[0] {
   const defaults: Parameters<typeof CommentCard>[0] = {
     comment: baseComment,
     isActive: false,
@@ -81,7 +76,29 @@ function renderCard(
     onRequestReplyEdit: vi.fn(),
     onCloseEditor: vi.fn(),
   };
-  return render(createElement(CommentCard, { ...defaults, ...props }), { wrapper: AllProviders });
+  return { ...defaults, ...props };
+}
+
+function renderCard(
+  props: Partial<Parameters<typeof CommentCard>[0]> = {},
+  mockSettings?: Record<string, unknown>,
+) {
+  fetchPreferences.mockReset();
+  fetchPreferences.mockResolvedValue({
+    settings: mockSettings || {},
+  });
+  return render(createElement(CommentCard, cardProps(props)), { wrapper: AllProviders });
+}
+
+// Settings load after the first render, from the shipped default (resolve
+// mode). A resolved card looks the same in both modes now, so nothing on it
+// shows when remove mode has arrived: an open card's Open pill going away
+// does, and the card is then swapped for the one under test.
+async function renderCardInRemoveMode(props: Partial<Parameters<typeof CommentCard>[0]>) {
+  const view = renderCard({}, { enableResolve: false });
+  await waitFor(() => expect(screen.queryByText('Open')).toBeNull());
+  view.rerender(createElement(CommentCard, cardProps(props)));
+  return view;
 }
 
 describe('CommentCard - answered indicator', () => {
@@ -102,20 +119,15 @@ describe('CommentCard - answered indicator', () => {
     expect(screen.queryByText('Answered')).toBeNull();
   });
 
-  it('agrees with the footer on a resolved comment in remove mode', async () => {
-    // The card gates on resolveEnabled && status === 'resolved'; the footer
-    // count gates the same way. They used to differ, so a file resolved in
-    // someone else's resolve-mode session and reopened in remove mode showed
-    // the pill here while the footer skipped it, and the total read lower than
-    // the pills on screen.
-    // enableResolve is set explicitly, not inherited. The shipped default is
-    // resolve mode, so omitting it here would quietly run this "remove mode"
-    // case in the other one and assert nothing.
-    renderCard(
-      { comment: { ...answeredComment, status: 'resolved' }, answered: true },
-      { enableResolve: false },
-    );
-    expect(await screen.findByText('Answered')).toBeTruthy();
+  it('drops the pill on a resolved comment in remove mode too (#159)', async () => {
+    // A resolved marker is finished in either mode, so the card treats it the
+    // way resolve mode does, and the List footer leaves it out the same way.
+    await renderCardInRemoveMode({
+      comment: { ...answeredComment, status: 'resolved' },
+      answered: true,
+    });
+    expect(screen.getByText('Resolved')).toBeTruthy();
+    expect(screen.queryByText('Answered')).toBeNull();
   });
 
   it('stands in for the Sent pill rather than stacking beside it', async () => {
@@ -178,7 +190,6 @@ describe('CommentCard - sent dimming', () => {
     // opacity-50 and opacity-60 on one element is settled by Tailwind's
     // stylesheet order, not by position in the string, so which one wins is
     // invisible from the call site. Resolved owns the dimming here.
-    // isResolved needs enableResolve, since that is what turns the status on.
     const { container } = renderCard(
       { sent: true, isActive: false, comment: { ...baseComment, status: 'resolved' } },
       { enableResolve: true },
@@ -922,6 +933,21 @@ describe('CommentCard: action scope', () => {
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeNull();
     });
 
+    it('offers Reopen, and no reply field, on a resolved card with the workflow off (#159)', async () => {
+      const onUnresolve = vi.fn();
+      const { container } = await renderCardInRemoveMode({
+        comment: { ...reviewer, status: 'resolved' },
+        isActive: true,
+        onResolve: vi.fn(),
+        onUnresolve,
+      });
+      expect(screen.queryByRole('button', { name: 'Write a reply...' })).toBeNull();
+      expect(screen.queryByPlaceholderText('Write a reply...')).toBeNull();
+      expect(threadBar(container)).not.toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
+      expect(onUnresolve).toHaveBeenCalledWith('cmt_1');
+    });
+
     it('shows no Resolve when the surface wires no resolve handler', () => {
       renderCard({ comment: reviewer, isActive: true });
       expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull();
@@ -961,6 +987,17 @@ describe('status pill and resolve action', () => {
     };
     renderCard({ comment: resolvedComment }, { enableResolve: true });
     const pill = await waitFor(() => screen.getByText('Resolved'));
+    expect(pill.className).toContain('bg-surface-inset');
+  });
+
+  it('shows no Open pill in remove mode, where open is simply what a comment is', async () => {
+    renderCard({}, { enableResolve: false });
+    await waitFor(() => expect(screen.queryByText('Open')).toBeNull());
+  });
+
+  it('still marks a resolved comment Resolved in remove mode (#159)', async () => {
+    await renderCardInRemoveMode({ comment: { ...baseComment, status: 'resolved' } });
+    const pill = screen.getByText('Resolved');
     expect(pill.className).toContain('bg-surface-inset');
   });
 

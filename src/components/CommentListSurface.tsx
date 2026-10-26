@@ -118,6 +118,19 @@ export function CommentListSurface({
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const { settings } = useSettings();
   const resolveEnabled = settings.enableResolve;
+  const resolvedCount = comments.filter((c) => getEffectiveStatus(c) === 'resolved').length;
+  const openCount = comments.length - resolvedCount;
+  // The Open/Resolved split. Always there in resolve mode; with the workflow
+  // off, only while the file carries a resolved marker (#159), which is
+  // finished there too and belongs apart from the open ones.
+  const showStatus = resolveEnabled || resolvedCount > 0;
+
+  // A filter the tabs no longer offer would hide cards with no way back, e.g.
+  // Resolved left selected after reopening the last resolved comment with the
+  // workflow off.
+  useEffect(() => {
+    if (!showStatus && filter !== 'all') setFilter('all');
+  }, [showStatus, filter]);
 
   // Keep a card visible by scrolling ONLY the list's own overflow container.
   // scrollIntoView walks every scrollable ancestor; the rail-hosted surface
@@ -168,7 +181,7 @@ export function CommentListSurface({
     // longer exists widens nothing: there is no status to widen toward, and
     // guessing "open" used to yank the reviewer off the Resolved filter for a
     // card that was never going to appear.
-    if (resolveEnabled && target) {
+    if (showStatus && target) {
       const widened = widenedFilter(filter, getEffectiveStatus(target));
       if (widened) {
         setFilter(widened);
@@ -193,7 +206,7 @@ export function CommentListSurface({
       if (takesFocus) node.focus({ preventScroll: true });
       onFocusHandled?.();
     });
-  }, [requestedFocus, resolveEnabled, filter, search, comments, onFocusHandled]);
+  }, [requestedFocus, showStatus, filter, search, comments, onFocusHandled]);
 
   // Activating a comment the current filter or search hides widens the view
   // so its card is visible. Clicking a highlight means "show me this
@@ -207,10 +220,10 @@ export function CommentListSurface({
     if (!activeCommentId) return;
     const c = comments.find((x) => x.id === activeCommentId);
     if (!c) return;
-    const widened = resolveEnabled ? widenedFilter(filter, getEffectiveStatus(c)) : null;
+    const widened = showStatus ? widenedFilter(filter, getEffectiveStatus(c)) : null;
     if (!matchesSearch(c, search)) setSearch('');
     if (widened) setFilter(widened);
-  }, [activeCommentId, comments, filter, search, resolveEnabled]);
+  }, [activeCommentId, comments, filter, search, showStatus]);
 
   useEffect(() => {
     if (requestedEditor) {
@@ -251,35 +264,23 @@ export function CommentListSurface({
     setActiveEditor(null);
   };
 
-  // Count by status (only meaningful when resolve is enabled).
-  const openCount = resolveEnabled
-    ? comments.filter((c) => getEffectiveStatus(c) === 'open').length
-    : comments.length;
-  const resolvedCount = resolveEnabled
-    ? comments.filter((c) => getEffectiveStatus(c) === 'resolved').length
-    : 0;
   // Remove mode has no resolved state, so a comment that survived a round
   // carrying an agent's reply is the only "this one is done" signal there is.
   // Without a count the reader has to open every card to find them.
   // Counted in both modes, and excluding resolved comments, which are already
   // finished. Resolve mode buckets an answered-but-open question under "open",
   // where it is indistinguishable from one nobody has addressed.
-  // The resolved exclusion is gated on resolveEnabled exactly as the card's is
-  // (CommentCard's `isResolved`). Without the gate, a file resolved in someone
-  // else's resolve-mode session and then opened by a reader in remove mode
-  // shows the pill on the card while the footer silently skips it, so the
-  // total reads lower than the number of pills on screen.
+  // The resolved exclusion matches the card's (CommentCard's `isResolved`),
+  // which holds in either mode, so the total always equals the pills on screen.
   const answeredCount = answeredCommentIds
-    ? comments.filter(
-        (c) =>
-          answeredCommentIds.has(c.id) && !(resolveEnabled && getEffectiveStatus(c) === 'resolved'),
-      ).length
+    ? comments.filter((c) => answeredCommentIds.has(c.id) && getEffectiveStatus(c) !== 'resolved')
+        .length
     : 0;
 
   // Filter and search
   const filtered = comments.filter((c) => {
-    // Status filter (only when resolve enabled)
-    if (resolveEnabled) {
+    // Status filter (only while the tabs are offered)
+    if (showStatus) {
       const status = getEffectiveStatus(c);
       if (filter === 'open' && status !== 'open') return false;
       if (filter === 'resolved' && status !== 'resolved') return false;
@@ -289,19 +290,15 @@ export function CommentListSurface({
     return matchesSearch(c, search);
   });
 
-  // Sort: open first, then resolved (only when resolve enabled).
-  // All comments (including agent-ask comments) render in natural document order.
-  const activeCommentsAll = resolveEnabled
-    ? filtered.filter((c) => getEffectiveStatus(c) !== 'resolved')
-    : filtered;
+  // Sort: open first, then resolved. All comments (including agent-ask
+  // comments) render in natural document order within each group.
+  const activeCommentsAll = filtered.filter((c) => getEffectiveStatus(c) !== 'resolved');
   // Unpainted comments stay OUT of this bucket on purpose: the anchor itself
   // is fine, the render just does not show it, and "Needs re-anchoring" would
   // tell the reader to go fix something that isn't broken.
   const orphanActiveComments = activeCommentsAll.filter((c) => missingAnchors.has(c.id));
   const activeComments = activeCommentsAll.filter((c) => !missingAnchors.has(c.id));
-  const resolvedComments = resolveEnabled
-    ? filtered.filter((c) => getEffectiveStatus(c) === 'resolved')
-    : [];
+  const resolvedComments = filtered.filter((c) => getEffectiveStatus(c) === 'resolved');
 
   if (comments.length === 0) {
     return (
@@ -337,7 +334,7 @@ export function CommentListSurface({
     <div className="flex flex-col h-full">
       {/* Filters and search share one row (crit round 2, chrome density) */}
       <div className="px-3 pt-3 pb-2 flex items-center gap-2">
-        {resolveEnabled && (
+        {showStatus && (
           <div className="flex gap-1 shrink-0">
             {FILTER_TABS.map(({ key, label }) => {
               const count =
@@ -412,7 +409,7 @@ export function CommentListSurface({
                 answered={answeredCommentIds?.has(comment.id) ?? false}
                 onSelect={onActivate}
                 onResolve={resolveEnabled ? onResolve : undefined}
-                onUnresolve={resolveEnabled ? onUnresolve : undefined}
+                onUnresolve={onUnresolve}
                 onDelete={onDelete}
                 onEdit={onEdit}
                 onReply={onReply}
@@ -453,7 +450,7 @@ export function CommentListSurface({
             answered={answeredCommentIds?.has(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
-            onUnresolve={resolveEnabled ? onUnresolve : undefined}
+            onUnresolve={onUnresolve}
             onDelete={onDelete}
             onEdit={onEdit}
             onReply={onReply}
@@ -468,7 +465,7 @@ export function CommentListSurface({
           />
         ))}
 
-        {resolveEnabled && resolvedComments.length > 0 && filter !== 'resolved' && (
+        {resolvedComments.length > 0 && filter !== 'resolved' && (
           <div className="flex items-center gap-2 pt-3 pb-1">
             <div className="h-px flex-1 bg-border-subtle" />
             <span className="text-xs text-content-muted font-medium">
@@ -499,7 +496,7 @@ export function CommentListSurface({
             answered={answeredCommentIds?.has(comment.id) ?? false}
             onSelect={onActivate}
             onResolve={resolveEnabled ? onResolve : undefined}
-            onUnresolve={resolveEnabled ? onUnresolve : undefined}
+            onUnresolve={onUnresolve}
             onDelete={onDelete}
             onEdit={onEdit}
             onReply={onReply}
@@ -527,7 +524,7 @@ export function CommentListSurface({
       <div className="border-t border-border px-4 py-2 bg-surface-secondary flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
           <span className="text-xs text-content-secondary whitespace-nowrap">
-            {resolveEnabled ? (
+            {showStatus ? (
               <>
                 {openCount} open
                 {answeredCount > 0 && <> ({answeredCount} answered)</>}
@@ -555,9 +552,11 @@ export function CommentListSurface({
             </ActionButton>
           )}
         </div>
-        {resolveEnabled && comments.length > 0 && (
+        {/* Clear Resolved in either mode: with the workflow off it shows
+            once the file carries a resolved marker (#159). */}
+        {comments.length > 0 && (resolveEnabled || resolvedCount > 0) && (
           <div className="flex gap-1.5 justify-end">
-            {openCount > 0 && onBulkResolve && (
+            {resolveEnabled && openCount > 0 && onBulkResolve && (
               <ActionButton
                 intent="success"
                 size="sm"
