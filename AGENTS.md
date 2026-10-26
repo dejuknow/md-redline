@@ -2030,6 +2030,15 @@ The `<!--` / `-->` delimiters are `::before` / `::after`, so the span's
 for the text the DOM hands it, and any transformation of the emitted text makes
 the comment vanish with no marker and no error.
 
+The comment, delimiters included, is drawn in `--theme-text-secondary`, set
+mono and at 0.875em, which is what sets it apart from the prose. It is body
+copy, so it holds the 4.5:1 text minimum on every theme (lowest 4.99, on
+Solarized): mixing in any `--theme-text-faint` put Solarized and GitHub under
+it, and the delimiters, once faint, measured under 2.3:1 (#125). RawView's
+`.raw-html-comment` uses the same ink, in italic. `server/theme-contrast.test.ts`
+reads the colors out of `index.css` (resolving a `color-mix` if one comes back)
+and checks every theme.
+
 A comment renders inline when a sibling is non-blank text or a phrasing element
 (`hast-util-phrasing`); otherwise it gets `doc-html-comment--block` and its own
 line. A body containing a newline also gets `doc-html-comment--pre`, which keeps
