@@ -152,20 +152,43 @@ describe('createUpdateChecker', () => {
     expect(c.getLatest()).toBe('9.9.9');
   });
 
-  it('stop during an in-flight start prevents the interval from arming', async () => {
-    const url = await startRegistryStub(JSON.stringify({ latest: '9.9.9' }), 200, 25);
-    checker = createUpdateChecker({
-      currentVersion: '0.6.0',
-      packageName: 'md-redline',
-      homeDir,
-      registryUrl: url,
-      intervalMs: 30,
-    });
-    const inFlight = checker.start();
-    checker.stop();
-    await inFlight;
-    await new Promise((r) => setTimeout(r, 100));
-    expect(requestCount).toBe(1);
+  // The fetch is held open by hand and time is fake, so nothing here depends on
+  // wall-clock speed: the two stop() windows are hit by construction, and
+  // "never armed" is read off the timer queue instead of inferred from a sleep.
+  it.each([
+    ['reading the cache', false],
+    ['the registry fetch', true],
+  ])('stop during %s prevents the interval from arming', async (_phase, stopOnceFetching) => {
+    vi.useFakeTimers();
+    try {
+      let fetchBegan!: () => void;
+      const began = new Promise<void>((resolve) => (fetchBegan = resolve));
+      let respond!: (res: Response) => void;
+      const response = new Promise<Response>((resolve) => (respond = resolve));
+      const fetchImpl = vi.fn(() => {
+        fetchBegan();
+        return response;
+      });
+      checker = createUpdateChecker({
+        currentVersion: '0.6.0',
+        packageName: 'md-redline',
+        homeDir,
+        intervalMs: 30,
+        fetchImpl,
+      });
+      const inFlight = checker.start();
+      if (stopOnceFetching) await began;
+      checker.stop();
+      // stop() does not cancel the request, so it is issued either way.
+      await began;
+      respond(new Response(null, { status: 503 }));
+      await inFlight;
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10 * 30);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports pending until an in-flight initial check settles', async () => {
