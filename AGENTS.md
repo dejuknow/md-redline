@@ -1931,7 +1931,14 @@ available in both rendered and raw views via the panel toolbar. The handoff
 captures a **diff reference** per file (`{ content, capturedAt, origin, agentName? }`,
 persisted in `localStorage` under `md-redline-snapshots`; legacy bare-string
 values are migrated on load). The change set is computed by `useDiffLines`
-(`diffChunkCount` is the number of changed chunks). The reference is
+(`diffChunkCount` is the number of changed chunks). Lines are compared by
+`computeDiff` (`src/lib/diff.ts`) with an LCS table while it stays under one
+million cells. Past that, the shared start and end are trimmed and the middle
+gets the same LCS table if it fits, or else `myersLineDiff`, whose cost grows
+with the number of changed lines rather than the file's length, so edits far
+apart in a long file still show as those edits (#188). Only a middle needing
+more than `MAX_EDIT_DISTANCE` (2,000) removed plus added lines falls back to
+marking it all removed and added. The reference is
 auto-managed as a "review frontier":
 
 - The diff toggle is quiet (no active styling, no count badge) when
