@@ -121,7 +121,7 @@ body {
   --theme-danger-text: #dc2626;
   --theme-success: #10b981;
   --theme-success-bg: #ecfdf5;
-  --theme-success-text: #059669;
+  --theme-success-text: #047857;
   --theme-warning: #f59e0b;
   --theme-warning-bg: #fffbeb;
   --theme-warning-text: #d97706;
@@ -262,7 +262,7 @@ body {
   --theme-danger-text: #c0392b;
   --theme-success: #27ae60;
   --theme-success-bg: rgba(39, 174, 96, 0.1);
-  --theme-success-text: #27ae60;
+  --theme-success-text: #1d7a43;
   --theme-warning: #d4a04a;
   --theme-warning-bg: rgba(212, 160, 74, 0.12);
   --theme-warning-text: #b8862e;
@@ -469,7 +469,7 @@ body {
   --theme-danger-text: #dc322f;
   --theme-success: #859900;
   --theme-success-bg: rgba(133, 153, 0, 0.1);
-  --theme-success-text: #859900;
+  --theme-success-text: #5f6d00;
   --theme-warning: #b58900;
   --theme-warning-bg: rgba(181, 137, 0, 0.12);
   --theme-warning-text: #b58900;

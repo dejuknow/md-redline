@@ -67,7 +67,7 @@ async function openFixture(page: Page) {
   });
 }
 
-// The open count has no title; the resolved-only badge is titled "N resolved".
+// The open count is the rounded badge with a number and no title.
 function openBadge(page: Page) {
   return page
     .locator('.h-11')

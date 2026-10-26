@@ -23,6 +23,36 @@ function tabTitle(tab: Tab): string {
   return `${tab.filePath}\n${reason}`;
 }
 
+/**
+ * "This file has resolved comments" (#160): a check in the resolved green, the
+ * same meaning as the density strip's resolved ticks. Not a number, because a
+ * number on a tab reads as work left, and outline against fill was all that
+ * told it apart from the open count. Drawn beside an open count too, so a file
+ * with both still turns up when scanning the tabs for resolved comments. The
+ * count is in the tooltip and, through the hidden text, the tab's accessible
+ * name. Its ink is held to 3:1 on every tab surface by theme-contrast.test.
+ */
+function ResolvedMark({ count }: { count: number }) {
+  const label = `${count} resolved`;
+  return (
+    <span data-resolved-mark title={label} className="shrink-0 inline-flex text-success-text">
+      <svg
+        className="w-3 h-3"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M3.5 8.5l3 3 6-7" />
+      </svg>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 export interface TabContextMenuInfo {
   filePath: string;
   x: number;
@@ -268,7 +298,7 @@ export function TabBar({
                   title={tabTitle(tab)}
                 >
                   <span className="truncate">{fileName}</span>
-                  {count > 0 ? (
+                  {count > 0 && (
                     <span
                       className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
                         isActive
@@ -278,14 +308,8 @@ export function TabBar({
                     >
                       {count}
                     </span>
-                  ) : resolvedCount > 0 ? (
-                    <span
-                      className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border-subtle text-content-muted"
-                      title={`${resolvedCount} resolved`}
-                    >
-                      {resolvedCount}
-                    </span>
-                  ) : null}
+                  )}
+                  {resolvedCount > 0 && <ResolvedMark count={resolvedCount} />}
                   {tab.error && (
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`} />
                   )}
@@ -415,7 +439,7 @@ export function TabBar({
                         >
                           {fileName}
                         </span>
-                        {count > 0 ? (
+                        {count > 0 && (
                           <span
                             className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
                               isActive
@@ -425,14 +449,8 @@ export function TabBar({
                           >
                             {count}
                           </span>
-                        ) : resolvedCount > 0 ? (
-                          <span
-                            className="text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 border border-border-subtle text-content-muted"
-                            title={`${resolvedCount} resolved`}
-                          >
-                            {resolvedCount}
-                          </span>
-                        ) : null}
+                        )}
+                        {resolvedCount > 0 && <ResolvedMark count={resolvedCount} />}
                         {tab.error && (
                           <span
                             className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`}
