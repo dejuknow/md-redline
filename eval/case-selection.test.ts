@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideSkip } from './case-selection';
+import { decideSkip, selectionProblems } from './case-selection';
 
 const base = {
   caseName: 'case',
@@ -73,5 +73,29 @@ describe('decideSkip', () => {
     if (!d.skip) throw new Error('expected a skip');
     expect(d.message).toContain('resolve-mode case');
     expect(d.message).toContain('claude-cli-remove');
+  });
+});
+
+describe('selectionProblems (#105)', () => {
+  const agents = ['claude-cli', 'claude-cli-remove', 'claude-cli-resolve'];
+
+  it('accepts absent, remove and resolve modes and a known agent', () => {
+    expect(selectionProblems({}, agents)).toEqual([]);
+    expect(selectionProblems({ markerMode: 'remove' }, agents)).toEqual([]);
+    expect(
+      selectionProblems({ markerMode: 'resolve', requiresAgent: 'claude-cli-resolve' }, agents),
+    ).toEqual([]);
+  });
+
+  it('rejects a misspelled markerMode, which every agent would skip', () => {
+    const problems = selectionProblems({ markerMode: 'resovle' }, agents);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('markerMode "resovle"');
+  });
+
+  it('rejects an unknown requiresAgent', () => {
+    expect(selectionProblems({ requiresAgent: 'claude-cli-resolv' }, agents)[0]).toContain(
+      'requiresAgent "claude-cli-resolv"',
+    );
   });
 });

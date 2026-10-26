@@ -48,3 +48,28 @@ export function decideSkip(input: {
   }
   return { skip: false };
 }
+
+const MARKER_MODES: readonly MarkerMode[] = ['remove', 'resolve'];
+
+/**
+ * What is wrong with an expected.json's case-selection fields, if anything.
+ * Either field misspelled makes `decideSkip` skip the case under every agent,
+ * forever, with one log line per run and no failure anywhere (#105), so
+ * `eval:dry`, which CI runs, rejects them instead.
+ */
+export function selectionProblems(
+  expected: { markerMode?: unknown; requiresAgent?: unknown },
+  knownAgents: readonly string[],
+): string[] {
+  const problems: string[] = [];
+  const { markerMode, requiresAgent } = expected;
+  if (markerMode !== undefined && !MARKER_MODES.includes(markerMode as MarkerMode)) {
+    problems.push(`markerMode "${String(markerMode)}" is not one of ${MARKER_MODES.join(', ')}`);
+  }
+  if (requiresAgent !== undefined && !knownAgents.includes(requiresAgent as string)) {
+    problems.push(
+      `requiresAgent "${String(requiresAgent)}" is not a known agent (${knownAgents.join(', ')})`,
+    );
+  }
+  return problems;
+}

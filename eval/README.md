@@ -17,7 +17,7 @@ npm run eval:dry
 ```
 
 - `npm run eval:dry`
-  Validates fixture structure only. It checks that each case has a readable `input.md`, `prompt.txt`, and valid `expected.json`. It does not call the agent and does not write scored results.
+  Validates fixture structure only. It checks that each case has a readable `input.md`, `prompt.txt`, and valid `expected.json`, and that its `markerMode` and `requiresAgent`, when set, name a real mode and agent (a typo in either would skip the case under every agent). It does not call the agent and does not write scored results.
 - `npm run eval`
   Runs the full harness, invokes the configured agent adapter on each case, scores the output, and writes results under `eval/results/<timestamp>_<agent>_<format>/`.
 

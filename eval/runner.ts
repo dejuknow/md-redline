@@ -9,7 +9,7 @@ import { claudeCliResolve } from './agents/claude-cli-resolve.js';
 import { claudeCliRemove } from './agents/claude-cli-remove.js';
 import { DEFAULT_MODEL, setClaudeModel } from './agents/run-claude.js';
 import type { AgentAdapter, EvalCase, ExpectedCriteria, ScoringResult } from './types.js';
-import { decideSkip } from './case-selection.js';
+import { decideSkip, selectionProblems } from './case-selection.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(__dirname, 'fixtures');
@@ -142,7 +142,7 @@ async function validateFixtures(cases: EvalCase[]) {
     }
     try {
       const raw = await readFile(c.expectedPath, 'utf-8');
-      JSON.parse(raw);
+      errors.push(...selectionProblems(JSON.parse(raw), Object.keys(agents)));
     } catch {
       errors.push('missing or invalid expected.json');
     }
