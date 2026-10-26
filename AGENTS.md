@@ -1170,8 +1170,13 @@ Two details are load-bearing:
   fenced block look ragged, so they all silently fell back to a rebuild.
 
 The palette entry is called `Copy selection as markdown`, spelling out its
-subject because nothing sits under the cursor there. It is offered only for a
-committed selection, which it reads from the painted marks when it runs.
+subject because nothing sits under the cursor there. Like the menu, it resolves
+the markdown when the palette opens (`paletteSelectionMarkdown`, read by the
+Cmd+K handler before the palette focuses its input) and copies that text, so it
+covers a committed selection and a pending touch or pen one alike (#163).
+Reading at run time failed both ways: focusing the palette's input takes the
+browser's live range with it, and the mouseup of a click on the item dropped a
+committed selection, so the item left the list before the click landed.
 
 ### Copying a document selection
 The rendered view paints the pending selection as `mark.selection-highlight`

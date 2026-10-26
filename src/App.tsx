@@ -913,10 +913,13 @@ export default function App() {
     if (!range) return null;
     return resolveSelectionMarkdown(range, container, cleanMarkdownRef.current)?.markdown ?? null;
   }, []);
-  const copySelectionAsMarkdown = useCallback(() => {
-    const markdown = selectionAsMarkdown();
-    if (markdown) void navigator.clipboard.writeText(markdown).catch(() => {});
-  }, [selectionAsMarkdown]);
+  // What the palette's "Copy selection as markdown" copies, read when the
+  // palette OPENS rather than when the command runs (#163). Opening it focuses
+  // its input, which takes the browser's live range with it, so a touch or pen
+  // selection (pending, never painted) would have nothing left to read. And the
+  // mouseup of a click on the item drops a committed selection before the
+  // click lands, which took the item out of the list from under the pointer.
+  const [paletteSelectionMarkdown, setPaletteSelectionMarkdown] = useState<string | null>(null);
   const requestCommentFocus = useCallback(
     (commentId: string, origin: CommentFocusOrigin = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -2361,6 +2364,7 @@ export default function App() {
       // Cmd+K : Open command palette (works even in inputs)
       if (mod && e.key === 'k') {
         e.preventDefault();
+        if (activeModal !== 'commandPalette') setPaletteSelectionMarkdown(selectionAsMarkdown());
         toggleModal('commandPalette');
         return;
       }
@@ -2552,6 +2556,7 @@ export default function App() {
     return () => document.removeEventListener('keydown', handler);
   }, [
     lockSelection,
+    selectionAsMarkdown,
     handleJumpToNext,
     handleJumpToPrev,
     handleAddComment,
@@ -2901,17 +2906,17 @@ export default function App() {
         onExecute: () => setConfirmDeleteAll(true),
       });
     }
-    // `selection`, not `commentSelection`: a touch or pen selection sits in
-    // pendingSelection and is never painted, and this reads the painted marks,
-    // so offering it there would copy nothing at all.
-    if (selection) {
+    // Gated on the markdown read when the palette opened, which covers a
+    // committed selection and a pending touch or pen one alike.
+    if (paletteSelectionMarkdown) {
+      const markdown = paletteSelectionMarkdown;
       cmds.push({
         id: 'copy-selection-markdown',
         // Named for its subject, unlike the menu's "Copy as Markdown": nothing
         // sits under the cursor here, so the label has to say what it acts on.
         label: 'Copy selection as markdown',
         section: 'Selection',
-        onExecute: copySelectionAsMarkdown,
+        onExecute: () => void navigator.clipboard.writeText(markdown).catch(() => {}),
       });
     }
     if (commentCount > 0) {
@@ -2958,8 +2963,7 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
-    selection,
-    copySelectionAsMarkdown,
+    paletteSelectionMarkdown,
     resolvedCommentCount,
     settings.enableResolve,
     handleBulkResolve,

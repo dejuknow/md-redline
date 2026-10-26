@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { EMPHASIS_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/emphasis-doc.md');
@@ -122,6 +123,74 @@ test.describe('Copy as Markdown', () => {
         .toBe('- List item with **bold inside it**\n- Second item for the ordered sibling below');
     });
   }
+});
+
+// The palette's "Copy selection as markdown" (#163). It used to be offered for a
+// mouse selection only, since it read the painted marks, and a touch or pen
+// selection stays pending and is never painted. Opening the palette focuses
+// its input, which takes the browser's live range with it, so the markdown is
+// resolved when the palette opens rather than when the command runs.
+test.describe('Copy selection as markdown from the palette', () => {
+  const LIST_MARKDOWN =
+    '- List item with **bold inside it**\n- Second item for the ordered sibling below';
+
+  test.beforeEach(async ({ context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  });
+
+  async function copyFromPalette(page: Page) {
+    await page.keyboard.press(withMod('k'));
+    await page.getByPlaceholder('Type a command...').fill('copy selection');
+    await page
+      .locator('button[data-selected]', { hasText: 'Copy selection as markdown' })
+      .click({ timeout: 5000 });
+  }
+
+  test('copies a mouse selection', async ({ page }) => {
+    await openFixture(page);
+    await page.evaluate(() => navigator.clipboard.writeText(''));
+    await selectBlock(page, 'ul');
+
+    await copyFromPalette(page);
+
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(LIST_MARKDOWN);
+  });
+
+  for (const pointerType of ['touch', 'pen']) {
+    test(`copies a ${pointerType} selection, which is never painted (#163)`, async ({ page }) => {
+      await openFixture(page);
+      await page.evaluate(() => navigator.clipboard.writeText(''));
+      await page.evaluate((pt) => {
+        const el = document.querySelector('.prose ul');
+        if (!el) throw new Error('block not found: ul');
+        el.dispatchEvent(new PointerEvent('pointerdown', { pointerType: pt, bubbles: true }));
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }, pointerType);
+      await expect(page.getByTestId('pending-selection-commit')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('mark.selection-highlight')).toHaveCount(0);
+
+      await copyFromPalette(page);
+
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe(LIST_MARKDOWN);
+    });
+  }
+
+  test('is not offered with nothing selected', async ({ page }) => {
+    await openFixture(page);
+    await page.keyboard.press(withMod('k'));
+    await page.getByPlaceholder('Type a command...').fill('copy selection');
+    await expect(
+      page.locator('button[data-selected]', { hasText: 'Copy selection as markdown' }),
+    ).toHaveCount(0);
+  });
 });
 
 // The tests above click the item with a mouse. On a tablet it is a real tap,
