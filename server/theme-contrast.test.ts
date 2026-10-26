@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * Contrast floor for the rendered frontmatter block, checked against every
- * shipped theme.
+ * Contrast floors checked against every shipped theme: the rendered
+ * frontmatter block here, and ordinary HTML comments further down (#125).
  *
  * The block's first version used --theme-text-muted on --theme-bg-secondary,
  * which measures 2.18:1 on Solarized and failed AA on six of the eight themes.
@@ -94,4 +94,81 @@ describe('frontmatter block contrast', () => {
     expect(contrast(theme.vars[valueInk], theme.vars[background])).toBeGreaterThan(4.3);
     expect(contrast(theme.vars[keyInk], theme.vars[background])).toBeGreaterThan(4.5);
   });
+});
+
+/**
+ * A rule's `color`, resolved against one theme: either a single theme variable
+ * or a `color-mix(in srgb, ...)` of two, mixed per channel the way the browser
+ * does in srgb. Resolving the mix here keeps the test honest about what the
+ * rule actually draws, rather than about which variable it names.
+ */
+function inkFor(selector: string, theme: Theme): string {
+  const body = ruleBody(selector);
+  const color = /\n\s*color:\s*([^;]+);/.exec(body)?.[1].trim();
+  if (!color) throw new Error(`no color in ${selector}`);
+  const single = /^var\(--theme-([a-z-]+)\)$/.exec(color);
+  if (single) return theme.vars[single[1]];
+  const mixed =
+    /^color-mix\(in srgb,\s*var\(--theme-([a-z-]+)\)\s+(\d+)%,\s*var\(--theme-([a-z-]+)\)\)$/.exec(
+      color,
+    );
+  if (!mixed) throw new Error(`unsupported color in ${selector}: ${color}`);
+  const share = Number(mixed[2]) / 100;
+  const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const a = channels(theme.vars[mixed[1]]);
+  const b = channels(theme.vars[mixed[3]]);
+  return `#${a
+    .map((c, i) =>
+      Math.round(c * share + b[i] * (1 - share))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+}
+
+/**
+ * Ordinary HTML comments in the rendered view (#125). Their text is body copy,
+ * so it needs the 4.5:1 AA minimum on every theme. Its first colour, a mix of
+ * text-secondary and text-faint, measured 3.88 on Solarized and 4.06 on GitHub.
+ */
+/**
+ * The ink the `<!--` and `-->` delimiters draw in: the color of any rule that
+ * targets the comment's ::before, else the comment's own, which generated
+ * content inherits. Found by scanning selector lists, so a rule shared by
+ * ::before and ::after counts as well as one for ::before alone.
+ */
+function delimiterInk(theme: Theme): string {
+  for (const rule of CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const selectors = rule[1].split(',').map((sel) => sel.trim());
+    if (!selectors.includes('.doc-html-comment::before')) continue;
+    const color = /(?:^|\n|;)\s*color:\s*var\(--theme-([a-z-]+)\)/.exec(rule[2]);
+    if (color) return theme.vars[color[1]];
+  }
+  return inkFor('.doc-html-comment', theme);
+}
+
+describe('rendered HTML comment contrast', () => {
+  const themes = themeBlocks();
+
+  it.each(themes.map((t) => [t.name, t] as const))('comment text reads on %s', (_name, theme) => {
+    expect(contrast(inkFor('.doc-html-comment', theme), theme.vars.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The delimiters are readable syntax: they are what tells a comment apart
+  // from the prose around it, so they get the text minimum too, not the 3:1
+  // for graphics. In text-faint they measured 1.64 to 2.25.
+  it.each(themes.map((t) => [t.name, t] as const))('delimiters read on %s', (_name, theme) => {
+    expect(contrast(delimiterInk(theme), theme.vars.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The raw view colors the whole comment, body and delimiters, with one rule
+  // on the same sheet background.
+  it.each(themes.map((t) => [t.name, t] as const))(
+    'raw view comment reads on %s',
+    (_name, theme) => {
+      expect(contrast(inkFor('.raw-html-comment', theme), theme.vars.bg)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    },
+  );
 });

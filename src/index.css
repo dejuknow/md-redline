@@ -832,9 +832,14 @@ body {
 
 /* Ordinary (non-@comment) HTML comments in the rendered view. The <!-- and -->
    delimiters are generated content, so the span's textContent is the comment
-   body byte for byte, which is what comment anchoring searches the source for. */
+   body byte for byte, which is what comment anchoring searches the source for.
+   The text is body copy, so it takes text-secondary unmixed: any share of
+   text-faint put Solarized and GitHub under 4.5:1 (#125, theme-contrast.test).
+   The delimiters inherit it. They are readable syntax, what tells a comment
+   from the prose around it, so they get the same minimum rather than the
+   faint ink they had, which measured under 2.3:1 on every theme. */
 .doc-html-comment {
-  color: color-mix(in srgb, var(--theme-text-secondary) 80%, var(--theme-text-faint));
+  color: var(--theme-text-secondary);
   font-family: var(--font-mono);
   font-variant-ligatures: none;
   font-size: 0.875em;
@@ -846,11 +851,6 @@ body {
 
 .doc-html-comment::after {
   content: "-->";
-}
-
-.doc-html-comment::before,
-.doc-html-comment::after {
-  color: var(--theme-text-faint);
 }
 
 .doc-html-comment--block {
@@ -1554,8 +1554,10 @@ body {
   border-radius: 4px;
 }
 
+/* The whole comment, body included, so it needs the text minimum: text-faint
+   measured 1.64 to 2.25:1 (#125). The italic keeps it apart from the prose. */
 .raw-html-comment {
-  color: var(--theme-text-faint);
+  color: var(--theme-text-secondary);
   font-style: italic;
 }
 
