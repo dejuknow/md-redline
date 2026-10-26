@@ -871,6 +871,8 @@ export default function App() {
     handleReply,
     handleEditReply,
     handleDeleteReply,
+    undoLastDelete,
+    canUndoDelete,
     handleBulkDelete,
     handleBulkResolve,
     handleBulkDeleteResolved,
@@ -2386,6 +2388,21 @@ export default function App() {
       // closed. (The Mermaid fullscreen modal already short-circuited above.)
       if (isInput || activeModal === 'commandPalette') return;
 
+      // Cmd+Z : Undo the last comment or reply delete. Below the input check,
+      // so a text field, the reply composer, and an inline edit keep their own
+      // undo. Not under a dialog (settings, the shortcuts panel, the file
+      // opener, a confirm, including the rail's own Delete all): the comment
+      // would come back behind it, and a Delete all confirm would go on
+      // counting without it. The find bar leaves the document in use, so it
+      // doesn't count. Nothing to undo in this file leaves the key alone.
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+        const dialogOpen =
+          (activeModal !== null && activeModal !== 'search') ||
+          document.querySelector('[role="alertdialog"]') !== null;
+        if (!dialogOpen && undoLastDelete()) e.preventDefault();
+        return;
+      }
+
       // ? : Toggle keyboard shortcuts help
       if (e.key === '?') {
         e.preventDefault();
@@ -2463,6 +2480,7 @@ export default function App() {
     handleJumpToPrev,
     handleAddComment,
     handleDelete,
+    undoLastDelete,
     handleResolve,
     handleUnresolve,
     viewMode,
@@ -2861,6 +2879,15 @@ export default function App() {
         onExecute: () => handleDelete(activeCommentId),
       });
     }
+    if (canUndoDelete) {
+      cmds.push({
+        id: 'undo-last-delete',
+        label: 'Undo last delete',
+        shortcut: `${modKey}+Z`,
+        section: 'Comments',
+        onExecute: undoLastDelete,
+      });
+    }
     return cmds;
   }, [
     commentCount,
@@ -2877,6 +2904,8 @@ export default function App() {
     handleResolve,
     handleUnresolve,
     handleDelete,
+    canUndoDelete,
+    undoLastDelete,
   ]);
 
   const headingCommands = useMemo(

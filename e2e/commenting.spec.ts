@@ -220,6 +220,114 @@ test.describe('Comment lifecycle', () => {
       .toContain('Mention cost factor');
   });
 
+  test('Cmd+Z brings back a deleted comment after its toast has closed', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+    const highlight = page.locator('mark.comment-highlight', { hasText: 'hashed with bcrypt' });
+    await expect(highlight).toBeVisible();
+
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+    const toast = page.getByRole('status').filter({ hasText: 'Comment deleted.' });
+    await expect(toast).toBeVisible();
+    await toast.getByRole('button', { name: 'Dismiss notification' }).click();
+    await expect(toast).toHaveCount(0);
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+
+    await page.keyboard.press(withMod('z'));
+
+    await expect(getCard(page, 'Mention cost factor')).toBeVisible();
+    await expect(highlight).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'Comment restored.' })).toBeVisible();
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('Mention cost factor');
+  });
+
+  test('Cmd+Z in the reply field leaves a deleted comment deleted', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+    await addComment(page, 'brute force attacks', 'Clarify the rate limit window.');
+
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+    await expect(getCard(page, 'Mention cost factor')).toHaveCount(0);
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+
+    const other = getCard(page, 'Clarify the rate limit window.');
+    await other.getByText('Clarify the rate limit window.').click();
+    await other.getByRole('button', { name: 'Write a reply...' }).click();
+    const field = other.getByPlaceholder('Write a reply...');
+    await field.fill('more context');
+    await field.press(withMod('z'));
+
+    // The field keeps its own undo; the delete stays. A restore would land
+    // within a frame and a save soon after, so give it time to show up.
+    await page.waitForTimeout(500);
+    await expect(getCard(page, 'Mention cost factor')).toHaveCount(0);
+    expect(readFileSync(fixturePath, 'utf-8')).not.toContain('Mention cost factor');
+    await expect(page.getByRole('status').filter({ hasText: 'Comment restored.' })).toHaveCount(0);
+  });
+
+  test('Cmd+Z waits while a confirm dialog is open', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+    await addComment(page, 'brute force attacks', 'Clarify the rate limit window.');
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+    await expect(getCard(page, 'Mention cost factor')).toHaveCount(0);
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+
+    await page.keyboard.press(withMod('k'));
+    await page.getByPlaceholder('Type a command...').fill('delete all comments');
+    await page.locator('button[data-selected]', { hasText: 'Delete all comments' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+
+    // The comment would come back behind the dialog, which counts without it.
+    await page.keyboard.press(withMod('z'));
+    await page.waitForTimeout(500);
+    await expect(getCard(page, 'Mention cost factor')).toHaveCount(0);
+    expect(readFileSync(fixturePath, 'utf-8')).not.toContain('Mention cost factor');
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await page.keyboard.press(withMod('z'));
+    await expect(getCard(page, 'Mention cost factor')).toBeVisible();
+  });
+
+  test('the command palette offers Undo last delete after a delete', async ({ page }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+
+    await page.keyboard.press(withMod('k'));
+    const input = page.getByPlaceholder('Type a command...');
+    await input.fill('undo last delete');
+    await expect(
+      page.locator('button[data-selected]', { hasText: 'Undo last delete' }),
+    ).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(input).not.toBeVisible();
+
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+    await expect(getCard(page, 'Mention cost factor')).toHaveCount(0);
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+
+    await page.keyboard.press(withMod('k'));
+    await input.fill('undo last delete');
+    await page.locator('button[data-selected]', { hasText: 'Undo last delete' }).click();
+
+    await expect(getCard(page, 'Mention cost factor')).toBeVisible();
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf-8'), { timeout: 10_000 })
+      .toContain('Mention cost factor');
+  });
+
   test('delete all shows confirm dialog and cancelling keeps comments', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'valid credentials', 'First comment');

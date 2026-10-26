@@ -40,6 +40,7 @@ const sections: Section[] = [
       { keys: `${mod}Enter`, label: 'Start commenting on selection' },
       { keys: `${mod}${shift}M`, label: 'Lock selection for commenting' },
       { keys: 'D', label: 'Delete active comment' },
+      { keys: `${mod}Z`, label: 'Undo last delete' },
       { keys: 'A / X', label: 'Resolve active comment', condition: 'resolve' },
       { keys: 'U', label: 'Reopen active comment', condition: 'resolve' },
     ],
