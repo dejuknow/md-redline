@@ -1372,33 +1372,37 @@ card's trash icon, the `D` key, the command palette, the highlight's and card's
 context menus) goes through `handleDelete` / `handleDeleteReply` in
 `useComments.ts`, which still write straight to disk with no confirm and then
 toast "Comment deleted." or "Reply deleted." with an **Undo** action (the toast
-lasts 5 seconds). The hook also keeps that delete as the last one
-(`lastDeleteRef`, one level: a newer delete replaces it), so it can be undone
-after the toast is gone: `Cmd+Z` (`Ctrl+Z`) outside a text field, or **Undo last
-delete** in the palette. The toast's button, the key, and the palette all run the
-same `restoreDelete`. On the deleted-from file it uses up the delete whether or
-not it restores, so the toast's Undo does nothing after `Cmd+Z` already
-restored it. Undo restores the whole
-pre-delete document, so it runs only when nothing else has touched the file
-since: the same file must still be the active one and the raw markdown must
-still equal what the delete wrote (`rawMarkdownRef`, read at undo time). A
-restore toasts "Comment restored." or "Reply restored.", and undoing a comment
-also brings it back into view with `requestCommentFocus(id, 'jump')`, the
-request "Jump to agent question" makes. If the markdown moved on (an agent
-edit, another comment action), nothing is written and an error toast says
-"Couldn't undo. The file changed after the delete." Undo is per file: while
-another file is open, `Cmd+Z` falls through (`undoLastDelete` returns false),
-the palette entry is hidden, and the toast's Undo (a tab switch within its 5
-seconds) says "Couldn't undo. The delete was in another file." and keeps the
-delete, so all three work again once the deleted-from file is back and
-unchanged. On its own file `Cmd+Z` always answers, with the error toast if the
-file moved on, while the palette lists the entry only when it would restore
-(`canUndoDelete`). The key sits below the shortcut handler's input check, so a
-text field, the reply composer, and inline editing keep their native undo, and
-it does nothing under a dialog (settings, the shortcuts panel, the file opener,
-any `ConfirmDialog`), where the comment would come back behind it. A
-delete that removed nothing (an id that no longer exists) shows no toast and
-keeps no undo. The bulk **Delete all** flow keeps its
+lasts 5 seconds). Undo restores the whole pre-delete document, so it runs only
+when nothing else has touched the file since: the same file must still be the
+active one and the raw markdown must still equal what the delete wrote
+(`rawMarkdownRef`, read at undo time). A restore toasts "Comment restored." or
+"Reply restored.", and undoing a comment also brings it back into view with
+`requestCommentFocus(id, 'jump')`, the request "Jump to agent question" makes.
+If the markdown moved on (an agent edit, another comment action), nothing is
+written, the delete is used up, and an error toast says "Couldn't undo. The
+file changed after the delete." The toast's Undo clicked from another file (a
+tab switch within its 5 seconds) says "Couldn't undo. The delete was in another
+file." and keeps the delete for later. A delete that removed nothing (an id
+that no longer exists) shows no toast and offers no undo.
+
+**`Cmd+Z` undoes what the last Undo toast offered, after the toast is gone
+too.** Deletes and diff resets (see Diff view) share one level of undo,
+`useUndoSlot`: each one hands the slot an `UndoEntry` (`kind`, `what`,
+`filePath`, `run`, and for a delete `isCurrent`) as it shows its toast, and the newest replaces the last, so `Cmd+Z`
+(`Ctrl+Z`) always does what the last Undo button would have. The palette lists
+the same entry as **Undo delete** / **Undo diff reset** (General section). The
+toast's button, the key, and the palette all call the entry's `run`, which uses
+itself up through `take`, so the toast's Undo does nothing after `Cmd+Z`
+already ran it. Undo is per file, as in an editor: while another file is open,
+`Cmd+Z` falls through (`undoLast` returns false) and the palette entry is
+hidden, and both come back with the file. On its own file `Cmd+Z` always
+answers, with the entry's error toast if the file or diff moved on, and the
+palette lists the entry whenever the slot holds one for the open file, so
+running a stale one says why. The key sits below the shortcut handler's input
+check, so a text field, the reply composer, and inline editing keep their
+native undo, and it does nothing under a dialog (settings, the shortcuts
+panel, the file opener, any `ConfirmDialog`), where a restored comment would
+come back behind it. The bulk **Delete all** flow keeps its
 `ConfirmDialog` and has no Undo. Each `showToast` call gets a fresh `id` that
 `Toast` keys its timers on, so a second delete in a row (same "Comment
 deleted." text) gets its own 5 seconds and isn't hidden by the first toast's
@@ -1921,13 +1925,29 @@ auto-managed as a "review frontier":
   (from the reference `origin` + `capturedAt`, via `formatReferenceLabel`).
 - **Auto-advance**: when the active file's open-comment count crosses to zero
   (gated on `enableResolve`), the reference advances to the current content, the
-  diff resets, and a toast ("All comments resolved. Diff reset.") offers Undo.
+  diff resets, and a toast ("All comments resolved. Diff reset.") offers Undo
+  (the resolve itself stays; Undo puts the old reference back). When a delete
+  emptied the count instead (the slot holds a `comment-delete` entry that is
+  still the file's last change, `isCurrent`), the toast says "Comment deleted.
+  Diff reset." and its undo reverses both: it hands the slot back to the delete,
+  puts the reference back if neither has moved, and lets the delete restore and
+  confirm itself, so the reset can't take the deleted comment's only undo with
+  it. From another file it refuses ("Couldn't undo. The delete was in another
+  file.") and keeps the pair, so the comment never comes back without its diff.
   Guarded against spurious advances on tab switch, Undo, and `enableResolve`
   toggles (`shouldAdvanceFrontier` plus the `prevOpenCount` /
   `advancedForEpisode` / `frontierFile` / `prevResolveEnabled` refs in `App.tsx`).
 - **Mark reviewed** (panel toolbar text button + command palette, shown only
   when `diffChunkCount > 0`) manually advances the reference to the current
-  content, also with an Undo toast.
+  content, also with an Undo toast ("Diff reset.").
+- Both resets go through `resetDiffWithUndo` in `App.tsx`, which also offers the
+  undo to `useUndoSlot`, so `Cmd+Z` and the palette's **Undo diff reset** work
+  after the toast is gone (see Comments: deleting). The undo names its file
+  (`restoreReference(prev, path)`), so the toast's Undo lands on the right file
+  after a tab switch, and it never touches the document. It runs only while that
+  file's reference is still the one the reset set: a handoff captures a new one
+  with no toast, and then the undo says "Couldn't undo. The diff changed after
+  the reset." A restore toasts "Diff restored."
 - **Agent before copies**: `useAgentBaselines` polls `GET /api/baselines` and, for
   every open tab with no reference at all, fetches the content once and seeds it as
   `origin: 'agent'`. Agent copies fill gaps only: a path that already has a reference
@@ -2183,7 +2203,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 | `Cmd+Enter` | Start commenting on selection (or commit the open block when editing) |
 | `Cmd+Shift+M` | Lock selection for commenting |
 | `D` | Delete active comment (undo from the toast or `Cmd+Z` while the file is unchanged) |
-| `Cmd+Z` | Undo the last comment or reply delete (outside text fields) |
+| `Cmd+Z` | Undo what the last Undo toast offered: a delete or a diff reset (outside text fields) |
 | `A` / `X` | Resolve active comment |
 | `U` | Reopen active comment |
 | `Cmd+F` | Find in document |
@@ -2358,10 +2378,11 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 `Cmd+K` opens the palette. Commands include: navigation (next/prev comment, find),
 tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
-file ops (reload, open, mark reviewed), settings, keyboard help, all themes,
+file ops (reload, open, mark reviewed), settings, keyboard help, undo (Undo delete /
+Undo diff reset, while the open file has one), all themes,
 comment bulk ops (resolve all, clear resolved, delete all, hand off to agent),
 active comment ops
-(resolve, reopen, delete; a delete offers Undo in its toast), undo last delete (listed while it would restore the open file's last delete), heading jump, diagram view (open diagram in fullscreen),
+(resolve, reopen, delete; a delete offers Undo in its toast), heading jump, diagram view (open diagram in fullscreen),
 agent asks (jump to next agent question, which shows the pending count and cycles
 through questions on repeat invocations).
 

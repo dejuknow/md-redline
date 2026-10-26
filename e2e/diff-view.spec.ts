@@ -2,7 +2,8 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { addComment, openCommentsDrawer } from './helpers/comments';
+import { addComment, clickCardAction, openCommentsDrawer } from './helpers/comments';
+import { withMod } from './helpers/shortcuts';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -169,6 +170,64 @@ test.describe('Diff overlay', () => {
     await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
 
     await toolbarBtn(page, 'Mark reviewed').click();
+    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+  });
+
+  test('Cmd+Z after Mark reviewed undoes the reset, not an earlier delete', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
+    await clickCardAction(page, 'Mention cost factor', 'Delete');
+    await expect
+      .poll(() => readFileSync(FIXTURE, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('Mention cost factor');
+
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(1000);
+    const original = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
+    await switchToRaw(page);
+    const diffBtn = toggleBtn(page, 'diff');
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+
+    await toolbarBtn(page, 'Mark reviewed').click();
+    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    const resetToast = page.getByRole('status').filter({ hasText: 'Diff reset.' });
+    await resetToast.getByRole('button', { name: 'Dismiss notification' }).click();
+    await expect(resetToast).toHaveCount(0);
+
+    // The last thing offered for undo was the reset, so that is what comes back.
+    await page.keyboard.press(withMod('z'));
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole('status').filter({ hasText: 'Diff restored.' })).toBeVisible();
+    expect(readFileSync(FIXTURE, 'utf-8')).not.toContain('Mention cost factor');
+  });
+
+  test('a handoff after the reset leaves the reset in place', async ({ page, context }) => {
+    await openFixture(page);
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(1000);
+    const original = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
+    await switchToRaw(page);
+    const diffBtn = toggleBtn(page, 'diff');
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+
+    await toolbarBtn(page, 'Mark reviewed').click();
+    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    // A handoff takes a new reference of its own, with no toast. The first
+    // handoff's comment is still open, so the button is there in raw view.
+    await page.getByTestId('handoff-button').click();
+    await page.waitForTimeout(500);
+
+    await page.keyboard.press(withMod('z'));
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: "Couldn't undo. The diff changed after the reset." }),
+    ).toBeVisible();
     await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
   });
 
@@ -341,6 +400,45 @@ test.describe('Diff overlay', () => {
     // Undo brings the diff back.
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('deleting the last open comment resets the diff, and one undo brings both back', async ({
+    page,
+    context,
+  }) => {
+    await openFixture(page);
+    await page.keyboard.press(withMod(','));
+    await page.getByRole('switch', { name: /resolve/i }).click();
+    await page.keyboard.press('Escape');
+
+    await takeSnapshotViaHandoff(page, context);
+    await page.waitForTimeout(1000);
+    const original = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
+    await switchToRaw(page);
+    const diffBtn = toggleBtn(page, 'diff');
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+
+    // The handoff's placeholder is the only open comment. Deleting it empties
+    // the open count, which resets the diff the way resolving it would.
+    await openCommentsDrawer(page);
+    await page.locator('[data-comment-card-id] p').first().click();
+    await page.keyboard.press('d');
+    const toast = page.getByRole('status').filter({ hasText: 'Comment deleted. Diff reset.' });
+    await expect(toast).toBeVisible({ timeout: 5_000 });
+    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect
+      .poll(() => readFileSync(FIXTURE, 'utf-8'), { timeout: 10_000 })
+      .not.toContain('placeholder');
+    await toast.getByRole('button', { name: 'Dismiss notification' }).click();
+
+    await page.keyboard.press(withMod('z'));
+
+    await expect(page.getByRole('status').filter({ hasText: 'Comment restored.' })).toBeVisible();
+    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+    await expect
+      .poll(() => readFileSync(FIXTURE, 'utf-8'), { timeout: 10_000 })
+      .toContain('placeholder');
   });
 
   test('diff reference label states what is being compared', async ({ page, context }) => {

@@ -299,16 +299,14 @@ test.describe('Comment lifecycle', () => {
     await expect(getCard(page, 'Mention cost factor')).toBeVisible();
   });
 
-  test('the command palette offers Undo last delete after a delete', async ({ page }) => {
+  test('the command palette offers Undo delete after a delete', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'hashed with bcrypt', 'Mention cost factor');
 
     await page.keyboard.press(withMod('k'));
     const input = page.getByPlaceholder('Type a command...');
-    await input.fill('undo last delete');
-    await expect(
-      page.locator('button[data-selected]', { hasText: 'Undo last delete' }),
-    ).toHaveCount(0);
+    await input.fill('undo');
+    await expect(page.locator('button[data-selected]', { hasText: 'Undo delete' })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(input).not.toBeVisible();
 
@@ -319,8 +317,8 @@ test.describe('Comment lifecycle', () => {
       .not.toContain('Mention cost factor');
 
     await page.keyboard.press(withMod('k'));
-    await input.fill('undo last delete');
-    await page.locator('button[data-selected]', { hasText: 'Undo last delete' }).click();
+    await input.fill('undo');
+    await page.locator('button[data-selected]', { hasText: 'Undo delete' }).click();
 
     await expect(getCard(page, 'Mention cost factor')).toBeVisible();
     await expect

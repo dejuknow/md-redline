@@ -166,6 +166,29 @@ describe('useDiffSnapshot', () => {
     act(() => result.current.restoreReference(prev));
     expect(result.current.currentSnapshot).toBe('v1');
   });
+
+  it('restoreReference can name the file, so an undo lands on the file it came from', () => {
+    const rawMarkdownRef = { current: 'a v1' };
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string | null }) => useDiffSnapshot(path, rawMarkdownRef),
+      { initialProps: { path: '/a.md' as string | null } },
+    );
+    act(() => {
+      result.current.captureReference('review');
+    });
+    rawMarkdownRef.current = 'a v2';
+    let prev: DiffReference | null = null;
+    act(() => {
+      prev = result.current.captureReference('review');
+    });
+
+    // The reader has moved to another file by the time the undo runs.
+    rerender({ path: '/b.md' });
+    act(() => result.current.restoreReference(prev, '/a.md'));
+
+    expect(result.current.getReference('/a.md')?.content).toBe('a v1');
+    expect(result.current.getReference('/b.md')).toBeNull();
+  });
 });
 
 describe('agent-captured references', () => {

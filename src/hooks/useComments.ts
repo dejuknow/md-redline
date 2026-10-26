@@ -34,19 +34,11 @@ import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import type { ShowToast } from './useToast';
+import type { UndoEntry, UndoSlot } from './useUndoSlot';
 
 interface TabInfo {
   filePath: string;
   rawMarkdown: string;
-}
-
-/** A single delete, as much of it as undoing it needs. */
-interface DeleteSnapshot {
-  filePath: string | null;
-  before: string;
-  after: string;
-  restoredMessage: string;
-  onRestored?: () => void;
 }
 
 /**
@@ -84,6 +76,8 @@ export interface UseCommentsParams {
   clearSelection: () => void;
   setAutoExpandForm: Dispatch<SetStateAction<boolean>>;
   requestCommentFocus: (commentId: string, origin?: CommentFocusOrigin) => void;
+  /** Where a delete leaves its undo for Cmd+Z and the palette (useUndoSlot). */
+  undoSlot: Pick<UndoSlot, 'offer' | 'holds' | 'take'>;
 }
 
 export function useComments(params: UseCommentsParams) {
@@ -105,6 +99,7 @@ export function useComments(params: UseCommentsParams) {
     clearSelection,
     setAutoExpandForm,
     requestCommentFocus,
+    undoSlot: { offer: offerUndo, holds: undoHolds, take: takeUndo },
   } = params;
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -266,86 +261,56 @@ export function useComments(params: UseCommentsParams) {
   const activeFilePathRef = useRef(activeFilePath);
   activeFilePathRef.current = activeFilePath;
 
-  // The last single delete, kept so it can be undone after its toast is gone
-  // (Cmd+Z, the palette's "Undo last delete"). One level only: a newer delete
-  // replaces it. The ref is what the handlers read; the state re-renders the
-  // palette when it appears or goes away. rememberDelete writes both.
-  const lastDeleteRef = useRef<DeleteSnapshot | null>(null);
-  const [lastDelete, setLastDelete] = useState<DeleteSnapshot | null>(null);
-  const rememberDelete = useCallback((snapshot: DeleteSnapshot | null) => {
-    lastDeleteRef.current = snapshot;
-    setLastDelete(snapshot);
-  }, []);
-
-  // Put a delete back. The undo restores the whole pre-delete document, so it
-  // only runs when nothing else has touched the file since: the same file is
-  // still open and the markdown is exactly what the delete wrote. Anything else
-  // (an agent edit, another comment action, a different tab) would be silently
+  // After a single comment or reply is deleted, offer to put it back: in the
+  // toast, and through the shared undo slot (Cmd+Z, the palette) once the
+  // toast is gone. The undo restores the whole pre-delete document, so it only
+  // runs when nothing else has touched the file since: the same file is still
+  // open and the markdown is exactly what the delete wrote. Anything else (an
+  // agent edit, another comment action, a different tab) would be silently
   // overwritten by `before`.
-  const restoreDelete = useCallback(
-    (snapshot: DeleteSnapshot) => {
-      // Already undone (the toast's Undo after Cmd+Z), or a newer delete
-      // replaced it.
-      if (lastDeleteRef.current !== snapshot) return;
-      // Only the toast's Undo gets here from another file. The delete stays
-      // kept, so Cmd+Z still undoes it once its own file is back.
-      if (activeFilePathRef.current !== snapshot.filePath) {
-        showToast("Couldn't undo. The delete was in another file.", 'error');
-        return;
-      }
-      // On its own file the delete is used up whether or not it restores.
-      rememberDelete(null);
-      if (rawMarkdownRef.current !== snapshot.after) {
-        showToast("Couldn't undo. The file changed after the delete.", 'error');
-        return;
-      }
-      // The path check above means this delete-time writer still targets
-      // the open file, and saveFileAt reads the file's mtime when it runs.
-      updateAndSave(snapshot.before);
-      snapshot.onRestored?.();
-      showToast(snapshot.restoredMessage, 'info');
-    },
-    [showToast, rawMarkdownRef, updateAndSave, rememberDelete],
-  );
-
-  // After a single comment or reply is deleted, offer to put it back.
   const offerDeleteUndo = useCallback(
     (
+      kind: 'comment-delete' | 'reply-delete',
       message: string,
       restoredMessage: string,
       before: string,
       after: string,
       onRestored?: () => void,
     ) => {
-      const snapshot: DeleteSnapshot = {
-        filePath: activeFilePathRef.current,
-        before,
-        after,
-        restoredMessage,
-        onRestored,
+      const filePath = activeFilePathRef.current;
+      const entry: UndoEntry = {
+        kind,
+        what: 'delete',
+        filePath,
+        run: () => {
+          // Already undone (the toast's Undo after Cmd+Z), or a newer undo
+          // replaced it.
+          if (!undoHolds(entry)) return;
+          // Only the toast's Undo gets here from another file. The delete
+          // stays kept, so Cmd+Z still undoes it once its own file is back.
+          if (activeFilePathRef.current !== filePath) {
+            showToast("Couldn't undo. The delete was in another file.", 'error');
+            return;
+          }
+          // On its own file the delete is used up whether or not it restores.
+          takeUndo(entry);
+          if (rawMarkdownRef.current !== after) {
+            showToast("Couldn't undo. The file changed after the delete.", 'error');
+            return;
+          }
+          // The path check above means this delete-time writer still targets
+          // the open file, and saveFileAt reads the file's mtime when it runs.
+          updateAndSave(before);
+          onRestored?.();
+          showToast(restoredMessage, 'info');
+        },
+        isCurrent: () => activeFilePathRef.current === filePath && rawMarkdownRef.current === after,
       };
-      rememberDelete(snapshot);
-      showToast(message, 'info', { label: 'Undo', onClick: () => restoreDelete(snapshot) });
+      offerUndo(entry);
+      showToast(message, 'info', { label: 'Undo', onClick: entry.run });
     },
-    [showToast, restoreDelete, rememberDelete],
+    [showToast, rawMarkdownRef, updateAndSave, offerUndo, undoHolds, takeUndo],
   );
-
-  // Undo is per file, as in an editor: while another file is open the last
-  // delete is left alone (false, so Cmd+Z falls through) and still undoes once
-  // its own file is back. On its own file it always runs, so a delete the file
-  // has moved past still answers Cmd+Z with the reason nothing came back.
-  const undoLastDelete = useCallback((): boolean => {
-    const snapshot = lastDeleteRef.current;
-    if (!snapshot || snapshot.filePath !== activeFilePathRef.current) return false;
-    restoreDelete(snapshot);
-    return true;
-  }, [restoreDelete]);
-
-  // Whether "Undo last delete" would restore anything right now.
-  const canUndoDelete =
-    lastDelete !== null &&
-    lastDelete.filePath === activeFilePath &&
-    rawMarkdown === lastDelete.after;
 
   const handleAddComment = useCallback(
     (
@@ -418,8 +383,13 @@ export function useComments(params: UseCommentsParams) {
       if (after === before) return;
       // The same request "Jump to agent question" makes: scroll to the card,
       // focus it, and select it in Anchored density.
-      offerDeleteUndo('Comment deleted.', 'Comment restored.', before, after, () =>
-        requestCommentFocus(id, 'jump'),
+      offerDeleteUndo(
+        'comment-delete',
+        'Comment deleted.',
+        'Comment restored.',
+        before,
+        after,
+        () => requestCommentFocus(id, 'jump'),
       );
     },
     [updateAndSave, rawMarkdownRef, offerDeleteUndo, requestCommentFocus],
@@ -452,7 +422,7 @@ export function useComments(params: UseCommentsParams) {
       const after = removeReply(before, commentId, replyId);
       updateAndSave(after);
       if (after === before) return;
-      offerDeleteUndo('Reply deleted.', 'Reply restored.', before, after);
+      offerDeleteUndo('reply-delete', 'Reply deleted.', 'Reply restored.', before, after);
     },
     [updateAndSave, rawMarkdownRef, offerDeleteUndo],
   );
@@ -585,8 +555,6 @@ export function useComments(params: UseCommentsParams) {
     handleReply,
     handleEditReply,
     handleDeleteReply,
-    undoLastDelete,
-    canUndoDelete,
     handleBulkDelete,
     handleBulkResolve,
     handleBulkDeleteResolved,
