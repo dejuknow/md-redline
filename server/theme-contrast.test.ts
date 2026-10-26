@@ -4,7 +4,8 @@ import { join } from 'node:path';
 
 /**
  * Contrast floors checked against every shipped theme: the rendered
- * frontmatter block here, and ordinary HTML comments further down (#125).
+ * frontmatter block here, ordinary HTML comments further down (#125), and the
+ * resolved mark on file tabs (#160).
  *
  * The block's first version used --theme-text-muted on --theme-bg-secondary,
  * which measures 2.18:1 on Solarized and failed AA on six of the eight themes.
@@ -36,6 +37,8 @@ function contrast(a: string, b: string): number {
 interface Theme {
   name: string;
   vars: Record<string, string>;
+  /** The block's own text, for the few values that are not hex (the rgba tint). */
+  body: string;
 }
 
 function themeBlocks(): Theme[] {
@@ -48,7 +51,7 @@ function themeBlocks(): Theme[] {
     for (const v of match[2].matchAll(/--theme-([a-z-]+):\s*(#[0-9a-fA-F]{3,8})/g)) {
       vars[v[1]] = v[2];
     }
-    if (vars['bg-secondary']) blocks.push({ name, vars });
+    if (vars['bg-secondary']) blocks.push({ name, vars, body: match[2] });
   }
   return blocks;
 }
@@ -169,6 +172,58 @@ describe('rendered HTML comment contrast', () => {
       expect(contrast(inkFor('.raw-html-comment', theme), theme.vars.bg)).toBeGreaterThanOrEqual(
         4.5,
       );
+    },
+  );
+});
+
+/**
+ * The resolved mark on a file tab (#160) is a check whose meaning is its shape,
+ * so it needs the 3:1 non-text minimum on every surface a tab sits on: the
+ * active tab (--theme-bg), an inactive one on the tab bar (--theme-bg-secondary)
+ * and an inactive one under the pointer (--theme-tint over the bar). The success
+ * green first measured 2.51 on Sepia, 2.62 on Solarized and 2.70 on a hovered
+ * Light tab. The ink is read off the component's class, the way the rules above
+ * are read off index.css, so moving the mark to another color is checked too.
+ */
+function resolvedMarkInk(theme: Theme): string {
+  const source = readFileSync(join(__dirname, '..', 'src', 'components', 'TabBar.tsx'), 'utf-8');
+  const className = /data-resolved-mark[^>]*className="([^"]*)"/.exec(source)?.[1];
+  const utility = className && /(?:^|\s)text-([a-z-]+)/.exec(className)?.[1];
+  if (!utility) throw new Error('no text color on the resolved mark');
+  const themeVar = new RegExp(`--color-${utility}:\\s*var\\(--theme-([a-z-]+)\\)`).exec(CSS)?.[1];
+  if (!themeVar) throw new Error(`no --color-${utility} in index.css`);
+  return theme.vars[themeVar];
+}
+
+/** The theme's rgba --theme-tint laid over a hex background, as the browser paints it. */
+function tintOver(base: string, theme: Theme): string {
+  const tint = /--theme-tint:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/.exec(theme.body);
+  if (!tint) throw new Error(`no rgba tint in ${theme.name}`);
+  const alpha = Number(tint[4]);
+  return `#${[1, 3, 5]
+    .map((i, c) =>
+      Math.round(Number(tint[c + 1]) * alpha + parseInt(base.slice(i, i + 2), 16) * (1 - alpha))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+}
+
+describe('resolved tab mark contrast', () => {
+  const themes = themeBlocks();
+
+  it.each(themes.map((t) => [t.name, t] as const))(
+    'reads on the active, inactive and hovered tab on %s',
+    (_name, theme) => {
+      const ink = resolvedMarkInk(theme);
+      const surfaces = [
+        theme.vars.bg,
+        theme.vars['bg-secondary'],
+        tintOver(theme.vars['bg-secondary'], theme),
+      ];
+      for (const surface of surfaces) {
+        expect(contrast(ink, surface)).toBeGreaterThanOrEqual(3);
+      }
     },
   );
 });

@@ -1422,9 +1422,16 @@ the time that was left. With reduced motion the bar stays full and the clock sti
 Tab badges count user and agent-initiated comments alike (`tabCommentCounts`
 in App). A resolved comment is out of the tab badge, the Send set
 (`commentIdsByFile`, which feeds the Review banner), `commentCount` and `N`/`P`
-navigation in either mode, and a tab with no open comments but some resolved
-ones draws a quiet outlined "N resolved" badge instead (`resolvedCommentCounts`,
-user comments only; same in the tab strip and the overflow tab list). Resolve
+navigation in either mode. A tab with resolved comments draws a check in the
+resolved green (`ResolvedMark` in `TabBar.tsx`, from `resolvedCommentCounts`,
+user comments only; same in the tab strip and the overflow tab list), beside the
+open count when there is one (#160). It is a check rather than a number because
+a number on a tab reads as work left, and it shows next to an open count so a
+file with both still turns up when scanning for resolved comments. The count is
+in its tooltip ("N resolved") and in hidden text for the tab's accessible name;
+the SVG is `aria-hidden`. Its ink, `--theme-success-text`, is held to 3:1 on
+the active, inactive and hovered tab of every theme by `theme-contrast.test.ts`,
+which is why Light, Sepia and Solarized carry a darker success green. Resolve
 mode off still meets resolved markers: a file resolved in an earlier
 resolve-mode session, a session an agent started with `enableResolve: true`, a
 collaborator's file, or a hand edit. Every surface shows those as resolved too

@@ -156,8 +156,8 @@ describe('TabBar: keeping the active tab in view', () => {
 });
 
 describe('TabBar: comment count badges', () => {
-  // one.md has open comments, two.md has only resolved ones, three.md has both
-  // (the open count wins), and four.md has neither.
+  // one.md has open comments, two.md has only resolved ones, three.md has both,
+  // and four.md has neither.
   const BADGE_TABS = ['one', 'two', 'three', 'four'].map((name) => ({
     filePath: `/docs/${name}.md`,
     error: null,
@@ -192,7 +192,7 @@ describe('TabBar: comment count badges', () => {
       open: Array.from(button.querySelectorAll('span.rounded-full')).filter(
         (el) => !el.hasAttribute('title') && /^\d+$/.test(el.textContent ?? ''),
       ),
-      resolved: Array.from(button.querySelectorAll('span[title$=" resolved"]')),
+      resolved: Array.from(button.querySelectorAll('[data-resolved-mark]')),
     };
   }
 
@@ -202,17 +202,21 @@ describe('TabBar: comment count badges', () => {
     expect(one.open.map((el) => el.textContent)).toEqual(['3']);
     expect(one.resolved).toHaveLength(0);
 
-    // No open comments but some resolved: the outlined "N resolved" badge.
+    // Resolved comments draw the check, never a number (#160): the count is in
+    // the tooltip and in hidden text for the tab's accessible name.
     const two = badgesIn(scope, 'two.md');
     expect(two.open).toHaveLength(0);
     expect(two.resolved.map((el) => [el.textContent, el.getAttribute('title')])).toEqual([
-      ['2', '2 resolved'],
+      ['2 resolved', '2 resolved'],
     ]);
+    expect(two.resolved[0].querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(two.resolved[0].querySelector('.sr-only')?.textContent).toBe('2 resolved');
 
-    // An open count wins over a resolved count.
+    // Both: the open count, and the check beside it, so a file with open
+    // comments still turns up when scanning for resolved ones.
     const three = badgesIn(scope, 'three.md');
     expect(three.open.map((el) => el.textContent)).toEqual(['1']);
-    expect(three.resolved).toHaveLength(0);
+    expect(three.resolved.map((el) => el.getAttribute('title'))).toEqual(['4 resolved']);
 
     // Neither: no badge at all.
     const four = badgesIn(scope, 'four.md');
@@ -220,7 +224,7 @@ describe('TabBar: comment count badges', () => {
     expect(four.resolved).toHaveLength(0);
   }
 
-  it('draws the open count, or the "N resolved" badge when only resolved remain, in the tab strip', () => {
+  it('draws the open count and the resolved check in the tab strip', () => {
     const { container } = renderBadges(resolvedCounts);
 
     expectBadges(container);
@@ -238,13 +242,13 @@ describe('TabBar: comment count badges', () => {
     expectBadges(getByTestId('tab-list-menu'));
   });
 
-  it('draws no resolved badge when the resolved counts are empty or omitted', () => {
-    // App passes an empty map while the resolve workflow is off; the prop is
-    // optional, so a missing map has to read the same.
+  it('draws no resolved check when the resolved counts are empty or omitted', () => {
+    // The prop is optional, so a missing map has to read the same as one with
+    // no resolved comments in it.
     for (const resolved of [new Map<string, number>(), undefined]) {
       const { container, unmount } = renderBadges(resolved);
 
-      expect(container.querySelectorAll('span[title$=" resolved"]')).toHaveLength(0);
+      expect(container.querySelectorAll('[data-resolved-mark]')).toHaveLength(0);
       expect(badgesIn(container, 'two.md').open).toHaveLength(0);
       unmount();
     }

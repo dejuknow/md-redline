@@ -224,12 +224,13 @@ test.describe('Multi-tab support', () => {
     await expect(badge).toHaveText('2');
   });
 
-  test('a fully resolved file shows an "N resolved" badge, not an open count, in the strip and the tab list', async ({
+  test('a fully resolved file shows the resolved check, not a count, in the strip and the tab list', async ({
     page,
   }) => {
     // With the resolve workflow on, a resolved comment leaves the open count.
     // A file whose threads are all resolved has no open-count badge; it draws
-    // the outlined "N resolved" badge instead, in both tab sites.
+    // the resolved check instead (#160), in both tab sites, with the count in
+    // its tooltip.
     const marker = (id: string, anchor: string, status: 'open' | 'resolved') =>
       `<!-- @comment${JSON.stringify({
         id,
@@ -271,18 +272,17 @@ test.describe('Multi-tab support', () => {
     await page.keyboard.press('Escape');
     await expect(settingsPanel).not.toBeVisible();
 
-    // The open count has no title; the resolved badge is titled "N resolved".
+    // The open count has no title; the resolved check is titled "N resolved".
     const tabButton = (scope: Locator, fileName: string) =>
       scope.locator('button', { hasText: fileName }).first();
     const openBadge = (scope: Locator, fileName: string) =>
       tabButton(scope, fileName).locator('span.rounded-full:not([title])', { hasText: /\d/ });
     const resolvedBadge = (scope: Locator, fileName: string) =>
-      tabButton(scope, fileName).locator('span[title$=" resolved"]');
+      tabButton(scope, fileName).locator('[data-resolved-mark]');
     const tabBar = page.locator('.h-11');
 
     // Active tab.
     await expect(openBadge(tabBar, 'test-doc.md')).toHaveCount(0);
-    await expect(resolvedBadge(tabBar, 'test-doc.md')).toHaveText('2');
     await expect(resolvedBadge(tabBar, 'test-doc.md')).toHaveAttribute('title', '2 resolved');
 
     for (const [index, fixture] of OVERFLOW_FIXTURES.entries()) {
@@ -290,11 +290,11 @@ test.describe('Multi-tab support', () => {
     }
 
     // Inactive tabs, in the strip and in the overflow list. The file with an
-    // open comment shows its count and no resolved badge.
+    // open comment shows its count and no resolved check.
     await expect(openBadge(tabBar, 'overflow-tab-1.md')).toHaveText('1');
     await expect(resolvedBadge(tabBar, 'overflow-tab-1.md')).toHaveCount(0);
     await expect(openBadge(tabBar, 'test-doc.md')).toHaveCount(0);
-    await expect(resolvedBadge(tabBar, 'test-doc.md')).toHaveText('2');
+    await expect(resolvedBadge(tabBar, 'test-doc.md')).toHaveAttribute('title', '2 resolved');
 
     await page.getByTestId('tab-list-button').click();
     const tabListMenu = page.getByTestId('tab-list-menu');
@@ -302,7 +302,7 @@ test.describe('Multi-tab support', () => {
     await expect(openBadge(tabListMenu, 'overflow-tab-1.md')).toHaveText('1');
     await expect(resolvedBadge(tabListMenu, 'overflow-tab-1.md')).toHaveCount(0);
     await expect(openBadge(tabListMenu, 'test-doc.md')).toHaveCount(0);
-    await expect(resolvedBadge(tabListMenu, 'test-doc.md')).toHaveText('2');
+    await expect(resolvedBadge(tabListMenu, 'test-doc.md')).toHaveAttribute('title', '2 resolved');
   });
 
   test('Cmd+Shift+[ / ] cycle tabs', async ({ page }) => {
