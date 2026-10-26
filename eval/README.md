@@ -54,6 +54,8 @@ The current fixtures cover the main document-editing scenarios this app cares ab
 - files with no comments
 - YAML frontmatter preservation
 - mixed open and resolved comments
+- resolved threads left alone even when the reviewer's reply is the latest
+- threads answered in an earlier round left alone
 - clustered comments inside a single paragraph
 - markdown table edits
 
@@ -78,7 +80,7 @@ For each case, [runner.ts](./runner.ts) does the following:
 Scoring is implemented in [scorer.ts](./scorer.ts). The overall score is weighted across three dimensions:
 
 - `parsing` 25%
-  Checks whether actionable comment markers were removed after the agent addressed them.
+  Checks whether actionable comment markers were removed after the agent addressed them, and that any skipped comment marked `leaveUntouched` came through with the status and replies it had.
 - `execution` 50%
   Checks whether the edited document content satisfies the case assertions in `expected.json`.
 - `integrity` 25%

@@ -6,7 +6,8 @@
   "comments": [
     {
       "id": "eval-21-c1",
-      "expectedAction": "skip"
+      "expectedAction": "skip",
+      "leaveUntouched": true
     },
     {
       "id": "eval-21-c2",

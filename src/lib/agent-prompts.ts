@@ -43,6 +43,24 @@ export function buildAddressCommentsPrompt({
     '(append to any existing replies). Do NOT include a `timestamp` field in your reply; ' +
     'md-redline will fill it in automatically when it reads your edit.';
 
+  // Resolved markers are settled in either mode (#167): the app shows them as
+  // finished and leaves them out of Send, so a reply there is never read.
+  // Neither mode said so, and agents answered the reader's closing reply on a
+  // resolved thread in 5 of 6 runs (eval cases 22 and 23; 0 of 6 since).
+  //
+  // Both rules are judged from the file as the agent FIRST read it. Step 3
+  // has it reply to every comment it addresses and resolve mode resolves them,
+  // so by step 4 a comment it just handled looks settled by either rule. #167
+  // blamed that reading for remove mode keeping markers in case 02, but those
+  // runs kept the marker open to ask for numbers the document never gave (see
+  // the fixture); with the numbers in place both wordings pass. The anchor
+  // stays as a guard, not a measured fix.
+  const settledRule =
+    'Judge what is already settled from the file as you first read it, before any of your edits, and leave those comments exactly as they are, without replying: ' +
+    'a comment whose marker has `"status":"resolved"` is finished, even if my reply is the latest in its thread, ' +
+    'and a comment that already carried a reply from you, with no later reply from me, was answered in an earlier round. ' +
+    'If I replied after your last reply on an open comment, address my latest reply and add a new reply.';
+
   const isSingle = filePaths.length === 1;
   const fileRef = isSingle ? filePaths[0] : 'the files listed below';
   const fileList = isSingle
@@ -88,7 +106,7 @@ You MUST edit the files at the exact paths listed above. Do NOT copy them to a d
 ## What to do
 ${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
 1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${commentIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
-2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. If a comment already carries a reply authored by you and no later reply from me, it was answered in an earlier round: leave it exactly as it is and do not reply again. If I replied after your last reply, address my latest reply and add a new reply.
+2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. ${settledRule}
 3. ${replyStep}
 4. ${afterAction}
 5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it
