@@ -331,16 +331,19 @@ export function useComments(params: UseCommentsParams) {
       // loses the comment with no marker, no error, and a focus request for an
       // id that was never written. The MCP route already reports this case;
       // the UI used to swallow it.
+      //
+      // The selection stays, so the form holding the reader's draft stays
+      // open. Clearing it unmounted the form and threw the draft away, after
+      // all the typing was done (#191).
       if (newRaw === (rawMarkdownRef.current ?? '')) {
-        showToast("Couldn't anchor that comment. Try selecting the text again.", 'error');
-        clearSelection();
-        setAutoExpandForm(false);
-        return;
+        showToast("Couldn't anchor that comment. Your text is still in the form.", 'error');
+        return false;
       }
       updateAndSave(newRaw);
       requestCommentFocus(newCommentId, 'creation');
       clearSelection();
       setAutoExpandForm(false);
+      return true;
     },
     [
       updateAndSave,

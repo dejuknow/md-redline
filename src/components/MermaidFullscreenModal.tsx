@@ -72,13 +72,14 @@ export interface MermaidFullscreenModalProps {
   comments: MdComment[];
   activeCommentId: string | null;
   onClose: () => void;
+  /** Returns false when the comment could not be placed in the file. */
   onAddComment: (
     anchor: string,
     text: string,
     contextBefore: string,
     contextAfter: string,
     hintOffset: number,
-  ) => void;
+  ) => boolean | void;
   onReply: (commentId: string, text: string) => void;
   onResolve?: (commentId: string) => void;
   onUnresolve?: (commentId: string) => void;
@@ -523,7 +524,8 @@ export function MermaidFullscreenModal({
           selection={commentSelection}
           isPending={isPending}
           onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
-            onAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
+            // A comment the file could not place keeps the form and its draft.
+            if (onAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset) === false) return false;
             clearSelection();
           }}
           onCancel={clearSelection}

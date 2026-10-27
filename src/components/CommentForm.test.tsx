@@ -180,6 +180,44 @@ describe('CommentForm selection pill', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the draft and says why when the comment cannot be placed', async () => {
+    // The file could not place the comment. Dropping the draft here threw away
+    // everything the reader had typed (#191).
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onSubmit = vi.fn(() => false);
+    renderForm({ onSubmit });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'A long comment worth keeping' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect((screen.getByPlaceholderText('Add your comment...') as HTMLTextAreaElement).value).toBe(
+      'A long comment worth keeping',
+    );
+    expect(screen.getByRole('alert').textContent).toMatch(/could not be found in the file/);
+  });
+
+  it('clears the draft when the comment is placed', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onSubmit = vi.fn(() => true);
+    renderForm({ onSubmit });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Placed fine' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByPlaceholderText('Add your comment...')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('quickComment bypasses the pill and honors showTemplatesByDefault', async () => {
     fetchPreferences.mockResolvedValue({
       settings: {

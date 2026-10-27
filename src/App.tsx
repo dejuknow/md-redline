@@ -3772,10 +3772,9 @@ export default function App() {
               autoExpand={autoExpandForm}
               hidden={viewerCtxMenu.isOpen}
               overlayOpen={activeModal !== null || drawerOpen}
-              onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
-                handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset);
-                setAutoExpandForm(false);
-              }}
+              onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) =>
+                handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset)
+              }
               onCancel={() => {
                 clearSelection();
                 setAutoExpandForm(false);
@@ -3887,7 +3886,7 @@ export default function App() {
               const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
               adjustedHint = toPlainOffset(cleanHint);
             }
-            handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
+            return handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
           }}
           onReply={handleReply}
           onResolve={settings.enableResolve ? handleResolve : undefined}

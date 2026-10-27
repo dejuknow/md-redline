@@ -218,3 +218,29 @@ test.describe('Comments anchor cleanly across markdown constructs', () => {
     expect(marked).toEqual(expect.arrayContaining(['2. Onboarding events', 'Event', 'low']));
   });
 });
+
+test.describe('A comment the file cannot place', () => {
+  test('keeps the form open with the draft (#191)', async ({ page }) => {
+    // `&amp;` renders as `&`, and the anchor search does not decode entities,
+    // so this selection has no match in the source. Any unplaceable anchor
+    // would do; this is the cheapest one to build.
+    const doc = '# Anchor Edge Cases\n\nTom &amp; Jerry run fast.\n';
+    writeFileSync(fixturePath, doc);
+    await openFixture(page);
+    await selectSingleText(page, 'Tom & Jerry');
+
+    const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
+    await expect(commentBtn).toBeVisible({ timeout: 5000 });
+    await commentBtn.click();
+    const draft = 'A long comment the reader should not have to type twice';
+    await page.getByPlaceholder('Add your comment...').fill(draft);
+    await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment' }).click();
+
+    await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
+    await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
+    await expect(page.locator('[data-comment-form]').getByRole('alert')).toContainText(
+      'could not be found in the file',
+    );
+    expect(readFileSync(fixturePath, 'utf8')).toBe(doc);
+  });
+});

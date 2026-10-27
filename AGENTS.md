@@ -986,6 +986,13 @@ While a template prefill sits untouched in the full comment form, Escape
 clears the prefill and keeps the form open; a second Escape (or an Escape
 after typing) closes the form as usual.
 
+When the file cannot place a comment, because the selected text has no match
+in the source, the full comment form stays open with its draft.
+`handleAddComment` returns false and leaves the selection alone, and
+`CommentForm` keeps its text and shows an inline alert. Clearing the selection
+would unmount the form, which is the only place the draft lives (#191). The
+Mermaid fullscreen modal's form follows the same rule.
+
 ### Right-clicking a selection
 
 The viewer's own menu (Comment, Copy, Copy as Markdown) opens from the painted mark,
