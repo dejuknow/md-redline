@@ -991,7 +991,12 @@ in the source, the full comment form stays open with its draft.
 `handleAddComment` returns false and leaves the selection alone, and
 `CommentForm` keeps its text and shows an inline alert. Clearing the selection
 would unmount the form, which is the only place the draft lives (#191). The
-Mermaid fullscreen modal's form follows the same rule.
+Mermaid fullscreen modal's form follows the same rule. The anchor search does
+not decode entities or footnote references, so a retry on the same selection
+fails the same way: Comment stays disabled until the selection changes, the
+quoted anchor gets a danger border, the templates and the shortcut hint hide,
+and the alert (linked to the textarea by `aria-describedby`) points the reader
+at nearby text without symbols like `&` or footnote numbers.
 
 ### Right-clicking a selection
 

@@ -198,7 +198,14 @@ describe('CommentForm selection pill', () => {
     expect((screen.getByPlaceholderText('Add your comment...') as HTMLTextAreaElement).value).toBe(
       'A long comment worth keeping',
     );
-    expect(screen.getByRole('alert').textContent).toMatch(/could not be found in the file/);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/Can.t find this text in the file/);
+    expect(alert.textContent).toContain(
+      'Select nearby text to attach this comment. Your draft stays here.',
+    );
+    expect(textarea.getAttribute('aria-describedby')).toBe(alert.id);
+    // Comment is off, so its shortcut hint goes too.
+    expect(screen.queryByText(/\+Enter$/)).toBeNull();
   });
 
   it('clears the draft when the comment is placed', async () => {
@@ -216,6 +223,39 @@ describe('CommentForm selection pill', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.queryByPlaceholderText('Add your comment...')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('blocks a retry on the selection the file could not place', async () => {
+    // The same selection fails the same way, so Comment stays off until the
+    // reader picks other text.
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onSubmit = vi.fn(() => false);
+    renderForm({ onSubmit });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    fireEvent.change(textarea, { target: { value: 'Second try' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('closes the templates when the comment cannot be placed', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true, showTemplatesByDefault: true },
+    });
+    renderForm({ onSubmit: vi.fn(() => false) });
+
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    expect(await screen.findByText('Quick templates:')).toBeTruthy();
+    fireEvent.change(textarea, { target: { value: 'Nowhere to go' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(screen.queryByText('Quick templates:')).toBeNull();
   });
 
   it('quickComment bypasses the pill and honors showTemplatesByDefault', async () => {

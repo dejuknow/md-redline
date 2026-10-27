@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useId } from 'react';
 import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
@@ -63,8 +63,10 @@ export function CommentForm({
   // True while a template prefill sits untouched; Escape then clears the
   // prefill instead of closing the form.
   const [prefillPristine, setPrefillPristine] = useState(false);
-  // True after a submit the file could not place. Cleared with the selection.
+  // True after a submit the file could not place. Cleared with the selection,
+  // since a retry on the same selection fails the same way.
   const [anchorFailed, setAnchorFailed] = useState(false);
+  const anchorAlertId = useId();
   const [showTemplates, setShowTemplates] = useState(
     settings.quickComment ? settings.showTemplatesByDefault : false,
   );
@@ -215,7 +217,8 @@ export function CommentForm({
   // Measures after useAutoResize above has sized the textarea for this text:
   // both are layout effects and run in declaration order. Measured before the
   // resize, a paste or a dictated sentence leaves the form placed for its old
-  // height, pushing the buttons off the bottom of the viewport.
+  // height, pushing the buttons off the bottom of the viewport. The alert for
+  // a comment the file could not place grows the form the same way.
   useLayoutEffect(() => {
     const node = formRef.current;
     if (!node) return;
@@ -228,7 +231,7 @@ export function CommentForm({
     setFormSize((current) =>
       current?.height === nextSize.height && current?.width === nextSize.width ? current : nextSize,
     );
-  }, [isExpanded, showTemplates, text, selectionKey]);
+  }, [isExpanded, showTemplates, text, selectionKey, anchorFailed]);
 
   // Position the form near the selection (the live rect when the pill has
   // been following a scroll, the snapshot otherwise).
@@ -267,7 +270,7 @@ export function CommentForm({
   };
 
   const handleSubmit = () => {
-    if (!text.trim() || text.length > COMMENT_MAX_LENGTH) return;
+    if (!text.trim() || text.length > COMMENT_MAX_LENGTH || anchorFailed) return;
     const placed = onSubmit(
       selection.text,
       text.trim(),
@@ -277,6 +280,8 @@ export function CommentForm({
     );
     if (placed === false) {
       setAnchorFailed(true);
+      // Templates can't help a draft that has nowhere to go.
+      setShowTemplates(false);
       return;
     }
     setText('');
@@ -487,7 +492,11 @@ export function CommentForm({
       {/* Anchor preview */}
       <div className="px-3 pt-3 pb-2 border-b border-border-subtle bg-surface-secondary">
         <p className="text-xs text-content-secondary mb-1">Commenting on:</p>
-        <p className="text-xs font-mono text-comment-anchor-text bg-comment-anchor-bg rounded px-2 py-1 truncate border border-comment-anchor-border">
+        <p
+          className={`text-xs font-mono text-comment-anchor-text bg-comment-anchor-bg rounded px-2 py-1 truncate border ${
+            anchorFailed ? 'border-danger' : 'border-comment-anchor-border'
+          }`}
+        >
           &ldquo;{selection.text}&rdquo;
         </p>
       </div>
@@ -520,6 +529,7 @@ export function CommentForm({
             setPrefillPristine(false);
           }}
           onKeyDown={handleKeyDown}
+          aria-describedby={anchorFailed ? anchorAlertId : undefined}
           placeholder="Add your comment..."
           rows={1}
           maxLength={COMMENT_MAX_LENGTH}
@@ -535,14 +545,22 @@ export function CommentForm({
           </p>
         )}
         {anchorFailed && (
-          <p role="alert" className="text-xs mt-1 text-danger">
-            This text could not be found in the file, so the comment has nowhere to go. Copy your
-            comment, cancel, and select the text again.
-          </p>
+          <div
+            id={anchorAlertId}
+            role="alert"
+            className="mt-2 rounded-md bg-danger-bg px-2.5 py-2 text-xs text-danger-text"
+          >
+            <p className="font-semibold">Can&rsquo;t find this text in the file.</p>
+            <p className="mt-0.5">
+              Select nearby text to attach this comment. Your draft stays here. Symbols like &amp;
+              and footnote numbers often cause this.
+            </p>
+          </div>
         )}
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-content-muted">{modLabel}+Enter</span>
+            {/* Comment is off until the selection changes, so its shortcut is too. */}
+            {!anchorFailed && <span className="text-xs text-content-muted">{modLabel}+Enter</span>}
             <button
               onClick={() => setShowTemplates(!showTemplates)}
               className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
@@ -577,7 +595,7 @@ export function CommentForm({
             </button>
             <button
               onClick={handleSubmit}
-              disabled={!text.trim() || text.length > COMMENT_MAX_LENGTH}
+              disabled={!text.trim() || text.length > COMMENT_MAX_LENGTH || anchorFailed}
               className="text-xs px-3 py-1.5 bg-primary text-on-primary rounded-md hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Comment
