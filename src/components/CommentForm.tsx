@@ -282,6 +282,11 @@ export function CommentForm({
       setAnchorFailed(true);
       // Templates can't help a draft that has nowhere to go.
       setShowTemplates(false);
+      // The draft is now the reader's to keep, so Escape must not clear it.
+      setPrefillPristine(false);
+      // Comment turns off under the reader's click, which would drop focus to
+      // the page and leave Escape with nothing to act on.
+      inputRef.current?.focus();
       return;
     }
     setText('');

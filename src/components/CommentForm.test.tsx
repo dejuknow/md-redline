@@ -192,6 +192,7 @@ describe('CommentForm selection pill', () => {
       'Add your comment...',
     )) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'A long comment worth keeping' } });
+    expect(screen.getByText(/\+Enter$/)).toBeTruthy();
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -206,6 +207,27 @@ describe('CommentForm selection pill', () => {
     expect(textarea.getAttribute('aria-describedby')).toBe(alert.id);
     // Comment is off, so its shortcut hint goes too.
     expect(screen.queryByText(/\+Enter$/)).toBeNull();
+  });
+
+  it('keeps a failed template draft on Escape and refocuses it after a click', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onCancel = vi.fn();
+    renderForm({ onSubmit: vi.fn(() => false), onCancel });
+
+    fireEvent.click(await screen.findByText('Rewrite this'));
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    const comment = screen.getByRole('button', { name: 'Comment' });
+    comment.focus();
+    fireEvent.click(comment);
+
+    expect(document.activeElement).toBe(textarea);
+    // The untouched prefill is now the draft the alert promised to keep, so
+    // Escape cancels instead of clearing it.
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    expect(textarea.value).toBe('Please rewrite this section.');
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it('clears the draft when the comment is placed', async () => {
