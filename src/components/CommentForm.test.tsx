@@ -201,7 +201,7 @@ describe('CommentForm selection pill', () => {
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toMatch(/Can.t find this text in the file/);
     expect(alert.textContent).toContain(
-      'Select nearby text to attach this comment. Your draft stays here.',
+      'Your draft is still here. Copy it, cancel, and select nearby text to try again.',
     );
     expect(textarea.getAttribute('aria-describedby')).toBe(alert.id);
     // Comment is off, so its shortcut hint goes too.
@@ -256,6 +256,9 @@ describe('CommentForm selection pill', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
     expect(screen.queryByText('Quick templates:')).toBeNull();
+    // A template click replaces the text, so the toggle goes too: it would
+    // overwrite the draft this state exists to keep.
+    expect(screen.queryByTitle('Quick templates')).toBeNull();
   });
 
   it('quickComment bypasses the pill and honors showTemplatesByDefault', async () => {

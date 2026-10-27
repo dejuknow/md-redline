@@ -336,7 +336,7 @@ export function useComments(params: UseCommentsParams) {
       // open. Clearing it unmounted the form and threw the draft away, after
       // all the typing was done (#191).
       if (newRaw === (rawMarkdownRef.current ?? '')) {
-        showToast("Couldn't anchor that comment. Select nearby text to place it.", 'error');
+        showToast("Couldn't anchor that comment. Your draft is still in the form.", 'error');
         return false;
       }
       updateAndSave(newRaw);

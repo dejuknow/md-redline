@@ -994,9 +994,12 @@ would unmount the form, which is the only place the draft lives (#191). The
 Mermaid fullscreen modal's form follows the same rule. The anchor search does
 not decode entities or footnote references, so a retry on the same selection
 fails the same way: Comment stays disabled until the selection changes, the
-quoted anchor gets a danger border, the templates and the shortcut hint hide,
-and the alert (linked to the textarea by `aria-describedby`) points the reader
-at nearby text without symbols like `&` or footnote numbers.
+quoted anchor gets a danger border, the templates, their toggle and the
+shortcut hint hide (a template click would overwrite the draft), and the alert
+(linked to the textarea by `aria-describedby`) tells the reader to copy the
+draft, cancel, and select nearby text without symbols like `&` or footnote
+numbers. A locked composer ignores new drags, so cancelling is the only way to
+reselect.
 
 ### Right-clicking a selection
 

@@ -552,8 +552,8 @@ export function CommentForm({
           >
             <p className="font-semibold">Can&rsquo;t find this text in the file.</p>
             <p className="mt-0.5">
-              Select nearby text to attach this comment. Your draft stays here. Symbols like &amp;
-              and footnote numbers often cause this.
+              Your draft is still here. Copy it, cancel, and select nearby text to try again.
+              Symbols like &amp; and footnote numbers often cause this.
             </p>
           </div>
         )}
@@ -561,30 +561,33 @@ export function CommentForm({
           <div className="flex items-center gap-2">
             {/* Comment is off until the selection changes, so its shortcut is too. */}
             {!anchorFailed && <span className="text-xs text-content-muted">{modLabel}+Enter</span>}
-            <button
-              onClick={() => setShowTemplates(!showTemplates)}
-              className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
-                showTemplates
-                  ? 'bg-primary-bg-strong text-primary-text'
-                  : 'text-content-muted hover:text-primary-text hover:bg-tint-primary'
-              }`}
-              title="Quick templates"
-            >
-              <svg
-                className="w-3.5 h-3.5"
-                aria-hidden="true"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+            {/* A template click replaces the text, so it would overwrite the draft. */}
+            {!anchorFailed && (
+              <button
+                onClick={() => setShowTemplates(!showTemplates)}
+                className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
+                  showTemplates
+                    ? 'bg-primary-bg-strong text-primary-text'
+                    : 'text-content-muted hover:text-primary-text hover:bg-tint-primary'
+                }`}
+                title="Quick templates"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"
-                />
-              </svg>
-            </button>
+                <svg
+                  className="w-3.5 h-3.5"
+                  aria-hidden="true"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
           <div className="flex gap-2">
             <button
