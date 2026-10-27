@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { resetTestAppState } from './helpers/test-state';
@@ -270,6 +270,34 @@ test('selecting SVG text in fullscreen opens the floating comment form', async (
   const form = page.locator('[data-comment-form]');
   await expect(form).toBeVisible({ timeout: 5_000 });
   await expect(form.getByRole('button', { name: 'Comment' })).toBeVisible();
+});
+
+test('a comment the file cannot place keeps the fullscreen form and its draft (#191)', async ({
+  page,
+}) => {
+  // Mermaid renders the entity code `#amp;` as `&`, and the anchor search
+  // reads diagram source verbatim, so this label has no match in the file.
+  const doc = FIXTURE_MARKDOWN.replace('Profile[Profile]', 'Profile["Tom#amp;Jerry"]');
+  writeFileSync(FIXTURE_PATH, doc);
+  await openMermaidFixture(page);
+  await openFullscreenModal(page);
+  await page
+    .locator('.mermaid-fullscreen-canvas-inner svg text', { hasText: 'Tom&Jerry' })
+    .first()
+    .waitFor({ timeout: 10_000 });
+  await selectSubstringInFullscreenSvg(page, 'Tom&Jerry', 'Tom&Jerry');
+
+  const form = page.locator('[data-comment-form]');
+  await expect(form).toBeVisible({ timeout: 5_000 });
+  await form.getByRole('button', { name: 'Comment' }).click();
+  const draft = 'A long comment the reader should not have to type twice';
+  await page.getByPlaceholder('Add your comment...').fill(draft);
+  await form.getByRole('button', { name: 'Comment' }).click();
+
+  await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
+  await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
+  await expect(form.getByRole('alert')).toContainText('could not be found in the file');
+  expect(readFileSync(FIXTURE_PATH, 'utf8')).toBe(doc);
 });
 
 // ---------------------------------------------------------------------------

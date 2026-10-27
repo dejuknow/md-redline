@@ -591,6 +591,48 @@ describe('useComments', () => {
       expect(showToast).toHaveBeenCalledWith(expect.stringContaining("Couldn't anchor"), 'error');
     });
 
+    it('keeps the selection when the anchor is not found, so the draft survives', () => {
+      // Clearing the selection unmounts the comment form, and the draft lives
+      // only in that form. A failed anchor must leave both in place (#191).
+      const clearSelection = vi.fn();
+      const setAutoExpandForm = vi.fn();
+      const raw = 'Hello world';
+      const rawMarkdownRef = { current: raw };
+      const params = defaultParams({
+        rawMarkdown: raw,
+        rawMarkdownRef: rawMarkdownRef as unknown as UseCommentsParams['rawMarkdownRef'],
+        clearSelection,
+        setAutoExpandForm,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      let placed: boolean | undefined;
+      act(() => {
+        placed = result.current.handleAddComment('text that is not in the document', 'note');
+      });
+
+      expect(placed).toBe(false);
+      expect(clearSelection).not.toHaveBeenCalled();
+      expect(setAutoExpandForm).not.toHaveBeenCalled();
+    });
+
+    it('reports success when the comment is placed', () => {
+      const raw = 'Hello world';
+      const rawMarkdownRef = { current: raw };
+      const params = defaultParams({
+        rawMarkdown: raw,
+        rawMarkdownRef: rawMarkdownRef as unknown as UseCommentsParams['rawMarkdownRef'],
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      let placed: boolean | undefined;
+      act(() => {
+        placed = result.current.handleAddComment('Hello', 'Nice greeting');
+      });
+
+      expect(placed).toBe(true);
+    });
+
     it('calls setRawMarkdown, saveFile, and sets activeCommentId', () => {
       const setRawMarkdown = vi.fn();
       const saveFile = vi.fn();

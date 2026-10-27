@@ -28,13 +28,18 @@ interface Props {
    * it; it gets focus back when the overlay closes instead (#100).
    */
   overlayOpen?: boolean;
+  /**
+   * Returns false when the comment could not be placed in the file. The form
+   * then keeps the draft and says why, so the reader does not lose what they
+   * typed (#191).
+   */
   onSubmit: (
     anchor: string,
     text: string,
     contextBefore: string,
     contextAfter: string,
     hintOffset: number,
-  ) => void;
+  ) => boolean | void;
   onCancel: () => void;
   onLock: () => void;
 }
@@ -58,6 +63,8 @@ export function CommentForm({
   // True while a template prefill sits untouched; Escape then clears the
   // prefill instead of closing the form.
   const [prefillPristine, setPrefillPristine] = useState(false);
+  // True after a submit the file could not place. Cleared with the selection.
+  const [anchorFailed, setAnchorFailed] = useState(false);
   const [showTemplates, setShowTemplates] = useState(
     settings.quickComment ? settings.showTemplatesByDefault : false,
   );
@@ -143,6 +150,7 @@ export function CommentForm({
       if (!settings.quickComment) setIsExpanded(false);
       setText('');
       setPrefillPristine(false);
+      setAnchorFailed(false);
       setShowTemplates(settings.quickComment ? settings.showTemplatesByDefault : false);
       setShowPillMenu(false);
       setLiveRect(null);
@@ -260,13 +268,17 @@ export function CommentForm({
 
   const handleSubmit = () => {
     if (!text.trim() || text.length > COMMENT_MAX_LENGTH) return;
-    onSubmit(
+    const placed = onSubmit(
       selection.text,
       text.trim(),
       selection.contextBefore,
       selection.contextAfter,
       selection.offset,
     );
+    if (placed === false) {
+      setAnchorFailed(true);
+      return;
+    }
     setText('');
     setPrefillPristine(false);
     setIsExpanded(false);
@@ -520,6 +532,12 @@ export function CommentForm({
             }`}
           >
             {text.length}/{COMMENT_MAX_LENGTH}
+          </p>
+        )}
+        {anchorFailed && (
+          <p role="alert" className="text-xs mt-1 text-danger">
+            This text could not be found in the file, so the comment has nowhere to go. Copy your
+            comment, cancel, and select the text again.
           </p>
         )}
         <div className="flex items-center justify-between mt-2">
