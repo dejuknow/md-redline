@@ -296,7 +296,7 @@ test('a comment the file cannot place keeps the fullscreen form and its draft (#
 
   await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
   await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
-  await expect(form.getByRole('alert')).toContainText('could not be found in the file');
+  await expect(form.getByRole('alert')).toContainText('find this text in the file');
   expect(readFileSync(FIXTURE_PATH, 'utf8')).toBe(doc);
 });
 

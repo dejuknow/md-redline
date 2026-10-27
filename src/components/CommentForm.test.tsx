@@ -192,13 +192,42 @@ describe('CommentForm selection pill', () => {
       'Add your comment...',
     )) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: 'A long comment worth keeping' } });
+    expect(screen.getByText(/\+Enter$/)).toBeTruthy();
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect((screen.getByPlaceholderText('Add your comment...') as HTMLTextAreaElement).value).toBe(
       'A long comment worth keeping',
     );
-    expect(screen.getByRole('alert').textContent).toMatch(/could not be found in the file/);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/Can.t find this text in the file/);
+    expect(alert.textContent).toContain(
+      'Your draft is still here. Copy it, cancel, and select nearby text to try again.',
+    );
+    expect(textarea.getAttribute('aria-describedby')).toBe(alert.id);
+    // Comment is off, so its shortcut hint goes too.
+    expect(screen.queryByText(/\+Enter$/)).toBeNull();
+  });
+
+  it('keeps a failed template draft on Escape and refocuses it after a click', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onCancel = vi.fn();
+    renderForm({ onSubmit: vi.fn(() => false), onCancel });
+
+    fireEvent.click(await screen.findByText('Rewrite this'));
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    const comment = screen.getByRole('button', { name: 'Comment' });
+    comment.focus();
+    fireEvent.click(comment);
+
+    expect(document.activeElement).toBe(textarea);
+    // The untouched prefill is now the draft the alert promised to keep, so
+    // Escape cancels instead of clearing it.
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    expect(textarea.value).toBe('Please rewrite this section.');
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it('clears the draft when the comment is placed', async () => {
@@ -216,6 +245,42 @@ describe('CommentForm selection pill', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.queryByPlaceholderText('Add your comment...')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('blocks a retry on the selection the file could not place', async () => {
+    // The same selection fails the same way, so Comment stays off until the
+    // reader picks other text.
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onSubmit = vi.fn(() => false);
+    renderForm({ onSubmit });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    fireEvent.change(textarea, { target: { value: 'Second try' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('closes the templates when the comment cannot be placed', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true, showTemplatesByDefault: true },
+    });
+    renderForm({ onSubmit: vi.fn(() => false) });
+
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    expect(await screen.findByText('Quick templates:')).toBeTruthy();
+    fireEvent.change(textarea, { target: { value: 'Nowhere to go' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(screen.queryByText('Quick templates:')).toBeNull();
+    // A template click replaces the text, so the toggle goes too: it would
+    // overwrite the draft this state exists to keep.
+    expect(screen.queryByTitle('Quick templates')).toBeNull();
   });
 
   it('quickComment bypasses the pill and honors showTemplatesByDefault', async () => {

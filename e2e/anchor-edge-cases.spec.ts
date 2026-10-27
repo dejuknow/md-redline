@@ -239,7 +239,7 @@ test.describe('A comment the file cannot place', () => {
     await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
     await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
     await expect(page.locator('[data-comment-form]').getByRole('alert')).toContainText(
-      'could not be found in the file',
+      'find this text in the file',
     );
     expect(readFileSync(fixturePath, 'utf8')).toBe(doc);
   });
