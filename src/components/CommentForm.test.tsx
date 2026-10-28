@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 
 // Mock preferences-client so SettingsContext doesn't hit the network
 const fetchPreferences = vi.fn();
@@ -329,13 +329,24 @@ describe('CommentForm selection pill', () => {
 describe('CommentForm on a selection the file cannot place', () => {
   it('puts the status region in the page before its message', async () => {
     fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
-    renderForm({ placeable: false });
+    // Hold the frame that fills the region, so the empty state can't be missed
+    // on a machine slow enough that the frame fires before the query resolves.
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => frames.push(cb));
+    try {
+      renderForm({ placeable: false });
 
-    // A live region inserted with its message already in it is often not
-    // announced, so the region arrives empty and the message follows.
-    const status = await screen.findByRole('status');
-    expect(status.textContent).toBe('');
-    await waitFor(() => expect(status.textContent).toContain(UNPLACEABLE_HEADLINE));
+      // A live region inserted with its message already in it is often not
+      // announced, so the region arrives empty and the message follows.
+      const status = await screen.findByRole('status');
+      expect(status.textContent).toBe('');
+      act(() => frames.splice(0).forEach((cb) => cb(0)));
+      await waitFor(() => expect(status.textContent).toContain(UNPLACEABLE_HEADLINE));
+    } finally {
+      raf.mockRestore();
+    }
   });
 
   it('keeps the same status region while the pill becomes unplaceable', async () => {
