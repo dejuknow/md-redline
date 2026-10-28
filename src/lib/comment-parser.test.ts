@@ -28,6 +28,8 @@ import {
   orderCommentsByAnchor,
   transformCommentMarkers,
   extractMermaidText,
+  resolveAnchorOffset,
+  canPlaceAnchor,
 } from './comment-parser';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
@@ -3967,5 +3969,478 @@ describe('stamping who wrote a reply (#102)', () => {
     expect(c.replies?.find((r) => r.id === 'ra')?.agent).toBe(true);
     // An explicit stamp is never overwritten.
     expect(c.replies?.find((r) => r.id === 'rb')?.agent).toBe(false);
+  });
+});
+
+describe('stripInlineFormatting literal contexts', () => {
+  it('maps an escaped character to its backslash', () => {
+    const md = 'a \\*b';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('a *b');
+    expect(toCleanOffset(2)).toBe(2); // the backslash, not the *
+  });
+
+  it('places a comment on escaped text before the backslash', () => {
+    const out = insertComment('x \\*star here', '*star', 'c', 'U', '', '', 2);
+    expect(out).toMatch(/^x <!-- @comment\{.*\} -->\\\*star here$/);
+  });
+
+  it('copies code-span content verbatim', () => {
+    expect(stripInlineFormatting('use `a_b *c* \\d` now').plain).toBe('use a_b *c* \\d now');
+  });
+
+  it('handles double-backtick spans', () => {
+    expect(stripInlineFormatting('x ``a ` b`` y').plain).toBe('x a ` b y');
+  });
+
+  it('strips one padding space from each side of a code span', () => {
+    expect(stripInlineFormatting('x ` a ` y').plain).toBe('x a y');
+    expect(stripInlineFormatting('x `  a  ` y').plain).toBe('x  a  y');
+    expect(stripInlineFormatting('x `  ` y').plain).toBe('x    y');
+    expect(stripInlineFormatting('x ` a` y').plain).toBe('x  a y');
+  });
+
+  it('maps code-span characters to their source offsets', () => {
+    const md = 'use `a_b` now';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('use a_b now');
+    expect(toCleanOffset(4)).toBe(5); // a
+    expect(toCleanOffset(5)).toBe(6); // _
+    expect(toCleanOffset(7)).toBe(9); // the space after the closing backtick
+  });
+
+  it('places a comment on text inside a code span', () => {
+    const out = insertComment('use `a_b *c*` now', 'a_b *c*', 'c', 'U', '', '', 4);
+    // Markers cannot live inside a code span, so it lands just before it.
+    expect(out).toMatch(/^use <!-- @comment\{.*\} -->`a_b \*c\*` now$/);
+  });
+
+  it('drops blockquote prefixes on continuation lines inside a code span', () => {
+    const md = '> use `a\n> b` now';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('use a\nb now');
+    expect(toCleanOffset(6)).toBe(md.indexOf('b'));
+    expect(stripInlineFormatting('> > x `a\n> > b` y').plain).toBe('x a\nb y');
+  });
+
+  it('does not treat an escaped backtick as a code span opener', () => {
+    expect(stripInlineFormatting('a \\`b_c\\` d').plain).toBe('a `b_c` d');
+  });
+});
+
+describe('stripInlineFormatting character references', () => {
+  it('keeps references literal inside code blocks nested in a quote or list', () => {
+    expect(stripInlineFormatting('> ```\n> a &amp; b\n> ```\n').plain).toContain('a &amp; b');
+    expect(stripInlineFormatting('- item\n\n  ```\n  a &amp; b\n  ```\n').plain).toContain(
+      'a &amp; b',
+    );
+  });
+
+  // Expectations are the rendered text content of renderMarkdown for each source.
+  it.each([
+    ['Tom &amp; Jerry', 'Tom & Jerry'],
+    ['a&nbsp;b', 'a b'],
+    ['&copy; 2026', '© 2026'],
+    ['it&#39;s &#x27;q&#X27;', "it's 'q'"],
+    ['&amp no semi', '&amp no semi'],
+    ['&notanentity;', '&notanentity;'],
+    ['&AMP; &Amp;', '& &Amp;'], // case-sensitive table: AMP exists, Amp does not
+    ['&#0; &#xD800; &#x110000; &#128; &#xFFFF;', '� � � � �'],
+    ['&#1234567; &#12345678; &#x1234567;', '� &#12345678; &#x1234567;'],
+    ['&#x1F600;', '\u{1F600}'],
+    ['&NotEqualTilde;', '≂̸'],
+    ['&amp;amp;', '&amp;'],
+    ['&#42;not emphasis&#42;', '*not emphasis*'],
+    ['&lt;b&gt; tag', '<b> tag'],
+    ['`a &amp; b`', 'a &amp; b'],
+    ['\\&amp;', '&amp;'],
+    ['<https://x.io/?a&amp;b>', 'https://x.io/?a&amp;b'],
+    ['see https://x.io/?a&amp;b', 'see https://x.io/?a&amp;b'],
+    ['[Q&amp;A](https://x.io/?a&amp;b)', 'Q&A'],
+    ['<!-- a &amp; b -->', '<!-- a &amp; b -->'], // HTML comment bodies stay literal
+  ])('%j renders as %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('keeps frontmatter literal', () => {
+    const { plain } = stripInlineFormatting('---\ntitle: a &amp; b\n---\n\nx &amp; y');
+    expect(plain).toContain('title: a &amp; b');
+    expect(plain).toContain('x & y');
+  });
+
+  it('keeps fenced and indented code literal', () => {
+    expect(stripInlineFormatting('```\na &amp; b\n```').plain).toBe('a &amp; b\n');
+    expect(stripInlineFormatting('    a &amp; b').plain).toBe('    a &amp; b');
+  });
+
+  // GFM bare autolinks keep their source spelling, except where the renderer
+  // does not see a link (no boundary before it, inside a link label) or drops a
+  // trailing reference from the link.
+  it.each([
+    ['see www.x.io/?a&amp;b now', 'see www.x.io/?a&amp;b now'],
+    ['HTTPS://x.io/?a&amp;b', 'HTTPS://x.io/?a&amp;b'],
+    ['(https://x.io/?a&amp;b)', '(https://x.io/?a&amp;b)'],
+    ['see **https://x.io/?a&amp;b**', 'see https://x.io/?a&amp;b'],
+    ['see https://x.io/a&amp;', 'see https://x.io/a&'],
+    ['see https://x.io/a&amp; more', 'see https://x.io/a& more'],
+    ['see https://x.io/?a&amp;b<br>c&amp;d', 'see https://x.io/?a&amp;bc&d'],
+    ['foohttps://x.io/?a&amp;b', 'foohttps://x.io/?a&b'],
+    ['[https://x.io/?a&amp;b](u)', 'https://x.io/?a&b'],
+    ['see https://&amp;', 'see https://&'],
+    // A protocol link may follow any character but an ASCII letter.
+    ['see "https://x.io/?a&amp;b" now', 'see "https://x.io/?a&amp;b" now'],
+    ['Link:https://x.io/?a&amp;b', 'Link:https://x.io/?a&amp;b'],
+    ['see <span>https://x.io/?a&amp;b</span>', 'see https://x.io/?a&amp;b'],
+    ['n 1https://x.io/?a&amp;b', 'n 1https://x.io/?a&amp;b'],
+    ['a;https://x.io/?a&amp;b', 'a;https://x.io/?a&amp;b'],
+    ['a\\https://x.io/?a&amp;b', 'a\\https://x.io/?a&amp;b'],
+    ['x ]https://x.io/?a&amp;b', 'x ]https://x.io/?a&amp;b'],
+    // A `www.` link needs whitespace or one of `(*_~]` before it.
+    ['x ]www.x.io/?a&amp;b', 'x ]www.x.io/?a&amp;b'],
+    ['x "www.x.io/?a&amp;b', 'x "www.x.io/?a&b'],
+    ['x:www.x.io/?a&amp;b', 'x:www.x.io/?a&b'],
+    // An unclosed `[` turns literal autolinks off; an escaped one does not.
+    ['x [https://x.io/?a&amp;b', 'x [https://x.io/?a&b'],
+    ['x [www.x.io/?a&amp;b', 'x [www.x.io/?a&b'],
+    ['x \\[https://x.io/?a&amp;b', 'x [https://x.io/?a&amp;b'],
+  ])('bare autolink %j renders as %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('keeps an existing source-spelling anchor on a URL attached', () => {
+    const comment: MdComment = {
+      id: 'c1',
+      anchor: 'https://x.io/?a&amp;b',
+      text: 't',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+    };
+    for (const md of [
+      'see "https://x.io/?a&amp;b" now',
+      'Link:https://x.io/?a&amp;b',
+      'see <span>https://x.io/?a&amp;b</span>',
+    ]) {
+      expect(detectMissingAnchors(md, [comment]).has('c1')).toBe(false);
+    }
+  });
+
+  it('maps every emitted unit to the reference and back', () => {
+    const md = 'x &amp; y';
+    const { plain, toCleanOffset, toPlainOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('x & y');
+    expect(toCleanOffset(2)).toBe(2);
+    expect(toCleanOffset(3)).toBe(7);
+    expect(toPlainOffset(2)).toBe(2);
+    expect(toPlainOffset(4)).toBe(2);
+    expect(toPlainOffset(7)).toBe(3);
+    expect(toPlainOffset(9)).toBe(plain.length);
+    expect(toPlainOffset(100)).toBe(plain.length);
+  });
+
+  it('maps both units of an astral or two-code-point reference to the &', () => {
+    for (const md of ['a &#x1F600; b', 'a &NotEqualTilde; b']) {
+      const { plain, toCleanOffset, toPlainOffset } = stripInlineFormatting(md);
+      expect(plain.length).toBe(6);
+      expect(toCleanOffset(2)).toBe(2);
+      expect(toCleanOffset(3)).toBe(2);
+      expect(toCleanOffset(4)).toBe(md.length - 2);
+      expect(toPlainOffset(5)).toBe(2);
+    }
+  });
+
+  it('returns the first unit for an offset inside a trailing reference', () => {
+    const { plain, toPlainOffset } = stripInlineFormatting('x &amp;');
+    expect(plain).toBe('x &');
+    expect(toPlainOffset(4)).toBe(2);
+    expect(toPlainOffset(7)).toBe(3);
+  });
+
+  it('decodes prose but not a code span on the same line', () => {
+    expect(stripInlineFormatting('Run `a &amp; b` then a &amp; b.').plain).toBe(
+      'Run a &amp; b then a & b.',
+    );
+  });
+
+  it('leaves an entity-free document unchanged', () => {
+    const doc = [
+      '---',
+      'title: Regression sample',
+      '---',
+      '',
+      '# Heading one',
+      '',
+      'Intro with **bold**, *italic*, _under_, ~~gone~~ and `code *span*`.',
+      'A field_name stays, so does 2 * 3 and ~/docs.',
+      '',
+      '## Lists',
+      '',
+      '- first item',
+      '  - nested item with [a link](https://x.io/page "Title")',
+      '- [ ] open task',
+      '- [x] done task',
+      '1. ordered one',
+      '2. ordered two',
+      '',
+      '> Quoted line with a [ref link][docs] inside.',
+      '> - quoted bullet',
+      '> # quoted heading',
+      '',
+      'See the [docs] and a footnote[^1] plus ![alt text](img.png) here.',
+      'An autolink <https://x.io/a?b=c> and a bare https://x.io/path_x here.',
+      'Wrapped **https://x.io/bold** and (www.x.io/p) and [https://x.io/l](https://x.io/l).',
+      'Escapes: \\*not em\\* and \\[not link\\] and a <span>tag</span>.',
+      '',
+      '| Col A | Col B |',
+      '| ----- | ----- |',
+      '| cell *one* | `two` |',
+      '',
+      '```ts',
+      'const x = a * b; // **kept**',
+      '```',
+      '',
+      '    indented code - kept',
+      '',
+      '<!-- a plain html comment -->',
+      '',
+      '[docs]: https://x.io/docs',
+      '[^1]: The footnote text.',
+    ].join('\n');
+    // Captured from stripInlineFormatting before character references were decoded.
+    const expected =
+      '---\ntitle: Regression sample\n---\n\nHeading one\n\nIntro with bold, italic, under, gone and code *span*.\nA field_name stays, so does 2 * 3 and ~/docs.\n\nLists\n\nfirst item\nnested item with a link\nopen task\ndone task\nordered one\nordered two\n\nQuoted line with a ref link inside.\nquoted bullet\nquoted heading\n\nSee the docs and a footnote plus  here.\nAn autolink https://x.io/a?b=c and a bare https://x.io/path_x here.\nWrapped https://x.io/bold and (www.x.io/p) and https://x.io/l.\nEscapes: *not em* and [not link] and a tag.\n\n| Col A | Col B |\n| ----- | ----- |\n| cell one | two |\n\nconst x = a * b; // **kept**\n\n    indented code - kept\n\n<!-- a plain html comment -->\n\n: The footnote text.';
+    expect(stripInlineFormatting(doc).plain).toBe(expected);
+  });
+});
+
+describe('entity anchors', () => {
+  it('places a rendered-text anchor over an encoded source before the reference text', () => {
+    const out = insertComment(
+      'Ship it once Tom &amp; Jerry sign off.',
+      'Tom & Jerry',
+      'c',
+      'U',
+      'Ship it once ',
+      ' sign off.',
+      13,
+    );
+    expect(out).toMatch(/^Ship it once <!-- @comment\{.*\} -->Tom &amp; Jerry sign off\.$/);
+  });
+
+  describe('shared anchor resolver', () => {
+    function markerAt(out: string): number {
+      return out.indexOf('<!-- @comment');
+    }
+
+    const cases: Array<{
+      name: string;
+      md: string;
+      anchor: string;
+      before?: string;
+      after?: string;
+      hint: number;
+    }> = [
+      { name: 'plain prose', md: 'Alpha beta gamma.', anchor: 'beta', hint: 6 },
+      { name: 'formatted prose', md: 'Say **foo** now.', anchor: 'foo', hint: 4 },
+      { name: 'entity prose', md: 'Ship Tom &amp; Jerry now.', anchor: 'Tom & Jerry', hint: 5 },
+      {
+        name: 'duplicate passages with context',
+        md: 'one dup here. two dup there.',
+        anchor: 'dup',
+        before: 'two ',
+        after: ' there.',
+        hint: 18,
+      },
+      {
+        name: 'cross-element selection',
+        md: '# Head\n\nBody text here.',
+        anchor: 'Head\nBody text',
+        hint: 2,
+      },
+    ];
+
+    for (const c of cases) {
+      it(`resolves the offset insertComment writes at: ${c.name}`, () => {
+        const offset = resolveAnchorOffset(c.md, c.anchor, {
+          contextBefore: c.before,
+          contextAfter: c.after,
+          hintOffset: c.hint,
+        });
+        expect(offset).not.toBeNull();
+        const out = insertComment(c.md, c.anchor, 'c', 'U', c.before, c.after, c.hint);
+        expect(markerAt(out)).toBe(offset);
+      });
+    }
+
+    it('refuses a selection whose later lines are missing', () => {
+      const md = 'first only\n';
+      expect(insertComment(md, 'first\nmissing', 'c', 'U', '', '', 0)).toBe(md);
+      expect(resolveAnchorOffset(md, 'first\nmissing', { hintOffset: 0 })).toBeNull();
+      expect(canPlaceAnchor(md, { text: 'first\nmissing', offset: 0 })).toBe(false);
+    });
+
+    it('canPlaceAnchor is true for a placeable selection', () => {
+      expect(canPlaceAnchor('Ship Tom &amp; Jerry now.', { text: 'Tom & Jerry', offset: 5 })).toBe(
+        true,
+      );
+    });
+
+    it('picks the second occurrence when an entity differs from a literal ampersand', () => {
+      const md = 'x & b here. y &amp; b there.';
+      const hint = md.indexOf('y &amp;') + 2;
+      const out = insertComment(md, '& b', 'c', 'U', 'y ', ' there.', hint);
+      expect(out.indexOf('<!-- @comment')).toBe(md.indexOf('&amp; b'));
+      expect(out).toMatch(/y <!-- @comment\{.*\} -->&amp; b there\.$/);
+    });
+  });
+
+  describe('orphan detection with entities', () => {
+    function comment(anchor: string): MdComment {
+      return {
+        id: 'c1',
+        anchor,
+        text: 'x',
+        author: 'U',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      };
+    }
+
+    it('does not orphan a rendered-text anchor over an encoded source', () => {
+      expect(detectMissingAnchors('Tom &amp; Jerry run.', [comment('Tom & Jerry')]).size).toBe(0);
+    });
+
+    it('does not orphan an agent-supplied encoded anchor', () => {
+      expect(detectMissingAnchors('Tom &amp; Jerry run.', [comment('Tom &amp; Jerry')]).size).toBe(
+        0,
+      );
+    });
+
+    it('accepts a literal source that only matches a decoded anchor (spec "Our call")', () => {
+      // Accepted trade-off from the entity-anchors design spec ("Our call" on the
+      // anchorResolves secondary pass): a comment anchored on `a &amp; b` still counts
+      // as attached when the source reads `a & b`. This is pinned as accepted, not a bug.
+      expect(detectMissingAnchors('a & b', [comment('a &amp; b')]).size).toBe(0);
+    });
+  });
+});
+
+describe('code spans in table cells', () => {
+  // Expectations are the rendered text of renderMarkdown for each source: GFM
+  // unescapes `\|` inside a table cell, code spans included.
+  const row = "| Add `origin: 'user' \\| 'agent'` to the comment type | done |";
+  const md = `| Change | Status |\n| --- | --- |\n${row}\n`;
+  const anchor = "Add origin: 'user' | 'agent' to the comment type";
+
+  function comment(text: string): MdComment {
+    return {
+      id: 'c1',
+      anchor: text,
+      text: 'x',
+      author: 'U',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  it('shows an escaped pipe in a table-cell code span as a bare pipe', () => {
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toContain(anchor);
+    // The pipe maps to its backslash, like any other escape.
+    expect(toCleanOffset(plain.indexOf("' | '") + 2)).toBe(md.indexOf('\\|'));
+  });
+
+  it('keeps an escaped backslash and unescapes only the pipe after it', () => {
+    expect(stripInlineFormatting('| a |\n|---|\n| `x \\\\\\| y` z |\n').plain).toContain(
+      'x \\\\| y z',
+    );
+  });
+
+  it('unescapes the pipe in a table nested in a list item or blockquote', () => {
+    expect(stripInlineFormatting('- | a |\n  |---|\n  | `p \\| q` |\n').plain).toContain('p | q');
+    expect(stripInlineFormatting('> | a |\n> |---|\n> | `p \\| q` |\n').plain).toContain('p | q');
+  });
+
+  it('leaves an escaped pipe in a code span outside a table as written', () => {
+    expect(stripInlineFormatting('Add `a \\| b` here').plain).toBe('Add a \\| b here');
+  });
+
+  it('keeps an existing comment on the cell attached', () => {
+    expect(detectMissingAnchors(md, [comment(anchor)]).size).toBe(0);
+  });
+
+  it('places a new comment on the cell', () => {
+    const hint = stripInlineFormatting(md).plain.indexOf(anchor);
+    expect(canPlaceAnchor(md, { text: anchor, offset: hint })).toBe(true);
+    const out = insertComment(md, anchor, 'c', 'U', '', '', hint);
+    expect(out).not.toBe(md);
+    expect(out).toContain('<!-- @comment');
+  });
+});
+
+describe('stripInlineFormatting heading markers', () => {
+  // Expectations are the rendered text of renderMarkdown for each source.
+  it.each([
+    ["#124's first version", "#124's first version"],
+    ['See\n#124 for details', 'See\n#124 for details'],
+    ['####### seven', '####### seven'],
+    ['> #124 in a quote', '#124 in a quote'],
+  ])('keeps a hash with no space after it: %j', (md, plain) => {
+    expect(stripInlineFormatting(md).plain).toBe(plain);
+  });
+
+  it.each([
+    ['# Title', 'Title'],
+    ['###### Six', 'Six'],
+    ['#\tTab', 'Tab'],
+    ['#', ''],
+    ['# A\n#\nB', 'A\n\nB'],
+    ['> ## Quoted', 'Quoted'],
+  ])('strips a real heading marker: %j', (md, plain) => {
+    expect(stripInlineFormatting(md).plain).toBe(plain);
+  });
+
+  it('places a comment on prose that starts with a hash', () => {
+    const md = "#124's first version shipped.";
+    expect(canPlaceAnchor(md, { text: "#124's first", offset: 0 })).toBe(true);
+    expect(insertComment(md, "#124's first", 'c', 'U', '', '', 0)).toMatch(
+      /^<!-- @comment\{.*\} -->#124's first version shipped\.$/,
+    );
+  });
+});
+
+describe('resolveAnchorOffset stripped-segment fallback', () => {
+  it('places a cross-element selection over formatted text with no hint', () => {
+    // No hint skips the plain-text pass, the source holds neither the anchor
+    // nor its first line as written (`**bold**`), so only the search in the
+    // formatting-stripped text finds it.
+    const md = '# The **bold** head\n\nBody _text_ here.\n';
+    const anchor = 'The bold head\nBody text here';
+    expect(md.includes('The bold head')).toBe(false);
+    const offset = resolveAnchorOffset(md, anchor);
+    expect(offset).toBe(md.indexOf('The'));
+    expect(canPlaceAnchor(md, { text: anchor })).toBe(true);
+    const out = insertComment(md, anchor, 'c', 'U');
+    expect(out.indexOf('<!-- @comment')).toBe(offset);
+    expect(out).toMatch(/^# <!-- @comment\{.*\} -->The \*\*bold\*\* head\n\nBody _text_ here\.\n$/);
+  });
+});
+
+describe('stripInlineFormatting memo', () => {
+  const doc = (n: number) => `# Doc ${n}\n\n` + 'Some `code` and **bold** prose. '.repeat(100);
+
+  it('reuses the result for a document-sized text', () => {
+    expect(stripInlineFormatting(doc(1))).toBe(stripInlineFormatting(doc(1)));
+  });
+
+  it('keeps a document memoized while short anchors with code are stripped', () => {
+    const first = stripInlineFormatting(doc(2));
+    for (let k = 0; k < 20; k++) stripInlineFormatting(`anchor \`x${k}\` y`);
+    expect(stripInlineFormatting(doc(2))).toBe(first);
+  });
+
+  it('stays bounded', () => {
+    const first = stripInlineFormatting(doc(3));
+    for (let k = 0; k < 10; k++) stripInlineFormatting(doc(100 + k));
+    const again = stripInlineFormatting(doc(3));
+    expect(again).not.toBe(first);
+    expect(again.plain).toBe(first.plain);
   });
 });

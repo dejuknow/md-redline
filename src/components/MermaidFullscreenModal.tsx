@@ -72,6 +72,14 @@ export interface MermaidFullscreenModalProps {
   comments: MdComment[];
   activeCommentId: string | null;
   onClose: () => void;
+  /** Whether the file can place a comment on this selection. Applies the same
+   * hint adjustment as submission so the two cannot disagree. */
+  canPlace: (
+    anchor: string,
+    contextBefore: string,
+    contextAfter: string,
+    hintOffset: number,
+  ) => boolean;
   /** Returns false when the comment could not be placed in the file. */
   onAddComment: (
     anchor: string,
@@ -107,6 +115,7 @@ export function MermaidFullscreenModal({
   comments,
   activeCommentId,
   onClose,
+  canPlace,
   onAddComment,
   onReply,
   onResolve,
@@ -142,8 +151,20 @@ export function MermaidFullscreenModal({
       (root?.querySelector('.mermaid-fullscreen-canvas-inner') as HTMLElement | null) ?? null;
   }, [open, svgHtml]);
 
-  const { commentSelection, isPending, clearSelection, lockSelection } =
+  const { commentSelection, isPending, clearSelection, lockSelection, unlockSelection } =
     useSelection(canvasInnerRef);
+  // Checked once per selection and file version, not on every render.
+  const selectionPlaceable = useMemo(
+    () =>
+      !commentSelection ||
+      canPlace(
+        commentSelection.text,
+        commentSelection.contextBefore,
+        commentSelection.contextAfter,
+        commentSelection.offset,
+      ),
+    [commentSelection, canPlace],
+  );
 
   // Modal stays mounted (returns null) when closed, which means useSelection
   // state survives across opens. Without this, closing while a CommentForm is
@@ -523,6 +544,7 @@ export function MermaidFullscreenModal({
         <CommentForm
           selection={commentSelection}
           isPending={isPending}
+          placeable={selectionPlaceable}
           onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
             // A comment the file could not place keeps the form and its draft.
             if (onAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset) === false) return false;
@@ -530,6 +552,7 @@ export function MermaidFullscreenModal({
           }}
           onCancel={clearSelection}
           onLock={lockSelection}
+          onUnlock={unlockSelection}
         />
       )}
     </div>

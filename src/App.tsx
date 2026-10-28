@@ -17,9 +17,9 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import {
   backfillReplyTimestamps,
+  canPlaceAnchor,
   findNewReplyIds,
   parseComments,
-  stripInlineFormatting,
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import type { SelectionInfo } from './types';
@@ -63,6 +63,7 @@ import {
   collectMermaidBlocks,
   findCurrentMermaidBlock,
   getMermaidBlockIdentity,
+  mermaidPlainHint,
 } from './lib/mermaid-blocks';
 import { useMermaidRenderer } from './hooks/useMermaidRenderer';
 import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
@@ -891,8 +892,15 @@ export default function App() {
   // Filled in from overlayOpen, next to the start-up reveal just above the
   // returned tree, once every overlay it reads exists.
   const escapeOwnedElsewhereRef = useRef<() => boolean>(() => false);
-  const { selection, commentSelection, isPending, clearSelection, lockSelection, adoptSelection } =
-    useSelection(proseRef as RefObject<HTMLElement | null>, escapeOwnedElsewhereRef);
+  const {
+    selection,
+    commentSelection,
+    isPending,
+    clearSelection,
+    lockSelection,
+    unlockSelection,
+    adoptSelection,
+  } = useSelection(proseRef as RefObject<HTMLElement | null>, escapeOwnedElsewhereRef);
 
   // Mirrors cleanMarkdown for callbacks that must stay stable: the marker-free
   // document is what a copy hands back, and it is what the block spans index.
@@ -1641,6 +1649,22 @@ export default function App() {
     mermaidFullscreen.activeIdentity,
   ]);
 
+  // Whether the fullscreen diagram view can place a comment on a selection.
+  // Stable between file changes, so the view checks a selection once rather
+  // than on every render.
+  const canPlaceInMermaidFullscreen = useCallback(
+    (anchor: string, ctxBefore: string, ctxAfter: string, hintOffset: number) =>
+      canPlaceAnchor(cleanMarkdown, {
+        text: anchor,
+        contextBefore: ctxBefore,
+        contextAfter: ctxAfter,
+        offset: activeMermaidBlock
+          ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
+          : hintOffset,
+      }),
+    [cleanMarkdown, activeMermaidBlock],
+  );
+
   const handleOpenMermaidFullscreen = useCallback(
     (source: string, blockIndex: number) => {
       const block =
@@ -2292,6 +2316,28 @@ export default function App() {
   commentableSelectionRef.current = commentSelection;
   cleanMarkdownRef.current = cleanMarkdown;
 
+  // Whether the file can place a comment on the selection, checked when it is
+  // captured (pending or committed) and again whenever the file changes. The
+  // pill says so up front, and every way into the form is closed for it.
+  const selectionPlaceable = useMemo(
+    () => !commentSelection || canPlaceAnchor(cleanMarkdown, commentSelection),
+    [cleanMarkdown, commentSelection],
+  );
+  // For the keyboard shortcuts, which read refs rather than re-subscribing.
+  // The form gave way on its own; the keyboard's request to open it is spent,
+  // so the text coming back does not reopen it. Stable, because the form's
+  // effects list it as a dependency.
+  const handleFormUnlock = useCallback(() => {
+    unlockSelection();
+    setAutoExpandForm(false);
+  }, [unlockSelection]);
+  const selectionPlaceableRef = useRef(selectionPlaceable);
+  selectionPlaceableRef.current = selectionPlaceable;
+  const canPlaceSelection = useCallback(
+    (sel: SelectionInfo) => canPlaceAnchor(cleanMarkdown, sel),
+    [cleanMarkdown],
+  );
+
   // Context menu handlers
   const {
     ctxMenuItems,
@@ -2312,6 +2358,7 @@ export default function App() {
     ensureCommentSurface,
     selectionRef: commentableSelectionRef,
     adoptSelection,
+    canPlaceSelection,
     selectionAsMarkdown,
     setAutoExpandForm,
     triggerEdit,
@@ -2432,6 +2479,9 @@ export default function App() {
         viewMode === 'rendered'
       ) {
         e.preventDefault();
+        // The pill already says why; locking would freeze a selection the
+        // reader needs to change.
+        if (!selectionPlaceableRef.current) return;
         lockSelection();
         setAutoExpandForm(true);
         return;
@@ -2440,7 +2490,7 @@ export default function App() {
       // Cmd+Shift+M : Start commenting on selection
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        if (commentableSelectionRef.current) {
+        if (commentableSelectionRef.current && selectionPlaceableRef.current) {
           lockSelection();
         }
         return;
@@ -3770,6 +3820,7 @@ export default function App() {
               selection={commentSelection}
               isPending={isPending}
               autoExpand={autoExpandForm}
+              placeable={selectionPlaceable}
               hidden={viewerCtxMenu.isOpen}
               overlayOpen={activeModal !== null || drawerOpen}
               onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) =>
@@ -3780,6 +3831,7 @@ export default function App() {
                 setAutoExpandForm(false);
               }}
               onLock={lockSelection}
+              onUnlock={handleFormUnlock}
             />
           )}
         </>
@@ -3862,6 +3914,7 @@ export default function App() {
           comments={comments}
           activeCommentId={activeCommentId}
           onClose={mermaidFullscreen.close}
+          canPlace={canPlaceInMermaidFullscreen}
           onAddComment={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
             // The hint offset coming out of the modal is in canvas-text-content
             // coordinates and isn't meaningful in markdown space, so we ignore
@@ -3875,17 +3928,9 @@ export default function App() {
             // plain-text positions and can prefer a nearby prose occurrence —
             // the comment then ends up filed against the prose, and
             // commentsForDiagram filters it out of the diagram panel.
-            let adjustedHint = hintOffset;
-            if (activeMermaidBlock) {
-              // Point insertComment at the active fenced block as it exists now.
-              // The fullscreen modal may stay open while earlier diagrams are
-              // inserted or removed, so the original source-order index can drift.
-              const anchorInSource = activeMermaidBlock.source.indexOf(anchor);
-              const cleanHint =
-                activeMermaidBlock.sourceStart + (anchorInSource >= 0 ? anchorInSource : 0);
-              const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
-              adjustedHint = toPlainOffset(cleanHint);
-            }
+            const adjustedHint = activeMermaidBlock
+              ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
+              : hintOffset;
             return handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
           }}
           onReply={handleReply}

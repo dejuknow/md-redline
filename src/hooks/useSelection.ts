@@ -104,6 +104,15 @@ export function useSelection(
     lockedRef.current = true;
   }, [commitPendingSelection]);
 
+  /**
+   * Release the lock and leave the selection where it is. For a composer that
+   * gives way to the unavailable status on text the file cannot place: the
+   * selection stays up under the status, and the next drag replaces it.
+   */
+  const unlockSelection = useCallback(() => {
+    lockedRef.current = false;
+  }, []);
+
   useEffect(() => {
     // The pointerType of the most recent pointerdown decides which flow
     // handles the resulting selection: 'mouse' opens the form on mouseup as
@@ -272,6 +281,7 @@ export function useSelection(
     isPending: !selection && pendingSelection !== null,
     clearSelection,
     lockSelection,
+    unlockSelection,
     adoptSelection,
     commitPendingSelection,
   };

@@ -32,6 +32,8 @@ export interface UseContextMenuItemsParams {
   selectionRef: RefObject<SelectionInfo | null>;
   /** Commit and lock a selection the menu captured when it opened. */
   adoptSelection: (info: SelectionInfo) => void;
+  /** Whether the file can place a comment on this selection. */
+  canPlaceSelection: (sel: SelectionInfo) => boolean;
   /**
    * The selection as the document's markdown, or null when there is nothing
    * painted and no live range to read it from.
@@ -93,6 +95,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     ensureCommentSurface,
     selectionRef,
     adoptSelection,
+    canPlaceSelection,
     selectionAsMarkdown,
     setAutoExpandForm,
     triggerEdit,
@@ -237,6 +240,9 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
         const items: ContextMenuEntry[] = [
           {
             label: 'Comment',
+            // Off for text the file cannot place: the pill already says why,
+            // and opening the form would only lead to a failed submit.
+            disabled: !canPlaceSelection(sel),
             onClick: () => {
               // The captured selection, not live state: the other items in this
               // menu already act on `sel`, and locking whatever happens to be
@@ -278,6 +284,7 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       handleUnresolve,
       handleDelete,
       adoptSelection,
+      canPlaceSelection,
       selectionAsMarkdown,
       ensureCommentSurface,
       triggerEdit,

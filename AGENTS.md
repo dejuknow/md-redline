@@ -986,20 +986,50 @@ While a template prefill sits untouched in the full comment form, Escape
 clears the prefill and keeps the form open; a second Escape (or an Escape
 after typing) closes the form as usual.
 
-When the file cannot place a comment, because the selected text has no match
-in the source, the full comment form stays open with its draft.
+A selection the file cannot place is caught before the reader types anything.
+The anchor search (`resolveAnchorOffset` in `comment-parser.ts`, the search half
+of `insertComment`, shared with the UI through `canPlaceAnchor`) decodes HTML
+character references the way the renderer does (named with a semicolon,
+decimal, hex), so `&amp;` in the file matches `&` in the selected text. Code
+spans, fenced and indented code, backslash escapes, angle and bare autolinks,
+frontmatter and HTML comment bodies stay literal, except that a code span in a
+table cell shows `\|` as `|`, as GFM does. A line-start `#` is a heading marker
+only when one to six of them are followed by a space, a tab or the end of the
+line, so `#124` stays text. `stripInlineFormatting` memoizes its result for
+document-sized texts (a few entries, least recently used out), so the check,
+detection, the viewer and the diagram view share one per document; short
+anchors are not memoized and do not enter the code parse cache. `App` runs the
+check on every selection and the pill swaps Comment and the templates for a
+`role="status"` message: "Can’t comment on this text." with "Part of it is
+written differently in the file. Try a shorter selection." The status region
+stays mounted for as long as the pill shows and gets its message a frame after
+it mounts, so screen readers announce it. `quickComment`, `Cmd+Enter`,
+`Cmd+Shift+M` and the context menu's Comment item (disabled) all respect it. An
+empty expanded form collapses to the same status and releases the lock
+(`unlockSelection` in `useSelection`, the `onUnlock` prop on `CommentForm`)
+when its selection widens to unplaceable text, and also when a file change
+makes its selection unplaceable. Releasing it also clears `autoExpandForm`, so
+a form `Cmd+Enter` or the context menu opened does not reopen by itself when
+the text comes back; the pill offers Comment instead. A form with a typed draft
+is never collapsed and keeps its text when its selection changes. The Mermaid
+fullscreen modal runs the same check before commenting (`mermaidPlainHint` in
+`mermaid-blocks.ts`, a `canPlace` prop that `App` keeps stable between file
+changes, so the modal checks a selection once). Footnote
+references and Mermaid label escaping still fail to match and are tracked in
+#194.
+
+The check can still pass and the submit fail, when the file changes after the
+selection. Then the full comment form stays open with its draft (#191).
 `handleAddComment` returns false and leaves the selection alone, and
 `CommentForm` keeps its text and shows an inline alert. Clearing the selection
-would unmount the form, which is the only place the draft lives (#191). The
-Mermaid fullscreen modal's form follows the same rule. The anchor search does
-not decode entities or footnote references, so a retry on the same selection
-fails the same way: Comment stays disabled until the selection changes, the
-quoted anchor gets a danger border, the templates, their toggle and the
-shortcut hint hide (a template click would overwrite the draft), and the alert
-(linked to the textarea by `aria-describedby`) tells the reader to copy the
-draft, cancel, and select nearby text without symbols like `&` or footnote
-numbers. A locked composer ignores new drags, so cancelling is the only way to
-reselect.
+would unmount the form, which is the only place the draft lives. A retry on the
+same selection fails the same way: Comment stays disabled until the selection
+changes or the text returns to the file, the quoted anchor gets a danger border,
+the templates, their toggle and the shortcut hint hide (a template click would
+overwrite the draft), and the alert (linked to the textarea by
+`aria-describedby`) tells the reader to copy the draft, cancel, and select
+nearby text. A locked composer ignores new drags, so cancelling is the only way
+to reselect.
 
 ### Right-clicking a selection
 
@@ -2481,7 +2511,9 @@ Key exports from `src/lib/comment-parser.ts`:
 - `recoverAnchorAtOffset(cleanMarkdown, cleanOffset, newlineBudget)` — derive a replacement anchor from the text following a marker, or `null` when nothing usable follows it. `newlineBudget` is 0 for a standalone marker, 1 for an inline one
 - `displayAnchor(comment)` / `anchorSearchText(comment)` (`types.ts`) — the anchor as the reviewer sees it (recovered when stale) and the lowercased search haystack covering both. Anything read, copied, searched, or navigated by should go through these
 - `moveComment(rawMarkdown, id, newAnchor, hintOffset?)` — re-anchor an existing comment to `newAnchor`; preserves id, author, timestamp, replies, and status; refreshes context
-- `stripInlineFormatting(md)` — plain text with offset mapping
+- `stripInlineFormatting(md)` — plain text with offset mapping. Decodes HTML character references like the renderer; code spans are copied verbatim, and an escaped character maps to its backslash so a marker lands before the whole escape
+- `resolveAnchorOffset(cleanMarkdown, anchor, opts?)`: the anchor search half of `insertComment`: the clean-markdown offset where the marker goes, or `null`. `opts` takes `contextBefore`, `contextAfter`, `hintOffset`. The last fallback needs every segment of a multi-line anchor
+- `canPlaceAnchor(cleanMarkdown, sel)`: whether `resolveAnchorOffset` finds a place for a selection (`{ text, contextBefore?, contextAfter?, offset? }`); the UI's up-front check
 
 From `src/lib/agent-prompts.ts`:
 

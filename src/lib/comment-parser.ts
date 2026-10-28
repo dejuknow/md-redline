@@ -11,6 +11,8 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
+import { decodeNamedCharacterReference } from 'decode-named-character-reference';
+import { decodeNumericCharacterReference } from 'micromark-util-decode-numeric-character-reference';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -183,9 +185,18 @@ interface ParsedCodeBlock extends CodeBlockRange {
   target: number;
 }
 
+/** A code span as the renderer parses it. */
+interface ParsedInlineCode extends CodeBlockRange {
+  /**
+   * The span sits in a table cell, where GFM unescapes `\|` to `|` even inside
+   * code (the cell's pipes are split before the span is parsed).
+   */
+  inTable: boolean;
+}
+
 /** What placement and detection need from one parse of a text. */
 interface ParsedCode {
-  inline: CodeBlockRange[];
+  inline: ParsedInlineCode[];
   blocks: ParsedCodeBlock[];
   /** Every top-level block, from the start of its first line to its end. */
   topLevel: CodeBlockRange[];
@@ -197,8 +208,13 @@ const NO_CODE: ParsedCode = { inline: [], blocks: [], topLevel: [] };
 // into the same clean text over and over, and one change is parsed by several
 // callers, so the parse (tens of ms on a large spec) runs once, not per call.
 // Sized for several open tabs: the tab badges re-parse every tab on each change.
+// Only document-sized texts are kept: stripping an anchor that holds a
+// backtick parses it too, and a run of those would otherwise evict the
+// documents, whose parse is the expensive one. Short texts parse in no time.
 const parsedCodeCache = new Map<string, ParsedCode>();
 const PARSED_CODE_CACHE_SIZE = 16;
+/** Texts shorter than this are anchors, not documents, and are not memoized. */
+const DOCUMENT_MEMO_MIN_LENGTH = 1024;
 
 /**
  * Code spans and code blocks, taken from the parser the renderer uses rather
@@ -233,16 +249,23 @@ function getParsedCode(markdown: string): ParsedCode {
     if (topStart === undefined || topEnd === undefined) continue;
     const lineStart = Math.max(bom, markdown.lastIndexOf('\n', topStart + bom - 1) + 1);
     parsed.topLevel.push({ start: lineStart, end: topEnd + bom });
+    // Tables do not nest and the walk is pre-order, so a table is seen before
+    // every span inside it.
+    let tableEnd = -1;
     visit(top, (node) => {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       if (start === undefined || end === undefined) return;
-      if (node.type === 'inlineCode') parsed.inline.push({ start: start + bom, end: end + bom });
+      if (node.type === 'table') tableEnd = end;
+      if (node.type === 'inlineCode') {
+        parsed.inline.push({ start: start + bom, end: end + bom, inTable: start < tableEnd });
+      }
       if (node.type === 'code') {
         parsed.blocks.push({ start: start + bom, end: end + bom, target: lineStart });
       }
     });
   }
+  if (markdown.length < DOCUMENT_MEMO_MIN_LENGTH) return parsed;
   if (parsedCodeCache.size >= PARSED_CODE_CACHE_SIZE) {
     parsedCodeCache.delete(parsedCodeCache.keys().next().value as string);
   }
@@ -270,7 +293,7 @@ function sitsBeforeMovedCode(cleanMarkdown: string, offset: number): boolean {
 }
 
 /** Inline code spans (#123); see getParsedCode. */
-function getInlineCodeRanges(markdown: string): CodeBlockRange[] {
+function getInlineCodeRanges(markdown: string): ParsedInlineCode[] {
   return getParsedCode(markdown).inline;
 }
 
@@ -939,34 +962,18 @@ export interface InsertCommentExtras {
   sessionId?: string;
 }
 
-export function insertComment(
-  rawMarkdown: string,
+/**
+ * Resolve where an anchor sits in comment-free markdown: the clean offset that
+ * insertComment uses before it relocates out of protected containers. Pure, so
+ * the UI can ask at selection time whether a selection can be placed at all.
+ * Returns null when the anchor cannot be found.
+ */
+export function resolveAnchorOffset(
+  cleanMarkdown: string,
   anchor: string,
-  commentText: string,
-  author: string = 'User',
-  contextBefore?: string,
-  contextAfter?: string,
-  hintOffset?: number,
-  commentId: string = randomId(),
-  extras?: InsertCommentExtras,
-): string {
-  const comment: MdComment = {
-    id: commentId,
-    anchor,
-    text: commentText,
-    author,
-    timestamp: new Date().toISOString(),
-    ...(contextBefore ? { contextBefore } : {}),
-    ...(contextAfter ? { contextAfter } : {}),
-    ...(extras?.agentInitiated ? { agentInitiated: true } : {}),
-    ...(extras?.expectsReply ? { expectsReply: true } : {}),
-    ...(extras?.sessionId ? { sessionId: extras.sessionId } : {}),
-  };
-
-  // Find the anchor text in the CLEAN markdown (no comment markers),
-  // then map the position back to the raw markdown.
-  const { cleanMarkdown, cleanToRawOffset } = parseComments(rawMarkdown);
-
+  opts: { contextBefore?: string; contextAfter?: string; hintOffset?: number } = {},
+): number | null {
+  const { contextBefore, contextAfter, hintOffset } = opts;
   let insertionCleanOffset: number | null = null;
 
   // When hintOffset is provided (from DOM selection), search in plain-text space
@@ -1017,7 +1024,7 @@ export function insertComment(
     }
   }
 
-  // Fallback: cross-element selections with newlines/tabs — segment-based search
+  // Fallback: cross-element selections with newlines/tabs, via segment search
   if (insertionCleanOffset === null) {
     const segments = anchor
       .split(/[\n\t]+/)
@@ -1031,14 +1038,67 @@ export function insertComment(
 
       // If that fails, try in formatting-stripped text and map back
       if (insertionCleanOffset === null) {
+        // Every segment must resolve, in order, not just the first: a selection
+        // whose later lines are missing from the document is not placeable.
         const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
-        const fm = flexibleIndexOf(plain, segments[0]);
-        if (fm) {
-          insertionCleanOffset = toCleanOffset(fm.start);
+        const sr = findSegments(plain, segments);
+        if (sr !== null) {
+          insertionCleanOffset = toCleanOffset(sr.start);
         }
       }
     }
   }
+
+  return insertionCleanOffset;
+}
+
+/** True when a selection can be placed in cleanMarkdown (see resolveAnchorOffset). */
+export function canPlaceAnchor(
+  cleanMarkdown: string,
+  sel: { text: string; contextBefore?: string; contextAfter?: string; offset?: number },
+): boolean {
+  return (
+    resolveAnchorOffset(cleanMarkdown, sel.text, {
+      contextBefore: sel.contextBefore,
+      contextAfter: sel.contextAfter,
+      hintOffset: sel.offset,
+    }) !== null
+  );
+}
+
+export function insertComment(
+  rawMarkdown: string,
+  anchor: string,
+  commentText: string,
+  author: string = 'User',
+  contextBefore?: string,
+  contextAfter?: string,
+  hintOffset?: number,
+  commentId: string = randomId(),
+  extras?: InsertCommentExtras,
+): string {
+  const comment: MdComment = {
+    id: commentId,
+    anchor,
+    text: commentText,
+    author,
+    timestamp: new Date().toISOString(),
+    ...(contextBefore ? { contextBefore } : {}),
+    ...(contextAfter ? { contextAfter } : {}),
+    ...(extras?.agentInitiated ? { agentInitiated: true } : {}),
+    ...(extras?.expectsReply ? { expectsReply: true } : {}),
+    ...(extras?.sessionId ? { sessionId: extras.sessionId } : {}),
+  };
+
+  // Find the anchor text in the CLEAN markdown (no comment markers),
+  // then map the position back to the raw markdown.
+  const { cleanMarkdown, cleanToRawOffset } = parseComments(rawMarkdown);
+
+  let insertionCleanOffset = resolveAnchorOffset(cleanMarkdown, anchor, {
+    contextBefore,
+    contextAfter,
+    hintOffset,
+  });
 
   if (insertionCleanOffset === null) return rawMarkdown;
 
@@ -1644,16 +1704,122 @@ function findAllSegments(text: string, segments: string[]): { start: number; end
   return results;
 }
 
+// A character reference as micromark reads one: a case-sensitive named
+// reference, 1 to 7 decimal digits, or 1 to 6 hex digits, always with the `;`.
+const CHARACTER_REFERENCE_RE =
+  /^&(?:#[xX]([0-9a-fA-F]{1,6});|#([0-9]{1,7});|([A-Za-z][A-Za-z0-9]{0,31});)/;
+
+/**
+ * Decode the character reference starting at `at` (which holds `&`), using the
+ * renderer's own decoders so validation cannot drift from it. Returns null when
+ * the text there is not a reference the renderer would decode.
+ */
+function decodeCharacterReferenceAt(md: string, at: number): { text: string; end: number } | null {
+  const m = CHARACTER_REFERENCE_RE.exec(md.slice(at, at + 40));
+  if (!m) return null;
+  let text: string | false;
+  if (m[1] !== undefined) text = decodeNumericCharacterReference(m[1], 16);
+  else if (m[2] !== undefined) text = decodeNumericCharacterReference(m[2], 10);
+  else text = decodeNamedCharacterReference(m[3]);
+  if (text === false) return null;
+  return { text, end: at + m[0].length };
+}
+
+/**
+ * End of the GFM bare autolink (`http://`, `https://`, `www.`) starting at
+ * `at`, or -1 when none starts there. The renderer keeps a link's source
+ * spelling, so references inside it are not decoded. Deliberately simple: the
+ * run ends at whitespace or `<`, minus the trailing punctuation, unbalanced
+ * `)` and entity-like `&name;` that GFM leaves out of the link.
+ */
+function bareAutolinkEnd(md: string, at: number): number {
+  const prev = at > 0 ? md[at - 1] : ' ';
+  const head = md.slice(at, at + 8).toLowerCase();
+  const www = head.startsWith('www.');
+  let bodyStart: number;
+  if (head.startsWith('https://')) bodyStart = at + 8;
+  else if (head.startsWith('http://')) bodyStart = at + 7;
+  else if (www) bodyStart = at + 4;
+  else return -1;
+  // GFM's boundary rules: a protocol link may follow anything but an ASCII
+  // letter, a `www.` link only whitespace or one of `(*_~[]`. An unescaped `[`
+  // right before opens a link label, and the renderer finds no literal
+  // autolinks after an unclosed label, so it is never a boundary.
+  if (prev === '[' && md[at - 2] !== '\\') return -1;
+  if (www ? !/[\s(*_~[\]]/.test(prev) : /[A-Za-z]/.test(prev)) return -1;
+  // A scheme with no domain after it is not a link.
+  if (!www && !/[A-Za-z0-9]/.test(md[bodyStart] ?? '')) return -1;
+  let end = bodyStart;
+  while (end < md.length && !/[\s<]/.test(md[end])) end++;
+  for (;;) {
+    const run = md.slice(at, end);
+    const entity = /&[A-Za-z0-9]+;$/.exec(run);
+    if (/[?!.,:*_~]$/.test(run)) end--;
+    else if (entity) end -= entity[0].length;
+    else if (
+      run.endsWith(')') &&
+      (run.match(/\)/g) ?? []).length > (run.match(/\(/g) ?? []).length
+    ) {
+      end--;
+    } else break;
+  }
+  return end;
+}
+
+/**
+ * Where a heading's text starts when an ATX heading marker begins at `pos`:
+ * one to six `#` followed by a space, a tab or the end of the line, plus that
+ * one space or tab. -1 when the hashes are prose, as in `#124` or `#######`.
+ */
+function headingTextStart(md: string, pos: number): number {
+  let end = pos;
+  while (end < md.length && md[end] === '#') end++;
+  const hashes = end - pos;
+  if (hashes < 1 || hashes > 6) return -1;
+  if (end === md.length || md[end] === '\n') return end;
+  if (md[end] === ' ' || md[end] === '\t') return end + 1;
+  return -1;
+}
+
 /**
  * Strip inline markdown formatting (**, *, __, `, ~~) and block-level markers
  * (# headings, - lists, 1. lists) to produce plain text that matches rendered output.
+ * Character references in prose (`&amp;`, `&#39;`) are decoded the way the
+ * renderer decodes them; each unit they emit maps back to the reference's `&`.
  * Returns a position map to convert plain-text offsets back to clean-markdown offsets.
  */
-export function stripInlineFormatting(md: string): {
+export function stripInlineFormatting(md: string): StrippedText {
+  if (md.length < DOCUMENT_MEMO_MIN_LENGTH) return computeStrippedText(md);
+  const cached = strippedTextMemo.get(md);
+  if (cached) {
+    // Most recently used goes last, so the oldest is evicted first.
+    strippedTextMemo.delete(md);
+    strippedTextMemo.set(md, cached);
+    return cached;
+  }
+  const stripped = computeStrippedText(md);
+  if (strippedTextMemo.size >= STRIPPED_TEXT_MEMO_SIZE) {
+    strippedTextMemo.delete(strippedTextMemo.keys().next().value as string);
+  }
+  strippedTextMemo.set(md, stripped);
+  return stripped;
+}
+
+/** Plain text that matches rendered output, with maps to and from the source. */
+export interface StrippedText {
   plain: string;
   toCleanOffset: (off: number) => number;
   toPlainOffset: (cleanOff: number) => number;
-} {
+}
+
+// Every selection is checked for placement against the whole document, and
+// detection, the viewer and the diagram view each strip the same text again.
+// The result is never mutated, so callers share one per document. Kept to a
+// few entries: each holds a source map as long as the document.
+const strippedTextMemo = new Map<string, StrippedText>();
+const STRIPPED_TEXT_MEMO_SIZE = 4;
+
+function computeStrippedText(md: string): StrippedText {
   const map: number[] = [];
   let plain = '';
   let i = 0;
@@ -1678,6 +1844,34 @@ export function stripInlineFormatting(md: string): {
     refLabels.add(normalizeRefLabel(m[1]));
   }
 
+  const codeSpans = new Map<number, ParsedInlineCode>();
+  for (const r of getInlineCodeRanges(md)) codeSpans.set(r.start, r);
+
+  // Character references decode in prose only. Frontmatter and HTML comment
+  // bodies are shown literally, so references there stay as written. The
+  // comment ranges use the exclusions insertComment uses, so a `<!--` inside
+  // code or frontmatter is not taken for a comment running to the end.
+  const literalRanges: CodeBlockRange[] = [];
+  const hasReferences = md.includes('&');
+  if (hasReferences) {
+    const frontmatter = getFrontmatterRange(md);
+    const nonHtmlRegions = [
+      ...getCodeBlockRanges(md),
+      ...getParsedCode(md).blocks,
+      ...(frontmatter ? [frontmatter] : []),
+      ...getInlineCodeRanges(md),
+    ];
+    if (frontmatter) literalRanges.push(frontmatter);
+    // Code blocks the fence branch below never sees, because they don't start
+    // at a raw line start: nested in a blockquote or a list item.
+    literalRanges.push(...getParsedCode(md).blocks);
+    literalRanges.push(...getHtmlCommentRanges(md, nonHtmlRegions));
+  }
+  // Source end of each decoded reference, keyed by its `&`, for toPlainOffset.
+  const referenceEnds = new Map<number, number>();
+  // References before this offset sit inside a bare autolink and stay literal.
+  let autolinkEnd = -1;
+
   while (i < len) {
     // Handle pending link URL skip: we reached ], jump past ](url)
     if (pendingLinkSkipAt !== -1 && i >= pendingLinkSkipAt) {
@@ -1699,11 +1893,74 @@ export function stripInlineFormatting(md: string): {
         continue;
       }
       if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(nx)) {
-        map.push(i + 1);
+        // Map the character to its backslash: a marker placed at the
+        // character's own offset would land between the backslash and what it
+        // escapes, turning the escape into a literal backslash.
+        map.push(i);
         plain += nx;
         i += 2;
         continue;
       }
+    }
+
+    // Inline code spans: the rendered text is the content verbatim, so
+    // emphasis, escapes and links inside it must not be interpreted. The range
+    // comes from the same parser the renderer uses and includes the backtick
+    // delimiters; stray backticks outside any range fall through to the
+    // "backticks are formatting" branch below.
+    const codeSpan = codeSpans.get(i);
+    if (codeSpan !== undefined) {
+      const codeSpanEnd = codeSpan.end;
+      let open = i;
+      while (open < codeSpanEnd && md[open] === '`') open++;
+      const delimLen = open - i;
+      let from = open;
+      let to = codeSpanEnd - delimLen;
+      // CommonMark: when the content both starts and ends with a space (or
+      // line ending) and is not all spaces, one of each is padding.
+      const isPad = (c: string) => c === ' ' || c === '\n';
+      if (
+        to - from >= 2 &&
+        isPad(md[from]) &&
+        isPad(md[to - 1]) &&
+        md.slice(from, to).trim() !== ''
+      ) {
+        from++;
+        to--;
+      }
+      for (let k = from; k < to; k++) {
+        // A span inside a blockquote continues on lines that start with the
+        // quote prefix, which is container syntax, not code content.
+        if (k > from && md[k - 1] === '\n' && md[k] === '>') {
+          while (k < to && md[k] === '>') {
+            k++;
+            if (k < to && md[k] === ' ') k++;
+          }
+          if (k >= to) break;
+        }
+        // In a table cell the renderer unescapes `\|` inside code, reading
+        // escape pairs left to right, so `\\` stays as written and only the
+        // pipe loses its backslash. The pipe maps to the backslash, as the
+        // escape branch above does.
+        if (codeSpan.inTable && md[k] === '\\' && k + 1 < to) {
+          if (md[k + 1] === '|') {
+            map.push(k);
+            plain += '|';
+            k++;
+            continue;
+          }
+          if (md[k + 1] === '\\') {
+            map.push(k, k + 1);
+            plain += '\\\\';
+            k++;
+            continue;
+          }
+        }
+        map.push(k);
+        plain += md[k];
+      }
+      i = codeSpanEnd;
+      continue;
     }
 
     // Fenced code blocks: skip fence lines, keep content as-is
@@ -1975,19 +2232,20 @@ export function stripInlineFormatting(md: string): {
         if (k < len && md[k] === '.' && k + 1 < len && md[k + 1] === ' ') {
           i = k + 2;
         }
-      } else if (j < len && md[j] === '#') {
-        i = j;
-        while (i < len && md[i] === '#') i++;
-        if (i < len && md[i] === ' ') i++;
+      } else {
+        const textStart = headingTextStart(md, j);
+        if (textStart !== -1) i = textStart;
       }
       continue;
     }
 
     // Heading markers at line start
     if (atLineStart(i) && md[i] === '#') {
-      while (i < len && md[i] === '#') i++;
-      if (i < len && md[i] === ' ') i++;
-      continue;
+      const textStart = headingTextStart(md, i);
+      if (textStart !== -1) {
+        i = textStart;
+        continue;
+      }
     }
 
     // List markers at line start: - item, * item, + item, N. item.
@@ -2053,6 +2311,28 @@ export function stripInlineFormatting(md: string): {
       continue;
     }
 
+    // A bare autolink's references stay literal. Link labels are prose to the
+    // renderer, so a URL written as a label still decodes. Without an `&` in
+    // the text there are no references, so the scan is skipped.
+    if (hasReferences && i >= autolinkEnd && pendingLinkSkipAt === -1 && /[hHwW]/.test(md[i])) {
+      const end = bareAutolinkEnd(md, i);
+      if (end !== -1) autolinkEnd = end;
+    }
+
+    // Character references: the decoded text is plain text, never reread as
+    // markdown. Every UTF-16 unit it emits maps to the `&`, so a marker for
+    // text starting there lands before the whole reference.
+    if (md[i] === '&' && i >= autolinkEnd && !isInsideCodeBlock(i, literalRanges)) {
+      const ref = decodeCharacterReferenceAt(md, i);
+      if (ref) {
+        for (let u = 0; u < ref.text.length; u++) map.push(i);
+        plain += ref.text;
+        referenceEnds.set(i, ref.end);
+        i = ref.end;
+        continue;
+      }
+    }
+
     map.push(i);
     plain += md[i];
     i++;
@@ -2062,16 +2342,24 @@ export function stripInlineFormatting(md: string): {
     plain,
     toCleanOffset: (off: number) => (off >= map.length ? md.length : map[off]),
     toPlainOffset: (cleanOff: number) => {
-      // Binary search: find the plain index whose map entry is closest to cleanOff
+      // Lower bound: the first plain index whose source offset is >= cleanOff,
+      // or plain.length when every emitted character comes before it.
       let lo = 0;
-      let hi = map.length - 1;
-      if (hi < 0) return 0;
+      let hi = map.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (map[mid] < cleanOff) lo = mid + 1;
         else hi = mid;
       }
-      // lo is now the first plain index where map[lo] >= cleanOff
+      // An offset inside a reference belongs to the reference's first unit.
+      if (lo > 0) {
+        const refStart = map[lo - 1];
+        const refEnd = referenceEnds.get(refStart);
+        if (refEnd !== undefined && cleanOff < refEnd) {
+          lo--;
+          while (lo > 0 && map[lo - 1] === refStart) lo--;
+        }
+      }
       return lo;
     },
   };

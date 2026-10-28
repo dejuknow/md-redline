@@ -2994,6 +2994,32 @@ describe('POST /api/review-sessions/:id/agent-comments', () => {
     expect(after).not.toMatch(/agentInitiated/);
   });
 
+  it('places both rendered-text and encoded anchors over an entity in the source', async () => {
+    for (const anchor of ['Tom & Jerry', 'Tom &amp; Jerry']) {
+      const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
+      const filePath = join(tmp, 'spec.md');
+      await writeFile(filePath, '# T\n\nShip it once Tom &amp; Jerry sign off.\n', 'utf8');
+      const { app: testApp } = await buildTestApp({ allowedRoots: [tmp] });
+      const create = await testApp.request('/api/review-sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePaths: [filePath], origin: 'agent' }),
+      });
+      const { sessionId } = (await create.json()) as { sessionId: string };
+
+      const res = await testApp.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ questions: [{ filePath, anchor, text: 'q?' }] }),
+      });
+      expect(res.status).toBeGreaterThanOrEqual(200);
+      expect(res.status).toBeLessThan(300);
+
+      const after = await readFile(filePath, 'utf8');
+      expect(after).toMatch(/Ship it once <!-- @comment\{.*\} -->Tom &amp; Jerry sign off\./);
+    }
+  });
+
   it('rejects when a previous ask is still pending', async () => {
     const tmp = await realpath(await mkdtemp(join(tmpdir(), 'mdr-ask-')));
     const filePath = join(tmp, 'spec.md');

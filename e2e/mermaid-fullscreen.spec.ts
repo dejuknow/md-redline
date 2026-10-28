@@ -272,9 +272,7 @@ test('selecting SVG text in fullscreen opens the floating comment form', async (
   await expect(form.getByRole('button', { name: 'Comment' })).toBeVisible();
 });
 
-test('a comment the file cannot place keeps the fullscreen form and its draft (#191)', async ({
-  page,
-}) => {
+test('flags an unplaceable label in the fullscreen view', async ({ page }) => {
   // Mermaid renders the entity code `#amp;` as `&`, and the anchor search
   // reads diagram source verbatim, so this label has no match in the file.
   const doc = FIXTURE_MARKDOWN.replace('Profile[Profile]', 'Profile["Tom#amp;Jerry"]');
@@ -288,15 +286,11 @@ test('a comment the file cannot place keeps the fullscreen form and its draft (#
   await selectSubstringInFullscreenSvg(page, 'Tom&Jerry', 'Tom&Jerry');
 
   const form = page.locator('[data-comment-form]');
-  await expect(form).toBeVisible({ timeout: 5_000 });
-  await form.getByRole('button', { name: 'Comment' }).click();
-  const draft = 'A long comment the reader should not have to type twice';
-  await page.getByPlaceholder('Add your comment...').fill(draft);
-  await form.getByRole('button', { name: 'Comment' }).click();
-
-  await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
-  await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
-  await expect(form.getByRole('alert')).toContainText('find this text in the file');
+  await expect(form.getByRole('status')).toContainText('Can’t comment on this text.', {
+    timeout: 5_000,
+  });
+  await expect(form.getByRole('button', { name: 'Comment' })).toHaveCount(0);
+  await expect(page.getByPlaceholder('Add your comment...')).toHaveCount(0);
   expect(readFileSync(FIXTURE_PATH, 'utf8')).toBe(doc);
 });
 
