@@ -4315,3 +4315,55 @@ describe('entity anchors', () => {
     });
   });
 });
+
+describe('code spans in table cells', () => {
+  // Expectations are the rendered text of renderMarkdown for each source: GFM
+  // unescapes `\|` inside a table cell, code spans included.
+  const row = "| Add `origin: 'user' \\| 'agent'` to the comment type | done |";
+  const md = `| Change | Status |\n| --- | --- |\n${row}\n`;
+  const anchor = "Add origin: 'user' | 'agent' to the comment type";
+
+  function comment(text: string): MdComment {
+    return {
+      id: 'c1',
+      anchor: text,
+      text: 'x',
+      author: 'U',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  it('shows an escaped pipe in a table-cell code span as a bare pipe', () => {
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toContain(anchor);
+    // The pipe maps to its backslash, like any other escape.
+    expect(toCleanOffset(plain.indexOf("' | '") + 2)).toBe(md.indexOf('\\|'));
+  });
+
+  it('keeps an escaped backslash and unescapes only the pipe after it', () => {
+    expect(stripInlineFormatting('| a |\n|---|\n| `x \\\\\\| y` z |\n').plain).toContain(
+      'x \\\\| y z',
+    );
+  });
+
+  it('unescapes the pipe in a table nested in a list item or blockquote', () => {
+    expect(stripInlineFormatting('- | a |\n  |---|\n  | `p \\| q` |\n').plain).toContain('p | q');
+    expect(stripInlineFormatting('> | a |\n> |---|\n> | `p \\| q` |\n').plain).toContain('p | q');
+  });
+
+  it('leaves an escaped pipe in a code span outside a table as written', () => {
+    expect(stripInlineFormatting('Add `a \\| b` here').plain).toBe('Add a \\| b here');
+  });
+
+  it('keeps an existing comment on the cell attached', () => {
+    expect(detectMissingAnchors(md, [comment(anchor)]).size).toBe(0);
+  });
+
+  it('places a new comment on the cell', () => {
+    const hint = stripInlineFormatting(md).plain.indexOf(anchor);
+    expect(canPlaceAnchor(md, { text: anchor, offset: hint })).toBe(true);
+    const out = insertComment(md, anchor, 'c', 'U', '', '', hint);
+    expect(out).not.toBe(md);
+    expect(out).toContain('<!-- @comment');
+  });
+});

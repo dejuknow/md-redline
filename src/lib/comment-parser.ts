@@ -185,9 +185,18 @@ interface ParsedCodeBlock extends CodeBlockRange {
   target: number;
 }
 
+/** A code span as the renderer parses it. */
+interface ParsedInlineCode extends CodeBlockRange {
+  /**
+   * The span sits in a table cell, where GFM unescapes `\|` to `|` even inside
+   * code (the cell's pipes are split before the span is parsed).
+   */
+  inTable: boolean;
+}
+
 /** What placement and detection need from one parse of a text. */
 interface ParsedCode {
-  inline: CodeBlockRange[];
+  inline: ParsedInlineCode[];
   blocks: ParsedCodeBlock[];
   /** Every top-level block, from the start of its first line to its end. */
   topLevel: CodeBlockRange[];
@@ -235,11 +244,17 @@ function getParsedCode(markdown: string): ParsedCode {
     if (topStart === undefined || topEnd === undefined) continue;
     const lineStart = Math.max(bom, markdown.lastIndexOf('\n', topStart + bom - 1) + 1);
     parsed.topLevel.push({ start: lineStart, end: topEnd + bom });
+    // Tables do not nest and the walk is pre-order, so a table is seen before
+    // every span inside it.
+    let tableEnd = -1;
     visit(top, (node) => {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       if (start === undefined || end === undefined) return;
-      if (node.type === 'inlineCode') parsed.inline.push({ start: start + bom, end: end + bom });
+      if (node.type === 'table') tableEnd = end;
+      if (node.type === 'inlineCode') {
+        parsed.inline.push({ start: start + bom, end: end + bom, inTable: start < tableEnd });
+      }
       if (node.type === 'code') {
         parsed.blocks.push({ start: start + bom, end: end + bom, target: lineStart });
       }
@@ -272,7 +287,7 @@ function sitsBeforeMovedCode(cleanMarkdown: string, offset: number): boolean {
 }
 
 /** Inline code spans (#123); see getParsedCode. */
-function getInlineCodeRanges(markdown: string): CodeBlockRange[] {
+function getInlineCodeRanges(markdown: string): ParsedInlineCode[] {
   return getParsedCode(markdown).inline;
 }
 
@@ -1781,8 +1796,8 @@ export function stripInlineFormatting(md: string): {
     refLabels.add(normalizeRefLabel(m[1]));
   }
 
-  const codeSpanEnds = new Map<number, number>();
-  for (const r of getInlineCodeRanges(md)) codeSpanEnds.set(r.start, r.end);
+  const codeSpans = new Map<number, ParsedInlineCode>();
+  for (const r of getInlineCodeRanges(md)) codeSpans.set(r.start, r);
 
   // Character references decode in prose only. Frontmatter and HTML comment
   // bodies are shown literally, so references there stay as written. The
@@ -1841,8 +1856,9 @@ export function stripInlineFormatting(md: string): {
     // comes from the same parser the renderer uses and includes the backtick
     // delimiters; stray backticks outside any range fall through to the
     // "backticks are formatting" branch below.
-    const codeSpanEnd = codeSpanEnds.get(i);
-    if (codeSpanEnd !== undefined) {
+    const codeSpan = codeSpans.get(i);
+    if (codeSpan !== undefined) {
+      const codeSpanEnd = codeSpan.end;
       let open = i;
       while (open < codeSpanEnd && md[open] === '`') open++;
       const delimLen = open - i;
@@ -1869,6 +1885,24 @@ export function stripInlineFormatting(md: string): {
             if (k < to && md[k] === ' ') k++;
           }
           if (k >= to) break;
+        }
+        // In a table cell the renderer unescapes `\|` inside code, reading
+        // escape pairs left to right, so `\\` stays as written and only the
+        // pipe loses its backslash. The pipe maps to the backslash, as the
+        // escape branch above does.
+        if (codeSpan.inTable && md[k] === '\\' && k + 1 < to) {
+          if (md[k + 1] === '|') {
+            map.push(k);
+            plain += '|';
+            k++;
+            continue;
+          }
+          if (md[k + 1] === '\\') {
+            map.push(k, k + 1);
+            plain += '\\\\';
+            k++;
+            continue;
+          }
         }
         map.push(k);
         plain += md[k];
