@@ -61,6 +61,34 @@ function renderForm(props: Partial<Parameters<typeof CommentForm>[0]> = {}) {
   );
 }
 
+// Like renderForm, but props can change afterwards on the same mounted form,
+// the way App re-renders it when the file or the selection changes.
+function renderControlledForm(props: Partial<Parameters<typeof CommentForm>[0]> = {}) {
+  const base: Parameters<typeof CommentForm>[0] = {
+    selection,
+    onSubmit: vi.fn(),
+    onCancel: vi.fn(),
+    onLock: vi.fn(),
+    ...props,
+  };
+  const tree = (p: Parameters<typeof CommentForm>[0]) => (
+    <SettingsProvider>
+      <HydratedForm {...p} />
+    </SettingsProvider>
+  );
+  const view = render(tree(base));
+  return {
+    ...view,
+    props: base,
+    update: (next: Partial<Parameters<typeof CommentForm>[0]>) =>
+      view.rerender(tree({ ...base, ...next })),
+  };
+}
+
+const UNPLACEABLE_HEADLINE = 'Can’t comment on this text.';
+const UNPLACEABLE_DETAIL =
+  'Part of it is written differently in the file. Try a shorter selection.';
+
 beforeEach(() => {
   fetchPreferences.mockReset();
   savePreferencesToDisk.mockReset();
@@ -295,5 +323,138 @@ describe('CommentForm selection pill', () => {
 
     expect(await screen.findByPlaceholderText('Add your comment...')).toBeTruthy();
     expect(await screen.findByText('Quick templates:')).toBeTruthy();
+  });
+});
+
+describe('CommentForm on a selection the file cannot place', () => {
+  it('shows why a selection cannot be commented on', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ placeable: false });
+
+    const status = await screen.findByRole('status');
+    expect(status.textContent).toContain(UNPLACEABLE_HEADLINE);
+    expect(status.textContent).toContain(UNPLACEABLE_DETAIL);
+    expect(screen.queryByRole('button', { name: /Comment/ })).toBeNull();
+    expect(screen.queryByText('Rewrite this')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More templates' })).toBeNull();
+  });
+
+  it('quickComment does not open the form for an unplaceable selection', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onLock = vi.fn();
+    renderForm({ placeable: false, onLock });
+
+    await screen.findByRole('status');
+    expect(screen.queryByPlaceholderText('Add your comment...')).toBeNull();
+    expect(onLock).not.toHaveBeenCalled();
+  });
+
+  it('autoExpand does not open an unplaceable selection', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onLock = vi.fn();
+    renderForm({ autoExpand: true, placeable: false, onLock });
+
+    await screen.findByRole('status');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onLock).not.toHaveBeenCalled();
+  });
+
+  it('ignores taps and clicks on the status of a pending selection', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onLock = vi.fn();
+    renderForm({ isPending: true, placeable: false, onLock });
+
+    const status = await screen.findByRole('status');
+    fireEvent.touchEnd(status);
+    fireEvent.click(status);
+
+    expect(onLock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('status')).toBeTruthy();
+  });
+
+  it('clears the failed state when the selection becomes placeable again', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const { update } = renderControlledForm({ placeable: true, onSubmit: vi.fn(() => false) });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Worth keeping' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    expect(screen.getByRole('alert')).toBeTruthy();
+
+    // The file changed under the open form: first still unplaceable, then
+    // placeable again.
+    update({ placeable: false });
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+    update({ placeable: true });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect((screen.getByPlaceholderText('Add your comment...') as HTMLTextAreaElement).value).toBe(
+      'Worth keeping',
+    );
+  });
+
+  it('never opens a collapsed pill when availability changes', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onLock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onLock });
+
+    await screen.findByRole('button', { name: /Comment/ });
+    update({ placeable: false });
+    expect(screen.getByRole('status')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    update({ placeable: true });
+    expect(screen.getByRole('button', { name: /Comment/ })).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onLock).not.toHaveBeenCalled();
+  });
+
+  it('quickComment opens the next selection once the file can place it', async () => {
+    // The pill for an unplaceable selection is never locked, so the next drag
+    // reaches the same mounted form with a new selection.
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onLock = vi.fn();
+    const { update } = renderControlledForm({ placeable: false, onLock });
+
+    await screen.findByRole('status');
+    update({
+      placeable: true,
+      selection: { ...selection, text: 'access the application', offset: 70 },
+    });
+
+    expect(await screen.findByPlaceholderText('Add your comment...')).toBeTruthy();
+    expect(onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an open quickComment form stays open when the next selection cannot be placed', async () => {
+    // A triple-click widens the word quick comment opened (and locked) to its
+    // line. The open form ignores availability: collapsing it would leave a
+    // locked pill that ignores the next drag. Submit still says why.
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onLock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onLock });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    update({
+      placeable: false,
+      selection: { ...selection, text: 'Users must provide valid credentials', offset: 23 },
+    });
+
+    expect(screen.getByPlaceholderText('Add your comment...')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(onLock).toHaveBeenCalledTimes(1);
   });
 });

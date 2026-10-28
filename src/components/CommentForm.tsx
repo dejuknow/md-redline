@@ -15,6 +15,13 @@ interface Props {
   isPending?: boolean;
   autoExpand?: boolean;
   /**
+   * False when the file has nowhere to place a comment on this selection. The
+   * pill then says so instead of offering Comment, and nothing opens the form.
+   * An open form ignores it, except to lift the failed-submit state once the
+   * file can place the selection again.
+   */
+  placeable?: boolean;
+  /**
    * Hide while the viewer's context menu is open. Both surfaces carry Comment
    * and the same templates, and the menu's submenu opens straight over the
    * pill's own template row. Hidden with visibility rather than by unmounting
@@ -48,6 +55,7 @@ export function CommentForm({
   selection,
   isPending,
   autoExpand,
+  placeable = true,
   hidden = false,
   overlayOpen = false,
   onSubmit,
@@ -58,7 +66,7 @@ export function CommentForm({
   const TEMPLATES = settings.templates;
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
   const modLabel = getPrimaryModifierLabel();
-  const [isExpanded, setIsExpanded] = useState(!!settings.quickComment && !isPending);
+  const [isExpanded, setIsExpanded] = useState(!!settings.quickComment && !isPending && placeable);
   const [text, setText] = useState('');
   // True while a template prefill sits untouched; Escape then clears the
   // prefill instead of closing the form.
@@ -101,18 +109,18 @@ export function CommentForm({
   // pending selection must stay collapsed and adjustable until the user says
   // otherwise.
   useEffect(() => {
-    if (autoExpand && !isExpanded && !isPending) {
+    if (autoExpand && !isExpanded && !isPending && placeable) {
       onLock();
       setIsExpanded(true);
     }
-  }, [autoExpand, isExpanded, isPending, onLock]);
+  }, [autoExpand, isExpanded, isPending, placeable, onLock]);
 
   // Quick comment: lock selection on mount when starting expanded. Skipped
   // while pending, both because there is nothing to lock yet and because
   // onLock commits the pending selection, which would auto-open the form on
-  // touch.
+  // touch. Skipped for a selection the file cannot place, which never opens.
   useEffect(() => {
-    if (settings.quickComment && !isPending) {
+    if (settings.quickComment && !isPending && placeable) {
       onLock();
     }
     // Only run on mount — quickComment won't change mid-lifecycle of this instance
@@ -149,7 +157,16 @@ export function CommentForm({
   useEffect(() => {
     if (prevSelectionKeyRef.current !== selectionKey) {
       prevSelectionKeyRef.current = selectionKey;
-      if (!settings.quickComment) setIsExpanded(false);
+      if (!settings.quickComment) {
+        setIsExpanded(false);
+      } else if (!isExpanded && !isPending && placeable) {
+        // The pill on a selection the file could not place is never locked,
+        // so the next drag lands here. Quick comment opens it as on mount.
+        // An open form stays open: it is locked, and collapsing it would leave
+        // a locked pill that ignores the reader's next drag.
+        onLock();
+        setIsExpanded(true);
+      }
       setText('');
       setPrefillPristine(false);
       setAnchorFailed(false);
@@ -159,7 +176,25 @@ export function CommentForm({
       scrollBaselineRef.current = getDocScroller()?.scrollTop ?? null;
       setFormSize(null);
     }
-  }, [selectionKey, settings.quickComment, settings.showTemplatesByDefault]);
+  }, [
+    selectionKey,
+    settings.quickComment,
+    settings.showTemplatesByDefault,
+    placeable,
+    isExpanded,
+    isPending,
+    onLock,
+  ]);
+
+  // The file changed under an open form and can place the selection again, so
+  // Comment comes back. Only on that change: a failed submit on a selection
+  // that was placeable all along stays failed.
+  const prevPlaceableRef = useRef(placeable);
+  useEffect(() => {
+    const becamePlaceable = !prevPlaceableRef.current && placeable;
+    prevPlaceableRef.current = placeable;
+    if (becamePlaceable && isExpanded) setAnchorFailed(false);
+  }, [placeable, isExpanded]);
 
   // Baseline for the scroll-delta fallback, captured once per mount (the
   // selection-change effect above refreshes it for subsequent selections).
@@ -218,7 +253,8 @@ export function CommentForm({
   // both are layout effects and run in declaration order. Measured before the
   // resize, a paste or a dictated sentence leaves the form placed for its old
   // height, pushing the buttons off the bottom of the viewport. The alert for
-  // a comment the file could not place grows the form the same way.
+  // a comment the file could not place grows the form the same way, and the
+  // pill's unavailable status is taller and narrower than its buttons.
   useLayoutEffect(() => {
     const node = formRef.current;
     if (!node) return;
@@ -231,7 +267,7 @@ export function CommentForm({
     setFormSize((current) =>
       current?.height === nextSize.height && current?.width === nextSize.width ? current : nextSize,
     );
-  }, [isExpanded, showTemplates, text, selectionKey, anchorFailed]);
+  }, [isExpanded, showTemplates, text, selectionKey, anchorFailed, placeable]);
 
   // Position the form near the selection (the live rect when the pill has
   // been following a scroll, the snapshot otherwise).
@@ -382,6 +418,23 @@ export function CommentForm({
   const surfaceStyle: React.CSSProperties = hidden
     ? { ...style, visibility: 'hidden', pointerEvents: 'none' }
     : style;
+
+  if (!isExpanded && !placeable) {
+    // Not a button and no handlers: there is nothing to do here but pick other
+    // text, and a tap must not commit or open anything.
+    return (
+      <div ref={formRef} style={surfaceStyle} aria-hidden={hidden || undefined} data-comment-form>
+        <div className="selection-pill-enter px-3 py-1.5 max-w-[calc(100vw-24px)] bg-surface-raised border border-border rounded-2xl shadow-lg">
+          <div role="status" className="max-w-72 text-xs text-danger-text">
+            <p className="font-semibold">Can&rsquo;t comment on this text.</p>
+            <p className="mt-0.5">
+              Part of it is written differently in the file. Try a shorter selection.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!isExpanded) {
     const pillTemplates = TEMPLATES.slice(0, 2);

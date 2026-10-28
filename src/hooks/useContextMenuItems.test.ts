@@ -12,6 +12,7 @@ function setup(
   committed: SelectionInfo,
   selectionAsMarkdown = vi.fn(() => null as string | null),
   comments: MdComment[] = [],
+  canPlaceSelection: (sel: SelectionInfo) => boolean = () => true,
 ) {
   const viewerCtxMenu = menu();
   const params = {
@@ -24,6 +25,7 @@ function setup(
     ensureCommentSurface: vi.fn(),
     selectionRef: { current: committed },
     adoptSelection: vi.fn(),
+    canPlaceSelection,
     selectionAsMarkdown,
     setAutoExpandForm: vi.fn(),
     triggerEdit: vi.fn(),
@@ -81,6 +83,35 @@ describe('the selection menu over a live range (#87)', () => {
     });
     expect(opened).toBe(false);
     expect(viewerCtxMenu.open).not.toHaveBeenCalled();
+  });
+});
+
+describe('Comment in the selection menu on text the file cannot place', () => {
+  const committed = {
+    text: 'Tom & Jerry',
+    offset: 0,
+    contextBefore: '',
+    contextAfter: '',
+  } as unknown as SelectionInfo;
+
+  function commentItem(canPlace: boolean) {
+    const canPlaceSelection = vi.fn(() => canPlace);
+    const { result } = setup(committed, undefined, [], canPlaceSelection);
+    act(() => {
+      result.current.handleViewerContextMenu({ type: 'selection', x: 0, y: 0 });
+    });
+    expect(canPlaceSelection).toHaveBeenCalledWith(committed);
+    return result.current.ctxMenuItems.find(
+      (item) => (item as { label?: string }).label === 'Comment',
+    ) as { disabled?: boolean } | undefined;
+  }
+
+  it('disables Comment when the selection cannot be placed', () => {
+    expect(commentItem(false)?.disabled).toBe(true);
+  });
+
+  it('keeps Comment enabled when the selection can be placed', () => {
+    expect(commentItem(true)?.disabled).toBeFalsy();
   });
 });
 

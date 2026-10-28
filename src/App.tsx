@@ -17,6 +17,7 @@ import { useResizablePanel } from './hooks/useResizablePanel';
 import { useSessionPersistence, loadSession } from './hooks/useSessionPersistence';
 import {
   backfillReplyTimestamps,
+  canPlaceAnchor,
   findNewReplyIds,
   parseComments,
   stripInlineFormatting,
@@ -2292,6 +2293,21 @@ export default function App() {
   commentableSelectionRef.current = commentSelection;
   cleanMarkdownRef.current = cleanMarkdown;
 
+  // Whether the file can place a comment on the selection, checked when it is
+  // captured (pending or committed) and again whenever the file changes. The
+  // pill says so up front, and every way into the form is closed for it.
+  const selectionPlaceable = useMemo(
+    () => !commentSelection || canPlaceAnchor(cleanMarkdown, commentSelection),
+    [cleanMarkdown, commentSelection],
+  );
+  // For the keyboard shortcuts, which read refs rather than re-subscribing.
+  const selectionPlaceableRef = useRef(selectionPlaceable);
+  selectionPlaceableRef.current = selectionPlaceable;
+  const canPlaceSelection = useCallback(
+    (sel: SelectionInfo) => canPlaceAnchor(cleanMarkdown, sel),
+    [cleanMarkdown],
+  );
+
   // Context menu handlers
   const {
     ctxMenuItems,
@@ -2312,6 +2328,7 @@ export default function App() {
     ensureCommentSurface,
     selectionRef: commentableSelectionRef,
     adoptSelection,
+    canPlaceSelection,
     selectionAsMarkdown,
     setAutoExpandForm,
     triggerEdit,
@@ -2432,6 +2449,9 @@ export default function App() {
         viewMode === 'rendered'
       ) {
         e.preventDefault();
+        // The pill already says why; locking would freeze a selection the
+        // reader needs to change.
+        if (!selectionPlaceableRef.current) return;
         lockSelection();
         setAutoExpandForm(true);
         return;
@@ -2440,7 +2460,7 @@ export default function App() {
       // Cmd+Shift+M : Start commenting on selection
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        if (commentableSelectionRef.current) {
+        if (commentableSelectionRef.current && selectionPlaceableRef.current) {
           lockSelection();
         }
         return;
@@ -3770,6 +3790,7 @@ export default function App() {
               selection={commentSelection}
               isPending={isPending}
               autoExpand={autoExpandForm}
+              placeable={selectionPlaceable}
               hidden={viewerCtxMenu.isOpen}
               overlayOpen={activeModal !== null || drawerOpen}
               onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) =>
