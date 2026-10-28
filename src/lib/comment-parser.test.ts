@@ -4398,3 +4398,20 @@ describe('stripInlineFormatting heading markers', () => {
     );
   });
 });
+
+describe('resolveAnchorOffset stripped-segment fallback', () => {
+  it('places a cross-element selection over formatted text with no hint', () => {
+    // No hint skips the plain-text pass, the source holds neither the anchor
+    // nor its first line as written (`**bold**`), so only the search in the
+    // formatting-stripped text finds it.
+    const md = '# The **bold** head\n\nBody _text_ here.\n';
+    const anchor = 'The bold head\nBody text here';
+    expect(md.includes('The bold head')).toBe(false);
+    const offset = resolveAnchorOffset(md, anchor);
+    expect(offset).toBe(md.indexOf('The'));
+    expect(canPlaceAnchor(md, { text: anchor })).toBe(true);
+    const out = insertComment(md, anchor, 'c', 'U');
+    expect(out.indexOf('<!-- @comment')).toBe(offset);
+    expect(out).toMatch(/^# <!-- @comment\{.*\} -->The \*\*bold\*\* head\n\nBody _text_ here\.\n$/);
+  });
+});
