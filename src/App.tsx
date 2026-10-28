@@ -1649,6 +1649,22 @@ export default function App() {
     mermaidFullscreen.activeIdentity,
   ]);
 
+  // Whether the fullscreen diagram view can place a comment on a selection.
+  // Stable between file changes, so the view checks a selection once rather
+  // than on every render.
+  const canPlaceInMermaidFullscreen = useCallback(
+    (anchor: string, ctxBefore: string, ctxAfter: string, hintOffset: number) =>
+      canPlaceAnchor(cleanMarkdown, {
+        text: anchor,
+        contextBefore: ctxBefore,
+        contextAfter: ctxAfter,
+        offset: activeMermaidBlock
+          ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
+          : hintOffset,
+      }),
+    [cleanMarkdown, activeMermaidBlock],
+  );
+
   const handleOpenMermaidFullscreen = useCallback(
     (source: string, blockIndex: number) => {
       const block =
@@ -3891,16 +3907,7 @@ export default function App() {
           comments={comments}
           activeCommentId={activeCommentId}
           onClose={mermaidFullscreen.close}
-          canPlace={(anchor, ctxBefore, ctxAfter, hintOffset) =>
-            canPlaceAnchor(cleanMarkdown, {
-              text: anchor,
-              contextBefore: ctxBefore,
-              contextAfter: ctxAfter,
-              offset: activeMermaidBlock
-                ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
-                : hintOffset,
-            })
-          }
+          canPlace={canPlaceInMermaidFullscreen}
           onAddComment={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
             // The hint offset coming out of the modal is in canvas-text-content
             // coordinates and isn't meaningful in markdown space, so we ignore

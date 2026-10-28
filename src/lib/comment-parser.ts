@@ -208,8 +208,13 @@ const NO_CODE: ParsedCode = { inline: [], blocks: [], topLevel: [] };
 // into the same clean text over and over, and one change is parsed by several
 // callers, so the parse (tens of ms on a large spec) runs once, not per call.
 // Sized for several open tabs: the tab badges re-parse every tab on each change.
+// Only document-sized texts are kept: stripping an anchor that holds a
+// backtick parses it too, and a run of those would otherwise evict the
+// documents, whose parse is the expensive one. Short texts parse in no time.
 const parsedCodeCache = new Map<string, ParsedCode>();
 const PARSED_CODE_CACHE_SIZE = 16;
+/** Texts shorter than this are anchors, not documents, and are not memoized. */
+const DOCUMENT_MEMO_MIN_LENGTH = 1024;
 
 /**
  * Code spans and code blocks, taken from the parser the renderer uses rather
@@ -260,6 +265,7 @@ function getParsedCode(markdown: string): ParsedCode {
       }
     });
   }
+  if (markdown.length < DOCUMENT_MEMO_MIN_LENGTH) return parsed;
   if (parsedCodeCache.size >= PARSED_CODE_CACHE_SIZE) {
     parsedCodeCache.delete(parsedCodeCache.keys().next().value as string);
   }
@@ -1782,11 +1788,38 @@ function headingTextStart(md: string, pos: number): number {
  * renderer decodes them; each unit they emit maps back to the reference's `&`.
  * Returns a position map to convert plain-text offsets back to clean-markdown offsets.
  */
-export function stripInlineFormatting(md: string): {
+export function stripInlineFormatting(md: string): StrippedText {
+  if (md.length < DOCUMENT_MEMO_MIN_LENGTH) return computeStrippedText(md);
+  const cached = strippedTextMemo.get(md);
+  if (cached) {
+    // Most recently used goes last, so the oldest is evicted first.
+    strippedTextMemo.delete(md);
+    strippedTextMemo.set(md, cached);
+    return cached;
+  }
+  const stripped = computeStrippedText(md);
+  if (strippedTextMemo.size >= STRIPPED_TEXT_MEMO_SIZE) {
+    strippedTextMemo.delete(strippedTextMemo.keys().next().value as string);
+  }
+  strippedTextMemo.set(md, stripped);
+  return stripped;
+}
+
+/** Plain text that matches rendered output, with maps to and from the source. */
+export interface StrippedText {
   plain: string;
   toCleanOffset: (off: number) => number;
   toPlainOffset: (cleanOff: number) => number;
-} {
+}
+
+// Every selection is checked for placement against the whole document, and
+// detection, the viewer and the diagram view each strip the same text again.
+// The result is never mutated, so callers share one per document. Kept to a
+// few entries: each holds a source map as long as the document.
+const strippedTextMemo = new Map<string, StrippedText>();
+const STRIPPED_TEXT_MEMO_SIZE = 4;
+
+function computeStrippedText(md: string): StrippedText {
   const map: number[] = [];
   let plain = '';
   let i = 0;
@@ -1819,7 +1852,8 @@ export function stripInlineFormatting(md: string): {
   // comment ranges use the exclusions insertComment uses, so a `<!--` inside
   // code or frontmatter is not taken for a comment running to the end.
   const literalRanges: CodeBlockRange[] = [];
-  if (md.includes('&')) {
+  const hasReferences = md.includes('&');
+  if (hasReferences) {
     const frontmatter = getFrontmatterRange(md);
     const nonHtmlRegions = [
       ...getCodeBlockRanges(md),
@@ -2275,8 +2309,9 @@ export function stripInlineFormatting(md: string): {
     }
 
     // A bare autolink's references stay literal. Link labels are prose to the
-    // renderer, so a URL written as a label still decodes.
-    if (i >= autolinkEnd && pendingLinkSkipAt === -1 && /[hHwW]/.test(md[i])) {
+    // renderer, so a URL written as a label still decodes. Without an `&` in
+    // the text there are no references, so the scan is skipped.
+    if (hasReferences && i >= autolinkEnd && pendingLinkSkipAt === -1 && /[hHwW]/.test(md[i])) {
       const end = bareAutolinkEnd(md, i);
       if (end !== -1) autolinkEnd = end;
     }

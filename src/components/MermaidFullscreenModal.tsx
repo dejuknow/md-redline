@@ -153,6 +153,18 @@ export function MermaidFullscreenModal({
 
   const { commentSelection, isPending, clearSelection, lockSelection, unlockSelection } =
     useSelection(canvasInnerRef);
+  // Checked once per selection and file version, not on every render.
+  const selectionPlaceable = useMemo(
+    () =>
+      !commentSelection ||
+      canPlace(
+        commentSelection.text,
+        commentSelection.contextBefore,
+        commentSelection.contextAfter,
+        commentSelection.offset,
+      ),
+    [commentSelection, canPlace],
+  );
 
   // Modal stays mounted (returns null) when closed, which means useSelection
   // state survives across opens. Without this, closing while a CommentForm is
@@ -532,12 +544,7 @@ export function MermaidFullscreenModal({
         <CommentForm
           selection={commentSelection}
           isPending={isPending}
-          placeable={canPlace(
-            commentSelection.text,
-            commentSelection.contextBefore,
-            commentSelection.contextAfter,
-            commentSelection.offset,
-          )}
+          placeable={selectionPlaceable}
           onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
             // A comment the file could not place keeps the form and its draft.
             if (onAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset) === false) return false;

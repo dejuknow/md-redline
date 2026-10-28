@@ -4415,3 +4415,25 @@ describe('resolveAnchorOffset stripped-segment fallback', () => {
     expect(out).toMatch(/^# <!-- @comment\{.*\} -->The \*\*bold\*\* head\n\nBody _text_ here\.\n$/);
   });
 });
+
+describe('stripInlineFormatting memo', () => {
+  const doc = (n: number) => `# Doc ${n}\n\n` + 'Some `code` and **bold** prose. '.repeat(100);
+
+  it('reuses the result for a document-sized text', () => {
+    expect(stripInlineFormatting(doc(1))).toBe(stripInlineFormatting(doc(1)));
+  });
+
+  it('keeps a document memoized while short anchors with code are stripped', () => {
+    const first = stripInlineFormatting(doc(2));
+    for (let k = 0; k < 20; k++) stripInlineFormatting(`anchor \`x${k}\` y`);
+    expect(stripInlineFormatting(doc(2))).toBe(first);
+  });
+
+  it('stays bounded', () => {
+    const first = stripInlineFormatting(doc(3));
+    for (let k = 0; k < 10; k++) stripInlineFormatting(doc(100 + k));
+    const again = stripInlineFormatting(doc(3));
+    expect(again).not.toBe(first);
+    expect(again.plain).toBe(first.plain);
+  });
+});
