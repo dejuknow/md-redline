@@ -4013,6 +4013,14 @@ describe('stripInlineFormatting literal contexts', () => {
     expect(out).toMatch(/^use <!-- @comment\{.*\} -->`a_b \*c\*` now$/);
   });
 
+  it('drops blockquote prefixes on continuation lines inside a code span', () => {
+    const md = '> use `a\n> b` now';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('use a\nb now');
+    expect(toCleanOffset(6)).toBe(md.indexOf('b'));
+    expect(stripInlineFormatting('> > x `a\n> > b` y').plain).toBe('x a\nb y');
+  });
+
   it('does not treat an escaped backtick as a code span opener', () => {
     expect(stripInlineFormatting('a \\`b_c\\` d').plain).toBe('a `b_c` d');
   });

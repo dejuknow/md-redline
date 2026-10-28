@@ -1737,6 +1737,15 @@ export function stripInlineFormatting(md: string): {
         to--;
       }
       for (let k = from; k < to; k++) {
+        // A span inside a blockquote continues on lines that start with the
+        // quote prefix, which is container syntax, not code content.
+        if (k > from && md[k - 1] === '\n' && md[k] === '>') {
+          while (k < to && md[k] === '>') {
+            k++;
+            if (k < to && md[k] === ' ') k++;
+          }
+          if (k >= to) break;
+        }
         map.push(k);
         plain += md[k];
       }
