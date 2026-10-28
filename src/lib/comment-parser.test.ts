@@ -3969,3 +3969,51 @@ describe('stamping who wrote a reply (#102)', () => {
     expect(c.replies?.find((r) => r.id === 'rb')?.agent).toBe(false);
   });
 });
+
+describe('stripInlineFormatting literal contexts', () => {
+  it('maps an escaped character to its backslash', () => {
+    const md = 'a \\*b';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('a *b');
+    expect(toCleanOffset(2)).toBe(2); // the backslash, not the *
+  });
+
+  it('places a comment on escaped text before the backslash', () => {
+    const out = insertComment('x \\*star here', '*star', 'c', 'U', '', '', 2);
+    expect(out).toMatch(/^x <!-- @comment\{.*\} -->\\\*star here$/);
+  });
+
+  it('copies code-span content verbatim', () => {
+    expect(stripInlineFormatting('use `a_b *c* \\d` now').plain).toBe('use a_b *c* \\d now');
+  });
+
+  it('handles double-backtick spans', () => {
+    expect(stripInlineFormatting('x ``a ` b`` y').plain).toBe('x a ` b y');
+  });
+
+  it('strips one padding space from each side of a code span', () => {
+    expect(stripInlineFormatting('x ` a ` y').plain).toBe('x a y');
+    expect(stripInlineFormatting('x `  a  ` y').plain).toBe('x  a  y');
+    expect(stripInlineFormatting('x `  ` y').plain).toBe('x    y');
+    expect(stripInlineFormatting('x ` a` y').plain).toBe('x  a y');
+  });
+
+  it('maps code-span characters to their source offsets', () => {
+    const md = 'use `a_b` now';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('use a_b now');
+    expect(toCleanOffset(4)).toBe(5); // a
+    expect(toCleanOffset(5)).toBe(6); // _
+    expect(toCleanOffset(7)).toBe(9); // the space after the closing backtick
+  });
+
+  it('places a comment on text inside a code span', () => {
+    const out = insertComment('use `a_b *c*` now', 'a_b *c*', 'c', 'U', '', '', 4);
+    // Markers cannot live inside a code span, so it lands just before it.
+    expect(out).toMatch(/^use <!-- @comment\{.*\} -->`a_b \*c\*` now$/);
+  });
+
+  it('does not treat an escaped backtick as a code span opener', () => {
+    expect(stripInlineFormatting('a \\`b_c\\` d').plain).toBe('a `b_c` d');
+  });
+});

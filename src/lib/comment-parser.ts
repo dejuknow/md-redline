@@ -1678,6 +1678,9 @@ export function stripInlineFormatting(md: string): {
     refLabels.add(normalizeRefLabel(m[1]));
   }
 
+  const codeSpanEnds = new Map<number, number>();
+  for (const r of getInlineCodeRanges(md)) codeSpanEnds.set(r.start, r.end);
+
   while (i < len) {
     // Handle pending link URL skip: we reached ], jump past ](url)
     if (pendingLinkSkipAt !== -1 && i >= pendingLinkSkipAt) {
@@ -1699,11 +1702,46 @@ export function stripInlineFormatting(md: string): {
         continue;
       }
       if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(nx)) {
-        map.push(i + 1);
+        // Map the character to its backslash: a marker placed at the
+        // character's own offset would land between the backslash and what it
+        // escapes, turning the escape into a literal backslash.
+        map.push(i);
         plain += nx;
         i += 2;
         continue;
       }
+    }
+
+    // Inline code spans: the rendered text is the content verbatim, so
+    // emphasis, escapes and links inside it must not be interpreted. The range
+    // comes from the same parser the renderer uses and includes the backtick
+    // delimiters; stray backticks outside any range fall through to the
+    // "backticks are formatting" branch below.
+    const codeSpanEnd = codeSpanEnds.get(i);
+    if (codeSpanEnd !== undefined) {
+      let open = i;
+      while (open < codeSpanEnd && md[open] === '`') open++;
+      const delimLen = open - i;
+      let from = open;
+      let to = codeSpanEnd - delimLen;
+      // CommonMark: when the content both starts and ends with a space (or
+      // line ending) and is not all spaces, one of each is padding.
+      const isPad = (c: string) => c === ' ' || c === '\n';
+      if (
+        to - from >= 2 &&
+        isPad(md[from]) &&
+        isPad(md[to - 1]) &&
+        md.slice(from, to).trim() !== ''
+      ) {
+        from++;
+        to--;
+      }
+      for (let k = from; k < to; k++) {
+        map.push(k);
+        plain += md[k];
+      }
+      i = codeSpanEnd;
+      continue;
     }
 
     // Fenced code blocks: skip fence lines, keep content as-is
