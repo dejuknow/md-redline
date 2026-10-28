@@ -11,6 +11,8 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
+import { decodeNamedCharacterReference } from 'decode-named-character-reference';
+import { decodeNumericCharacterReference } from 'micromark-util-decode-numeric-character-reference';
 
 // Match <!-- @comment{...JSON...} --> — use dotall flag so JSON with
 // newlines in string values is matched correctly.
@@ -1644,9 +1646,67 @@ function findAllSegments(text: string, segments: string[]): { start: number; end
   return results;
 }
 
+// A character reference as micromark reads one: a case-sensitive named
+// reference, 1 to 7 decimal digits, or 1 to 6 hex digits, always with the `;`.
+const CHARACTER_REFERENCE_RE =
+  /^&(?:#[xX]([0-9a-fA-F]{1,6});|#([0-9]{1,7});|([A-Za-z][A-Za-z0-9]{0,31});)/;
+
+/**
+ * Decode the character reference starting at `at` (which holds `&`), using the
+ * renderer's own decoders so validation cannot drift from it. Returns null when
+ * the text there is not a reference the renderer would decode.
+ */
+function decodeCharacterReferenceAt(md: string, at: number): { text: string; end: number } | null {
+  const m = CHARACTER_REFERENCE_RE.exec(md.slice(at, at + 40));
+  if (!m) return null;
+  let text: string | false;
+  if (m[1] !== undefined) text = decodeNumericCharacterReference(m[1], 16);
+  else if (m[2] !== undefined) text = decodeNumericCharacterReference(m[2], 10);
+  else text = decodeNamedCharacterReference(m[3]);
+  if (text === false) return null;
+  return { text, end: at + m[0].length };
+}
+
+/**
+ * End of the GFM bare autolink (`http://`, `https://`, `www.`) starting at
+ * `at`, or -1 when none starts there. The renderer keeps a link's source
+ * spelling, so references inside it are not decoded. Deliberately simple: the
+ * run ends at whitespace or `<`, minus the trailing punctuation, unbalanced
+ * `)` and entity-like `&name;` that GFM leaves out of the link.
+ */
+function bareAutolinkEnd(md: string, at: number): number {
+  const prev = at > 0 ? md[at - 1] : ' ';
+  if (!/[\s*_~(]/.test(prev)) return -1;
+  const head = md.slice(at, at + 8).toLowerCase();
+  let bodyStart: number;
+  if (head.startsWith('https://')) bodyStart = at + 8;
+  else if (head.startsWith('http://')) bodyStart = at + 7;
+  else if (head.startsWith('www.')) bodyStart = at + 4;
+  else return -1;
+  // A scheme with no domain after it is not a link.
+  if (!head.startsWith('www.') && !/[A-Za-z0-9]/.test(md[bodyStart] ?? '')) return -1;
+  let end = bodyStart;
+  while (end < md.length && !/[\s<]/.test(md[end])) end++;
+  for (;;) {
+    const run = md.slice(at, end);
+    const entity = /&[A-Za-z0-9]+;$/.exec(run);
+    if (/[?!.,:*_~]$/.test(run)) end--;
+    else if (entity) end -= entity[0].length;
+    else if (
+      run.endsWith(')') &&
+      (run.match(/\)/g) ?? []).length > (run.match(/\(/g) ?? []).length
+    ) {
+      end--;
+    } else break;
+  }
+  return end;
+}
+
 /**
  * Strip inline markdown formatting (**, *, __, `, ~~) and block-level markers
  * (# headings, - lists, 1. lists) to produce plain text that matches rendered output.
+ * Character references in prose (`&amp;`, `&#39;`) are decoded the way the
+ * renderer decodes them; each unit they emit maps back to the reference's `&`.
  * Returns a position map to convert plain-text offsets back to clean-markdown offsets.
  */
 export function stripInlineFormatting(md: string): {
@@ -1680,6 +1740,27 @@ export function stripInlineFormatting(md: string): {
 
   const codeSpanEnds = new Map<number, number>();
   for (const r of getInlineCodeRanges(md)) codeSpanEnds.set(r.start, r.end);
+
+  // Character references decode in prose only. Frontmatter and HTML comment
+  // bodies are shown literally, so references there stay as written. The
+  // comment ranges use the exclusions insertComment uses, so a `<!--` inside
+  // code or frontmatter is not taken for a comment running to the end.
+  const literalRanges: CodeBlockRange[] = [];
+  if (md.includes('&')) {
+    const frontmatter = getFrontmatterRange(md);
+    const nonHtmlRegions = [
+      ...getCodeBlockRanges(md),
+      ...getParsedCode(md).blocks,
+      ...(frontmatter ? [frontmatter] : []),
+      ...getInlineCodeRanges(md),
+    ];
+    if (frontmatter) literalRanges.push(frontmatter);
+    literalRanges.push(...getHtmlCommentRanges(md, nonHtmlRegions));
+  }
+  // Source end of each decoded reference, keyed by its `&`, for toPlainOffset.
+  const referenceEnds = new Map<number, number>();
+  // References before this offset sit inside a bare autolink and stay literal.
+  let autolinkEnd = -1;
 
   while (i < len) {
     // Handle pending link URL skip: we reached ], jump past ](url)
@@ -2100,6 +2181,27 @@ export function stripInlineFormatting(md: string): {
       continue;
     }
 
+    // A bare autolink's references stay literal. Link labels are prose to the
+    // renderer, so a URL written as a label still decodes.
+    if (i >= autolinkEnd && pendingLinkSkipAt === -1 && /[hHwW]/.test(md[i])) {
+      const end = bareAutolinkEnd(md, i);
+      if (end !== -1) autolinkEnd = end;
+    }
+
+    // Character references: the decoded text is plain text, never reread as
+    // markdown. Every UTF-16 unit it emits maps to the `&`, so a marker for
+    // text starting there lands before the whole reference.
+    if (md[i] === '&' && i >= autolinkEnd && !isInsideCodeBlock(i, literalRanges)) {
+      const ref = decodeCharacterReferenceAt(md, i);
+      if (ref) {
+        for (let u = 0; u < ref.text.length; u++) map.push(i);
+        plain += ref.text;
+        referenceEnds.set(i, ref.end);
+        i = ref.end;
+        continue;
+      }
+    }
+
     map.push(i);
     plain += md[i];
     i++;
@@ -2109,16 +2211,24 @@ export function stripInlineFormatting(md: string): {
     plain,
     toCleanOffset: (off: number) => (off >= map.length ? md.length : map[off]),
     toPlainOffset: (cleanOff: number) => {
-      // Binary search: find the plain index whose map entry is closest to cleanOff
+      // Lower bound: the first plain index whose source offset is >= cleanOff,
+      // or plain.length when every emitted character comes before it.
       let lo = 0;
-      let hi = map.length - 1;
-      if (hi < 0) return 0;
+      let hi = map.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (map[mid] < cleanOff) lo = mid + 1;
         else hi = mid;
       }
-      // lo is now the first plain index where map[lo] >= cleanOff
+      // An offset inside a reference belongs to the reference's first unit.
+      if (lo > 0) {
+        const refStart = map[lo - 1];
+        const refEnd = referenceEnds.get(refStart);
+        if (refEnd !== undefined && cleanOff < refEnd) {
+          lo--;
+          while (lo > 0 && map[lo - 1] === refStart) lo--;
+        }
+      }
       return lo;
     },
   };

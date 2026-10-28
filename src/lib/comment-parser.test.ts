@@ -4025,3 +4025,162 @@ describe('stripInlineFormatting literal contexts', () => {
     expect(stripInlineFormatting('a \\`b_c\\` d').plain).toBe('a `b_c` d');
   });
 });
+
+describe('stripInlineFormatting character references', () => {
+  // Expectations are the rendered text content of renderMarkdown for each source.
+  it.each([
+    ['Tom &amp; Jerry', 'Tom & Jerry'],
+    ['a&nbsp;b', 'a b'],
+    ['&copy; 2026', '© 2026'],
+    ['it&#39;s &#x27;q&#X27;', "it's 'q'"],
+    ['&amp no semi', '&amp no semi'],
+    ['&notanentity;', '&notanentity;'],
+    ['&AMP; &Amp;', '& &Amp;'], // case-sensitive table: AMP exists, Amp does not
+    ['&#0; &#xD800; &#x110000; &#128; &#xFFFF;', '� � � � �'],
+    ['&#1234567; &#12345678; &#x1234567;', '� &#12345678; &#x1234567;'],
+    ['&#x1F600;', '\u{1F600}'],
+    ['&NotEqualTilde;', '≂̸'],
+    ['&amp;amp;', '&amp;'],
+    ['&#42;not emphasis&#42;', '*not emphasis*'],
+    ['&lt;b&gt; tag', '<b> tag'],
+    ['`a &amp; b`', 'a &amp; b'],
+    ['\\&amp;', '&amp;'],
+    ['<https://x.io/?a&amp;b>', 'https://x.io/?a&amp;b'],
+    ['see https://x.io/?a&amp;b', 'see https://x.io/?a&amp;b'],
+    ['[Q&amp;A](https://x.io/?a&amp;b)', 'Q&A'],
+    ['<!-- a &amp; b -->', '<!-- a &amp; b -->'], // HTML comment bodies stay literal
+  ])('%j renders as %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('keeps frontmatter literal', () => {
+    const { plain } = stripInlineFormatting('---\ntitle: a &amp; b\n---\n\nx &amp; y');
+    expect(plain).toContain('title: a &amp; b');
+    expect(plain).toContain('x & y');
+  });
+
+  it('keeps fenced and indented code literal', () => {
+    expect(stripInlineFormatting('```\na &amp; b\n```').plain).toBe('a &amp; b\n');
+    expect(stripInlineFormatting('    a &amp; b').plain).toBe('    a &amp; b');
+  });
+
+  // GFM bare autolinks keep their source spelling, except where the renderer
+  // does not see a link (no boundary before it, inside a link label) or drops a
+  // trailing reference from the link.
+  it.each([
+    ['see www.x.io/?a&amp;b now', 'see www.x.io/?a&amp;b now'],
+    ['HTTPS://x.io/?a&amp;b', 'HTTPS://x.io/?a&amp;b'],
+    ['(https://x.io/?a&amp;b)', '(https://x.io/?a&amp;b)'],
+    ['see **https://x.io/?a&amp;b**', 'see https://x.io/?a&amp;b'],
+    ['see https://x.io/a&amp;', 'see https://x.io/a&'],
+    ['see https://x.io/a&amp; more', 'see https://x.io/a& more'],
+    ['see https://x.io/?a&amp;b<br>c&amp;d', 'see https://x.io/?a&amp;bc&d'],
+    ['foohttps://x.io/?a&amp;b', 'foohttps://x.io/?a&b'],
+    ['[https://x.io/?a&amp;b](u)', 'https://x.io/?a&b'],
+    ['see https://&amp;', 'see https://&'],
+  ])('bare autolink %j renders as %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('maps every emitted unit to the reference and back', () => {
+    const md = 'x &amp; y';
+    const { plain, toCleanOffset, toPlainOffset } = stripInlineFormatting(md);
+    expect(plain).toBe('x & y');
+    expect(toCleanOffset(2)).toBe(2);
+    expect(toCleanOffset(3)).toBe(7);
+    expect(toPlainOffset(2)).toBe(2);
+    expect(toPlainOffset(4)).toBe(2);
+    expect(toPlainOffset(7)).toBe(3);
+    expect(toPlainOffset(9)).toBe(plain.length);
+    expect(toPlainOffset(100)).toBe(plain.length);
+  });
+
+  it('maps both units of an astral or two-code-point reference to the &', () => {
+    for (const md of ['a &#x1F600; b', 'a &NotEqualTilde; b']) {
+      const { plain, toCleanOffset, toPlainOffset } = stripInlineFormatting(md);
+      expect(plain.length).toBe(6);
+      expect(toCleanOffset(2)).toBe(2);
+      expect(toCleanOffset(3)).toBe(2);
+      expect(toCleanOffset(4)).toBe(md.length - 2);
+      expect(toPlainOffset(5)).toBe(2);
+    }
+  });
+
+  it('returns the first unit for an offset inside a trailing reference', () => {
+    const { plain, toPlainOffset } = stripInlineFormatting('x &amp;');
+    expect(plain).toBe('x &');
+    expect(toPlainOffset(4)).toBe(2);
+    expect(toPlainOffset(7)).toBe(3);
+  });
+
+  it('decodes prose but not a code span on the same line', () => {
+    expect(stripInlineFormatting('Run `a &amp; b` then a &amp; b.').plain).toBe(
+      'Run a &amp; b then a & b.',
+    );
+  });
+
+  it('leaves an entity-free document unchanged', () => {
+    const doc = [
+      '---',
+      'title: Regression sample',
+      '---',
+      '',
+      '# Heading one',
+      '',
+      'Intro with **bold**, *italic*, _under_, ~~gone~~ and `code *span*`.',
+      'A field_name stays, so does 2 * 3 and ~/docs.',
+      '',
+      '## Lists',
+      '',
+      '- first item',
+      '  - nested item with [a link](https://x.io/page "Title")',
+      '- [ ] open task',
+      '- [x] done task',
+      '1. ordered one',
+      '2. ordered two',
+      '',
+      '> Quoted line with a [ref link][docs] inside.',
+      '> - quoted bullet',
+      '> # quoted heading',
+      '',
+      'See the [docs] and a footnote[^1] plus ![alt text](img.png) here.',
+      'An autolink <https://x.io/a?b=c> and a bare https://x.io/path_x here.',
+      'Wrapped **https://x.io/bold** and (www.x.io/p) and [https://x.io/l](https://x.io/l).',
+      'Escapes: \\*not em\\* and \\[not link\\] and a <span>tag</span>.',
+      '',
+      '| Col A | Col B |',
+      '| ----- | ----- |',
+      '| cell *one* | `two` |',
+      '',
+      '```ts',
+      'const x = a * b; // **kept**',
+      '```',
+      '',
+      '    indented code - kept',
+      '',
+      '<!-- a plain html comment -->',
+      '',
+      '[docs]: https://x.io/docs',
+      '[^1]: The footnote text.',
+    ].join('\n');
+    // Captured from stripInlineFormatting before character references were decoded.
+    const expected =
+      '---\ntitle: Regression sample\n---\n\nHeading one\n\nIntro with bold, italic, under, gone and code *span*.\nA field_name stays, so does 2 * 3 and ~/docs.\n\nLists\n\nfirst item\nnested item with a link\nopen task\ndone task\nordered one\nordered two\n\nQuoted line with a ref link inside.\nquoted bullet\nquoted heading\n\nSee the docs and a footnote plus  here.\nAn autolink https://x.io/a?b=c and a bare https://x.io/path_x here.\nWrapped https://x.io/bold and (www.x.io/p) and https://x.io/l.\nEscapes: *not em* and [not link] and a tag.\n\n| Col A | Col B |\n| ----- | ----- |\n| cell one | two |\n\nconst x = a * b; // **kept**\n\n    indented code - kept\n\n<!-- a plain html comment -->\n\n: The footnote text.';
+    expect(stripInlineFormatting(doc).plain).toBe(expected);
+  });
+});
+
+describe('entity anchors', () => {
+  it('places a rendered-text anchor over an encoded source before the reference text', () => {
+    const out = insertComment(
+      'Ship it once Tom &amp; Jerry sign off.',
+      'Tom & Jerry',
+      'c',
+      'U',
+      'Ship it once ',
+      ' sign off.',
+      13,
+    );
+    expect(out).toMatch(/^Ship it once <!-- @comment\{.*\} -->Tom &amp; Jerry sign off\.$/);
+  });
+});
