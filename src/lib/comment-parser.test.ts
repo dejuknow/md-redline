@@ -28,6 +28,8 @@ import {
   orderCommentsByAnchor,
   transformCommentMarkers,
   extractMermaidText,
+  resolveAnchorOffset,
+  canPlaceAnchor,
 } from './comment-parser';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
@@ -4215,5 +4217,101 @@ describe('entity anchors', () => {
       13,
     );
     expect(out).toMatch(/^Ship it once <!-- @comment\{.*\} -->Tom &amp; Jerry sign off\.$/);
+  });
+
+  describe('shared anchor resolver', () => {
+    function markerAt(out: string): number {
+      return out.indexOf('<!-- @comment');
+    }
+
+    const cases: Array<{
+      name: string;
+      md: string;
+      anchor: string;
+      before?: string;
+      after?: string;
+      hint: number;
+    }> = [
+      { name: 'plain prose', md: 'Alpha beta gamma.', anchor: 'beta', hint: 6 },
+      { name: 'formatted prose', md: 'Say **foo** now.', anchor: 'foo', hint: 4 },
+      { name: 'entity prose', md: 'Ship Tom &amp; Jerry now.', anchor: 'Tom & Jerry', hint: 5 },
+      {
+        name: 'duplicate passages with context',
+        md: 'one dup here. two dup there.',
+        anchor: 'dup',
+        before: 'two ',
+        after: ' there.',
+        hint: 18,
+      },
+      {
+        name: 'cross-element selection',
+        md: '# Head\n\nBody text here.',
+        anchor: 'Head\nBody text',
+        hint: 2,
+      },
+    ];
+
+    for (const c of cases) {
+      it(`resolves the offset insertComment writes at: ${c.name}`, () => {
+        const offset = resolveAnchorOffset(c.md, c.anchor, {
+          contextBefore: c.before,
+          contextAfter: c.after,
+          hintOffset: c.hint,
+        });
+        expect(offset).not.toBeNull();
+        const out = insertComment(c.md, c.anchor, 'c', 'U', c.before, c.after, c.hint);
+        expect(markerAt(out)).toBe(offset);
+      });
+    }
+
+    it('refuses a selection whose later lines are missing', () => {
+      const md = 'first only\n';
+      expect(insertComment(md, 'first\nmissing', 'c', 'U', '', '', 0)).toBe(md);
+      expect(resolveAnchorOffset(md, 'first\nmissing', { hintOffset: 0 })).toBeNull();
+      expect(canPlaceAnchor(md, { text: 'first\nmissing', offset: 0 })).toBe(false);
+    });
+
+    it('canPlaceAnchor is true for a placeable selection', () => {
+      expect(canPlaceAnchor('Ship Tom &amp; Jerry now.', { text: 'Tom & Jerry', offset: 5 })).toBe(
+        true,
+      );
+    });
+
+    it('picks the second occurrence when an entity differs from a literal ampersand', () => {
+      const md = 'x & b here. y &amp; b there.';
+      const hint = md.indexOf('y &amp;') + 2;
+      const out = insertComment(md, '& b', 'c', 'U', 'y ', ' there.', hint);
+      expect(out.indexOf('<!-- @comment')).toBe(md.indexOf('&amp; b'));
+      expect(out).toMatch(/y <!-- @comment\{.*\} -->&amp; b there\.$/);
+    });
+  });
+
+  describe('orphan detection with entities', () => {
+    function comment(anchor: string): MdComment {
+      return {
+        id: 'c1',
+        anchor,
+        text: 'x',
+        author: 'U',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      };
+    }
+
+    it('does not orphan a rendered-text anchor over an encoded source', () => {
+      expect(detectMissingAnchors('Tom &amp; Jerry run.', [comment('Tom & Jerry')]).size).toBe(0);
+    });
+
+    it('does not orphan an agent-supplied encoded anchor', () => {
+      expect(detectMissingAnchors('Tom &amp; Jerry run.', [comment('Tom &amp; Jerry')]).size).toBe(
+        0,
+      );
+    });
+
+    it('accepts a literal source that only matches a decoded anchor (spec "Our call")', () => {
+      // Accepted trade-off from the entity-anchors design spec ("Our call" on the
+      // anchorResolves secondary pass): a comment anchored on `a &amp; b` still counts
+      // as attached when the source reads `a & b`. This is pinned as accepted, not a bug.
+      expect(detectMissingAnchors('a & b', [comment('a &amp; b')]).size).toBe(0);
+    });
   });
 });

@@ -941,34 +941,18 @@ export interface InsertCommentExtras {
   sessionId?: string;
 }
 
-export function insertComment(
-  rawMarkdown: string,
+/**
+ * Resolve where an anchor sits in comment-free markdown: the clean offset that
+ * insertComment uses before it relocates out of protected containers. Pure, so
+ * the UI can ask at selection time whether a selection can be placed at all.
+ * Returns null when the anchor cannot be found.
+ */
+export function resolveAnchorOffset(
+  cleanMarkdown: string,
   anchor: string,
-  commentText: string,
-  author: string = 'User',
-  contextBefore?: string,
-  contextAfter?: string,
-  hintOffset?: number,
-  commentId: string = randomId(),
-  extras?: InsertCommentExtras,
-): string {
-  const comment: MdComment = {
-    id: commentId,
-    anchor,
-    text: commentText,
-    author,
-    timestamp: new Date().toISOString(),
-    ...(contextBefore ? { contextBefore } : {}),
-    ...(contextAfter ? { contextAfter } : {}),
-    ...(extras?.agentInitiated ? { agentInitiated: true } : {}),
-    ...(extras?.expectsReply ? { expectsReply: true } : {}),
-    ...(extras?.sessionId ? { sessionId: extras.sessionId } : {}),
-  };
-
-  // Find the anchor text in the CLEAN markdown (no comment markers),
-  // then map the position back to the raw markdown.
-  const { cleanMarkdown, cleanToRawOffset } = parseComments(rawMarkdown);
-
+  opts: { contextBefore?: string; contextAfter?: string; hintOffset?: number } = {},
+): number | null {
+  const { contextBefore, contextAfter, hintOffset } = opts;
   let insertionCleanOffset: number | null = null;
 
   // When hintOffset is provided (from DOM selection), search in plain-text space
@@ -1019,7 +1003,7 @@ export function insertComment(
     }
   }
 
-  // Fallback: cross-element selections with newlines/tabs — segment-based search
+  // Fallback: cross-element selections with newlines/tabs, via segment search
   if (insertionCleanOffset === null) {
     const segments = anchor
       .split(/[\n\t]+/)
@@ -1033,14 +1017,67 @@ export function insertComment(
 
       // If that fails, try in formatting-stripped text and map back
       if (insertionCleanOffset === null) {
+        // Every segment must resolve, in order, not just the first: a selection
+        // whose later lines are missing from the document is not placeable.
         const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
-        const fm = flexibleIndexOf(plain, segments[0]);
-        if (fm) {
-          insertionCleanOffset = toCleanOffset(fm.start);
+        const sr = findSegments(plain, segments);
+        if (sr !== null) {
+          insertionCleanOffset = toCleanOffset(sr.start);
         }
       }
     }
   }
+
+  return insertionCleanOffset;
+}
+
+/** True when a selection can be placed in cleanMarkdown (see resolveAnchorOffset). */
+export function canPlaceAnchor(
+  cleanMarkdown: string,
+  sel: { text: string; contextBefore?: string; contextAfter?: string; offset?: number },
+): boolean {
+  return (
+    resolveAnchorOffset(cleanMarkdown, sel.text, {
+      contextBefore: sel.contextBefore,
+      contextAfter: sel.contextAfter,
+      hintOffset: sel.offset,
+    }) !== null
+  );
+}
+
+export function insertComment(
+  rawMarkdown: string,
+  anchor: string,
+  commentText: string,
+  author: string = 'User',
+  contextBefore?: string,
+  contextAfter?: string,
+  hintOffset?: number,
+  commentId: string = randomId(),
+  extras?: InsertCommentExtras,
+): string {
+  const comment: MdComment = {
+    id: commentId,
+    anchor,
+    text: commentText,
+    author,
+    timestamp: new Date().toISOString(),
+    ...(contextBefore ? { contextBefore } : {}),
+    ...(contextAfter ? { contextAfter } : {}),
+    ...(extras?.agentInitiated ? { agentInitiated: true } : {}),
+    ...(extras?.expectsReply ? { expectsReply: true } : {}),
+    ...(extras?.sessionId ? { sessionId: extras.sessionId } : {}),
+  };
+
+  // Find the anchor text in the CLEAN markdown (no comment markers),
+  // then map the position back to the raw markdown.
+  const { cleanMarkdown, cleanToRawOffset } = parseComments(rawMarkdown);
+
+  let insertionCleanOffset = resolveAnchorOffset(cleanMarkdown, anchor, {
+    contextBefore,
+    contextAfter,
+    hintOffset,
+  });
 
   if (insertionCleanOffset === null) return rawMarkdown;
 
