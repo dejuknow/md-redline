@@ -3824,7 +3824,12 @@ export default function App() {
                 setAutoExpandForm(false);
               }}
               onLock={lockSelection}
-              onUnlock={unlockSelection}
+              onUnlock={() => {
+                unlockSelection();
+                // The form gave way on its own; the keyboard's request to open
+                // it is spent, so the text coming back does not reopen it.
+                setAutoExpandForm(false);
+              }}
             />
           )}
         </>

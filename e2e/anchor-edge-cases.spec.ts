@@ -337,3 +337,38 @@ test.describe('A comment the file cannot place', () => {
     await expect(form.getByRole('button', { name: 'Comment' })).toBeEnabled();
   });
 });
+
+test.describe('A form the keyboard opened', () => {
+  test('stays closed when the file loses and then regains the selected text', async ({ page }) => {
+    const original = '# Anchor Edge Cases\n\nShip the blue release today.\n\nOther text.\n';
+    const changed = '# Anchor Edge Cases\n\nShip the green launch today.\n\nOther text.\n';
+    writeFileSync(fixturePath, original);
+    await openFixture(page);
+    await selectSingleText(page, 'blue release');
+
+    const form = page.locator('[data-comment-form]');
+    await expect(form.getByRole('button', { name: 'Comment' })).toBeVisible({ timeout: 5000 });
+    // Cmd+Enter opens the composer, as the context menu's Comment does.
+    await page.keyboard.press(withMod('Enter'));
+    const input = page.getByPlaceholder('Add your comment...');
+    await expect(input).toBeVisible();
+
+    // Nothing typed, and the file loses the text: the empty form gives way.
+    writeFileSync(fixturePath, changed);
+    await expect(page.locator('.prose')).toContainText('green launch', { timeout: 15_000 });
+    await expect(form.getByRole('status')).toContainText('Can’t comment on this text.');
+    await expect(input).toHaveCount(0);
+
+    // The text comes back. The reader did not ask for the composer again, so
+    // the pill offers Comment instead of reopening it.
+    writeFileSync(fixturePath, original);
+    await expect(page.locator('.prose')).toContainText('blue release', { timeout: 15_000 });
+    await expect(form.getByRole('button', { name: 'Comment' })).toBeVisible();
+    await expect(input).toHaveCount(0);
+
+    // A new selection opens as the pill too, not as the composer.
+    await selectSingleText(page, 'Other text');
+    await expect(form.getByRole('button', { name: 'Comment' })).toBeVisible({ timeout: 5000 });
+    await expect(input).toHaveCount(0);
+  });
+});
