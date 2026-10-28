@@ -474,7 +474,9 @@ describe('CommentForm on a selection the file cannot place', () => {
       selection: { ...selection, text: 'Users must provide valid credentials', offset: 23 },
     });
 
-    expect(screen.getByPlaceholderText('Add your comment...')).toBeTruthy();
+    expect((screen.getByPlaceholderText('Add your comment...') as HTMLTextAreaElement).value).toBe(
+      'Already typing',
+    );
     expect(screen.queryByRole('status')).toBeNull();
     expect(onUnlock).not.toHaveBeenCalled();
   });

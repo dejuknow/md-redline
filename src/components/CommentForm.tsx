@@ -165,6 +165,8 @@ export function CommentForm({
   useEffect(() => {
     if (prevSelectionKeyRef.current !== selectionKey) {
       prevSelectionKeyRef.current = selectionKey;
+      // A form that stays open over a typed draft keeps the draft.
+      let keepsDraft = false;
       if (isExpanded && !placeable && !text.trim()) {
         // A triple-click widened the word quick comment opened to a line the
         // file cannot place. Nothing typed, so nothing to keep: show why, and
@@ -179,9 +181,13 @@ export function CommentForm({
         // so the next drag lands here. Quick comment opens it as on mount.
         onLock();
         setIsExpanded(true);
+      } else {
+        keepsDraft = isExpanded && !!text.trim();
       }
-      setText('');
-      setPrefillPristine(false);
+      if (!keepsDraft) {
+        setText('');
+        setPrefillPristine(false);
+      }
       setAnchorFailed(false);
       setShowTemplates(settings.quickComment ? settings.showTemplatesByDefault : false);
       setShowPillMenu(false);
