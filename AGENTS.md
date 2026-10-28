@@ -992,16 +992,29 @@ of `insertComment`, shared with the UI through `canPlaceAnchor`) decodes HTML
 character references the way the renderer does (named with a semicolon,
 decimal, hex), so `&amp;` in the file matches `&` in the selected text. Code
 spans, fenced and indented code, backslash escapes, angle and bare autolinks,
-frontmatter and HTML comment bodies stay literal. `App` runs the check on every
-selection and the pill swaps Comment and the templates for a `role="status"`
-message: "Can’t comment on this text." with "Part of it is written differently
-in the file. Try a shorter selection." `quickComment`, `Cmd+Enter`,
+frontmatter and HTML comment bodies stay literal, except that a code span in a
+table cell shows `\|` as `|`, as GFM does. A line-start `#` is a heading marker
+only when one to six of them are followed by a space, a tab or the end of the
+line, so `#124` stays text. `stripInlineFormatting` memoizes its result for
+document-sized texts (a few entries, least recently used out), so the check,
+detection, the viewer and the diagram view share one per document; short
+anchors are not memoized and do not enter the code parse cache. `App` runs the
+check on every selection and the pill swaps Comment and the templates for a
+`role="status"` message: "Can’t comment on this text." with "Part of it is
+written differently in the file. Try a shorter selection." The status region
+stays mounted for as long as the pill shows and gets its message a frame after
+it mounts, so screen readers announce it. `quickComment`, `Cmd+Enter`,
 `Cmd+Shift+M` and the context menu's Comment item (disabled) all respect it. An
-empty expanded form whose selection widens to unplaceable text collapses to the
-same status and releases the lock (`unlockSelection` in `useSelection`, the
-`onUnlock` prop on `CommentForm`); a form with a typed draft is never
-collapsed. The Mermaid fullscreen modal runs the same check before commenting
-(`mermaidPlainHint` in `mermaid-blocks.ts`, a `canPlace` prop). Footnote
+empty expanded form collapses to the same status and releases the lock
+(`unlockSelection` in `useSelection`, the `onUnlock` prop on `CommentForm`)
+when its selection widens to unplaceable text, and also when a file change
+makes its selection unplaceable. Releasing it also clears `autoExpandForm`, so
+a form `Cmd+Enter` or the context menu opened does not reopen by itself when
+the text comes back; the pill offers Comment instead. A form with a typed draft
+is never collapsed and keeps its text when its selection changes. The Mermaid
+fullscreen modal runs the same check before commenting (`mermaidPlainHint` in
+`mermaid-blocks.ts`, a `canPlace` prop that `App` keeps stable between file
+changes, so the modal checks a selection once). Footnote
 references and Mermaid label escaping still fail to match and are tracked in
 #194.
 
