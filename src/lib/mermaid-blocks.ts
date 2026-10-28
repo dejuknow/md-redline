@@ -1,3 +1,5 @@
+import { stripInlineFormatting } from './comment-parser';
+
 export interface MermaidBlock {
   index: number;
   source: string;
@@ -106,4 +108,20 @@ export function findCurrentMermaidBlock(
   }
 
   return blocks[originalBlockIndex]?.source === trimmedSource ? blocks[originalBlockIndex] : null;
+}
+
+/**
+ * Plain-text hint offset for an anchor inside a diagram block. insertComment
+ * ranks occurrences against plain-text positions (the output of
+ * stripInlineFormatting), so a raw source position can lose to a nearby prose
+ * occurrence of the same text. Pointing at the anchor's place inside the
+ * block's source keeps the comment filed against the diagram.
+ */
+export function mermaidPlainHint(
+  cleanMarkdown: string,
+  block: MermaidBlock,
+  anchor: string,
+): number {
+  const cleanHint = block.sourceStart + Math.max(0, block.source.indexOf(anchor));
+  return stripInlineFormatting(cleanMarkdown).toPlainOffset(cleanHint);
 }

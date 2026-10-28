@@ -20,7 +20,6 @@ import {
   canPlaceAnchor,
   findNewReplyIds,
   parseComments,
-  stripInlineFormatting,
 } from './lib/comment-parser';
 import { getEffectiveStatus } from './types';
 import type { SelectionInfo } from './types';
@@ -64,6 +63,7 @@ import {
   collectMermaidBlocks,
   findCurrentMermaidBlock,
   getMermaidBlockIdentity,
+  mermaidPlainHint,
 } from './lib/mermaid-blocks';
 import { useMermaidRenderer } from './hooks/useMermaidRenderer';
 import { useMermaidFullscreen } from './hooks/useMermaidFullscreen';
@@ -3891,6 +3891,16 @@ export default function App() {
           comments={comments}
           activeCommentId={activeCommentId}
           onClose={mermaidFullscreen.close}
+          canPlace={(anchor, ctxBefore, ctxAfter, hintOffset) =>
+            canPlaceAnchor(cleanMarkdown, {
+              text: anchor,
+              contextBefore: ctxBefore,
+              contextAfter: ctxAfter,
+              offset: activeMermaidBlock
+                ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
+                : hintOffset,
+            })
+          }
           onAddComment={(anchor, text, ctxBefore, ctxAfter, hintOffset) => {
             // The hint offset coming out of the modal is in canvas-text-content
             // coordinates and isn't meaningful in markdown space, so we ignore
@@ -3904,17 +3914,9 @@ export default function App() {
             // plain-text positions and can prefer a nearby prose occurrence —
             // the comment then ends up filed against the prose, and
             // commentsForDiagram filters it out of the diagram panel.
-            let adjustedHint = hintOffset;
-            if (activeMermaidBlock) {
-              // Point insertComment at the active fenced block as it exists now.
-              // The fullscreen modal may stay open while earlier diagrams are
-              // inserted or removed, so the original source-order index can drift.
-              const anchorInSource = activeMermaidBlock.source.indexOf(anchor);
-              const cleanHint =
-                activeMermaidBlock.sourceStart + (anchorInSource >= 0 ? anchorInSource : 0);
-              const { toPlainOffset } = stripInlineFormatting(cleanMarkdown);
-              adjustedHint = toPlainOffset(cleanHint);
-            }
+            const adjustedHint = activeMermaidBlock
+              ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
+              : hintOffset;
             return handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
           }}
           onReply={handleReply}
