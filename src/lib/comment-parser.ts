@@ -1761,6 +1761,21 @@ function bareAutolinkEnd(md: string, at: number): number {
 }
 
 /**
+ * Where a heading's text starts when an ATX heading marker begins at `pos`:
+ * one to six `#` followed by a space, a tab or the end of the line, plus that
+ * one space or tab. -1 when the hashes are prose, as in `#124` or `#######`.
+ */
+function headingTextStart(md: string, pos: number): number {
+  let end = pos;
+  while (end < md.length && md[end] === '#') end++;
+  const hashes = end - pos;
+  if (hashes < 1 || hashes > 6) return -1;
+  if (end === md.length || md[end] === '\n') return end;
+  if (md[end] === ' ' || md[end] === '\t') return end + 1;
+  return -1;
+}
+
+/**
  * Strip inline markdown formatting (**, *, __, `, ~~) and block-level markers
  * (# headings, - lists, 1. lists) to produce plain text that matches rendered output.
  * Character references in prose (`&amp;`, `&#39;`) are decoded the way the
@@ -2180,19 +2195,20 @@ export function stripInlineFormatting(md: string): {
         if (k < len && md[k] === '.' && k + 1 < len && md[k + 1] === ' ') {
           i = k + 2;
         }
-      } else if (j < len && md[j] === '#') {
-        i = j;
-        while (i < len && md[i] === '#') i++;
-        if (i < len && md[i] === ' ') i++;
+      } else {
+        const textStart = headingTextStart(md, j);
+        if (textStart !== -1) i = textStart;
       }
       continue;
     }
 
     // Heading markers at line start
     if (atLineStart(i) && md[i] === '#') {
-      while (i < len && md[i] === '#') i++;
-      if (i < len && md[i] === ' ') i++;
-      continue;
+      const textStart = headingTextStart(md, i);
+      if (textStart !== -1) {
+        i = textStart;
+        continue;
+      }
     }
 
     // List markers at line start: - item, * item, + item, N. item.

@@ -4367,3 +4367,34 @@ describe('code spans in table cells', () => {
     expect(out).toContain('<!-- @comment');
   });
 });
+
+describe('stripInlineFormatting heading markers', () => {
+  // Expectations are the rendered text of renderMarkdown for each source.
+  it.each([
+    ["#124's first version", "#124's first version"],
+    ['See\n#124 for details', 'See\n#124 for details'],
+    ['####### seven', '####### seven'],
+    ['> #124 in a quote', '#124 in a quote'],
+  ])('keeps a hash with no space after it: %j', (md, plain) => {
+    expect(stripInlineFormatting(md).plain).toBe(plain);
+  });
+
+  it.each([
+    ['# Title', 'Title'],
+    ['###### Six', 'Six'],
+    ['#\tTab', 'Tab'],
+    ['#', ''],
+    ['# A\n#\nB', 'A\n\nB'],
+    ['> ## Quoted', 'Quoted'],
+  ])('strips a real heading marker: %j', (md, plain) => {
+    expect(stripInlineFormatting(md).plain).toBe(plain);
+  });
+
+  it('places a comment on prose that starts with a hash', () => {
+    const md = "#124's first version shipped.";
+    expect(canPlaceAnchor(md, { text: "#124's first", offset: 0 })).toBe(true);
+    expect(insertComment(md, "#124's first", 'c', 'U', '', '', 0)).toMatch(
+      /^<!-- @comment\{.*\} -->#124's first version shipped\.$/,
+    );
+  });
+});
