@@ -1862,6 +1862,9 @@ function computeStrippedText(md: string): StrippedText {
       ...getInlineCodeRanges(md),
     ];
     if (frontmatter) literalRanges.push(frontmatter);
+    // Code blocks the fence branch below never sees, because they don't start
+    // at a raw line start: nested in a blockquote or a list item.
+    literalRanges.push(...getParsedCode(md).blocks);
     literalRanges.push(...getHtmlCommentRanges(md, nonHtmlRegions));
   }
   // Source end of each decoded reference, keyed by its `&`, for toPlainOffset.

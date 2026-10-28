@@ -4029,6 +4029,13 @@ describe('stripInlineFormatting literal contexts', () => {
 });
 
 describe('stripInlineFormatting character references', () => {
+  it('keeps references literal inside code blocks nested in a quote or list', () => {
+    expect(stripInlineFormatting('> ```\n> a &amp; b\n> ```\n').plain).toContain('a &amp; b');
+    expect(stripInlineFormatting('- item\n\n  ```\n  a &amp; b\n  ```\n').plain).toContain(
+      'a &amp; b',
+    );
+  });
+
   // Expectations are the rendered text content of renderMarkdown for each source.
   it.each([
     ['Tom &amp; Jerry', 'Tom & Jerry'],
