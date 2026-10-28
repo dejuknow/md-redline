@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { ANCHOR_EDGE_CASES_DOC_BASELINE } from './helpers/fixture-baselines';
-import { resetTestAppState } from './helpers/test-state';
+import { withMod } from './helpers/shortcuts';
+import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -21,6 +22,8 @@ test.beforeEach(async ({ page }, testInfo) => {
   writeFileSync(fixturePath, ANCHOR_EDGE_CASES_DOC_BASELINE);
   await resetTestAppState(page);
 });
+
+test.afterAll(() => clearPersistedPreferences());
 
 test.afterEach(async () => {
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
@@ -219,28 +222,118 @@ test.describe('Comments anchor cleanly across markdown constructs', () => {
   });
 });
 
-test.describe('A comment the file cannot place', () => {
-  test('keeps the form open with the draft (#191)', async ({ page }) => {
-    // `&amp;` renders as `&`, and the anchor search does not decode entities,
-    // so this selection has no match in the source. Any unplaceable anchor
-    // would do; this is the cheapest one to build.
-    const doc = '# Anchor Edge Cases\n\nTom &amp; Jerry run fast.\n';
-    writeFileSync(fixturePath, doc);
+test.describe('HTML entities in the file', () => {
+  test('comments on text with an html entity', async ({ page }) => {
+    // `&amp;` renders as `&`. The anchor used to be searched for verbatim, so a
+    // selection like this had no match and the comment fell back to a guess.
+    writeFileSync(fixturePath, '# Anchor Edge Cases\n\nShip it once Tom &amp; Jerry sign off.\n');
     await openFixture(page);
     await selectSingleText(page, 'Tom & Jerry');
+    await submitCommentForm(page, 'which Tom and which Jerry');
 
-    const commentBtn = page.locator('[data-comment-form] button', { hasText: 'Comment' });
+    await expect
+      .poll(() => readFileSync(fixturePath, 'utf8'))
+      .toMatch(/once <!-- @comment\{.*?\} -->Tom &amp; Jerry sign off\./);
+
+    await openFixture(page);
+    await expect(page.locator('mark.comment-highlight')).toHaveText('Tom & Jerry');
+    await expect(page.getByText('which Tom and which Jerry')).toBeVisible();
+    await expect(page.getByText(/Needs re-anchoring/)).not.toBeVisible();
+  });
+});
+
+test.describe('A selection the file cannot place', () => {
+  const FOOTNOTE_DOC = '# Anchor Edge Cases\n\nClaim one[^n] and two.\n\n[^n]: Note.\n';
+
+  /** Select from `one` through `and`, across the footnote's superscript number. */
+  async function selectAcrossFootnote(page: Page) {
+    await selectFromTo(page, 'one', 'and');
+    // The rendered selection carries the footnote's number, which the file
+    // spells `[^n]`, so no single span of the source matches it. The app swaps
+    // the native selection for highlight marks, so read the number from those.
+    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+    const painted = (await page.locator('mark.selection-highlight').allTextContents()).join('');
+    expect(painted).toMatch(/one\s*1\s*and/);
+  }
+
+  test('flags a selection that crosses a footnote number', async ({ page }) => {
+    writeFileSync(fixturePath, FOOTNOTE_DOC);
+    await openFixture(page);
+    await selectAcrossFootnote(page);
+
+    const form = page.locator('[data-comment-form]');
+    await expect(form.getByRole('status')).toContainText('Can’t comment on this text.');
+    await expect(form.getByRole('status')).toContainText('Try a shorter selection.');
+    await expect(form.getByRole('button', { name: 'Comment' })).toHaveCount(0);
+    await expect(page.getByPlaceholder('Add your comment...')).toHaveCount(0);
+
+    // Cmd+Enter is the keyboard route to the composer, and it stays shut.
+    await page.keyboard.press(withMod('Enter'));
+    await expect(page.getByPlaceholder('Add your comment...')).toHaveCount(0);
+    await expect(form.getByRole('status')).toBeVisible();
+
+    // The context menu offers Comment, disabled.
+    const highlight = page.locator('mark.selection-highlight').first();
+    await expect(highlight).toBeVisible({ timeout: 5000 });
+    await highlight.click({ button: 'right' });
+    const menu = page.locator('.context-menu-enter');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'Comment', exact: true })).toBeDisabled();
+    await expect(page.getByPlaceholder('Add your comment...')).toHaveCount(0);
+    expect(readFileSync(fixturePath, 'utf8')).toBe(FOOTNOTE_DOC);
+  });
+
+  test('quick comment does not open a form on a selection the file cannot place', async ({
+    page,
+  }) => {
+    await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
+    writeFileSync(fixturePath, FOOTNOTE_DOC);
+    await openFixture(page);
+    await selectAcrossFootnote(page);
+
+    await expect(page.locator('[data-comment-form]').getByRole('status')).toContainText(
+      'Can’t comment on this text.',
+    );
+    await expect(page.getByPlaceholder('Add your comment...')).toHaveCount(0);
+    expect(readFileSync(fixturePath, 'utf8')).toBe(FOOTNOTE_DOC);
+  });
+});
+
+test.describe('A comment the file cannot place', () => {
+  test('keeps the form open with the draft when the file changes under it (#191)', async ({
+    page,
+  }) => {
+    // The selection places when it is made, so the up-front check passes. The
+    // file then loses that text before Comment is pressed, which is the case
+    // the failed-submit state still exists for.
+    const original = '# Anchor Edge Cases\n\nShip the blue release today.\n\nOther text.\n';
+    writeFileSync(fixturePath, original);
+    await openFixture(page);
+    await selectSingleText(page, 'blue release');
+
+    const form = page.locator('[data-comment-form]');
+    const commentBtn = form.getByRole('button', { name: 'Comment' });
     await expect(commentBtn).toBeVisible({ timeout: 5000 });
     await commentBtn.click();
     const draft = 'A long comment the reader should not have to type twice';
     await page.getByPlaceholder('Add your comment...').fill(draft);
-    await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment' }).click();
+
+    // Rewrite the file without the selected text and wait for the app to load it.
+    const changed = '# Anchor Edge Cases\n\nShip the green launch today.\n\nOther text.\n';
+    writeFileSync(fixturePath, changed);
+    await expect(page.locator('.prose')).toContainText('green launch', { timeout: 15_000 });
+
+    await form.getByRole('button', { name: 'Comment' }).click();
 
     await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
     await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
-    await expect(page.locator('[data-comment-form]').getByRole('alert')).toContainText(
-      'find this text in the file',
-    );
-    expect(readFileSync(fixturePath, 'utf8')).toBe(doc);
+    await expect(form.getByRole('alert')).toContainText('find this text in the file');
+    expect(readFileSync(fixturePath, 'utf8')).toBe(changed);
+
+    // The text coming back clears the failure and Comment works again.
+    writeFileSync(fixturePath, original);
+    await expect(page.locator('.prose')).toContainText('blue release', { timeout: 15_000 });
+    await expect(form.getByRole('alert')).toHaveCount(0);
+    await expect(form.getByRole('button', { name: 'Comment' })).toBeEnabled();
   });
 });
