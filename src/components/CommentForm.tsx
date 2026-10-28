@@ -49,7 +49,14 @@ interface Props {
   ) => boolean | void;
   onCancel: () => void;
   onLock: () => void;
+  /**
+   * Release the lock and keep the selection. Called when an empty open form
+   * gives way to the unavailable status, so the reader's next drag lands.
+   */
+  onUnlock?: () => void;
 }
+
+const noop = () => {};
 
 export function CommentForm({
   selection,
@@ -61,6 +68,7 @@ export function CommentForm({
   onSubmit,
   onCancel,
   onLock,
+  onUnlock = noop,
 }: Props) {
   const { settings } = useSettings();
   const TEMPLATES = settings.templates;
@@ -157,13 +165,18 @@ export function CommentForm({
   useEffect(() => {
     if (prevSelectionKeyRef.current !== selectionKey) {
       prevSelectionKeyRef.current = selectionKey;
-      if (!settings.quickComment) {
+      if (isExpanded && !placeable && !text.trim()) {
+        // A triple-click widened the word quick comment opened to a line the
+        // file cannot place. Nothing typed, so nothing to keep: show why, and
+        // release the lock, or the status would sit on a selection that
+        // ignores the reader's next drag.
+        setIsExpanded(false);
+        onUnlock();
+      } else if (!settings.quickComment) {
         setIsExpanded(false);
       } else if (!isExpanded && !isPending && placeable) {
         // The pill on a selection the file could not place is never locked,
         // so the next drag lands here. Quick comment opens it as on mount.
-        // An open form stays open: it is locked, and collapsing it would leave
-        // a locked pill that ignores the reader's next drag.
         onLock();
         setIsExpanded(true);
       }
@@ -183,18 +196,28 @@ export function CommentForm({
     placeable,
     isExpanded,
     isPending,
+    text,
     onLock,
+    onUnlock,
   ]);
 
-  // The file changed under an open form and can place the selection again, so
-  // Comment comes back. Only on that change: a failed submit on a selection
-  // that was placeable all along stays failed.
-  const prevPlaceableRef = useRef(placeable);
+  // The file changed under an open form, for the same selection (a new
+  // selection is handled above). Placeable again: Comment comes back, but a
+  // failed submit on a selection that was placeable all along stays failed.
+  // No longer placeable: an empty form gives way to the status as it would
+  // for a new selection; a draft stays, and submit says why.
+  const prevAvailabilityRef = useRef({ selectionKey, placeable });
   useEffect(() => {
-    const becamePlaceable = !prevPlaceableRef.current && placeable;
-    prevPlaceableRef.current = placeable;
-    if (becamePlaceable && isExpanded) setAnchorFailed(false);
-  }, [placeable, isExpanded]);
+    const prev = prevAvailabilityRef.current;
+    prevAvailabilityRef.current = { selectionKey, placeable };
+    if (!isExpanded || prev.selectionKey !== selectionKey || prev.placeable === placeable) return;
+    if (placeable) {
+      setAnchorFailed(false);
+    } else if (!text.trim()) {
+      setIsExpanded(false);
+      onUnlock();
+    }
+  }, [selectionKey, placeable, isExpanded, text, onUnlock]);
 
   // Baseline for the scroll-delta fallback, captured once per mount (the
   // selection-change effect above refreshes it for subsequent selections).

@@ -437,15 +437,16 @@ describe('CommentForm on a selection the file cannot place', () => {
     expect(onLock).toHaveBeenCalledTimes(1);
   });
 
-  it('an open quickComment form stays open when the next selection cannot be placed', async () => {
+  it('releases an empty quickComment form when its selection widens to unplaceable text', async () => {
     // A triple-click widens the word quick comment opened (and locked) to its
-    // line. The open form ignores availability: collapsing it would leave a
-    // locked pill that ignores the next drag. Submit still says why.
+    // line. With nothing typed there is no draft to keep, so the form gives
+    // way to the status, and the lock goes with it so the next drag lands.
     fetchPreferences.mockResolvedValue({
       settings: { templates: TEMPLATES_3, quickComment: true },
     });
     const onLock = vi.fn();
-    const { update } = renderControlledForm({ placeable: true, onLock });
+    const onUnlock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onLock, onUnlock });
 
     await screen.findByPlaceholderText('Add your comment...');
     update({
@@ -453,8 +454,61 @@ describe('CommentForm on a selection the file cannot place', () => {
       selection: { ...selection, text: 'Users must provide valid credentials', offset: 23 },
     });
 
+    expect(screen.getByRole('status')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+    expect(onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a typed draft open when its selection widens to unplaceable text', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onUnlock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onUnlock });
+
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    fireEvent.change(textarea, { target: { value: 'Already typing' } });
+    update({
+      placeable: false,
+      selection: { ...selection, text: 'Users must provide valid credentials', offset: 23 },
+    });
+
     expect(screen.getByPlaceholderText('Add your comment...')).toBeTruthy();
     expect(screen.queryByRole('status')).toBeNull();
-    expect(onLock).toHaveBeenCalledTimes(1);
+    expect(onUnlock).not.toHaveBeenCalled();
+  });
+
+  it('releases an empty open form when the file stops placing its selection', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onUnlock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onUnlock });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    update({ placeable: false });
+
+    expect(screen.getByRole('status')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a typed draft open when the file stops placing its selection', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onUnlock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onUnlock });
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Already typing' } });
+    update({ placeable: false });
+
+    expect(textarea.value).toBe('Already typing');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(onUnlock).not.toHaveBeenCalled();
   });
 });

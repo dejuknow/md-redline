@@ -464,6 +464,21 @@ describe('useSelection multi-click', () => {
     expect(hook().selection).toEqual(INFO);
   });
 
+  it('unlocking keeps the widened line but lets the next drag replace it', () => {
+    // The composer gives way when the line cannot take a comment, and must
+    // not leave behind a lock that ignores every later selection.
+    doubleClickAndLock();
+    mockResolve.mockReturnValue(LINE);
+    click(3);
+    act(() => hook().unlockSelection());
+    expect(hook().selection).toEqual(LINE);
+
+    const NEXT: SelectionInfo = { ...INFO, text: 'a cited answer' };
+    mockResolve.mockReturnValue(NEXT);
+    click(1);
+    expect(hook().selection).toEqual(NEXT);
+  });
+
   it('a third press that resolves to nothing keeps the locked word', () => {
     doubleClickAndLock();
     mockResolve.mockReturnValue(null);

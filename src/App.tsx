@@ -892,8 +892,15 @@ export default function App() {
   // Filled in from overlayOpen, next to the start-up reveal just above the
   // returned tree, once every overlay it reads exists.
   const escapeOwnedElsewhereRef = useRef<() => boolean>(() => false);
-  const { selection, commentSelection, isPending, clearSelection, lockSelection, adoptSelection } =
-    useSelection(proseRef as RefObject<HTMLElement | null>, escapeOwnedElsewhereRef);
+  const {
+    selection,
+    commentSelection,
+    isPending,
+    clearSelection,
+    lockSelection,
+    unlockSelection,
+    adoptSelection,
+  } = useSelection(proseRef as RefObject<HTMLElement | null>, escapeOwnedElsewhereRef);
 
   // Mirrors cleanMarkdown for callbacks that must stay stable: the marker-free
   // document is what a copy hands back, and it is what the block spans index.
@@ -3801,6 +3808,7 @@ export default function App() {
                 setAutoExpandForm(false);
               }}
               onLock={lockSelection}
+              onUnlock={unlockSelection}
             />
           )}
         </>
