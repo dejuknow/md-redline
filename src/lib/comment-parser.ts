@@ -1676,15 +1676,21 @@ function decodeCharacterReferenceAt(md: string, at: number): { text: string; end
  */
 function bareAutolinkEnd(md: string, at: number): number {
   const prev = at > 0 ? md[at - 1] : ' ';
-  if (!/[\s*_~(]/.test(prev)) return -1;
   const head = md.slice(at, at + 8).toLowerCase();
+  const www = head.startsWith('www.');
   let bodyStart: number;
   if (head.startsWith('https://')) bodyStart = at + 8;
   else if (head.startsWith('http://')) bodyStart = at + 7;
-  else if (head.startsWith('www.')) bodyStart = at + 4;
+  else if (www) bodyStart = at + 4;
   else return -1;
+  // GFM's boundary rules: a protocol link may follow anything but an ASCII
+  // letter, a `www.` link only whitespace or one of `(*_~[]`. An unescaped `[`
+  // right before opens a link label, and the renderer finds no literal
+  // autolinks after an unclosed label, so it is never a boundary.
+  if (prev === '[' && md[at - 2] !== '\\') return -1;
+  if (www ? !/[\s(*_~[\]]/.test(prev) : /[A-Za-z]/.test(prev)) return -1;
   // A scheme with no domain after it is not a link.
-  if (!head.startsWith('www.') && !/[A-Za-z0-9]/.test(md[bodyStart] ?? '')) return -1;
+  if (!www && !/[A-Za-z0-9]/.test(md[bodyStart] ?? '')) return -1;
   let end = bodyStart;
   while (end < md.length && !/[\s<]/.test(md[end])) end++;
   for (;;) {

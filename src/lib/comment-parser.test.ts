@@ -4078,8 +4078,41 @@ describe('stripInlineFormatting character references', () => {
     ['foohttps://x.io/?a&amp;b', 'foohttps://x.io/?a&b'],
     ['[https://x.io/?a&amp;b](u)', 'https://x.io/?a&b'],
     ['see https://&amp;', 'see https://&'],
+    // A protocol link may follow any character but an ASCII letter.
+    ['see "https://x.io/?a&amp;b" now', 'see "https://x.io/?a&amp;b" now'],
+    ['Link:https://x.io/?a&amp;b', 'Link:https://x.io/?a&amp;b'],
+    ['see <span>https://x.io/?a&amp;b</span>', 'see https://x.io/?a&amp;b'],
+    ['n 1https://x.io/?a&amp;b', 'n 1https://x.io/?a&amp;b'],
+    ['a;https://x.io/?a&amp;b', 'a;https://x.io/?a&amp;b'],
+    ['a\\https://x.io/?a&amp;b', 'a\\https://x.io/?a&amp;b'],
+    ['x ]https://x.io/?a&amp;b', 'x ]https://x.io/?a&amp;b'],
+    // A `www.` link needs whitespace or one of `(*_~]` before it.
+    ['x ]www.x.io/?a&amp;b', 'x ]www.x.io/?a&amp;b'],
+    ['x "www.x.io/?a&amp;b', 'x "www.x.io/?a&b'],
+    ['x:www.x.io/?a&amp;b', 'x:www.x.io/?a&b'],
+    // An unclosed `[` turns literal autolinks off; an escaped one does not.
+    ['x [https://x.io/?a&amp;b', 'x [https://x.io/?a&b'],
+    ['x [www.x.io/?a&amp;b', 'x [www.x.io/?a&b'],
+    ['x \\[https://x.io/?a&amp;b', 'x [https://x.io/?a&amp;b'],
   ])('bare autolink %j renders as %j', (md, expected) => {
     expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('keeps an existing source-spelling anchor on a URL attached', () => {
+    const comment: MdComment = {
+      id: 'c1',
+      anchor: 'https://x.io/?a&amp;b',
+      text: 't',
+      author: 'User',
+      timestamp: '2024-01-01T00:00:00.000Z',
+    };
+    for (const md of [
+      'see "https://x.io/?a&amp;b" now',
+      'Link:https://x.io/?a&amp;b',
+      'see <span>https://x.io/?a&amp;b</span>',
+    ]) {
+      expect(detectMissingAnchors(md, [comment]).has('c1')).toBe(false);
+    }
   });
 
   it('maps every emitted unit to the reference and back', () => {
