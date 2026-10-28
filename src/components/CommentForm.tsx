@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useId } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useId, useCallback } from 'react';
 import type { SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
@@ -100,6 +100,21 @@ export function CommentForm({
     (document.querySelector('[data-doc-page]')?.parentElement as HTMLElement | null) ?? null;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
+  // The pill's status region (role="status") stays in the page for as long as
+  // the pill does, and a message is put in it only once it has been there for
+  // a frame: a live region inserted with its message already in it is often
+  // not announced. The pill switching between Comment and the unavailable
+  // status keeps the same region, so the change is announced too.
+  const [statusRegionReady, setStatusRegionReady] = useState(false);
+  const statusRegionFrameRef = useRef(0);
+  const statusRegionRef = useCallback((node: HTMLDivElement | null) => {
+    cancelAnimationFrame(statusRegionFrameRef.current);
+    if (node) {
+      statusRegionFrameRef.current = requestAnimationFrame(() => setStatusRegionReady(true));
+    } else {
+      setStatusRegionReady(false);
+    }
+  }, []);
   const [formSize, setFormSize] = useState<{ height: number; width: number } | null>(null);
   useAutoResize(inputRef, text);
 
@@ -296,7 +311,7 @@ export function CommentForm({
     setFormSize((current) =>
       current?.height === nextSize.height && current?.width === nextSize.width ? current : nextSize,
     );
-  }, [isExpanded, showTemplates, text, selectionKey, anchorFailed, placeable]);
+  }, [isExpanded, showTemplates, text, selectionKey, anchorFailed, placeable, statusRegionReady]);
 
   // Position the form near the selection (the live rect when the pill has
   // been following a scroll, the snapshot otherwise).
@@ -448,19 +463,28 @@ export function CommentForm({
     ? { ...style, visibility: 'hidden', pointerEvents: 'none' }
     : style;
 
-  if (!isExpanded && !placeable) {
-    // Not a button and no handlers: there is nothing to do here but pick other
-    // text, and a tap must not commit or open anything.
-    return (
-      <div ref={formRef} style={surfaceStyle} aria-hidden={hidden || undefined} data-comment-form>
+  // First child of both pills, so React keeps the one region across them.
+  // Not a button and no handlers: on an unplaceable selection there is nothing
+  // to do but pick other text, and a tap must not commit or open anything.
+  const statusRegion = (
+    <div ref={statusRegionRef} role="status">
+      {!placeable && statusRegionReady && (
         <div className="selection-pill-enter px-3 py-1.5 max-w-[calc(100vw-24px)] bg-surface-raised border border-border rounded-2xl shadow-lg">
-          <div role="status" className="max-w-72 text-xs text-danger-text">
+          <div className="max-w-72 text-xs text-danger-text">
             <p className="font-semibold">Can&rsquo;t comment on this text.</p>
             <p className="mt-0.5">
               Part of it is written differently in the file. Try a shorter selection.
             </p>
           </div>
         </div>
+      )}
+    </div>
+  );
+
+  if (!isExpanded && !placeable) {
+    return (
+      <div ref={formRef} style={surfaceStyle} aria-hidden={hidden || undefined} data-comment-form>
+        {statusRegion}
       </div>
     );
   }
@@ -470,6 +494,7 @@ export function CommentForm({
     const menuTemplates = TEMPLATES.slice(2);
     return (
       <div ref={formRef} style={surfaceStyle} aria-hidden={hidden || undefined} data-comment-form>
+        {statusRegion}
         {showPillMenu && menuTemplates.length > 0 && (
           <div
             data-pill-template-menu
