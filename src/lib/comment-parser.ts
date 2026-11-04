@@ -209,9 +209,10 @@ const NO_MARKS: ReadonlySet<number> = new Set();
 interface ParsedText {
   code: ParsedCode;
   /**
-   * Offsets of the `*` and `_` characters the renderer reads as syntax: the
-   * delimiters of emphasis and strong emphasis, and the characters of a
-   * thematic break. Every other `*` or `_` is text.
+   * Offsets of syntax the renderer does not show: the delimiters of emphasis,
+   * strong emphasis and strikethrough, the characters of a thematic break,
+   * and the marker that opens a list item (with its padding and task
+   * checkbox), a blockquote or a heading. Every other `*`, `_` and `~` is text.
    */
   formattingMarks: ReadonlySet<number>;
 }
@@ -257,14 +258,24 @@ function getParsedCode(markdown: string): ParsedCode {
 }
 
 /**
- * The `*` and `_` characters the renderer reads as syntax (#198). Emphasis
- * pairs delimiter runs across a whole paragraph, by flanking, the rule of
- * three, and around code spans and link labels, so a character on its own
- * cannot say whether it is a delimiter. Only a paired one disappears from the
- * rendered text: a glob like `hosts/*` or a stray `modify_` shows as written.
+ * The syntax characters the renderer does not show (#198, #200). Emphasis and
+ * strikethrough pair delimiter runs across a whole paragraph, by flanking, the
+ * rule of three, and around code spans and link labels, so a character on its
+ * own cannot say whether it is a delimiter. Only a paired one disappears from
+ * the rendered text: a glob like `hosts/*`, a stray `modify_` or a lone `~~`
+ * shows as written. A list item can also open with another list marker, a
+ * quote or a heading on the same line (`1. - step`), which the line-start
+ * branches of the scanner do not see.
  */
+// A list marker the scanner's line-start branches do not strip: one followed
+// by a tab, a line break, or another marker, quote or heading on the same
+// line, and the `1)` form. Plain bulleted lists do not match, so a document
+// without `*`, `_` or `~` that has only those skips the parse.
+const LIST_SYNTAX_SCANNER_MISSES =
+  /^\uFEFF?[ \t>]*(?:(?:[-+]|\d{1,9}[.)])(?:\t|[ \t]*$|[ \t]+(?:[-*+>#]|\d{1,9}[.)]))|\d{1,9}\))/m;
+
 function getFormattingMarks(markdown: string): ReadonlySet<number> {
-  if (!/[*_]/.test(markdown)) return NO_MARKS;
+  if (!/[*_~]/.test(markdown) && !LIST_SYNTAX_SCANNER_MISSES.test(markdown)) return NO_MARKS;
   return getParsedText(markdown).formattingMarks;
 }
 
@@ -278,11 +289,13 @@ function getParsedText(markdown: string): ParsedText {
   // as src/markdown/pipeline.ts also corrects for. Nothing may be placed
   // before the mark, so a line start is never earlier than it.
   const bom = markdown.charCodeAt(0) === 0xfeff ? 1 : 0;
-  const markRun = (from: number, to: number) => {
+  // Marks the characters in [from, to) that `keep` accepts, in parser offsets.
+  const markRun = (from: number, to: number, keep: (c: string) => boolean) => {
     for (let k = from + bom; k < to + bom; k++) {
-      if (markdown[k] === '*' || markdown[k] === '_') formattingMarks.add(k);
+      if (keep(markdown[k])) formattingMarks.add(k);
     }
   };
+  const isEmphasisChar = (c: string) => c === '*' || c === '_';
   const tree = rendererParser.parse(markdown);
   for (const top of tree.children) {
     const topStart = top.position?.start.offset;
@@ -304,15 +317,28 @@ function getParsedText(markdown: string): ParsedText {
       if (node.type === 'code') {
         code.blocks.push({ start: start + bom, end: end + bom, target: lineStart });
       }
-      if (node.type === 'thematicBreak') markRun(start, end);
-      if ((node.type === 'emphasis' || node.type === 'strong') && node.children.length > 0) {
+      if (node.type === 'thematicBreak') markRun(start, end, isEmphasisChar);
+      if (
+        (node.type === 'listItem' || node.type === 'blockquote' || node.type === 'heading') &&
+        node.children.length > 0
+      ) {
+        // The marker, its padding and a list item's task checkbox come before
+        // the first child. A line break there stays: the text is on the next line.
+        const first = node.children[0].position?.start.offset;
+        if (first !== undefined) markRun(start, first, (c) => c !== '\n');
+      }
+      if (
+        (node.type === 'emphasis' || node.type === 'strong' || node.type === 'delete') &&
+        node.children.length > 0
+      ) {
         // The delimiters are what lies between the node's edges and its
         // content's: one or two characters on each side.
         const first = node.children[0].position?.start.offset;
         const last = node.children[node.children.length - 1].position?.end.offset;
         if (first === undefined || last === undefined) return;
-        markRun(start, first);
-        markRun(last, end);
+        const isDelimiter = node.type === 'delete' ? (c: string) => c === '~' : isEmphasisChar;
+        markRun(start, first, isDelimiter);
+        markRun(last, end, isDelimiter);
       }
     });
   }
@@ -1896,14 +1922,15 @@ function looksLikeEmphasisMark(md: string, i: number): boolean {
 /**
  * The plain readings of an anchor that may quote markdown, as an agent copying
  * raw source writes them, for matching against a document's plain text. The
- * first is how the renderer shows the anchor; the second drops every `*` and
- * `_` that looks like formatting, for a quote that starts or stops inside
- * emphasis (`**Status: draft`), which no parse of the quote alone can pair.
+ * first is how the renderer shows the anchor; the second drops every `*`, `_`
+ * and `~~` that looks like formatting, for a quote that starts or stops inside
+ * emphasis or strikethrough (`**Status: draft`), which no parse of the quote
+ * alone can pair.
  * Either may equal the anchor itself.
  */
 export function stripAnchorFormatting(anchor: string): string[] {
   const rendered = stripInlineFormatting(anchor).plain;
-  if (!/[*_]/.test(anchor)) return [rendered];
+  if (!/[*_~]/.test(anchor)) return [rendered];
   const guessed = computeStrippedText(anchor, 'guess').plain;
   return guessed === rendered ? [rendered] : [rendered, guessed];
 }
@@ -1922,9 +1949,10 @@ function stripRangeInDocument(cleanMarkdown: string, from: number, to: number): 
 }
 
 /**
- * Which `*` and `_` characters are emphasis: `'parse'` pairs them as the
- * renderer does, `'guess'` judges each on its own (looksLikeEmphasisMark), and
- * a set gives their offsets outright.
+ * Which syntax characters the renderer hides: `'parse'` reads them off the
+ * renderer's parse (see ParsedText.formattingMarks), `'guess'` judges each
+ * `*`, `_` and `~~` on its own (looksLikeEmphasisMark), and a set gives the
+ * hidden offsets outright, in the same terms as the parse.
  */
 type EmphasisMarks = 'parse' | 'guess' | ReadonlySet<number>;
 
@@ -2394,11 +2422,14 @@ function computeStrippedText(md: string, emphasis: EmphasisMarks = 'parse'): Str
       }
     }
 
-    // Emphasis delimiters: only the ones the renderer paired are syntax.
-    if (
-      (md[i] === '*' || md[i] === '_') &&
-      (formattingMarks ? formattingMarks.has(i) : looksLikeEmphasisMark(md, i))
-    ) {
+    // Syntax the renderer hides: paired emphasis and strikethrough delimiters,
+    // and list markers the line-start branches above did not consume.
+    if (formattingMarks) {
+      if (formattingMarks.has(i)) {
+        i++;
+        continue;
+      }
+    } else if ((md[i] === '*' || md[i] === '_') && looksLikeEmphasisMark(md, i)) {
       i++;
       continue;
     }
@@ -2409,9 +2440,9 @@ function computeStrippedText(md: string, emphasis: EmphasisMarks = 'parse'): Str
       continue;
     }
 
-    // Single tildes are literal text (for example ~/docs paths); only paired
-    // tildes represent strikethrough formatting.
-    if (md[i] === '~' && md[i + 1] === '~') {
+    // Without the parse, a single tilde is taken for text (a ~/docs path) and
+    // a double one for strikethrough.
+    if (!formattingMarks && md[i] === '~' && md[i + 1] === '~') {
       i += 2;
       continue;
     }
