@@ -30,6 +30,7 @@ import {
   extractMermaidText,
   resolveAnchorOffset,
   canPlaceAnchor,
+  recoverAnchorAtOffset,
 } from './comment-parser';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
@@ -4442,5 +4443,117 @@ describe('stripInlineFormatting memo', () => {
     const again = stripInlineFormatting(doc(3));
     expect(again).not.toBe(first);
     expect(again.plain).toBe(first.plain);
+  });
+});
+
+describe('emphasis delimiters pair the way the renderer pairs them (#198)', () => {
+  // Only a `*` or `_` the renderer pairs into emphasis disappears from the
+  // rendered text. One left unpaired, as in a glob, renders literally.
+  it.each([
+    [
+      'Copy the files under hosts/*/bin/ before the run.',
+      'Copy the files under hosts/*/bin/ before the run.',
+    ],
+    ['You can modify_ the value later.', 'You can modify_ the value later.'],
+    ['Use *.md and *.txt files', 'Use *.md and *.txt files'],
+    ['Build src/**/*.ts first', 'Build src/**/*.ts first'],
+    ['A footnote*', 'A footnote*'],
+    ['_leading underscore', '_leading underscore'],
+    ['**unclosed bold', '**unclosed bold'],
+    ['file_*.txt', 'file_*.txt'],
+    ['foo_bar_ baz', 'foo_bar_ baz'],
+    ['\u00e9_\u00e0', '\u00e9_\u00e0'],
+    ['See https://example.com/_foo_ now', 'See https://example.com/_foo_ now'],
+    ['[a*b](url*)', 'a*b'],
+    ['- see *.md and *em*', 'see *.md and em'],
+    ['> quote *.md and _em_', 'quote *.md and em'],
+  ])('keeps an unpaired delimiter in %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it.each([
+    ['This is **bold** and _em_ text', 'This is bold and em text'],
+    ['__a__', 'a'],
+    ['***x***', 'x'],
+    ['*a **b** c*', 'a b c'],
+    ['x ***b** c*', 'x b c'],
+    ['*foo**bar*', 'foo**bar'],
+    ['2*3*4 = 24', '234 = 24'],
+    ['**two\nlines**', 'two\nlines'],
+    ['**bold** and *.md', 'bold and *.md'],
+    ['snake_case_name stays', 'snake_case_name stays'],
+    ['a * b * c', 'a * b * c'],
+  ])('drops only the paired delimiters in %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('drops the characters of a thematic break', () => {
+    for (const rule of ['***', '___', '* * *']) {
+      expect(stripInlineFormatting(`a\n\n${rule}\n\nb`).plain).not.toMatch(/[*_]/);
+    }
+  });
+
+  it('maps a kept delimiter back to its source position', () => {
+    const md = '**Note:** copy hosts/*/bin/ first';
+    const { plain, toCleanOffset } = stripInlineFormatting(md);
+    expect(toCleanOffset(plain.indexOf('*'))).toBe(md.indexOf('/*/') + 1);
+  });
+
+  it('accounts for a byte-order mark', () => {
+    expect(stripInlineFormatting('\uFEFF**a** *.md').plain).toBe('\uFEFFa *.md');
+  });
+
+  it('keeps unpaired delimiters in a memoized document', () => {
+    const md = 'Some `code` and **bold** prose. '.repeat(40) + '\n\nCopy hosts/*/bin/ now.';
+    expect(md.length).toBeGreaterThanOrEqual(1024);
+    expect(stripInlineFormatting(md).plain).toContain('Copy hosts/*/bin/ now.');
+  });
+
+  it('accepts a selection that crosses formatting and a glob', () => {
+    expect(canPlaceAnchor('**bold** and *.md', { text: 'bold and *.md', offset: 0 })).toBe(true);
+    const md = 'Use **hosts/*/bin/** now.';
+    expect(canPlaceAnchor(md, { text: 'Use hosts/*/bin/ now.', offset: 0 })).toBe(true);
+    const parsed = parseComments(
+      insertComment(md, 'Use hosts/*/bin/ now.', 'which hosts?', 'User', undefined, undefined, 0),
+    );
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe(md);
+  });
+
+  it('places a comment on the selected occurrence, not the first raw match', () => {
+    const md = '**bold** *.md; then bold *.md';
+    expect(resolveAnchorOffset(md, 'bold *.md', { hintOffset: 0 })).toBe(2);
+  });
+
+  it('recovers an anchor that holds a glob', () => {
+    expect(recoverAnchorAtOffset('Copy hosts/*/bin/ before the run.', 0, 0)).toBe(
+      'Copy hosts/*/bin/ before the run.',
+    );
+  });
+
+  it('recovers the first line of emphasis that closes on a later line', () => {
+    const md = '**This is a sufficiently long first line\nwith the closing delimiter here.**';
+    expect(recoverAnchorAtOffset(md, 0, 0)).toBe('This is a sufficiently long first line');
+  });
+
+  it('recovers a list continuation without its emphasis markers', () => {
+    // The scanner reads a paragraph indented under a list item as indented
+    // code, so the line is stripped on its own, with the document's pairing.
+    const md = '- item\n\n    continuation **bold** paragraph here ok';
+    expect(recoverAnchorAtOffset(md, md.indexOf('continuation'), 0)).toBe(
+      'continuation bold paragraph here ok',
+    );
+  });
+
+  it('matches an agent anchor quoting markdown that holds a glob', () => {
+    const md = 'Use **hosts/*/bin/** now.';
+    const comments = [{ id: 'a', anchor: 'Use **hosts/*/bin/** now.' }] as MdComment[];
+    expect(detectMissingAnchors(md, comments).has('a')).toBe(false);
+  });
+
+  it('matches an agent anchor that stops inside emphasis', () => {
+    const md = '**Status: draft and pending review**';
+    const comments = [{ id: 'a', anchor: '**Status: draft' }] as MdComment[];
+    expect(detectMissingAnchors(md, comments).has('a')).toBe(false);
   });
 });
