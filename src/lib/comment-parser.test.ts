@@ -4450,7 +4450,10 @@ describe('emphasis delimiters pair the way the renderer pairs them (#198)', () =
   // Only a `*` or `_` the renderer pairs into emphasis disappears from the
   // rendered text. One left unpaired, as in a glob, renders literally.
   it.each([
-    ['Copy the files under hosts/*/bin/ before the run.', 'Copy the files under hosts/*/bin/ before the run.'],
+    [
+      'Copy the files under hosts/*/bin/ before the run.',
+      'Copy the files under hosts/*/bin/ before the run.',
+    ],
     ['You can modify_ the value later.', 'You can modify_ the value later.'],
     ['Use *.md and *.txt files', 'Use *.md and *.txt files'],
     ['Build src/**/*.ts first', 'Build src/**/*.ts first'],
@@ -4510,7 +4513,9 @@ describe('emphasis delimiters pair the way the renderer pairs them (#198)', () =
     expect(canPlaceAnchor('**bold** and *.md', { text: 'bold and *.md', offset: 0 })).toBe(true);
     const md = 'Use **hosts/*/bin/** now.';
     expect(canPlaceAnchor(md, { text: 'Use hosts/*/bin/ now.', offset: 0 })).toBe(true);
-    const parsed = parseComments(insertComment(md, 'Use hosts/*/bin/ now.', 'which hosts?', 'User', undefined, undefined, 0));
+    const parsed = parseComments(
+      insertComment(md, 'Use hosts/*/bin/ now.', 'which hosts?', 'User', undefined, undefined, 0),
+    );
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.cleanMarkdown).toBe(md);
   });

@@ -871,8 +871,7 @@ export function recoverAnchorAtOffset(
 
   // Emphasis pairs across lines (#198), so the line alone cannot tell a `**`
   // that closes further down from text: take the pairing from the document.
-  const bodyStart =
-    start + line.length - afterScaffolding.length + afterScaffolding.search(/\S/);
+  const bodyStart = start + line.length - afterScaffolding.length + afterScaffolding.search(/\S/);
   let candidate = stripRangeInDocument(cleanMarkdown, bodyStart, bodyStart + body.length).trim();
   if (candidate.length > MAX_RECOVERED_ANCHOR) {
     candidate = candidate.slice(0, MAX_RECOVERED_ANCHOR);
