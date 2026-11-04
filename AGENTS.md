@@ -995,11 +995,15 @@ spans, fenced and indented code, backslash escapes, angle and bare autolinks,
 frontmatter and HTML comment bodies stay literal, except that a code span in a
 table cell shows `\|` as `|`, as GFM does. A line-start `#` is a heading marker
 only when one to six of them are followed by a space, a tab or the end of the
-line, so `#124` stays text. A `*` or `_` disappears only when the renderer
-pairs it into emphasis, a thematic break being the one other place: the
-offsets come from the same remark parse as the code spans (#198), so a glob
-like `hosts/*/bin/` or a stray `modify_` stays in the plain text the way it
-renders. `stripInlineFormatting` memoizes its result for
+line, so `#124` stays text. A `*`, `_` or `~` disappears only when the
+renderer pairs it into emphasis or strikethrough (single tildes included, as
+in `H~2~O`), a thematic break being the one other place: the offsets come from
+the same remark parse as the code spans (#198, #200), so a glob like
+`hosts/*/bin/`, a stray `modify_` or a lone `~~` stays in the plain text the
+way it renders. The same parse supplies the marker of a list item, blockquote
+or heading that opens inside another list item on the same line (`1. - step`,
+`- > quote`), and the `1)` form, which the line-start branches miss.
+`stripInlineFormatting` memoizes its result for
 document-sized texts (a few entries, least recently used out), so the check,
 detection, the viewer and the diagram view share one per document; short
 anchors are not memoized and do not enter the code parse cache. `App` runs the
@@ -1809,7 +1813,7 @@ visible text nodes, in order:
    a literal match rather than once as a last resort.
 3. Stripped-formatting match (`**bold**` → `bold`), literal then flexible, for
    each reading `stripAnchorFormatting` gives: the anchor as the renderer would
-   show it, then with every `*` and `_` that looks like formatting dropped, for
+   show it, then with every `*`, `_` and `~~` that looks like formatting dropped, for
    a quote that stops inside emphasis (`**Status: draft`).
 4. Mermaid node syntax (`E[label]` → `label`), with its own inner fallbacks.
 
@@ -2518,8 +2522,8 @@ Key exports from `src/lib/comment-parser.ts`:
 - `recoverAnchorAtOffset(cleanMarkdown, cleanOffset, newlineBudget)` — derive a replacement anchor from the text following a marker, or `null` when nothing usable follows it. `newlineBudget` is 0 for a standalone marker, 1 for an inline one. The line is stripped with the document's emphasis pairing, so a `**` that closes on a later line is still dropped
 - `displayAnchor(comment)` / `anchorSearchText(comment)` (`types.ts`) — the anchor as the reviewer sees it (recovered when stale) and the lowercased search haystack covering both. Anything read, copied, searched, or navigated by should go through these
 - `moveComment(rawMarkdown, id, newAnchor, hintOffset?)` — re-anchor an existing comment to `newAnchor`; preserves id, author, timestamp, replies, and status; refreshes context
-- `stripInlineFormatting(md)` — plain text with offset mapping. Decodes HTML character references like the renderer; code spans are copied verbatim, and an escaped character maps to its backslash so a marker lands before the whole escape; only the `*` and `_` the renderer pairs into emphasis are dropped, so an unpaired one (a glob, a trailing `*`) stays
-- `stripAnchorFormatting(anchor)` — the plain readings of an anchor that may quote markdown: as rendered, then (when different) with every `*` and `_` that looks like formatting dropped, for a quote that starts or stops inside emphasis. `detectMissingAnchors` and the viewer's stripped tier try each
+- `stripInlineFormatting(md)` — plain text with offset mapping. Decodes HTML character references like the renderer; code spans are copied verbatim, and an escaped character maps to its backslash so a marker lands before the whole escape; only the `*`, `_` and `~` the renderer pairs into emphasis or strikethrough are dropped, so an unpaired one (a glob, a trailing `*`, a lone `~~`) stays, and nested list markers are dropped as the renderer drops them
+- `stripAnchorFormatting(anchor)` — the plain readings of an anchor that may quote markdown: as rendered, then (when different) with every `*`, `_` and `~~` that looks like formatting dropped, for a quote that starts or stops inside emphasis or strikethrough. `detectMissingAnchors` and the viewer's stripped tier try each
 - `resolveAnchorOffset(cleanMarkdown, anchor, opts?)`: the anchor search half of `insertComment`: the clean-markdown offset where the marker goes, or `null`. `opts` takes `contextBefore`, `contextAfter`, `hintOffset`. The last fallback needs every segment of a multi-line anchor
 - `canPlaceAnchor(cleanMarkdown, sel)`: whether `resolveAnchorOffset` finds a place for a selection (`{ text, contextBefore?, contextAfter?, offset? }`); the UI's up-front check
 
