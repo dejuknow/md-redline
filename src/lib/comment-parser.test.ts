@@ -4557,3 +4557,58 @@ describe('emphasis delimiters pair the way the renderer pairs them (#198)', () =
     expect(detectMissingAnchors(md, comments).has('a')).toBe(false);
   });
 });
+
+describe('strikethrough and list markers match the renderer (#200)', () => {
+  it.each([
+    ['Use ~a~ and b', 'Use a and b'],
+    ['H~2~O', 'H2O'],
+    ['Run ~~old~~ new', 'Run old new'],
+    ['a ~~ b', 'a ~~ b'],
+    ['x ~~~a~~~ y', 'x ~~~a~~~ y'],
+    ['~~a~ b', '~~a~ b'],
+    ['see ~/docs and ~/bin', 'see ~/docs and ~/bin'],
+    ['approx ~5 min', 'approx ~5 min'],
+  ])('drops only the paired tildes in %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it.each([
+    ['1. * foo*', 'foo*'],
+    ['1. - foo', 'foo'],
+    ['- 1. foo', 'foo'],
+    ['- - - foo', 'foo'],
+    ['* - [ ] task', 'task'],
+    ['1. * [x] done', 'done'],
+    ['> 1. - quoted', 'quoted'],
+    ['1) foo', 'foo'],
+    ['1. *foo*', 'foo'],
+    ['\uFEFF1) x', '\uFEFFx'],
+    ['-\n  foo', '\nfoo'],
+    ['- # Title', 'Title'],
+    ['1. ## Two', 'Two'],
+    ['- > quote', 'quote'],
+    ['- >\n  > two', '\ntwo'],
+  ])('drops every list marker in %j', (md, expected) => {
+    expect(stripInlineFormatting(md).plain).toBe(expected);
+  });
+
+  it('accepts a selection across single-tilde strikethrough', () => {
+    expect(canPlaceAnchor('Use ~a~ and b', { text: 'Use a and b', offset: 0 })).toBe(true);
+  });
+
+  it('accepts a selection in a nested list item', () => {
+    expect(canPlaceAnchor('- 1. first step', { text: 'first step', offset: 0 })).toBe(true);
+    const md = 'Intro\n\n1. - first step\n2. - second step';
+    const parsed = parseComments(
+      insertComment(md, 'first step', 'clarify', 'User', undefined, undefined, 0),
+    );
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.cleanMarkdown).toBe(md);
+  });
+
+  it('matches an agent anchor that stops inside strikethrough', () => {
+    const md = '~~Status: draft and pending review~~';
+    const comments = [{ id: 'a', anchor: '~~Status: draft' }] as MdComment[];
+    expect(detectMissingAnchors(md, comments).has('a')).toBe(false);
+  });
+});
