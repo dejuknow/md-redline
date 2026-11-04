@@ -167,8 +167,8 @@ function isInsideCodeBlock(offset: number, codeBlockRanges: CodeBlockRange[]): b
 }
 
 // The renderer's own parse (src/markdown/pipeline.ts), minus the plugins that
-// cannot change where a code span is.
-const inlineCodeParser = unified()
+// cannot change where a code span or an emphasis delimiter is.
+const rendererParser = unified()
   .use(remarkParse)
   .use(remarkFrontmatter, ['yaml', 'toml'])
   .use(remarkGfm);
@@ -203,6 +203,18 @@ interface ParsedCode {
 }
 
 const NO_CODE: ParsedCode = { inline: [], blocks: [], topLevel: [] };
+const NO_MARKS: ReadonlySet<number> = new Set();
+
+/** Everything read off one parse of a text. */
+interface ParsedText {
+  code: ParsedCode;
+  /**
+   * Offsets of the `*` and `_` characters the renderer reads as syntax: the
+   * delimiters of emphasis and strong emphasis, and the characters of a
+   * thematic break. Every other `*` or `_` is text.
+   */
+  formattingMarks: ReadonlySet<number>;
+}
 
 // A few recent results, keyed by the text. A batch of agent comments inserts
 // into the same clean text over and over, and one change is parsed by several
@@ -211,10 +223,13 @@ const NO_CODE: ParsedCode = { inline: [], blocks: [], topLevel: [] };
 // Only document-sized texts are kept: stripping an anchor that holds a
 // backtick parses it too, and a run of those would otherwise evict the
 // documents, whose parse is the expensive one. Short texts parse in no time.
-const parsedCodeCache = new Map<string, ParsedCode>();
-const PARSED_CODE_CACHE_SIZE = 16;
+const parsedTextCache = new Map<string, ParsedText>();
+const PARSED_TEXT_CACHE_SIZE = 16;
 /** Texts shorter than this are anchors, not documents, and are not memoized. */
 const DOCUMENT_MEMO_MIN_LENGTH = 1024;
+// The one short text parsed last. Stripping one asks for its code spans, its
+// code blocks and its emphasis in turn, and each would otherwise parse it again.
+let lastShortParse: { text: string; parsed: ParsedText } | null = null;
 
 /**
  * Code spans and code blocks, taken from the parser the renderer uses rather
@@ -229,26 +244,52 @@ const DOCUMENT_MEMO_MIN_LENGTH = 1024;
  * make their markers vanish.
  *
  * Skipped when the text has nothing that could be code (no backtick, no tilde
- * fence, no run of four spaces or a tab), which is most documents.
+ * fence, no run of four spaces or a tab), which is most documents. That gate
+ * also keeps placement from snapping to the top-level blocks of a document
+ * without code, so a text parsed only for its formatting marks still reports
+ * no code here.
  */
 function getParsedCode(markdown: string): ParsedCode {
   // Any run of four spaces or a tab, not just at a line start: indented code
   // also sits after a blockquote's "> " or a list marker.
   if (!/`|~~~| {4}|\t/.test(markdown)) return NO_CODE;
-  const cached = parsedCodeCache.get(markdown);
+  return getParsedText(markdown).code;
+}
+
+/**
+ * The `*` and `_` characters the renderer reads as syntax (#198). Emphasis
+ * pairs delimiter runs across a whole paragraph, by flanking, the rule of
+ * three, and around code spans and link labels, so a character on its own
+ * cannot say whether it is a delimiter. Only a paired one disappears from the
+ * rendered text: a glob like `hosts/*` or a stray `modify_` shows as written.
+ */
+function getFormattingMarks(markdown: string): ReadonlySet<number> {
+  if (!/[*_]/.test(markdown)) return NO_MARKS;
+  return getParsedText(markdown).formattingMarks;
+}
+
+function getParsedText(markdown: string): ParsedText {
+  const cached =
+    lastShortParse?.text === markdown ? lastShortParse.parsed : parsedTextCache.get(markdown);
   if (cached) return cached;
-  const parsed: ParsedCode = { inline: [], blocks: [], topLevel: [] };
+  const code: ParsedCode = { inline: [], blocks: [], topLevel: [] };
+  const formattingMarks = new Set<number>();
   // micromark drops a leading byte-order mark and counts offsets without it,
   // as src/markdown/pipeline.ts also corrects for. Nothing may be placed
   // before the mark, so a line start is never earlier than it.
   const bom = markdown.charCodeAt(0) === 0xfeff ? 1 : 0;
-  const tree = inlineCodeParser.parse(markdown);
+  const markRun = (from: number, to: number) => {
+    for (let k = from + bom; k < to + bom; k++) {
+      if (markdown[k] === '*' || markdown[k] === '_') formattingMarks.add(k);
+    }
+  };
+  const tree = rendererParser.parse(markdown);
   for (const top of tree.children) {
     const topStart = top.position?.start.offset;
     const topEnd = top.position?.end.offset;
     if (topStart === undefined || topEnd === undefined) continue;
     const lineStart = Math.max(bom, markdown.lastIndexOf('\n', topStart + bom - 1) + 1);
-    parsed.topLevel.push({ start: lineStart, end: topEnd + bom });
+    code.topLevel.push({ start: lineStart, end: topEnd + bom });
     // Tables do not nest and the walk is pre-order, so a table is seen before
     // every span inside it.
     let tableEnd = -1;
@@ -258,18 +299,32 @@ function getParsedCode(markdown: string): ParsedCode {
       if (start === undefined || end === undefined) return;
       if (node.type === 'table') tableEnd = end;
       if (node.type === 'inlineCode') {
-        parsed.inline.push({ start: start + bom, end: end + bom, inTable: start < tableEnd });
+        code.inline.push({ start: start + bom, end: end + bom, inTable: start < tableEnd });
       }
       if (node.type === 'code') {
-        parsed.blocks.push({ start: start + bom, end: end + bom, target: lineStart });
+        code.blocks.push({ start: start + bom, end: end + bom, target: lineStart });
+      }
+      if (node.type === 'thematicBreak') markRun(start, end);
+      if ((node.type === 'emphasis' || node.type === 'strong') && node.children.length > 0) {
+        // The delimiters are what lies between the node's edges and its
+        // content's: one or two characters on each side.
+        const first = node.children[0].position?.start.offset;
+        const last = node.children[node.children.length - 1].position?.end.offset;
+        if (first === undefined || last === undefined) return;
+        markRun(start, first);
+        markRun(last, end);
       }
     });
   }
-  if (markdown.length < DOCUMENT_MEMO_MIN_LENGTH) return parsed;
-  if (parsedCodeCache.size >= PARSED_CODE_CACHE_SIZE) {
-    parsedCodeCache.delete(parsedCodeCache.keys().next().value as string);
+  const parsed: ParsedText = { code, formattingMarks };
+  if (markdown.length < DOCUMENT_MEMO_MIN_LENGTH) {
+    lastShortParse = { text: markdown, parsed };
+    return parsed;
   }
-  parsedCodeCache.set(markdown, parsed);
+  if (parsedTextCache.size >= PARSED_TEXT_CACHE_SIZE) {
+    parsedTextCache.delete(parsedTextCache.keys().next().value as string);
+  }
+  parsedTextCache.set(markdown, parsed);
   return parsed;
 }
 
@@ -810,10 +865,15 @@ export function recoverAnchorAtOffset(
   const trimmed = line.trim();
   if (NON_PROSE_LINE.test(trimmed) || HTML_ENTITY.test(line)) return null;
   if (trimmed.replace(INLINE_CODE_SPAN, '').includes('|')) return null;
-  const body = line.replace(LEADING_SCAFFOLDING, '').trim();
+  const afterScaffolding = line.replace(LEADING_SCAFFOLDING, '');
+  const body = afterScaffolding.trim();
   if (!body) return null;
 
-  let candidate = stripInlineFormatting(body).plain.trim();
+  // Emphasis pairs across lines (#198), so the line alone cannot tell a `**`
+  // that closes further down from text: take the pairing from the document.
+  const bodyStart =
+    start + line.length - afterScaffolding.length + afterScaffolding.search(/\S/);
+  let candidate = stripRangeInDocument(cleanMarkdown, bodyStart, bodyStart + body.length).trim();
   if (candidate.length > MAX_RECOVERED_ANCHOR) {
     candidate = candidate.slice(0, MAX_RECOVERED_ANCHOR);
     // Back off to a word boundary so the quote does not end mid-word. The
@@ -1819,7 +1879,59 @@ export interface StrippedText {
 const strippedTextMemo = new Map<string, StrippedText>();
 const STRIPPED_TEXT_MEMO_SIZE = 4;
 
-function computeStrippedText(md: string): StrippedText {
+/**
+ * The per-character guess at an emphasis delimiter: any `*` or `_` that is not
+ * between two spaces, or an `_` between two word characters. It cannot know
+ * whether the character pairs, so it drops literal ones too (`hosts/*`); it
+ * is only used for a quote that may stop partway through emphasis, where the
+ * pairing the renderer saw is not in the text at all.
+ */
+function looksLikeEmphasisMark(md: string, i: number): boolean {
+  const prev = i > 0 ? md[i - 1] : ' ';
+  const next = i < md.length - 1 ? md[i + 1] : ' ';
+  const spaceFlanked = /\s/.test(prev) && /\s/.test(next);
+  const intraWordUnderscore = md[i] === '_' && /\w/.test(prev) && /\w/.test(next);
+  return !spaceFlanked && !intraWordUnderscore;
+}
+
+/**
+ * The plain readings of an anchor that may quote markdown, as an agent copying
+ * raw source writes them, for matching against a document's plain text. The
+ * first is how the renderer shows the anchor; the second drops every `*` and
+ * `_` that looks like formatting, for a quote that starts or stops inside
+ * emphasis (`**Status: draft`), which no parse of the quote alone can pair.
+ * Either may equal the anchor itself.
+ */
+export function stripAnchorFormatting(anchor: string): string[] {
+  const rendered = stripInlineFormatting(anchor).plain;
+  if (!/[*_]/.test(anchor)) return [rendered];
+  const guessed = computeStrippedText(anchor, 'guess').plain;
+  return guessed === rendered ? [rendered] : [rendered, guessed];
+}
+
+/**
+ * Plain text of the source range [from, to) of a document, stripped on its own
+ * but with the emphasis pairing the renderer found in the whole document: a
+ * `**` that closes on a later line is still a delimiter.
+ */
+function stripRangeInDocument(cleanMarkdown: string, from: number, to: number): string {
+  const marks = new Set<number>();
+  for (const m of getFormattingMarks(cleanMarkdown)) {
+    if (m >= from && m < to) marks.add(m - from);
+  }
+  return computeStrippedText(cleanMarkdown.slice(from, to), marks).plain;
+}
+
+/**
+ * Which `*` and `_` characters are emphasis: `'parse'` pairs them as the
+ * renderer does, `'guess'` judges each on its own (looksLikeEmphasisMark), and
+ * a set gives their offsets outright.
+ */
+type EmphasisMarks = 'parse' | 'guess' | ReadonlySet<number>;
+
+function computeStrippedText(md: string, emphasis: EmphasisMarks = 'parse'): StrippedText {
+  const formattingMarks =
+    emphasis === 'parse' ? getFormattingMarks(md) : emphasis === 'guess' ? null : emphasis;
   const map: number[] = [];
   let plain = '';
   let i = 0;
@@ -2283,19 +2395,13 @@ function computeStrippedText(md: string): StrippedText {
       }
     }
 
-    // Inline formatting: * _ — skip as emphasis markers, but keep when literal:
-    //   - flanked by whitespace on both sides (e.g. " * ")
-    //   - intra-word underscores per CommonMark (e.g. field_name): _ between
-    //     alphanumerics on both sides is literal, not emphasis
-    if (md[i] === '*' || md[i] === '_') {
-      const prev = i > 0 ? md[i - 1] : ' ';
-      const next = i < len - 1 ? md[i + 1] : ' ';
-      const spaceFlanked = /\s/.test(prev) && /\s/.test(next);
-      const intraWordUnderscore = md[i] === '_' && /\w/.test(prev) && /\w/.test(next);
-      if (!spaceFlanked && !intraWordUnderscore) {
-        i++;
-        continue;
-      }
+    // Emphasis delimiters: only the ones the renderer paired are syntax.
+    if (
+      (md[i] === '*' || md[i] === '_') &&
+      (formattingMarks ? formattingMarks.has(i) : looksLikeEmphasisMark(md, i))
+    ) {
+      i++;
+      continue;
     }
 
     // Backticks are always formatting.
@@ -2574,8 +2680,8 @@ function anchorResolves(anchor: string, plain: string, mermaidText: string): boo
   // Agent-authored anchors may contain markdown markup (e.g. `**Metric**: 30%`)
   // because the agent reads raw file content. Stripping symmetrically lets
   // these anchors match the plain-text file content.
-  const { plain: anchorPlain } = stripInlineFormatting(anchor);
-  if (anchorPlain !== anchor) {
+  for (const anchorPlain of stripAnchorFormatting(anchor)) {
+    if (anchorPlain === anchor) continue;
     if (plain.includes(anchorPlain)) return true;
     const strippedParts = anchorPlain.split(/\s+/).filter(Boolean);
     if (strippedParts.length > 0 && partsAppearContiguously(plain, strippedParts)) return true;

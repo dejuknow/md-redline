@@ -10,7 +10,7 @@ import {
 import { resolveSelection } from '../lib/selection-resolver';
 import type { MdComment } from '../types';
 import { getEffectiveStatus } from '../types';
-import { stripInlineFormatting } from '../lib/comment-parser';
+import { stripAnchorFormatting, stripInlineFormatting } from '../lib/comment-parser';
 import { assignHeadingIds } from '../lib/heading-slugs';
 import { sanitizeRenderedMarkdown } from '../lib/sanitize-html';
 import {
@@ -1363,8 +1363,8 @@ function findMatchRange(
   if (flexible) return flexible;
 
   // Tier 3: stripped formatting
-  const strippedText = stripInlineFormatting(text).plain;
-  if (strippedText !== text && strippedText.length > 0) {
+  for (const strippedText of stripAnchorFormatting(text)) {
+    if (strippedText === text || strippedText.length === 0) continue;
     const occs = findAllOccurrences(fullText, strippedText);
     if (occs.length > 0) {
       const start = pickClosestOccurrence(occs, hintOffset);
@@ -1385,12 +1385,18 @@ function findMatchRange(
         const start = pickClosestOccurrence(labelOccs, hintOffset);
         return { start, end: start + mermaidLabel.length };
       }
-      const strippedMermaidLabel = stripInlineFormatting(mermaidLabel).plain;
-      if (strippedMermaidLabel && strippedMermaidLabel !== mermaidLabel) {
-        const idx = fullText.indexOf(strippedMermaidLabel);
-        if (idx !== -1) return { start: idx, end: idx + strippedMermaidLabel.length };
-        return flexibleSearch(fullText, strippedMermaidLabel) ?? null;
+      const strippedLabels = stripAnchorFormatting(mermaidLabel).filter(
+        (label) => label && label !== mermaidLabel,
+      );
+      for (const label of strippedLabels) {
+        const idx = fullText.indexOf(label);
+        if (idx !== -1) return { start: idx, end: idx + label.length };
       }
+      for (const label of strippedLabels) {
+        const flexible = flexibleSearch(fullText, label);
+        if (flexible) return flexible;
+      }
+      if (strippedLabels.length > 0) return null;
       return flexibleSearch(fullText, mermaidLabel) ?? null;
     }
   }
