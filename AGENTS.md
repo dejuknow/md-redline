@@ -1003,6 +1003,27 @@ the same remark parse as the code spans (#198, #200), so a glob like
 way it renders. The same parse supplies the marker of a list item, blockquote
 or heading that opens inside another list item on the same line (`1. - step`,
 `- > quote`), and the `1)` form, which the line-start branches miss.
+When the anchor occurs more than once, `pickBestOccurrence` picks the
+occurrence whose surroundings best match the selection's `contextBefore` and
+`contextAfter`. The plain text keeps every HTML comment, but the rendered view
+drops some (a hidden prefix such as `vale off`, empty comments, or every
+comment with Render HTML comments off), and so does the selection's context.
+So a selection from the rendered view passes the source ranges of those
+comments as `hiddenRanges` (`resolveAnchorOffset` opts, `canPlaceAnchor`'s
+third argument, `insertComment`'s extras), and the anchor is found and ranked
+in the plain text without them (#206). A selection whose best match runs
+across a hidden comment has no unbroken source to anchor to, so it cannot take
+a comment rather than landing beside another occurrence. The ranges come from
+`findHiddenHtmlComments(markdown, visibility)` in `src/markdown/pipeline.ts`,
+which reads the comments off the renderer's own HTML parse (rehype-raw), so
+the renderer alone decides what is a comment (not `<!--` in code, escaped,
+alone in prose or inside a `<textarea>`) and which of them it hides, and
+reads each one's end from the source, so a comment spanning lines in a
+blockquote maps back correctly. It is memoized per document and settings.
+Callers with no rendered selection (the server, agents, re-anchoring, the
+fullscreen diagram, whose hint is a plain-text offset) omit `hiddenRanges` and
+search the full plain text as before. The parser itself knows nothing about
+HTML comment settings.
 `stripInlineFormatting` memoizes its result for
 document-sized texts (a few entries, least recently used out), so the check,
 detection, the viewer and the diagram view share one per document; short
@@ -2524,8 +2545,8 @@ Key exports from `src/lib/comment-parser.ts`:
 - `moveComment(rawMarkdown, id, newAnchor, hintOffset?)` — re-anchor an existing comment to `newAnchor`; preserves id, author, timestamp, replies, and status; refreshes context
 - `stripInlineFormatting(md)` — plain text with offset mapping. Decodes HTML character references like the renderer; code spans are copied verbatim, and an escaped character maps to its backslash so a marker lands before the whole escape; only the `*`, `_` and `~` the renderer pairs into emphasis or strikethrough are dropped, so an unpaired one (a glob, a trailing `*`, a lone `~~`) stays, and nested list markers are dropped as the renderer drops them
 - `stripAnchorFormatting(anchor)` — the plain readings of an anchor that may quote markdown: as rendered, then (when different) with every `*`, `_` and `~~` that looks like formatting dropped, for a quote that starts or stops inside emphasis or strikethrough. `detectMissingAnchors` and the viewer's stripped tier try each
-- `resolveAnchorOffset(cleanMarkdown, anchor, opts?)`: the anchor search half of `insertComment`: the clean-markdown offset where the marker goes, or `null`. `opts` takes `contextBefore`, `contextAfter`, `hintOffset`. The last fallback needs every segment of a multi-line anchor
-- `canPlaceAnchor(cleanMarkdown, sel)`: whether `resolveAnchorOffset` finds a place for a selection (`{ text, contextBefore?, contextAfter?, offset? }`); the UI's up-front check
+- `resolveAnchorOffset(cleanMarkdown, anchor, opts?)`: the anchor search half of `insertComment`: the clean-markdown offset where the marker goes, or `null`. `opts` takes `contextBefore`, `contextAfter`, `hintOffset`, and `hiddenRanges` (source ranges of the HTML comments the rendered view hides, see above). The last fallback needs every segment of a multi-line anchor
+- `canPlaceAnchor(cleanMarkdown, sel, hiddenRanges?)`: whether `resolveAnchorOffset` finds a place for a selection (`{ text, contextBefore?, contextAfter?, offset? }`); the UI's up-front check
 
 From `src/lib/agent-prompts.ts`:
 

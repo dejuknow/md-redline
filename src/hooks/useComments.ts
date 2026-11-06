@@ -28,7 +28,7 @@ import {
 import { randomId } from '../lib/random-id';
 import { computeUserRepliedLast } from '../lib/answered-comments';
 import { getEffectiveStatus, type MdComment } from '../types';
-import { renderMarkdown } from '../markdown/pipeline';
+import { findHiddenHtmlComments, renderMarkdown } from '../markdown/pipeline';
 import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
@@ -314,10 +314,25 @@ export function useComments(params: UseCommentsParams) {
       contextBefore?: string,
       contextAfter?: string,
       hintOffset?: number,
+      /**
+       * Whether the selection and its hint come from the rendered view, which
+       * drops some HTML comments. The fullscreen diagram passes false: its
+       * context is the diagram's own text and its hint a plain-text offset.
+       */
+      fromRenderedView = true,
     ) => {
       const newCommentId = randomId();
+      const currentRaw = rawMarkdownRef.current ?? '';
+      // The comments the rendered view hides, which the selection's context
+      // has no text from (#206).
+      const hiddenRanges = fromRenderedView
+        ? findHiddenHtmlComments(parseComments(currentRaw).cleanMarkdown, {
+            renderHtmlComments,
+            hiddenCommentPrefixes,
+          })
+        : undefined;
       const newRaw = insertComment(
-        rawMarkdownRef.current ?? '',
+        currentRaw,
         anchor,
         text,
         author,
@@ -325,6 +340,7 @@ export function useComments(params: UseCommentsParams) {
         contextAfter,
         hintOffset,
         newCommentId,
+        { hiddenRanges },
       );
       // insertComment returns the document unchanged when it cannot place the
       // marker (anchor not found in the source). Saving that as if it worked
@@ -335,7 +351,7 @@ export function useComments(params: UseCommentsParams) {
       // The selection stays, so the form holding the reader's draft stays
       // open. Clearing it unmounted the form and threw the draft away, after
       // all the typing was done (#191).
-      if (newRaw === (rawMarkdownRef.current ?? '')) {
+      if (newRaw === currentRaw) {
         showToast("Couldn't anchor that comment. Your draft is still in the form.", 'error');
         return false;
       }
@@ -353,6 +369,8 @@ export function useComments(params: UseCommentsParams) {
       requestCommentFocus,
       setAutoExpandForm,
       showToast,
+      renderHtmlComments,
+      hiddenCommentPrefixes,
     ],
   );
 

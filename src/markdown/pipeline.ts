@@ -299,11 +299,7 @@ function rehypeRenderHtmlComments(options: {
     const shown: { node: Comment; index: number; parent: Root | Element }[] = [];
     visit(tree, 'comment', (node: Comment, index, parent) => {
       if (parent == null || typeof index !== 'number') return;
-      if (node.value.startsWith(MDR_MARKER_PREFIX)) return;
-      // An empty comment is never a note. CommonMark itself uses `<!-- -->` to
-      // end a list, so rendering it would put a stray `<!-- -->` on the page.
-      if (node.value.trim() === '') return;
-      if (isHiddenComment(node.value, options.hiddenCommentPrefixes)) return;
+      if (!isHtmlCommentShown(node.value, options)) return;
       shown.push({ node, index, parent });
     });
     // Classify every comment before replacing any, so a converted comment's
@@ -332,13 +328,30 @@ function rehypeRenderHtmlComments(options: {
   };
 }
 
+/** Which ordinary HTML comments the rendered view shows (Settings). */
+export interface HtmlCommentVisibility {
+  renderHtmlComments: boolean;
+  hiddenCommentPrefixes: readonly string[];
+}
+
+/** Whether the rendered view shows an HTML comment whose inner text is `value`. */
+function isHtmlCommentShown(value: string, visibility: HtmlCommentVisibility): boolean {
+  if (!visibility.renderHtmlComments) return false;
+  // A malformed marker that parseComments could not strip.
+  if (value.startsWith(MDR_MARKER_PREFIX)) return false;
+  // An empty comment is never a note. CommonMark itself uses `<!-- -->` to
+  // end a list, so rendering it would put a stray `<!-- -->` on the page.
+  if (value.trim() === '') return false;
+  return !isHiddenComment(value, visibility.hiddenCommentPrefixes);
+}
+
 /**
  * True when the body, after `trimStart`, starts with a prefix. A prefix ending
  * in a letter or digit must end on a word boundary, so `more` does not hide
  * `moreover`; a hyphen is a boundary, so `markdownlint-disable` covers
  * `markdownlint-disable-next-line`.
  */
-function isHiddenComment(value: string, prefixes: string[]): boolean {
+function isHiddenComment(value: string, prefixes: readonly string[]): boolean {
   if (prefixes.length === 0) return false;
   // Case-sensitive on purpose: directives are lowercase or fixed-case, while a
   // person's note starts with a capital ("More thought needed...").
@@ -357,6 +370,78 @@ interface ProcessorOptions {
   keepLineBreaks?: boolean;
   renderHtmlComments?: boolean;
   hiddenCommentPrefixes?: string[];
+}
+
+/**
+ * Source ranges `[start, end)` of the HTML comments the rendered view of
+ * `markdown` (a whole document) does not show, in document order. A selection
+ * made there has none of their text, so the anchor search leaves them out
+ * when it compares (#206).
+ *
+ * Read off the renderer's own HTML parse (rehype-raw), which knows what is a
+ * comment: not `<!--` in code, escaped, alone in prose, or inside a
+ * `<textarea>`; `<!-->` is an empty one and `--!>` closes one. That parse
+ * gives each comment's start in the source but not always its end (a comment
+ * spanning lines loses the indent or `> ` of each continuation line), so the
+ * end is read from the source. A comment whose start does not check out, or
+ * with no closer, is left in: the search then behaves as it did before.
+ * Sorted by start.
+ */
+export function findHiddenHtmlComments(
+  markdown: string,
+  visibility: HtmlCommentVisibility,
+): { start: number; end: number }[] {
+  if (!markdown.includes('<!--')) return [];
+  const key = `${visibility.renderHtmlComments}\u0000${visibility.hiddenCommentPrefixes.join('\u0000')}\u0000${markdown}`;
+  const cached = hiddenCommentsCache.get(key);
+  if (cached) return cached;
+  const processor = unified()
+    .use(remarkParse)
+    .use(remarkFrontmatter, ['yaml', 'toml'])
+    .use(remarkGfm)
+    .use(remarkRehype, {
+      allowDangerousHtml: true,
+      handlers: { yaml: frontmatterHandler, toml: frontmatterHandler },
+    })
+    .use(rehypeRaw);
+  const tree = processor.runSync(processor.parse(markdown)) as Root;
+  // Positions leave out a leading byte-order mark; see rehypeAnnotateSource.
+  const bom = markdown.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const hidden: { start: number; end: number }[] = [];
+  visit(tree, 'comment', (node: Comment) => {
+    const at = node.position?.start.offset;
+    if (at === undefined || isHtmlCommentShown(node.value, visibility)) return;
+    const start = at + bom;
+    if (!markdown.startsWith('<!--', start)) return;
+    const end = htmlCommentEnd(markdown, start);
+    if (end !== null) hidden.push({ start, end });
+  });
+  // Tree order is not source order: the HTML parser moves content it cannot
+  // nest, out of a table say. The anchor search needs the ranges in order.
+  hidden.sort((a, b) => a.start - b.start);
+  if (hiddenCommentsCache.size >= 4) {
+    hiddenCommentsCache.delete(hiddenCommentsCache.keys().next().value as string);
+  }
+  hiddenCommentsCache.set(key, hidden);
+  return hidden;
+}
+
+// The placement check runs on every selection; the document rarely changes.
+const hiddenCommentsCache = new Map<string, { start: number; end: number }[]>();
+
+/**
+ * Where the comment opening at `start` ends, by HTML's rules: `<!-->` and
+ * `<!--->` are empty comments and `--!>` closes one as `-->` does. Null when
+ * nothing closes it.
+ */
+function htmlCommentEnd(markdown: string, start: number): number | null {
+  const open = start + 4;
+  if (markdown.startsWith('>', open)) return open + 1;
+  if (markdown.startsWith('->', open)) return open + 2;
+  const close = markdown.indexOf('-->', open);
+  const bangClose = markdown.indexOf('--!>', open);
+  if (bangClose !== -1 && (close === -1 || bangClose < close)) return bangClose + 4;
+  return close === -1 ? null : close + 3;
 }
 
 function buildProcessor(filePath?: string, options: ProcessorOptions = {}) {

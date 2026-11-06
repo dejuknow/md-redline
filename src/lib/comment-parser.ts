@@ -1038,6 +1038,58 @@ export function pickBestOccurrence(
   return bestOcc;
 }
 
+/**
+ * `text` with `ranges` (sorted, non-overlapping) removed. `toText` maps an
+ * offset in the result back to `text`; an offset where a range was removed
+ * maps past it. `spans` says whether [from, to) in the result had a range
+ * removed from its inside.
+ */
+function withoutRanges(
+  text: string,
+  ranges: readonly CodeBlockRange[],
+): { text: string; toText: (off: number) => number; spans: (from: number, to: number) => boolean } {
+  let view = '';
+  let from = 0;
+  // Where each range was, in the result.
+  const at: number[] = [];
+  for (const { start, end } of ranges) {
+    view += text.slice(from, start);
+    at.push(view.length);
+    from = end;
+  }
+  view += text.slice(from);
+  const toText = (off: number): number => {
+    let added = 0;
+    ranges.forEach(({ start, end }, k) => {
+      if (at[k] <= off) added += end - start;
+    });
+    return off + added;
+  };
+  const spans = (lo: number, hi: number) => at.some((p) => p > lo && p < hi);
+  return { text: view, toText, spans };
+}
+
+/**
+ * Every place `anchor` occurs in `text`: flexible whitespace matching, so
+ * browser-collapsed newlines in sel.toString() match source newlines, and
+ * failing that a segment search for cross-element selections (newlines/tabs).
+ */
+function findAnchorOccurrences(text: string, anchor: string): { start: number; end: number }[] {
+  const found: { start: number; end: number }[] = [];
+  for (let from = 0; ; ) {
+    const fm = flexibleIndexOf(text, anchor, from);
+    if (!fm) break;
+    found.push(fm);
+    from = fm.start + 1;
+  }
+  if (found.length > 0) return found;
+  const segments = anchor
+    .split(/[\n\t]+/)
+    .map((seg) => seg.trim())
+    .filter(Boolean);
+  return segments.length > 0 ? findAllSegments(text, segments) : [];
+}
+
 export interface InsertCommentExtras {
   agentInitiated?: boolean;
   /** When true, the marker represents an mdr_ask question; the UI surfaces it
@@ -1045,6 +1097,12 @@ export interface InsertCommentExtras {
    *  the marker is a fire-and-forget mdr_comment comment with no toast. */
   expectsReply?: boolean;
   sessionId?: string;
+  /**
+   * For a selection made in the rendered view, the source ranges of the HTML
+   * comments that view hides (findHiddenHtmlComments); see
+   * resolveAnchorOffset. Used to find the anchor, never written to the marker.
+   */
+  hiddenRanges?: readonly CodeBlockRange[];
 }
 
 /**
@@ -1056,9 +1114,19 @@ export interface InsertCommentExtras {
 export function resolveAnchorOffset(
   cleanMarkdown: string,
   anchor: string,
-  opts: { contextBefore?: string; contextAfter?: string; hintOffset?: number } = {},
+  opts: {
+    contextBefore?: string;
+    contextAfter?: string;
+    hintOffset?: number;
+    /**
+     * Source ranges, sorted, of the HTML comments the rendered view hides,
+     * for a selection made there (findHiddenHtmlComments in the render
+     * pipeline). Callers without a rendered selection omit it.
+     */
+    hiddenRanges?: readonly CodeBlockRange[];
+  } = {},
 ): number | null {
-  const { contextBefore, contextAfter, hintOffset } = opts;
+  const { contextBefore, contextAfter, hintOffset, hiddenRanges = [] } = opts;
   let insertionCleanOffset: number | null = null;
 
   // When hintOffset is provided (from DOM selection), search in plain-text space
@@ -1066,38 +1134,45 @@ export function resolveAnchorOffset(
   // markdown formatting, so it correctly handles duplicates where one occurrence
   // is formatted (e.g. **foo**) and another is not (foo).
   if (hintOffset !== undefined) {
-    const { plain, toCleanOffset } = stripInlineFormatting(cleanMarkdown);
+    const { plain, toCleanOffset, toPlainOffset } = stripInlineFormatting(cleanMarkdown);
 
-    // Direct search for anchor in plain text (flexible whitespace matching
-    // so browser-collapsed newlines in sel.toString() match source newlines)
-    const plainOccs: number[] = [];
-    let pSearch = 0;
-    while (true) {
-      const fm = flexibleIndexOf(plain, anchor, pSearch);
-      if (!fm) break;
-      plainOccs.push(fm.start);
-      pSearch = fm.start + 1;
-    }
+    // A selection made in the rendered view has none of the text of the HTML
+    // comments it hides, and neither does its context, while `plain` keeps
+    // them. Next to the selected occurrence, a hidden comment broke the
+    // context match at its first character and a later occurrence followed
+    // by the same words won (#206). So the anchor is found and ranked in
+    // `plain` without them.
+    // Ranges out of order or overlapping cannot be removed cleanly; the
+    // search then reads `plain` whole, as it did before.
+    const usable = hiddenRanges.every(
+      (r, k) => r.start < r.end && (k === 0 || hiddenRanges[k - 1].end <= r.start),
+    );
+    const asRendered =
+      hiddenRanges.length > 0 && usable
+        ? withoutRanges(
+            plain,
+            hiddenRanges.map((r) => ({ start: toPlainOffset(r.start), end: toPlainOffset(r.end) })),
+          )
+        : null;
+    const text = asRendered ? asRendered.text : plain;
 
-    // Also try segment-based search for cross-element selections (newlines/tabs)
-    if (plainOccs.length === 0) {
-      const segments = anchor
-        .split(/[\n\t]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (segments.length > 0) {
-        for (const r of findAllSegments(plain, segments)) {
-          plainOccs.push(r.start);
-        }
-      }
-    }
-
-    if (plainOccs.length > 0) {
+    const occs = findAnchorOccurrences(text, anchor);
+    if (occs.length > 0) {
+      const starts = occs.map((o) => o.start);
       const best =
-        plainOccs.length === 1
-          ? plainOccs[0]
-          : pickBestOccurrence(plain, plainOccs, anchor, hintOffset, contextBefore, contextAfter);
-      insertionCleanOffset = toCleanOffset(best);
+        starts.length === 1
+          ? starts[0]
+          : pickBestOccurrence(text, starts, anchor, hintOffset, contextBefore, contextAfter);
+      if (asRendered) {
+        const { start, end } = occs[starts.indexOf(best)];
+        // The reader selected text that runs across a hidden comment, which
+        // has no unbroken source to anchor to. Every fallback below would put
+        // the comment beside another occurrence, so it cannot take one.
+        if (asRendered.spans(start, end)) return null;
+        insertionCleanOffset = toCleanOffset(asRendered.toText(start));
+      } else {
+        insertionCleanOffset = toCleanOffset(best);
+      }
     }
   }
 
@@ -1141,12 +1216,14 @@ export function resolveAnchorOffset(
 export function canPlaceAnchor(
   cleanMarkdown: string,
   sel: { text: string; contextBefore?: string; contextAfter?: string; offset?: number },
+  hiddenRanges?: readonly CodeBlockRange[],
 ): boolean {
   return (
     resolveAnchorOffset(cleanMarkdown, sel.text, {
       contextBefore: sel.contextBefore,
       contextAfter: sel.contextAfter,
       hintOffset: sel.offset,
+      hiddenRanges,
     }) !== null
   );
 }
@@ -1183,6 +1260,7 @@ export function insertComment(
     contextBefore,
     contextAfter,
     hintOffset,
+    hiddenRanges: extras?.hiddenRanges,
   });
 
   if (insertionCleanOffset === null) return rawMarkdown;
