@@ -21,6 +21,7 @@ import {
   findNewReplyIds,
   parseComments,
 } from './lib/comment-parser';
+import { findHiddenHtmlComments } from './markdown/pipeline';
 import { getEffectiveStatus } from './types';
 import type { SelectionInfo } from './types';
 import {
@@ -369,6 +370,20 @@ export default function App() {
   const enabledHiddenCommentPrefixes = useMemo(
     () => getEnabledHiddenCommentPrefixes(settings.hiddenComments),
     [settings.hiddenComments],
+  );
+  // The comments the rendered view hides, for placing a selection made there:
+  // one that runs across a hidden comment cannot take a comment (#206).
+  const commentVisibility = useMemo(
+    () => ({
+      renderHtmlComments: settings.renderHtmlComments,
+      hiddenCommentPrefixes: enabledHiddenCommentPrefixes,
+    }),
+    [settings.renderHtmlComments, enabledHiddenCommentPrefixes],
+  );
+  const canPlaceRenderedSelection = useCallback(
+    (markdown: string, sel: SelectionInfo) =>
+      canPlaceAnchor(markdown, sel, findHiddenHtmlComments(markdown, commentVisibility)),
+    [commentVisibility],
   );
   const setTheme = useSetPersistedTheme();
   const { explorerWidth, mermaidPanelWidth, onResizeStart, isDragging } = useResizablePanel();
@@ -2320,8 +2335,8 @@ export default function App() {
   // captured (pending or committed) and again whenever the file changes. The
   // pill says so up front, and every way into the form is closed for it.
   const selectionPlaceable = useMemo(
-    () => !commentSelection || canPlaceAnchor(cleanMarkdown, commentSelection),
-    [cleanMarkdown, commentSelection],
+    () => !commentSelection || canPlaceRenderedSelection(cleanMarkdown, commentSelection),
+    [cleanMarkdown, commentSelection, canPlaceRenderedSelection],
   );
   // For the keyboard shortcuts, which read refs rather than re-subscribing.
   // The form gave way on its own; the keyboard's request to open it is spent,
@@ -2334,8 +2349,8 @@ export default function App() {
   const selectionPlaceableRef = useRef(selectionPlaceable);
   selectionPlaceableRef.current = selectionPlaceable;
   const canPlaceSelection = useCallback(
-    (sel: SelectionInfo) => canPlaceAnchor(cleanMarkdown, sel),
-    [cleanMarkdown],
+    (sel: SelectionInfo) => canPlaceRenderedSelection(cleanMarkdown, sel),
+    [cleanMarkdown, canPlaceRenderedSelection],
   );
 
   // Context menu handlers
@@ -3931,7 +3946,8 @@ export default function App() {
             const adjustedHint = activeMermaidBlock
               ? mermaidPlainHint(cleanMarkdown, activeMermaidBlock, anchor)
               : hintOffset;
-            return handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint);
+            // Not from the rendered view: the hint is a plain-text offset.
+            return handleAddComment(anchor, text, ctxBefore, ctxAfter, adjustedHint, false);
           }}
           onReply={handleReply}
           onResolve={settings.enableResolve ? handleResolve : undefined}
