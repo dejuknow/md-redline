@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useTabs } from './hooks/useTabs';
 import { useSelection } from './hooks/useSelection';
+import { useCommentDrafts } from './hooks/useCommentDrafts';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
 import { useUnreadReplies } from './hooks/useUnreadReplies';
@@ -136,6 +137,16 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(na
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
 const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
+
+/**
+ * What an unsent draft's selection reads against: the file's markdown without
+ * comments, and the page rendered from it. Render settings (HTML comments
+ * shown or hidden) change the page's text, which a selection's offset and
+ * context were read from, without changing the markdown.
+ */
+function draftDocKey(cleanMarkdown: string, html: string) {
+  return `${cleanMarkdown}\u0000${html}`;
+}
 
 export default function App() {
   // Load saved session lazily (deferred to first render, not module import time)
@@ -1621,6 +1632,46 @@ export default function App() {
   // unpaintedAnchors would otherwise keep answering for a pass that is not
   // running any more.
   const renderedViewerActive = viewMode === 'rendered' && !renderedDiffVisible;
+
+  // An unsent comment draft is set aside when its file leaves the rendered
+  // view (a tab switch, the raw view) and handed back when the file returns
+  // (#196). This also owns clearing the selection on the way out, which the
+  // tab-switch effect and the toolbar's raw button each used to do: it has to
+  // read the selection before it goes. A file still on its first load is not
+  // on screen yet, so a draft for a file opened again waits for the load to
+  // finish. A load that fails still hands it back, in the failed state, so
+  // the text can be copied.
+  //
+  // A draft is postable only on the markdown its selection was made on
+  // (comments aside, which leave the text alone). If the file changed
+  // meanwhile, nothing on the page can prove which words the selection now
+  // points at, so the draft comes back in the failed state and the reader
+  // selects again.
+  // Built once per document, not on every render: both halves are the size
+  // of the document.
+  const draftDocText = useMemo(() => draftDocKey(cleanMarkdown, html), [cleanMarkdown, html]);
+  const {
+    reportDraft,
+    restoredDraft,
+    restoredDoc,
+    restoredUnplaceable,
+    restoredReason,
+    selectionStale,
+    formKey: draftFormKey,
+  } = useCommentDrafts({
+    surfaceFile: viewMode === 'rendered' && !firstLoadInProgress ? activeFilePath : null,
+    selection,
+    docText: draftDocText,
+    underDiff: renderedDiffVisible,
+    clearSelection,
+    adoptSelection,
+  });
+  // The selection the viewer paints and the comment cards act on. Not a
+  // draft's whose file changed: the viewer would find the same words
+  // somewhere else, and "re-anchor to selection" would move a comment there.
+  // Nor another file's, for the one commit that switches files before the
+  // selection is cleared.
+  const paintedSelection = restoredUnplaceable || selectionStale ? null : selection;
   const mermaidRendererEnabled = mermaidFullscreen.isOpen || renderedViewerActive;
   const mermaidSvgMap = useMermaidRenderer(
     cleanMarkdown,
@@ -1793,12 +1844,13 @@ export default function App() {
       setActiveCommentId(null);
       setDiffEnabled(false);
       setDiffPending(false);
-      clearSelection();
+      // The selection is cleared by useCommentDrafts, which first sets aside
+      // any draft written on it.
       // The viewer's menu holds a SelectionInfo captured in the document being
       // left. Its items would anchor into the one arriving.
       closeViewerMenu();
     }
-  }, [activeFilePath, setDiffEnabled, clearSelection, setActiveCommentId, closeViewerMenu]);
+  }, [activeFilePath, setDiffEnabled, setActiveCommentId, closeViewerMenu]);
 
   // IDs of the replies present in newContent but not in oldContent. Kept
   // separate from the two things done with them (marking unread, stamping a
@@ -2335,8 +2387,10 @@ export default function App() {
   // captured (pending or committed) and again whenever the file changes. The
   // pill says so up front, and every way into the form is closed for it.
   const selectionPlaceable = useMemo(
-    () => !commentSelection || canPlaceRenderedSelection(cleanMarkdown, commentSelection),
-    [cleanMarkdown, commentSelection, canPlaceRenderedSelection],
+    () =>
+      !commentSelection ||
+      (!restoredUnplaceable && canPlaceRenderedSelection(cleanMarkdown, commentSelection)),
+    [cleanMarkdown, commentSelection, canPlaceRenderedSelection, restoredUnplaceable],
   );
   // For the keyboard shortcuts, which read refs rather than re-subscribing.
   // The form gave way on its own; the keyboard's request to open it is spent,
@@ -2349,8 +2403,15 @@ export default function App() {
   const selectionPlaceableRef = useRef(selectionPlaceable);
   selectionPlaceableRef.current = selectionPlaceable;
   const canPlaceSelection = useCallback(
-    (sel: SelectionInfo) => canPlaceRenderedSelection(cleanMarkdown, sel),
-    [cleanMarkdown, canPlaceRenderedSelection],
+    (sel: SelectionInfo) =>
+      // The draft handed back on a changed file: its Comment item would only
+      // reopen a form whose submit is refused.
+      !(
+        restoredUnplaceable &&
+        selection !== null &&
+        (sel === selection || (sel.text === selection.text && sel.offset === selection.offset))
+      ) && canPlaceRenderedSelection(cleanMarkdown, sel),
+    [cleanMarkdown, canPlaceRenderedSelection, restoredUnplaceable, selection],
   );
 
   // Context menu handlers
@@ -2511,8 +2572,13 @@ export default function App() {
         return;
       }
 
-      // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari)
-      if (mod && e.shiftKey && !isInput && activeModal !== 'commandPalette') {
+      // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari). Not from a
+      // text field, where a switch would throw away what is being typed,
+      // except the comment form's: its draft is set aside and handed back
+      // (#196). A draft handed back takes the keyboard, so without this the
+      // shortcut would stop for good at the first tab holding one.
+      const inCommentDraft = isInput && target.closest('[data-comment-form]') !== null;
+      if (mod && e.shiftKey && (!isInput || inCommentDraft) && activeModal !== 'commandPalette') {
         if (e.code === 'BracketLeft') {
           e.preventDefault();
           switchTabByOffset(-1);
@@ -3567,7 +3633,6 @@ export default function App() {
                   onViewModeChange={(mode) => {
                     setViewMode(mode);
                     if (mode === 'raw') {
-                      clearSelection();
                       if (diffChunkCount > 0) {
                         setDiffEnabled(true);
                         setDiffPending(false);
@@ -3728,8 +3793,8 @@ export default function App() {
                                   documentKey={activeFilePath}
                                   comments={comments}
                                   activeCommentId={activeCommentId}
-                                  selectionText={selection?.text ?? null}
-                                  selectionOffset={selection?.offset ?? null}
+                                  selectionText={paintedSelection?.text ?? null}
+                                  selectionOffset={paintedSelection?.offset ?? null}
                                   onHighlightClick={handleHighlightClickWithPopover}
                                   // Fragment arg is intentionally ignored in v1; openTab
                                   // takes only the path. See spec §3 non-goals.
@@ -3778,8 +3843,8 @@ export default function App() {
                               onBulkResolve={handleBulkResolve}
                               onBulkDeleteResolved={handleBulkDeleteResolved}
                               onContextMenu={handleSidebarContextMenu}
-                              selectionText={selection?.text ?? null}
-                              selectionOffset={selection?.offset ?? null}
+                              selectionText={paintedSelection?.text ?? null}
+                              selectionOffset={paintedSelection?.offset ?? null}
                               onReanchorToSelection={handleReanchorToSelection}
                               requestedEditor={requestedEditor}
                               requestedFocus={requestedCommentFocus}
@@ -3830,16 +3895,31 @@ export default function App() {
             Both handleExpand and handlePillTemplate call onLock first, so
             committing there means any engagement with the pill promotes the
             pending selection, whichever button the user reaches for. */}
-          {commentSelection && viewMode === 'rendered' && (
+          {commentSelection && viewMode === 'rendered' && !selectionStale && (
             <CommentForm
+              key={draftFormKey}
               selection={commentSelection}
               isPending={isPending}
               autoExpand={autoExpandForm}
+              initialDraft={restoredDraft ?? undefined}
+              onDraftChange={reportDraft}
+              failedReason={restoredReason ?? undefined}
               placeable={selectionPlaceable}
               hidden={viewerCtxMenu.isOpen}
               overlayOpen={activeModal !== null || drawerOpen}
               onSubmit={(anchor, text, ctxBefore, ctxAfter, hintOffset) =>
-                handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset)
+                // A draft handed back on markdown that has changed since its
+                // selection was made: the anchor search would settle for
+                // other words, so it is refused the way an unplaceable one
+                // is. Checked again against the source being written, which
+                // a file-watcher update can reach before the screen does.
+                restoredUnplaceable ||
+                selectionStale ||
+                (restoredDoc !== null &&
+                  draftDocKey(parseComments(rawMarkdownRef.current ?? '').cleanMarkdown, html) !==
+                    restoredDoc)
+                  ? false
+                  : handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset)
               }
               onCancel={() => {
                 clearSelection();
@@ -3877,8 +3957,8 @@ export default function App() {
           activeCommentId={activeCommentId}
           missingAnchors={missingAnchors}
           unpaintedAnchors={renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS}
-          selectionText={selection?.text ?? null}
-          selectionOffset={selection?.offset ?? null}
+          selectionText={paintedSelection?.text ?? null}
+          selectionOffset={paintedSelection?.offset ?? null}
           onReanchorToSelection={handleReanchorToSelection}
           onActivate={handleSidebarActivate}
           onResolve={handleResolve}

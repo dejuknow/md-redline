@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useId, useCallback } from 'react';
-import type { SelectionInfo } from '../types';
+import type { CommentDraft, SelectionInfo } from '../types';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPrimaryModifierLabel } from '../lib/platform';
@@ -54,6 +54,26 @@ interface Props {
    * gives way to the unavailable status, so the reader's next drag lands.
    */
   onUnlock?: () => void;
+  /**
+   * A draft to open on, read when the form mounts: one the reader left behind
+   * on this selection by switching tabs or to the raw view (#196). The form
+   * opens with the text in it, and in the failed-submit state when the file
+   * can no longer place the selection.
+   */
+  initialDraft?: Pick<CommentDraft, 'text' | 'prefillPristine' | 'failed'>;
+  /**
+   * Told what is in the field whenever it changes, and once on mount. The form
+   * is the only place a draft lives while it is open, and it unmounts without
+   * warning when its file leaves the screen.
+   */
+  onDraftChange?: (draft: CommentDraft) => void;
+  /**
+   * Why a draft handed back after the reader was away (#196) cannot be
+   * posted, so a failed submit says so rather than blaming the selected text:
+   * the file changed since its selection was made, or the selection was made
+   * in the diff view and the plain view shows the file now.
+   */
+  failedReason?: 'changed' | 'diff';
 }
 
 const noop = () => {};
@@ -69,22 +89,37 @@ export function CommentForm({
   onCancel,
   onLock,
   onUnlock = noop,
+  initialDraft,
+  onDraftChange,
+  failedReason,
 }: Props) {
   const { settings } = useSettings();
   const TEMPLATES = settings.templates;
   const COMMENT_MAX_LENGTH = settings.commentMaxLength;
   const modLabel = getPrimaryModifierLabel();
-  const [isExpanded, setIsExpanded] = useState(!!settings.quickComment && !isPending && placeable);
-  const [text, setText] = useState('');
+  // A draft handed back opens the form whatever else is true: it was open
+  // when the reader left, and the text has nowhere else to show.
+  const [isExpanded, setIsExpanded] = useState(
+    !!initialDraft || (!!settings.quickComment && !isPending && placeable),
+  );
+  const [text, setText] = useState(initialDraft?.text ?? '');
   // True while a template prefill sits untouched; Escape then clears the
-  // prefill instead of closing the form.
-  const [prefillPristine, setPrefillPristine] = useState(false);
+  // prefill instead of closing the form. Not in the failed state below, where
+  // the text is the reader's to keep.
+  const [prefillPristine, setPrefillPristine] = useState(
+    !!initialDraft?.prefillPristine && placeable,
+  );
   // True after a submit the file could not place. Cleared with the selection,
-  // since a retry on the same selection fails the same way.
-  const [anchorFailed, setAnchorFailed] = useState(false);
+  // since a retry on the same selection fails the same way. A draft handed
+  // back for text the file has since lost starts here, since its submit would
+  // fail the same way.
+  const [anchorFailed, setAnchorFailed] = useState(
+    !!initialDraft && (!!initialDraft.failed || !placeable),
+  );
   const anchorAlertId = useId();
+  // Closed over a draft handed back: a template click would replace it.
   const [showTemplates, setShowTemplates] = useState(
-    settings.quickComment ? settings.showTemplatesByDefault : false,
+    !initialDraft && settings.quickComment ? settings.showTemplatesByDefault : false,
   );
   const [showPillMenu, setShowPillMenu] = useState(false);
   // The selection rect is a snapshot from selection time; on scroll the pill
@@ -118,14 +153,24 @@ export function CommentForm({
   const [formSize, setFormSize] = useState<{ height: number; width: number } | null>(null);
   useAutoResize(inputRef, text);
 
+  // Focus the form could not take when it was due, to be taken when the
+  // overlay holding the keyboard closes (see the effect below handleKeyDown).
+  // A draft handed back under an open overlay (the find bar, the comments
+  // drawer) starts out owed for the same reason (#100).
+  const focusOwedRef = useRef(!!initialDraft && overlayOpen);
+
   useEffect(() => {
-    if (isExpanded && inputRef.current) {
+    if (isExpanded && inputRef.current && !focusOwedRef.current) {
       const el = inputRef.current;
       el.focus();
       const len = el.value.length;
       el.setSelectionRange(len, len);
     }
   }, [isExpanded]);
+
+  useEffect(() => {
+    onDraftChange?.({ selection, text, prefillPristine, failed: anchorFailed });
+  }, [onDraftChange, selection, text, prefillPristine, anchorFailed]);
 
   // Auto-expand when triggered by keyboard shortcut. Guarded on isPending for
   // the same reason as the quick-comment effect below: onLock commits, and a
@@ -142,8 +187,9 @@ export function CommentForm({
   // while pending, both because there is nothing to lock yet and because
   // onLock commits the pending selection, which would auto-open the form on
   // touch. Skipped for a selection the file cannot place, which never opens.
+  // A draft handed back is open either way, so its selection is locked too.
   useEffect(() => {
-    if (settings.quickComment && !isPending && placeable) {
+    if (initialDraft || (settings.quickComment && !isPending && placeable)) {
       onLock();
     }
     // Only run on mount — quickComment won't change mid-lifecycle of this instance
@@ -336,9 +382,13 @@ export function CommentForm({
     viewportPadding,
     Math.max(viewportPadding, viewportWidth - formWidth - viewportPadding),
   );
-  // Hide (do not unmount) while the selection is scrolled out of view; it
-  // reappears when the text scrolls back in.
-  const anchorOffscreen = anchorRect.bottom < 0 || anchorRect.top > viewportHeight;
+  // Hide the pill (do not unmount it) while the selection is scrolled out of
+  // view; it reappears when the text scrolls back in. Only the pill follows
+  // its text, so the open form is never hidden: nothing would bring it back,
+  // and it would sit there invisible with the selection locked under it. That
+  // is where a draft handed back in a shorter window used to land, its rect a
+  // snapshot from the taller one (#196). The clamp above keeps it in view.
+  const anchorOffscreen = !isExpanded && (anchorRect.bottom < 0 || anchorRect.top > viewportHeight);
 
   const style: React.CSSProperties = {
     position: 'fixed',
@@ -403,7 +453,6 @@ export function CommentForm({
   // Escape in Settings discard it. The focus is owed instead, and paid when
   // the overlay closes, if nothing else has claimed it by then.
   const wasHiddenRef = useRef(hidden);
-  const focusOwedRef = useRef(false);
   useEffect(() => {
     const cameBack = wasHiddenRef.current && !hidden;
     wasHiddenRef.current = hidden;
@@ -662,11 +711,30 @@ export function CommentForm({
             role="alert"
             className="mt-2 rounded-md bg-danger-bg px-2.5 py-2 text-xs text-danger-text"
           >
-            <p className="font-semibold">Can&rsquo;t find this text in the file.</p>
-            <p className="mt-0.5">
-              Your draft is still here. Copy it, cancel, and select nearby text to try again.
-              Symbols like &amp; and footnote numbers often cause this.
-            </p>
+            {failedReason === 'changed' ? (
+              <>
+                <p className="font-semibold">The file changed since you selected this text.</p>
+                <p className="mt-0.5">
+                  Your draft is still here. Copy it, cancel, and select the text again.
+                </p>
+              </>
+            ) : failedReason === 'diff' ? (
+              <>
+                <p className="font-semibold">This text was selected in the diff view.</p>
+                <p className="mt-0.5">
+                  Your draft is still here. Copy it, cancel, and select the text again here, or show
+                  the diff to post it there.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">Can&rsquo;t find this text in the file.</p>
+                <p className="mt-0.5">
+                  Your draft is still here. Copy it, cancel, and select nearby text to try again.
+                  Symbols like &amp; and footnote numbers often cause this.
+                </p>
+              </>
+            )}
           </div>
         )}
         <div className="flex items-center justify-between mt-2">

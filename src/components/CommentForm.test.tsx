@@ -549,3 +549,249 @@ describe('CommentForm on a selection the file cannot place', () => {
     expect(onUnlock).not.toHaveBeenCalled();
   });
 });
+
+describe('CommentForm on a draft handed back to it (#196)', () => {
+  const draft = { text: 'Half a thought', prefillPristine: false };
+
+  it('opens on the draft with the caret in it', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ initialDraft: draft });
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('Half a thought');
+    expect(document.activeElement).toBe(textarea);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('comes back failed after a submit that failed, though the file places it', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ initialDraft: { ...draft, failed: true }, placeable: true });
+
+    await screen.findByRole('alert');
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    // A template click would replace the draft.
+    expect(screen.queryByRole('button', { name: /templates/i })).toBeNull();
+  });
+
+  it('says the file changed, rather than blaming the text, for a draft on an old version', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ initialDraft: draft, placeable: false, failedReason: 'changed' });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/The file changed since you selected this text/);
+    expect(alert.textContent).not.toMatch(/Symbols like/);
+  });
+
+  it('says the text was selected in the diff view for a draft from there', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ initialDraft: draft, placeable: false, failedReason: 'diff' });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/selected in the diff view/);
+    expect(alert.textContent).not.toMatch(/Symbols like/);
+  });
+
+  it('opens saying so when the file can no longer place its selection', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ initialDraft: draft, placeable: false });
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('Half a thought');
+    expect(screen.getByRole('alert').textContent).toMatch(/Can.t find this text in the file/);
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    // Not the pill's status, which is for a selection with nothing typed on it.
+    expect(screen.queryByText(UNPLACEABLE_HEADLINE)).toBeNull();
+  });
+
+  it('takes the comment again once the file can place its selection', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const { update } = renderControlledForm({ initialDraft: draft, placeable: false });
+
+    await screen.findByRole('alert');
+    update({ placeable: true });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Comment' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('keeps the templates closed, which would replace the draft', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true, showTemplatesByDefault: true },
+    });
+    renderForm({ initialDraft: draft });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    expect(screen.queryByText('Quick templates:')).toBeNull();
+  });
+
+  it('still lets Escape clear a template prefill nobody touched', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onCancel = vi.fn();
+    renderForm({
+      initialDraft: { text: 'Please rewrite this section.', prefillPristine: true },
+      onCancel,
+    });
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+
+    expect(textarea.value).toBe('');
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves the keyboard with an open overlay and takes it when that closes', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const { update } = renderControlledForm({ initialDraft: draft, overlayOpen: true });
+
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    expect(document.activeElement).not.toBe(textarea);
+
+    update({ overlayOpen: false });
+    expect(document.activeElement).toBe(textarea);
+  });
+});
+
+describe('CommentForm reporting its draft', () => {
+  it('reports the text with the selection it is on as the reader types', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onDraftChange = vi.fn();
+    renderForm({ onDraftChange });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    fireEvent.change(textarea, { target: { value: 'Typed so far' } });
+
+    expect(onDraftChange).toHaveBeenLastCalledWith({
+      selection,
+      text: 'Typed so far',
+      prefillPristine: false,
+      failed: false,
+    });
+  });
+
+  it('reports a template prefill as untouched', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onDraftChange = vi.fn();
+    renderForm({ onDraftChange });
+
+    fireEvent.click(await screen.findByText('Rewrite this'));
+    await screen.findByPlaceholderText('Add your comment...');
+
+    expect(onDraftChange).toHaveBeenLastCalledWith({
+      selection,
+      text: 'Please rewrite this section.',
+      prefillPristine: true,
+      failed: false,
+    });
+  });
+
+  it('reports nothing typed once the comment is posted', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onDraftChange = vi.fn();
+    renderForm({ onDraftChange, onSubmit: vi.fn(() => true) });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    fireEvent.change(textarea, { target: { value: 'Posted' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    expect(onDraftChange).toHaveBeenLastCalledWith({
+      selection,
+      text: '',
+      prefillPristine: false,
+      failed: false,
+    });
+  });
+});
+
+describe('CommentForm on a draft handed back for text the file lost', () => {
+  it('keeps a template prefill on Escape, as after a failed submit', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onCancel = vi.fn();
+    renderForm({
+      initialDraft: { text: 'Please rewrite this section.', prefillPristine: true },
+      placeable: false,
+      onCancel,
+    });
+
+    const textarea = (await screen.findByPlaceholderText(
+      'Add your comment...',
+    )) as HTMLTextAreaElement;
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+
+    expect(textarea.value).toBe('Please rewrite this section.');
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('locks its selection like any open form', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const onLock = vi.fn();
+    renderForm({
+      initialDraft: { text: 'Half a thought', prefillPristine: false },
+      placeable: false,
+      onLock,
+    });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    expect(onLock).toHaveBeenCalled();
+  });
+});
+
+describe('CommentForm whose selection is outside the window', () => {
+  // The rect is a snapshot from when the text was selected. Far below a
+  // jsdom window, which is 768 tall.
+  const offscreen: SelectionInfo = {
+    ...selection,
+    rect: { top: 2000, left: 150, bottom: 2020, right: 300, width: 150, height: 20 } as DOMRect,
+  };
+  const formRoot = () => document.querySelector('[data-comment-form]') as HTMLElement;
+
+  it('hides the pill, which follows its text back into view', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({ selection: offscreen });
+
+    // Hidden from the accessibility tree too, so not findable by role.
+    await screen.findByTestId('pending-selection-commit');
+    expect(formRoot().style.visibility).toBe('hidden');
+  });
+
+  it('shows a draft handed back in a window shorter than the one it was written in', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    renderForm({
+      selection: offscreen,
+      initialDraft: { text: 'Half a thought', prefillPristine: false },
+    });
+
+    const textarea = await screen.findByPlaceholderText('Add your comment...');
+    expect(formRoot().style.visibility).not.toBe('hidden');
+    // Inside the window, not at the snapshot's place below it.
+    expect(parseFloat(formRoot().style.top)).toBeLessThan(window.innerHeight);
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('shows the form the keyboard opens on a selection scrolled out of view', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const { update } = renderControlledForm({ selection: offscreen });
+
+    await screen.findByTestId('pending-selection-commit');
+    update({ autoExpand: true });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    expect(formRoot().style.visibility).not.toBe('hidden');
+  });
+});

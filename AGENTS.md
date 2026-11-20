@@ -81,6 +81,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
+- `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
 - `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the toolbar badge
@@ -973,7 +974,9 @@ or any template opens the full form with the template grid hidden; the footer's
 "Quick templates" toggle still opens the grid on demand. The pill follows its
 selection while the document scrolls (live DOM selection when available, a
 scroll-delta fallback for locked selections) and hides while the selected text is
-off-screen. The **Quick comment** setting skips the pill entirely and opens the
+off-screen. Only the pill hides. The open form does not follow its text, so
+nothing would bring it back: it is clamped into the window instead, wherever
+its selection's saved rect is. The **Quick comment** setting skips the pill entirely and opens the
 full form immediately on selection, as before. That form locks its selection on
 mount, which lands between a triple-click's second and third presses, so
 `useSelection` lets the next press of the multi-click that committed a locked
@@ -1059,6 +1062,104 @@ overwrite the draft), and the alert (linked to the textarea by
 `aria-describedby`) tells the reader to copy the draft, cancel, and select
 nearby text. A locked composer ignores new drags, so cancelling is the only way
 to reselect.
+
+### Unsent comment drafts
+
+A draft the reader has typed and not posted survives leaving its document
+(#196). `useCommentDrafts` (`src/hooks/useCommentDrafts.ts`) keeps one per file:
+the text, whether it is an untouched template prefill, and the `SelectionInfo`
+it was written on. The form still owns the text while it is open and reports it
+upward through `onDraftChange`. The store only holds a draft while its form
+cannot show.
+
+- **Set aside** when the file's rendered view goes away: a tab switch, closing
+  the tab, or the raw view by either route (the toolbar button and the palette
+  command). `App` passes the hook `surfaceFile`, which is the active file while
+  it is loaded and in the rendered view, and the hook acts when that changes.
+  It also clears the selection there, which the tab-switch effect and the
+  toolbar's raw button used to do themselves, because the draft has to be read
+  before the selection goes. Do not clear the selection in the same handler
+  that switches tab or view, or the hook finds nothing to keep.
+- **Handed back** when that file is on screen in the rendered view again. The
+  selection is committed and locked through `adoptSelection`, `MarkdownViewer`
+  repaints the highlight, and `CommentForm` mounts on the text
+  (`initialDraft`) with the caret at its end. An open overlay keeps the
+  keyboard and the form takes focus when it closes, as in #100. `App` keys the
+  form on the hook's `formKey`, because the form of the file being left can
+  still be mounted when another file's draft comes back. A file opened again
+  waits for its first load to finish. The rendered view counts with the diff
+  overlay on, as it does for any open form: the form comes back over the diff,
+  which paints no selection highlight. That is the usual way back from the
+  toolbar's raw button, which turns the overlay on when there are changes.
+  Unchanged, the draft is postable there as before; changed, it is not (below).
+- **If the file changed meanwhile**, the draft comes back in the failed-submit
+  state above, with its text, and the reader selects again. A draft is
+  postable only on the markdown its selection was made on. After any change,
+  even one far from the selected words, the selection's offset and context may
+  point at other words, or at a copy of the same words the reader never chose,
+  and nothing on the page can prove which. An earlier version found the
+  selection again by its exact surrounding text and was dropped: an identical
+  paragraph elsewhere passes for one that was deleted, and a source edit can
+  leave the rendered page byte-identical.
+  - "The markdown" is `cleanMarkdown`, the file without its comment markers,
+    together with the rendered `html` made from it, which also changes with
+    render settings (HTML comments shown or hidden) that move the page text the
+    selection's offset and context were read from. An agent commenting,
+    replying or resolving elsewhere in the file changes neither, so it does not
+    count as a change.
+  - It is read when the selection is made (or, for a pending touch or pen
+    selection, when the form first reports it), not when the reader leaves, so
+    an edit that lands while the form is still open counts too.
+  - While a draft handed back is open, a change makes it not postable from
+    then on, and the file going back to exactly what it was makes it postable
+    again.
+  - A selection made in the diff overlay counts as changed whenever the
+    plain viewer shows the file instead: its offset and context were read over
+    the diff's text, deleted blocks included, and point elsewhere in the plain
+    text. Over the diff again it is postable. A selection made in the plain
+    viewer still comes back postable over the diff, as before.
+  - The alert says why, rather than the #191 copy, which blames symbols in the
+    selected text: "The file changed since you selected this text." or "This
+    text was selected in the diff view." (`restoredReason`, passed as
+    `failedReason` to `CommentForm`).
+  - A draft whose submit had already failed (#191) comes back failed whatever
+    the file says now: the form reports `failed` with its text.
+  - Not postable means `restoredUnplaceable`: the selection is neither painted
+    nor offered to "re-anchor to selection", since the viewer would find the
+    words somewhere else, and `App` refuses its submit. Submit also checks the
+    file's current source (`rawMarkdownRef`, through the same `draftDocKey`)
+    against what the selection was made on, since a file-watcher update can
+    reach the source before the screen.
+  - The commit that switches files renders before the selection is cleared,
+    with the outgoing file's selection still committed. The hook tracks which
+    file the committed selection was made in (`selectionStale`), and for that
+    commit `App` renders no form, paints no selection and refuses a submit.
+  - A file that fails to load when opened again gets the failed state, so the
+    text can still be copied.
+  - Known limits. A draft on an unchanged file comes back at the screen
+    position it was left at. In the failed state the only way to a new
+    selection is the #191 one: copy the text, Cancel, select again, paste. On an
+    unchanged file, posting still goes through the usual anchor search over the
+    source, which can choose a different copy where the rendered text and the
+    source disagree (a table cell, HTML the renderer strips). That is true of
+    every comment, not only drafts, and is tracked as its own issue, with a
+    selection made on deleted text in the diff overlay, which the same search
+    can post on a surviving copy.
+
+The tab shortcut (`Cmd+Shift+[` / `]`) works from inside the comment form's
+field, the one text field it is not ignored in. A draft handed back takes the
+keyboard, so cycling would otherwise stop at the first tab holding one, and
+the draft is safe across the switch. Reply and edit fields on cards still
+ignore it, because their text is lost on a switch.
+
+Only a form with text in it is kept. An empty form or a pill just closes, as
+before. Cancel, Escape and posting discard the draft for good. The store trusts
+the form's last report only while its selection is still the committed one,
+since all three clear the selection and tell nobody else.
+
+Drafts live in memory. Closing a tab keeps its draft, so opening the file again
+brings it back, and a page reload drops them all. The Mermaid fullscreen view's
+own form is not covered.
 
 ### Right-clicking a selection
 
@@ -1148,6 +1249,18 @@ and discarded an expanded draft. The draft also ignores an auto-repeated
 Escape, so a held key that closed an overlay does not carry on into cancelling
 the draft once focus comes back to it. One Escape per layer: the first closes
 the overlay or menu, a second clears the selection.
+
+Two more rules on that keyup. An Escape that goes down in the comment form's
+field is the form's: it acts on keydown (clearing an untouched template, or
+cancelling), and the keyup clearing too closed the form a template had just
+been cleared from. And the release clears nothing if a selection was handed
+in from outside while the key was down (`useSelection` counts
+`adoptSelection` calls), so a held Escape that cancelled one file's form and
+was released after a tab switch leaves the draft handed back there (#196). It
+counts only those, not every selection write, so a touch selection that
+settles while the key is down is still cleared. A fresh press starts both over, and so does the window
+losing focus, so a release that went to another window does not swallow the
+next press.
 
 **The menu carries Comment and Copy, not templates.** It listed the same eight
 templates the pill does, which made one label mean two things: the pill's
@@ -2324,7 +2437,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 | `Cmd+.` | Toggle focus mode |
 | `Cmd+O` | Open file |
 | `Cmd+,` | Open settings |
-| `Cmd+Shift+[` / `]` | Previous / next tab |
+| `Cmd+Shift+[` / `]` | Previous / next tab (outside text fields, and from the comment form's field) |
 | `?` | Keyboard shortcuts help |
 | `Esc` | Close fullscreen modal (Mermaid diagrams) |
 | `+` / `-` | Zoom in / out (Mermaid fullscreen) |

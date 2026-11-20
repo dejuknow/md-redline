@@ -497,3 +497,100 @@ describe('useSelection multi-click', () => {
     form.remove();
   });
 });
+
+describe('useSelection Escape', () => {
+  function escapeDown(target: EventTarget = document.body) {
+    act(() => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+  }
+  function escapeUp(target: EventTarget = document.body) {
+    act(() => {
+      target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true }));
+    });
+  }
+
+  it('clears the selection on a press and release', () => {
+    pointerDown('mouse');
+    mouseUp();
+    escapeDown();
+    escapeUp();
+    expect(hook().selection).toBeNull();
+  });
+
+  it('leaves a selection committed while the key was down', () => {
+    // A held Escape that closed one file's form, released after a tab switch
+    // handed another file's draft back: the release is not for that draft.
+    escapeDown();
+    act(() => hook().adoptSelection({ ...INFO, text: 'restored draft' }));
+    escapeUp();
+    expect(hook().selection?.text).toBe('restored draft');
+  });
+
+  it('still clears a touch selection that settles while the key is down', () => {
+    pointerDown('touch');
+    escapeDown();
+    // The handles' debounce captures the selection between down and up.
+    selectionChange();
+    expect(hook().pendingSelection).toEqual(INFO);
+    escapeUp();
+    expect(hook().pendingSelection).toBeNull();
+    expect(hook().selection).toBeNull();
+  });
+
+  it('leaves the selection to a comment field the key went down in', () => {
+    // The form acts on Escape itself, on keydown: it clears an untouched
+    // template, or it cancels. Clearing here as well closed the form the
+    // template was cleared from.
+    pointerDown('mouse');
+    mouseUp();
+    const form = document.createElement('div');
+    form.setAttribute('data-comment-form', '');
+    const field = document.createElement('textarea');
+    form.appendChild(field);
+    document.body.appendChild(form);
+    try {
+      escapeDown(field);
+      escapeUp(field);
+      expect(hook().selection).toEqual(INFO);
+    } finally {
+      form.remove();
+    }
+  });
+
+  it('still clears from the pill, which has no Escape of its own', () => {
+    pointerDown('mouse');
+    mouseUp();
+    const form = document.createElement('div');
+    form.setAttribute('data-comment-form', '');
+    const button = document.createElement('button');
+    form.appendChild(button);
+    document.body.appendChild(form);
+    try {
+      escapeDown(button);
+      escapeUp(button);
+      expect(hook().selection).toBeNull();
+    } finally {
+      form.remove();
+    }
+  });
+});
+
+describe('useSelection Escape with a release that never came', () => {
+  it('clears on the next full press', () => {
+    // The window lost focus with the key down, so its keyup went elsewhere.
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      window.dispatchEvent(new Event('blur'));
+    });
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true }));
+    });
+    expect(hook().selection).toBeNull();
+  });
+});

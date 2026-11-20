@@ -37,6 +37,9 @@ export function useSelection(
   // snapshot, which could not distinguish a superseding gesture from the drag it
   // was meant to allow and so let a stale timer destroy a fresh mouse selection.
   const epochRef = useRef(0);
+  // How many selections have been handed in from outside (adoptSelection):
+  // a draft handed back, a context-menu snapshot. Escape's release checks it.
+  const adoptCountRef = useRef(0);
 
   // `selection` and `pendingSelection` are mutually exclusive by construction.
   // These two functions are the ONLY writers, and each clears the other, which
@@ -74,6 +77,7 @@ export function useSelection(
     (info: SelectionInfo) => {
       commitSelection(info);
       lockedRef.current = true;
+      adoptCountRef.current += 1;
     },
     [commitSelection],
   );
@@ -191,18 +195,42 @@ export function useSelection(
     // window, before any handler runs and closes the layer (and so before one
     // can stop the event), and kept across auto-repeats until the key comes
     // up, since a held key's later repeats find nothing open.
+    //
+    // The comment form's field owns its Escape too: the form acts on keydown,
+    // clearing an untouched template or cancelling, and clearing again here
+    // closed the form a template had just been cleared from.
+    //
+    // And the release clears only the selection the key went down on. A held
+    // Escape that closed one file's form could be released after a tab switch
+    // had handed another file's draft back, and took that draft with it
+    // (#196). Counted by adoptSelection, the way a draft comes back, and not
+    // by the epoch: a touch selection settling while the key is down moves
+    // that, and Escape should still clear it.
     let escapeOwned = false;
+    let escapeDownEpoch: number | null = null;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      escapeOwned = escapeOwned || (escapeOwnedElsewhere?.current?.() ?? false);
+      // A fresh press starts over, in case the last one's release went to
+      // another window.
+      if (!e.repeat) {
+        escapeDownEpoch = adoptCountRef.current;
+        escapeOwned = false;
+      }
+      const target = e.target as Element | null;
+      const inCommentField =
+        target?.tagName === 'TEXTAREA' && target.closest?.('[data-comment-form]') != null;
+      escapeOwned = escapeOwned || inCommentField || (escapeOwnedElsewhere?.current?.() ?? false);
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        const downEpoch = escapeDownEpoch;
+        escapeDownEpoch = null;
         if (escapeOwned) {
           escapeOwned = false;
           return;
         }
+        if (downEpoch !== null && adoptCountRef.current !== downEpoch) return;
         lockedRef.current = false;
         commitSelection(null);
         window.getSelection()?.removeAllRanges();
@@ -261,7 +289,14 @@ export function useSelection(
     window.addEventListener('keydown', handleKeyDown, true);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('selectionchange', handleSelectionChange);
+    // A key held as the window loses focus is released somewhere else.
+    const handleBlur = () => {
+      escapeOwned = false;
+      escapeDownEpoch = null;
+    };
+    window.addEventListener('blur', handleBlur);
     return () => {
+      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('keydown', handleKeyDown, true);
