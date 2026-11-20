@@ -124,3 +124,17 @@ export interface SelectionInfo {
   /** Character offset of the selection start within the container's text content. */
   offset: number;
 }
+
+/** A comment the reader has started writing and not posted. */
+export interface CommentDraft {
+  /** The selection it is written on. */
+  selection: SelectionInfo;
+  text: string;
+  /** The text is a template prefill the reader has not touched. */
+  prefillPristine: boolean;
+  /**
+   * A submit on this selection already failed (#191), so it comes back failed
+   * however the file reads now.
+   */
+  failed?: boolean;
+}
