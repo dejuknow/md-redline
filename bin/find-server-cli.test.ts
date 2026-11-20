@@ -16,6 +16,9 @@ import { join } from 'path';
 
 const BIN = join(__dirname, 'md-redline');
 
+/** The home every fake server reports and every findServer run uses, unless a test says otherwise. */
+const FAKE_HOME = '/tmp/fake-home';
+
 const servers: Server[] = [];
 const children: ChildProcess[] = [];
 let scratch: string | null = null;
@@ -25,12 +28,12 @@ let scratch: string | null = null;
  * to return an object with a `homeDir` string, so anything less is not
  * something the CLI would ever select.
  */
-function startFakeServer(): Promise<{ port: number }> {
+function startFakeServer(homeDir = FAKE_HOME): Promise<{ port: number }> {
   return new Promise((resolvePromise, reject) => {
     const server = createServer((req, res) => {
       if (req.url === '/api/config') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ homeDir: '/tmp/fake-home' }));
+        res.end(JSON.stringify({ homeDir }));
         return;
       }
       res.writeHead(404);
@@ -99,6 +102,7 @@ function findServer(
         TMP: dir,
         MD_REDLINE_PORT: '',
         PORT: '',
+        MD_REDLINE_HOME: FAKE_HOME,
         ...env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -173,6 +177,29 @@ describe('choosing which running server to act on', () => {
   it('still prefers the port file when nothing was named', async () => {
     // How a server that scanned upward past a busy default gets found at all.
     const recorded = await startFakeServer();
+    writePortFile(recorded.port);
+
+    expect(await findServer()).toBe(String(recorded.port));
+  });
+
+  it('skips a recorded server serving another home', async () => {
+    // The report: the e2e suite's server on 3101 (its own MD_REDLINE_HOME)
+    // wrote the shared port file, and a plain `mdr file.md` opened there. That
+    // server refused the file with a 403, then shut down under the open tab.
+    const other = await startFakeServer('/tmp/e2e-home');
+    writePortFile(other.port);
+
+    expect(await findServer()).toBe('none');
+  });
+
+  it('skips a named server serving another home', async () => {
+    const other = await startFakeServer('/tmp/e2e-home');
+
+    expect(await findServer({ MD_REDLINE_PORT: String(other.port) })).toBe('none');
+  });
+
+  it('accepts a home spelled with a trailing separator', async () => {
+    const recorded = await startFakeServer(`${FAKE_HOME}/`);
     writePortFile(recorded.port);
 
     expect(await findServer()).toBe(String(recorded.port));
@@ -285,32 +312,47 @@ describe('a named port held by another program (#58)', () => {
         resolvePromise(typeof address === 'object' && address ? address.port : 0);
       });
     });
-    const doc = join(scratchDir(), 'doc.md');
-    writeFileSync(doc, '# Doc\n');
-
     const started = Date.now();
-    const output = await new Promise<string>((resolvePromise, reject) => {
-      const child = spawn(process.execPath, [BIN, 'baseline', doc], {
-        env: {
-          ...process.env,
-          TMPDIR: scratchDir(),
-          TEMP: scratchDir(),
-          TMP: scratchDir(),
-          MD_REDLINE_HOME: scratchDir(),
-          MD_REDLINE_PORT: String(port),
-          PORT: '',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      children.push(child);
-      let all = '';
-      child.stdout.on('data', (chunk) => (all += String(chunk)));
-      child.stderr.on('data', (chunk) => (all += String(chunk)));
-      child.once('error', reject);
-      child.once('close', () => resolvePromise(all));
-    });
+    const output = await runBaselineOn(port);
 
     expect(output).toContain(`port ${port} (MD_REDLINE_PORT) is in use by another program`);
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 20_000);
+
+  it('names an mdr serving another home as the holder', async () => {
+    const other = await startFakeServer('/tmp/e2e-home');
+
+    const output = await runBaselineOn(other.port);
+
+    expect(output).toContain(
+      `port ${other.port} (MD_REDLINE_PORT) is in use by an mdr serving a different home`,
+    );
+  }, 20_000);
 });
+
+/** `mdr baseline` against a strict port, capturing stdout and stderr together. */
+async function runBaselineOn(port: number): Promise<string> {
+  const doc = join(scratchDir(), 'doc.md');
+  writeFileSync(doc, '# Doc\n');
+
+  return new Promise<string>((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [BIN, 'baseline', doc], {
+      env: {
+        ...process.env,
+        TMPDIR: scratchDir(),
+        TEMP: scratchDir(),
+        TMP: scratchDir(),
+        MD_REDLINE_HOME: scratchDir(),
+        MD_REDLINE_PORT: String(port),
+        PORT: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    children.push(child);
+    let all = '';
+    child.stdout.on('data', (chunk) => (all += String(chunk)));
+    child.stderr.on('data', (chunk) => (all += String(chunk)));
+    child.once('error', reject);
+    child.once('close', () => resolvePromise(all));
+  });
+}

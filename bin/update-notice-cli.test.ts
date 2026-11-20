@@ -117,6 +117,8 @@ function buildEnv(stubPort: number, isolatedTmp: string, browserStub: string): N
     TMP: isolatedTmp,
     // The CLI's port scan starts here, landing straight on the stub.
     MD_REDLINE_PORT: String(stubPort),
+    // The home the stub reports. The CLI only takes a server serving its own.
+    MD_REDLINE_HOME: '/tmp/mdr-stub-home',
     // No-op the browser launcher so the run never opens a real browser. Works
     // on every OS, unlike shadowing `open` on PATH (Windows launches via
     // `cmd /c start`, which PATH cannot intercept).

@@ -203,12 +203,15 @@ async function readPortFile() {
  * @returns {Promise<number | null>} The first port answering as mdr, or null.
  */
 async function findServerPort() {
+  // Only a server serving this CLI's home is ours. Another home is another
+  // instance, with its own trusted roots, sessions and lifetime.
+  const probe = { homeDir: resolveHomeDir() };
   // A named port means that instance and no other (#58). Falling back to the
   // recorded or scanned server opened files inside a different instance, and
   // could shut that one down to "upgrade" a server the user never named. With
   // nothing on the named port, callers start one there instead.
   if (STRICT_SERVER_PORT !== null) {
-    return (await checkServer(STRICT_SERVER_PORT)) ? STRICT_SERVER_PORT : null;
+    return (await checkServer(STRICT_SERVER_PORT, probe)) ? STRICT_SERVER_PORT : null;
   }
   // No guard against the two being equal: serverProbeOrder dedupes, so a
   // repeated base contributes nothing and shifts nothing.
@@ -219,7 +222,7 @@ async function findServerPort() {
     scanCount: MAX_PORT_SCAN,
   });
   for (const port of order) {
-    if (await checkServer(port)) return port;
+    if (await checkServer(port, probe)) return port;
   }
   return null;
 }
@@ -641,8 +644,14 @@ async function ensureServerRunning() {
     STRICT_SERVER_PORT !== null &&
     (await portAcceptsConnections(STRICT_SERVER_PORT))
   ) {
+    // findServerPort skips an mdr serving another home, so the holder can be
+    // mdr itself. Say which, or the message sends the user hunting for some
+    // other program.
+    const holder = (await checkServer(STRICT_SERVER_PORT))
+      ? `an mdr serving a different home than ${resolveHomeDir()}`
+      : 'another program';
     throw new Error(
-      `port ${STRICT_SERVER_PORT} (MD_REDLINE_PORT) is in use by another program. ` +
+      `port ${STRICT_SERVER_PORT} (MD_REDLINE_PORT) is in use by ${holder}. ` +
         'Free it, or set MD_REDLINE_PORT to another port.',
     );
   }

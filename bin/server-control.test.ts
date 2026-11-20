@@ -131,6 +131,14 @@ describe('checkServer', () => {
     const fetchFn = vi.fn(async () => mkResponse(true, 200, { foo: 'bar' }));
     await expect(checkServer(3001, { fetchFn })).resolves.toBe(false);
   });
+
+  it('accepts only a server serving the given home when one is given', async () => {
+    const fetchFn = vi.fn(async () => mkResponse(true, 200, { homeDir: '/Users/test' }));
+    await expect(checkServer(3001, { fetchFn, homeDir: '/Users/test' })).resolves.toBe(true);
+    await expect(checkServer(3001, { fetchFn, homeDir: '/tmp/e2e-home' })).resolves.toBe(false);
+    // Omitted, any mdr counts: gracefulShutdown waits on one particular server.
+    await expect(checkServer(3001, { fetchFn })).resolves.toBe(true);
+  });
 });
 
 describe('gracefulShutdown', () => {

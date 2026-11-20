@@ -573,7 +573,12 @@ reaches that app and the CLI goes blind to its own healthy server. The CLI also
 scans the legacy 3001-3010 range so it can find, upgrade, or stop pre-6373
 servers. The server records its port in `$TMPDIR/md-redline.port` for the CLI's
 fast-path lookup and removes it on exit only if it still owns the recorded port
-(`removePortFileIfOwned`).
+(`removePortFileIfOwned`). Every server writes that one file whatever its
+`MD_REDLINE_HOME`, so `findServerPort` passes the CLI's own home to
+`checkServer`, which then accepts only a server whose `/api/config` `homeDir`
+matches. A server with another home, such as the e2e suite's on 3101, is never
+opened, stopped or upgraded by a plain `mdr`. If one holds a strict
+`MD_REDLINE_PORT`, the start error names it as an mdr with a different home.
 
 **Browser launcher** — the CLI opens the resolved URL in the OS default
 browser: `open` (macOS), `xdg-open` (Linux), `cmd /c start` (Windows). Set

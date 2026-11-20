@@ -28,6 +28,8 @@ import { join } from 'path';
 // in this file means fewer chances of landing on it.
 
 const BIN = join(__dirname, 'md-redline');
+// The home the fake server reports. The CLI only takes a server serving its own.
+const FAKE_HOME = '/tmp/fake-home';
 
 interface BaselinesPostBody {
   filePaths: string[];
@@ -53,7 +55,7 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/api/config') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ homeDir: '/tmp/fake-home' }));
+      res.end(JSON.stringify({ homeDir: FAKE_HOME }));
       return;
     }
     if (req.method === 'POST' && req.url === '/api/baselines') {
@@ -107,6 +109,7 @@ function runCli(args: string[], stdin?: string): Promise<CliResult> {
       env: {
         ...process.env,
         MD_REDLINE_PORT: String(serverPort),
+        MD_REDLINE_HOME: FAKE_HOME,
         PORT: '',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -211,6 +214,7 @@ describe('mdr baseline --hook --no-start (stdin regression)', () => {
       env: {
         ...process.env,
         MD_REDLINE_PORT: String(serverPort),
+        MD_REDLINE_HOME: FAKE_HOME,
         PORT: '',
       },
       // A real pipe, deliberately never written to and never ended: this is
@@ -240,6 +244,7 @@ describe('mdr baseline --hook --no-start (stdin regression)', () => {
       env: {
         ...process.env,
         MD_REDLINE_PORT: String(serverPort),
+        MD_REDLINE_HOME: FAKE_HOME,
         PORT: '',
       },
       // File-backed stdin from the null device: process.stdin.unref() does
@@ -273,6 +278,7 @@ describe('mdr baseline --hook --no-start (stdin regression)', () => {
       env: {
         ...process.env,
         MD_REDLINE_PORT: String(serverPort),
+        MD_REDLINE_HOME: FAKE_HOME,
         PORT: '',
       },
       // File-backed stdin from a regular temp file: process.stdin.unref()
