@@ -60,3 +60,27 @@ test('a committed selection leaves no native selection painting around it (#228)
   // native range after that repaint, which painted and copied whole blocks.
   expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 });
+
+test("a right-click on a plain word clears the old selection and keeps the word for the browser's menu (#229)", async ({
+  page,
+  browserName,
+}) => {
+  // Only WebKit selects the word under a right-click; Chromium selects nothing.
+  test.skip(browserName !== 'webkit', 'WebKit-only right-click behaviour');
+  const start = await textRect(page, 'valid credentials');
+  await page.mouse.move(start.left + 1, start.top + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(start.right - 1, start.top + start.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+
+  const word = await textRect(page, 'brute');
+  await page.mouse.click(word.left + word.width / 2, word.top + word.height / 2, {
+    button: 'right',
+  });
+
+  // The old selection is cleared, and the viewer's rebuild for that did not
+  // take the word Safari's own menu (Look Up, Copy) acts on.
+  await expect(page.locator('mark.selection-highlight')).toHaveCount(0);
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('brute');
+});

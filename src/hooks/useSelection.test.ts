@@ -744,6 +744,18 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
       other.remove();
     });
 
+    it('is left alone when no mouse press is behind the menu', () => {
+      // A long press on a touch selection opens the menu with no mousedown.
+      const e = new Event('pointerdown');
+      Object.defineProperty(e, 'pointerType', { value: 'touch' });
+      act(() => {
+        document.dispatchEvent(e);
+      });
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+    });
+
     it('leaves a drag in progress alone when a second button joins it', () => {
       // Left-drag, then the right button while the left is still held.
       pointerDown('mouse', 0);
