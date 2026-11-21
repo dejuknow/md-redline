@@ -2127,20 +2127,30 @@ States, driven by the active file's sendable-comment count:
 
 What a click does (`src/hooks/useHandoff.ts`):
 - **Waits for saves.** The agent reads the files on disk, not the tabs, so the
-  handoff refuses with a toast while any selected file has a write queued or in
-  flight, or its last write failed (a conflict or server error). `getSaveState`
-  in `useTabs` reports this per path; a load error is not a failed save. The
-  review banner's Send and Send & finish run the same check (`ensureSaved`).
+  handoff waits for any write still out on a selected file (`whenSaved` in
+  `useTabs`), then refuses with a toast if a file's last write failed (a
+  conflict or server error). `getSaveState` reports this per path; a load error
+  is not a failed save. The review banner's Send runs the same check
+  (`ensureSaved`), and so does Send & finish when it carries comments, its own
+  or a batch the server queued while the agent was busy. The clipboard write
+  after that wait can be refused by Safari, which wants it inside the click's
+  own task; this only happens when a save was still out at the click.
 - **Names the comments it counts.** The prompt passes `commentIds` for the
   selected files, built by `handoffComments` in `src/lib/agent-prompts.ts` (the
   reviewer's open comments, no agent questions or notes, nothing resolved), the
   same set the button's count shows. Without ids the prompt said to address
   every marker, which reached agent-authored threads the reviewer never sent.
+  With no such comment in the files, nothing is copied (the palette command is
+  gated on the same count). The eval adapters hand over the same ids.
 - **Moves the diff reference only on success, only for the files sent.** Each
   selected file's text is read at the click and recorded with
   `captureReferences` once the clipboard write succeeds. A failed copy moves no
   reference, and a file the picker left out keeps its own, even the active tab.
-  A banner Send records the session's files the same way (`recordSent`).
+  A banner Send records the session's files (`recordSent`), not the active tab,
+  but reads their text once the request returns rather than at the click. A
+  finish that sends nothing new records nothing, so the diff keeps showing the
+  agent's last round. A refused handoff leaves the picker open with its
+  selection.
 
 ### Diff overlay
 After a review handoff, or after an agent saves a before copy with `mdr_baseline`,

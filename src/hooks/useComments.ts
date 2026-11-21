@@ -466,6 +466,10 @@ export function useComments(params: UseCommentsParams) {
       // told the agent to address every marker in the file, which reached
       // agent-authored threads the reviewer never handed off.
       const commentIds = filePaths.flatMap((path) => commentIdsByFile.get(path) ?? []);
+      if (commentIds.length === 0) {
+        showToast('No comments of yours to hand off in this file.', 'info');
+        return false;
+      }
       const prompt = buildAddressCommentsPrompt({
         filePaths,
         commentCounts,

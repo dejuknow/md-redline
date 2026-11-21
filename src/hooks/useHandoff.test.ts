@@ -13,6 +13,7 @@ function setup(overrides: Partial<UseHandoffParams> = {}) {
       { filePath: '/b.md', rawMarkdown: 'b at click' },
     ],
     getSaveState: () => 'saved',
+    whenSaved: () => Promise.resolve(),
     copyAgentPrompt: vi.fn(() => Promise.resolve(true)),
     captureReferences: vi.fn(),
     showToast: vi.fn(),
@@ -33,10 +34,11 @@ describe('useHandoff', () => {
     );
     const { params, result } = setup({ copyAgentPrompt });
 
-    let pending: Promise<void> = Promise.resolve();
+    let pending: Promise<boolean> = Promise.resolve(false);
     act(() => {
       pending = result.current.handOff(['/a.md', '/b.md']);
     });
+    await vi.waitFor(() => expect(copyAgentPrompt).toHaveBeenCalled());
     // Nothing is recorded while the clipboard write is still out.
     expect(params.captureReferences).not.toHaveBeenCalled();
 
@@ -88,19 +90,57 @@ describe('useHandoff', () => {
   });
 
   describe('unsaved comments', () => {
-    it.each<[SaveState, RegExp]>([
-      ['saving', /still saving/i],
-      ['failed', /b\.md didn't save/],
-    ])('refuses while a handed-off file is %s', async (state, message) => {
+    it('waits for a write still out, then hands off', async () => {
+      const states = new Map<string, SaveState>([['/b.md', 'saving']]);
+      let landSave: () => void = () => {};
+      const whenSaved = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            landSave = () => {
+              states.set('/b.md', 'saved');
+              resolve();
+            };
+          }),
+      );
       const { params, result } = setup({
-        getSaveState: (path) => (path === '/b.md' ? state : 'saved'),
+        getSaveState: (path) => states.get(path) ?? 'saved',
+        whenSaved,
       });
 
-      await act(() => result.current.handOff(['/a.md', '/b.md']));
+      let pending: Promise<boolean> = Promise.resolve(false);
+      act(() => {
+        pending = result.current.handOff(['/a.md', '/b.md']);
+      });
+      expect(whenSaved).toHaveBeenCalled();
+      expect(params.copyAgentPrompt).not.toHaveBeenCalled();
 
+      let handedOff: boolean | undefined;
+      await act(async () => {
+        landSave();
+        handedOff = await pending;
+      });
+      expect(handedOff).toBe(true);
+      expect(params.copyAgentPrompt).toHaveBeenCalledWith(['/a.md', '/b.md']);
+      expect(params.showToast).not.toHaveBeenCalled();
+    });
+
+    it('refuses when a handed-off file failed to save', async () => {
+      const { params, result } = setup({
+        getSaveState: (path) => (path === '/b.md' ? 'failed' : 'saved'),
+      });
+
+      let handedOff: boolean | undefined;
+      await act(async () => {
+        handedOff = await result.current.handOff(['/a.md', '/b.md']);
+      });
+
+      expect(handedOff).toBe(false);
       expect(params.copyAgentPrompt).not.toHaveBeenCalled();
       expect(params.captureReferences).not.toHaveBeenCalled();
-      expect(params.showToast).toHaveBeenCalledWith(expect.stringMatching(message), 'error');
+      expect(params.showToast).toHaveBeenCalledWith(
+        expect.stringMatching(/b\.md didn't save/),
+        'error',
+      );
     });
 
     it('ignores a save problem in a file that is not being handed off', async () => {
@@ -113,13 +153,13 @@ describe('useHandoff', () => {
       expect(params.copyAgentPrompt).toHaveBeenCalled();
     });
 
-    it('exposes the same check for the review banner', () => {
+    it('exposes the same check for the review banner', async () => {
       const { params, result } = setup({
-        getSaveState: (path) => (path === '/b.md' ? 'saving' : 'saved'),
+        getSaveState: (path) => (path === '/b.md' ? 'failed' : 'saved'),
       });
 
-      expect(result.current.ensureSaved(['/a.md'])).toBe(true);
-      expect(result.current.ensureSaved(['/a.md', '/b.md'])).toBe(false);
+      expect(await result.current.ensureSaved(['/a.md'])).toBe(true);
+      expect(await result.current.ensureSaved(['/a.md', '/b.md'])).toBe(false);
       expect(params.showToast).toHaveBeenCalledTimes(1);
     });
   });

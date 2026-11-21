@@ -223,6 +223,31 @@ describe('useComments', () => {
       expect(prompt).not.toContain('`done1`');
     });
 
+    // The palette command is gated on the open count, which includes agent
+    // questions. A prompt scoped to no ids would forbid touching any marker.
+    it('copies nothing when the files hold none of the reviewer comments', async () => {
+      const writeText = vi.fn(() => Promise.resolve());
+      stubClipboard(writeText);
+      const raw = `One ${makeComment({ id: 'agent1', anchor: 'One', agentInitiated: true })}`;
+      const showToast = vi.fn();
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+        showToast,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      let copied: boolean | undefined;
+      await act(async () => {
+        copied = await result.current.handleCopyAgentPrompt(['/a.md']);
+      });
+
+      expect(copied).toBe(false);
+      expect(writeText).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('No comments'), 'info');
+    });
+
     it('reports a failed copy so the caller does not treat it as a handoff', async () => {
       stubClipboard(() => Promise.reject(new Error('denied')));
       const raw = `One ${makeComment({ id: 'u1', anchor: 'One' })}`;

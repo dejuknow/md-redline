@@ -604,11 +604,15 @@ export function useTabs(options?: {
     [activeFilePath, saveFileAt],
   );
 
-  const getSaveState = useCallback(
-    (path: string): SaveState =>
-      saveStateOf(tabDataRef.current.get(path), pendingSavesRef.current.get(path) ?? 0),
-    [],
-  );
+  const getSaveState = useCallback((path: string): SaveState => {
+    const key = findTabKey(tabDataRef.current, path) ?? path;
+    const pending = pendingSavesRef.current;
+    const pendingSaves = (pending.get(key) ?? 0) + (key === path ? 0 : (pending.get(path) ?? 0));
+    return saveStateOf(tabDataRef.current.get(key), pendingSaves);
+  }, []);
+
+  /** Settles once every write queued so far has finished, failed or not. */
+  const whenSaved = useCallback((): Promise<void> => saveQueueRef.current, []);
 
   const getTabSnapshot = useCallback((path: string): TabState | undefined => {
     return tabDataRef.current.get(path);
@@ -637,6 +641,9 @@ export function useTabs(options?: {
         error: null,
         errorKind: null,
         mtime: data.mtime,
+        // The tab now shows what is on disk, so nothing local is unsaved. A
+        // stale flag would make a later load error read as a failed save.
+        dirty: false,
       });
     } catch (err) {
       updateTab(activeFilePath, {
@@ -713,6 +720,7 @@ export function useTabs(options?: {
     saveFile,
     saveFileAt,
     getSaveState,
+    whenSaved,
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,

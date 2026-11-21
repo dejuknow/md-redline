@@ -193,6 +193,7 @@ export default function App() {
     switchTab,
     saveFile,
     getSaveState,
+    whenSaved,
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,
@@ -1432,6 +1433,7 @@ export default function App() {
     rawMarkdownRef,
     tabs,
     getSaveState,
+    whenSaved,
     copyAgentPrompt: handleCopyAgentPrompt,
     captureReferences,
     showToast,
@@ -3042,7 +3044,9 @@ export default function App() {
         onExecute: () => void navigator.clipboard.writeText(markdown).catch(() => {}),
       });
     }
-    if (commentCount > 0) {
+    // Same gate as the Hand off button: the reviewer's own open comments, not
+    // the open count, which also includes agent questions.
+    if (activeFilePath && (commentCounts.get(activeFilePath) ?? 0) > 0) {
       cmds.push({
         id: 'copy-agent-prompt',
         label: 'Hand off to agent (copy instructions)',
@@ -3085,6 +3089,7 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
+    commentCounts,
     paletteSelectionMarkdown,
     resolvedCommentCount,
     settings.enableResolve,

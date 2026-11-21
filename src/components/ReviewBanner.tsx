@@ -22,11 +22,11 @@ interface ReviewBannerProps {
   /** Called after a successful handoff so the parent can capture diff snapshots for the session's files. */
   onHandoffSuccess: (session: ReviewSession) => void;
   /**
-   * Returns false (after telling the reviewer why) while any of the files is
-   * still saving or failed to save. The agent reads the files on disk, so a
-   * send then would miss the latest comments.
+   * Waits for any write still out on the files, and resolves false (after
+   * telling the reviewer why) if one failed. The agent reads the files on
+   * disk, so a send then would miss the latest comments.
    */
-  ensureSaved?: (filePaths: string[]) => boolean;
+  ensureSaved?: (filePaths: string[]) => Promise<boolean>;
   onResolved: () => void;
   /**
    * Called after a successful send (batch or send & finish) with the comment
@@ -159,7 +159,7 @@ export function ReviewBanner({
     async (s: ReviewSession) => {
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
       if (unsentIds.length === 0) return;
-      if (ensureSaved && !ensureSaved(s.filePaths)) return;
+      if (ensureSaved && !(await ensureSaved(s.filePaths))) return;
       const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
       setBusyId(s.id);
       try {
@@ -224,8 +224,10 @@ export function ReviewBanner({
   const handleSendAndFinish = useCallback(
     async (s: ReviewSession) => {
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
-      // Finishing with nothing new to send reads no file, so only a send waits.
-      if (unsentIds.length > 0 && ensureSaved && !ensureSaved(s.filePaths)) return;
+      // The agent reads the files when this finish carries comments: ours, or
+      // a batch the server queued while the agent was busy (it folds that in).
+      const carriesComments = unsentIds.length > 0 || s.waitingForAgent;
+      if (carriesComments && ensureSaved && !(await ensureSaved(s.filePaths))) return;
       setBusyId(s.id);
       try {
         const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
@@ -259,8 +261,12 @@ export function ReviewBanner({
           showToast?.(`Finish failed: ${detail}`, 'error');
           return;
         }
-        onHandoffSuccess(s);
-        if (unsentIds.length > 0) onBatchSent?.(unsentIds, replyKeys);
+        // A finish with nothing new hands nothing off, so the diff keeps
+        // showing the agent's last round instead of resetting to now.
+        if (unsentIds.length > 0) {
+          onHandoffSuccess(s);
+          onBatchSent?.(unsentIds, replyKeys);
+        }
         showToast?.('Review finished and sent to agent', 'success');
         onResolved();
       } finally {

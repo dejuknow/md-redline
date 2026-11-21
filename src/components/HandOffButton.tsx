@@ -30,7 +30,8 @@ const chevronIcon = (
 interface Props {
   activeFilePath: string;
   commentCounts: Map<string, number>;
-  onCopyAgentPrompt: (filePaths: string[]) => void;
+  /** Resolves true when the handoff went out; the picker stays open otherwise. */
+  onCopyAgentPrompt: (filePaths: string[]) => Promise<boolean> | void;
 }
 
 /**
@@ -199,11 +200,12 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           {/* Action button */}
           <div className="border-t border-border-subtle mt-1.5 pt-1.5 px-3 pb-1">
             <button
-              onClick={() => {
+              onClick={async () => {
                 const paths = Array.from(selected);
                 if (paths.length === 0) return;
-                onCopyAgentPrompt(paths);
-                setOpen(false);
+                // A refused handoff (a file that failed to save) keeps the
+                // picker and its selection, so the reviewer need not pick again.
+                if ((await onCopyAgentPrompt(paths)) !== false) setOpen(false);
               }}
               disabled={selected.size === 0}
               className={`w-full text-xs px-2 py-1.5 rounded-md font-medium transition-opacity ${

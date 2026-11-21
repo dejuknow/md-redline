@@ -112,6 +112,19 @@ describe('buildAddressCommentsPrompt — anchor maintenance', () => {
   });
 });
 
+describe('buildAddressCommentsPrompt — comment scope', () => {
+  it('treats an empty id list as unscoped rather than scoping to nothing', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/a.md'],
+      commentCounts: new Map([['/tmp/a.md', 0]]),
+      enableResolve: false,
+      commentIds: [],
+    });
+    expect(prompt).not.toContain('Address ONLY');
+    expect(prompt).toContain('find all `<!-- @comment{...} -->` markers');
+  });
+});
+
 describe('buildAddressCommentsPrompt — mdr_ask hint', () => {
   it('mentions the mdr_ask tool and names the session when one is live', () => {
     const prompt = buildAddressCommentsPrompt({

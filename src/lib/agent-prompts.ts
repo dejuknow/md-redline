@@ -34,8 +34,11 @@ export function buildAddressCommentsPrompt({
 }: BuildAddressCommentsPromptOptions): string {
   if (filePaths.length === 0) return '';
 
-  const scopeInstruction = commentIds
-    ? `Address ONLY the comments with the following IDs: ${commentIds.map((id) => `\`${id}\``).join(', ')}. Leave any other comment markers in the file untouched.`
+  // An empty list scopes to nothing, which would read "the following IDs: ."
+  // and forbid touching every marker, so it means unscoped instead.
+  const scopedIds = commentIds && commentIds.length > 0 ? commentIds : null;
+  const scopeInstruction = scopedIds
+    ? `Address ONLY the comments with the following IDs: ${scopedIds.map((id) => `\`${id}\``).join(', ')}. Leave any other comment markers in the file untouched.`
     : null;
 
   // Both modes distinguish "I edited the document" from "I answered a
@@ -68,6 +71,9 @@ export function buildAddressCommentsPrompt({
   // finished and leaves them out of Send, so a reply there is never read.
   // Neither mode said so, and agents answered the reader's closing reply on a
   // resolved thread in 5 of 6 runs (eval cases 22 and 23; 0 of 6 since).
+  // Every prompt the app builds now names its comments by id and a resolved
+  // one is never among them, so for resolved threads this is a backstop, and
+  // cases 22 and 23 pass on the scope line as much as on this rule.
   //
   // Both rules are judged from the file as the agent FIRST read it. Step 3
   // has it reply to every comment it addresses and resolve mode resolves them,
@@ -134,7 +140,7 @@ You MUST edit the files at the exact paths listed above. Do NOT copy them to a d
 
 ## What to do
 ${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
-1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${commentIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
+1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${scopedIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
 2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. ${settledRule}
 3. ${replyStep}
 4. ${afterAction}

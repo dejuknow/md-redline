@@ -15,7 +15,7 @@ interface Props {
   // Handoff
   commentCounts: Map<string, number>;
   activeFilePath: string | null;
-  onCopyAgentPrompt?: (filePaths: string[]) => void;
+  onCopyAgentPrompt?: (filePaths: string[]) => Promise<boolean> | void;
 
   // Diff
   hasDiffSnapshot: boolean;
