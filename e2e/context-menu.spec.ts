@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { grantClipboard } from './helpers/clipboard';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -291,8 +292,9 @@ test.describe('Context menu on a text selection', () => {
   test('the pill hides while the menu is open, and comes back when it closes', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await openFixture(page);
     await selectText(page, 'valid credentials');
     await expect(page.locator('[data-comment-form]')).toBeVisible({ timeout: 5000 });
@@ -314,8 +316,9 @@ test.describe('Context menu on a text selection', () => {
   test('an expanded composer hides too, and comes back with its draft', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
     await openFixture(page);
     await selectText(page, 'valid credentials');
@@ -398,8 +401,9 @@ test.describe('Context menu on a text selection', () => {
   test('a multi-line draft keeps its size and caret through the menu', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await page.request.put('/api/preferences', { data: { settings: { quickComment: true } } });
     await openFixture(page);
     await selectText(page, 'valid credentials');
@@ -448,8 +452,9 @@ test.describe('Context menu on a text selection', () => {
   test('a live range that is not the committed selection gets no menu', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await openFixture(page);
     await selectText(page, 'valid credentials');
     await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
@@ -546,8 +551,9 @@ test.describe('Context menu on a text selection', () => {
   test('Copy as Markdown hands back the document source for a whole block', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await openFixture(page);
     // A whole paragraph: the boundaries line up with a block, so this is the
     // file's own bytes rather than a reconstruction.
@@ -576,8 +582,9 @@ test.describe('Context menu on a text selection', () => {
   test('Copy in the selection menu puts the selected text on the clipboard', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await openFixture(page);
     const menu = await openSelectionMenu(page, 'valid credentials');
     await menu.getByText('Copy', { exact: true }).click();

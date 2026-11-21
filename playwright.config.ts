@@ -28,6 +28,21 @@ export default defineConfig({
       name: 'chromium',
       use: { browserName: 'chromium' },
     },
+    // Selection, copy and context menus are where WebKit (Safari) and
+    // Chromium differ, and where Chromium-only runs missed two WebKit bugs
+    // (#228, #229). Only those specs run here, to keep CI time down.
+    {
+      name: 'webkit',
+      use: { browserName: 'webkit' },
+      testMatch: [
+        'native-selection.spec.ts',
+        'selection-pill.spec.ts',
+        'context-menu.spec.ts',
+        'copy-selection.spec.ts',
+        'copy-as-markdown.spec.ts',
+        'highlight-seam.spec.ts',
+      ],
+    },
   ],
   webServer: {
     command: 'npm run dev',

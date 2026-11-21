@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { grantClipboard } from './helpers/clipboard';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -55,8 +56,8 @@ async function copyAsMarkdown(page: Page) {
 }
 
 test.describe('Copy as Markdown', () => {
-  test.beforeEach(async ({ context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  test.beforeEach(async ({ context, browserName }) => {
+    await grantClipboard(context, browserName);
   });
 
   test('a fenced code block comes back with its fences', async ({ page }) => {
@@ -134,8 +135,8 @@ test.describe('Copy selection as markdown from the palette', () => {
   const LIST_MARKDOWN =
     '- List item with **bold inside it**\n- Second item for the ordered sibling below';
 
-  test.beforeEach(async ({ context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  test.beforeEach(async ({ context, browserName }) => {
+    await grantClipboard(context, browserName);
   });
 
   async function copyFromPalette(page: Page) {
@@ -199,8 +200,8 @@ test.describe('Copy selection as markdown from the palette', () => {
 test.describe('Copy as Markdown (real touch events)', () => {
   test.use({ hasTouch: true });
 
-  test.beforeEach(async ({ context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  test.beforeEach(async ({ context, browserName }) => {
+    await grantClipboard(context, browserName);
   });
 
   async function tap(page: Page, locator: ReturnType<Page['locator']>) {
