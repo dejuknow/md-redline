@@ -13,7 +13,11 @@ export interface UseHandoffParams {
   getSaveState: (path: string) => SaveState;
   /** Settles once every write queued so far has finished. */
   whenSaved: () => Promise<void>;
-  copyAgentPrompt: (filePaths: string[]) => Promise<boolean>;
+  /**
+   * Resolves true when the prompt reached the clipboard. With `ready`, the
+   * write starts at once and copies only if `ready` resolves true.
+   */
+  copyAgentPrompt: (filePaths: string[], ready?: Promise<boolean>) => Promise<boolean>;
   captureReferences: (entries: ReadonlyMap<string, string>, origin: 'handoff') => void;
   showToast: ShowToast;
 }
@@ -41,9 +45,8 @@ export function useHandoff({
   const ensureSaved = useCallback(
     async (filePaths: string[]): Promise<boolean> => {
       // Saves are local and usually land in milliseconds, so wait rather than
-      // make the reviewer click again. The clipboard write then runs after an
-      // await, which Safari can refuse outside the click's own task; that only
-      // happens on this rare path and surfaces as the usual copy error.
+      // make the reviewer click again. Hand off starts its clipboard write
+      // before this wait, since Safari refuses one that begins after it (#226).
       if (filePaths.some((path) => getSaveState(path) === 'saving')) await whenSaved();
       // Only a failure refuses. A write queued after the wait began is an edit
       // made after the click, not part of what is being handed off.
@@ -81,12 +84,17 @@ export function useHandoff({
       // Read before waiting: the text at the click is what is being handed
       // off, and the pending write is that same text on its way to disk.
       const atClick = contentsOf(filePaths);
-      if (!(await ensureSaved(filePaths))) return false;
-      if (!(await copyAgentPrompt(filePaths))) return false;
+      // With a save still out, start the clipboard write now and let the
+      // prompt land once the save has: Safari refuses a write that begins
+      // after an await, outside the click's own task (#226).
+      const copied = filePaths.some((path) => getSaveState(path) === 'saving')
+        ? await copyAgentPrompt(filePaths, ensureSaved(filePaths))
+        : (await ensureSaved(filePaths)) && (await copyAgentPrompt(filePaths));
+      if (!copied) return false;
       captureReferences(atClick, 'handoff');
       return true;
     },
-    [ensureSaved, contentsOf, copyAgentPrompt, captureReferences],
+    [ensureSaved, contentsOf, getSaveState, copyAgentPrompt, captureReferences],
   );
 
   /**

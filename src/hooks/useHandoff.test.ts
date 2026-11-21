@@ -117,38 +117,78 @@ describe('useHandoff', () => {
   });
 
   describe('unsaved comments', () => {
-    it('waits for a write still out, then hands off', async () => {
+    // Safari refuses a clipboard write that begins after an await (#226), so
+    // the copy starts at the click and is handed the save to wait on.
+    function savingB() {
       const states = new Map<string, SaveState>([['/b.md', 'saving']]);
-      let landSave: () => void = () => {};
+      let settleSave: (outcome: SaveState) => void = () => {};
       const whenSaved = vi.fn(
         () =>
           new Promise<void>((resolve) => {
-            landSave = () => {
-              states.set('/b.md', 'saved');
+            settleSave = (outcome) => {
+              states.set('/b.md', outcome);
               resolve();
             };
           }),
       );
-      const { params, result } = setup({
-        getSaveState: (path) => states.get(path) ?? 'saved',
-        whenSaved,
-      });
+      // Stands in for the clipboard: copies only once `ready` says so.
+      const copyAgentPrompt = vi.fn(async (_paths: string[], ready?: Promise<boolean>) =>
+        ready ? await ready : true,
+      );
+      return {
+        settleSave: (outcome: SaveState) => settleSave(outcome),
+        overrides: {
+          getSaveState: (path: string) => states.get(path) ?? 'saved',
+          whenSaved,
+          copyAgentPrompt,
+        },
+      };
+    }
+
+    it('starts the copy at the click and lets it land once the write is out', async () => {
+      const saving = savingB();
+      const { params, result } = setup(saving.overrides);
 
       let pending: Promise<boolean> = Promise.resolve(false);
       act(() => {
         pending = result.current.handOff(['/a.md', '/b.md']);
       });
-      expect(whenSaved).toHaveBeenCalled();
-      expect(params.copyAgentPrompt).not.toHaveBeenCalled();
+      expect(params.whenSaved).toHaveBeenCalled();
+      // Called within the click, before the save has landed.
+      expect(params.copyAgentPrompt).toHaveBeenCalledWith(['/a.md', '/b.md'], expect.any(Promise));
+      expect(params.captureReferences).not.toHaveBeenCalled();
 
       let handedOff: boolean | undefined;
       await act(async () => {
-        landSave();
+        saving.settleSave('saved');
         handedOff = await pending;
       });
       expect(handedOff).toBe(true);
-      expect(params.copyAgentPrompt).toHaveBeenCalledWith(['/a.md', '/b.md']);
+      expect(params.captureReferences).toHaveBeenCalled();
       expect(params.showToast).not.toHaveBeenCalled();
+    });
+
+    it('hands nothing off when the write still out then fails', async () => {
+      const saving = savingB();
+      const { params, result } = setup(saving.overrides);
+
+      let pending: Promise<boolean> = Promise.resolve(true);
+      act(() => {
+        pending = result.current.handOff(['/a.md', '/b.md']);
+      });
+      let handedOff: boolean | undefined;
+      await act(async () => {
+        saving.settleSave('failed');
+        handedOff = await pending;
+      });
+
+      expect(handedOff).toBe(false);
+      expect(params.captureReferences).not.toHaveBeenCalled();
+      expect(params.showToast).toHaveBeenCalledTimes(1);
+      expect(params.showToast).toHaveBeenCalledWith(
+        expect.stringMatching(/b\.md didn't save/),
+        'error',
+      );
     });
 
     it('refuses when a handed-off file failed to save', async () => {

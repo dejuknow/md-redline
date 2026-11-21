@@ -43,6 +43,7 @@ export default defineConfig({
         'copy-selection.spec.ts',
         'copy-as-markdown.spec.ts',
         'highlight-seam.spec.ts',
+        'handoff-clipboard.spec.ts',
       ],
     },
   ],
