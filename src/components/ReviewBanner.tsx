@@ -138,9 +138,27 @@ export function ReviewBanner({
   onJumpToAsk,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
-  // Claimed synchronously at the click, before any await: a second click
-  // landing while the first waits on a save must not post the same batch.
-  const sendingRef = useRef(false);
+  // Sessions with a send in flight, claimed synchronously at the click,
+  // before any await: a second click landing while the first waits on a save
+  // must not post the same batch. Keyed by session, so another review's
+  // buttons keep working meanwhile.
+  const sendingRef = useRef(new Set<string>());
+  // Sessions whose Send the server queued, mapped to how many sent ids the
+  // session reported then. A finish right after must still wait on saves, and
+  // the poll only reports `hasQueuedBatch` a few seconds later. Once a poll
+  // shows more sent ids, its own flag is current and the entry goes.
+  const [queuedHere, setQueuedHere] = useState<ReadonlyMap<string, number>>(new Map());
+  useEffect(() => {
+    setQueuedHere((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Map(prev);
+      for (const [id, sentAtQueue] of prev) {
+        const live = sessions.find((x) => x.id === id);
+        if (!live || live.sentCommentIds.length > sentAtQueue) next.delete(id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [sessions]);
 
   // `stayingOpen` is false for Send & finish: the session closes with that
   // send, so the prompt must not offer mdr_ask on it.
@@ -165,8 +183,8 @@ export function ReviewBanner({
   const handleSendBatch = useCallback(
     async (s: ReviewSession) => {
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
-      if (unsentIds.length === 0 || sendingRef.current) return;
-      sendingRef.current = true;
+      if (unsentIds.length === 0 || sendingRef.current.has(s.id)) return;
+      sendingRef.current.add(s.id);
       const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
       setBusyId(s.id);
       try {
@@ -204,6 +222,7 @@ export function ReviewBanner({
         onHandoffSuccess?.(s);
         onBatchSent?.(unsentIds, replyKeys);
         if (data.queued) {
+          setQueuedHere((prev) => new Map(prev).set(s.id, s.sentCommentIds.length));
           showToast?.(
             `Queued ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}: will send after your reply`,
             'success',
@@ -215,7 +234,7 @@ export function ReviewBanner({
           );
         }
       } finally {
-        sendingRef.current = false;
+        sendingRef.current.delete(s.id);
         setBusyId(null);
       }
     },
@@ -237,9 +256,10 @@ export function ReviewBanner({
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
       // The agent reads the files when this finish carries comments: ours, or
       // a batch the server queued while the agent was busy (it folds that in).
-      const carriesComments = unsentIds.length > 0 || s.hasQueuedBatch === true;
-      if (sendingRef.current) return;
-      sendingRef.current = true;
+      const carriesComments =
+        unsentIds.length > 0 || s.hasQueuedBatch === true || queuedHere.has(s.id);
+      if (sendingRef.current.has(s.id)) return;
+      sendingRef.current.add(s.id);
       setBusyId(s.id);
       try {
         const commit = carriesComments && prepareSend ? await prepareSend(s.filePaths) : NO_COMMIT;
@@ -286,13 +306,14 @@ export function ReviewBanner({
         showToast?.('Review finished and sent to agent', 'success');
         onResolved();
       } finally {
-        sendingRef.current = false;
+        sendingRef.current.delete(s.id);
         setBusyId(null);
       }
     },
     [
       buildPromptForSession,
       prepareSend,
+      queuedHere,
       commentIdsByFile,
       commentCounts,
       userRepliedLast,

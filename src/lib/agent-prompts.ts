@@ -11,19 +11,34 @@ export function sendableComments(comments: readonly MdComment[]): MdComment[] {
   return comments.filter((c) => !c.agentInitiated && getEffectiveStatus(c) !== 'resolved');
 }
 
+const NO_LIVE_SESSIONS: ReadonlySet<string> = new Set();
+
 /**
  * What the Hand off button sends: the sendable comments plus each open agent
- * thread whose last reply is the reviewer's. A clipboard handoff has no live
- * `mdr_ask` to carry that reply, so without it a "yes" under an agent's note
- * would never reach an agent. An agent thread with no reply from the reviewer,
- * or where the agent has the last word, stays out: the agent would only be
- * answering itself. The button counts these, the prompt names them by id, and
- * the eval adapters hand over the same set. Document order is kept.
+ * thread whose last reply is the reviewer's, once the review it came from has
+ * ended. Nothing else would carry that reply, so without it a "yes" under an
+ * agent's note would never reach an agent.
+ *
+ * While that review is still open (`liveSessionIds` holds its `sessionId`),
+ * the thread belongs to the agent there: an answered `mdr_ask` question went
+ * back through `mdr_ask` already, and a marker keeps no trace of which kind
+ * of agent thread it is, so sending it would deliver the answer twice. An
+ * agent thread with no reply from the reviewer, or where the agent has the
+ * last word, stays out too: the agent would only be answering itself.
+ *
+ * The button counts these, the prompt names them by id, and the eval
+ * adapters hand over the same set. Document order is kept.
  */
-export function handoffComments(comments: readonly MdComment[]): MdComment[] {
-  return comments.filter(
-    (c) => getEffectiveStatus(c) !== 'resolved' && (!c.agentInitiated || reviewerRepliedLast(c)),
-  );
+export function handoffComments(
+  comments: readonly MdComment[],
+  liveSessionIds: ReadonlySet<string> = NO_LIVE_SESSIONS,
+): MdComment[] {
+  return comments.filter((c) => {
+    if (getEffectiveStatus(c) === 'resolved') return false;
+    if (!c.agentInitiated) return true;
+    if (c.sessionId !== undefined && liveSessionIds.has(c.sessionId)) return false;
+    return reviewerRepliedLast(c);
+  });
 }
 
 /**
@@ -68,7 +83,7 @@ export function buildAddressCommentsPrompt({
   // and forbid touching every marker, so it means unscoped instead.
   const scopedIds = commentIds && commentIds.length > 0 ? commentIds : null;
   const scopeInstruction = scopedIds
-    ? `Address ONLY the comments with the following IDs: ${scopedIds.map((id) => `\`${id}\``).join(', ')}. Do not reply to, resolve, or remove any other comment marker in the file. The one change another marker may need is to its \`anchor\`: if your edit rewrites the text it points at, update it as "Keeping anchors valid" below describes.`
+    ? `Address ONLY the comments with the following IDs: ${scopedIds.map((id) => `\`${id}\``).join(', ')}. Do not reply to, resolve, or remove any other comment marker in the file. The one exception is when your edit rewrites text another marker points at: then update that marker's \`anchor\` and its context fields as "Keeping anchors valid" below describes, and change nothing else in it.`
     : null;
 
   // Both modes distinguish "I edited the document" from "I answered a

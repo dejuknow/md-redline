@@ -49,6 +49,15 @@ describe('sendableComments and handoffComments', () => {
   it('a handoff adds open agent threads where the reviewer replied last, in document order', () => {
     expect(handoffComments(all).map((c) => c.id)).toEqual(['mine', 'note-answered']);
   });
+
+  // An answered mdr_ask question looks exactly like a note the reviewer
+  // replied to, and its answer already went back through mdr_ask.
+  it('leaves out an agent thread whose review is still open', () => {
+    const inLiveReview = comment({ ...noteIAnswered, id: 'live', sessionId: 'rev_live' });
+    const fromEndedReview = comment({ ...noteIAnswered, id: 'ended', sessionId: 'rev_old' });
+    const ids = handoffComments([mine, inLiveReview, fromEndedReview], new Set(['rev_live']));
+    expect(ids.map((c) => c.id)).toEqual(['mine', 'ended']);
+  });
 });
 
 describe('buildAddressCommentsPrompt', () => {
@@ -97,7 +106,9 @@ describe('buildAddressCommentsPrompt', () => {
     expect(prompt).toContain('Do not reply to, resolve, or remove any other comment marker');
     // A shared anchor: editing for a listed comment can rewrite text another
     // marker points at, and "leave it untouched" would forbid keeping it valid.
-    expect(prompt).toContain('The one change another marker may need is to its `anchor`');
+    expect(prompt).toContain(
+      'update that marker\'s `anchor` and its context fields as "Keeping anchors valid"',
+    );
   });
 
   it('addresses all comments when commentIds is absent (backward compat)', () => {

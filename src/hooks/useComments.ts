@@ -82,7 +82,11 @@ export interface UseCommentsParams {
   requestCommentFocus: (commentId: string, origin?: CommentFocusOrigin) => void;
   /** Where a delete leaves its undo for Cmd+Z and the palette (useUndoSlot). */
   undoSlot: Pick<UndoSlot, 'offer' | 'holds' | 'take'>;
+  /** Review sessions still open; their agent threads stay out of a handoff. */
+  liveSessionIds?: ReadonlySet<string>;
 }
+
+const NO_LIVE_SESSIONS: ReadonlySet<string> = new Set();
 
 export function useComments(params: UseCommentsParams) {
   const {
@@ -104,6 +108,7 @@ export function useComments(params: UseCommentsParams) {
     setAutoExpandForm,
     requestCommentFocus,
     undoSlot: { offer: offerUndo, holds: undoHolds, take: takeUndo },
+    liveSessionIds = NO_LIVE_SESSIONS,
   } = params;
 
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -189,9 +194,7 @@ export function useComments(params: UseCommentsParams) {
         try {
           fileComments = parseComments(tab.rawMarkdown).comments;
         } catch {
-          counts.set(tab.filePath, 0);
-          handoffCountsByFile.set(tab.filePath, 0);
-          continue;
+          fileComments = [];
         }
       }
       const sendable = sendableComments(fileComments);
@@ -209,7 +212,7 @@ export function useComments(params: UseCommentsParams) {
         tab.filePath,
         fileComments.filter((c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved').length,
       );
-      const handoff = handoffComments(fileComments);
+      const handoff = handoffComments(fileComments, liveSessionIds);
       handoffCountsByFile.set(tab.filePath, handoff.length);
       handoffIds.set(
         tab.filePath,
@@ -224,7 +227,7 @@ export function useComments(params: UseCommentsParams) {
       handoffCounts: handoffCountsByFile,
       handoffIdsByFile: handoffIds,
     };
-  }, [tabs, activeFilePath, comments]);
+  }, [tabs, activeFilePath, comments, liveSessionIds]);
 
   // Threads the reviewer replied to after the agent's last reply, each mapped
   // to that reply's key (id plus a hash of its text). A sent thread is pending

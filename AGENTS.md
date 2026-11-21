@@ -2136,15 +2136,22 @@ What a click does (`src/hooks/useHandoff.ts`):
   Send & finish when it carries comments: its own, or a batch the server queued
   while the agent was busy, which the session reports as `hasQueuedBatch`
   (`waitingForAgent` is not a proxy: a batch also queues between agent polls).
-  The banner claims its busy state before that wait, so a second click cannot
-  post the same batch twice. The clipboard write
+  Right after a Send the server queued, the banner also treats the batch as
+  queued until a poll shows more sent ids, since the poll reports the flag a
+  few seconds late. The banner claims a per-session busy slot before that
+  wait, so a second click cannot post the same batch twice while another
+  review's buttons keep working. The clipboard write
   after that wait can be refused by Safari, which wants it inside the click's
   own task; this only happens when a save was still out at the click.
 - **Names the comments it counts.** The prompt passes `commentIds` for the
   selected files, built by `handoffComments` in `src/lib/agent-prompts.ts`: the
   reviewer's open comments, plus each open agent thread (an `mdr_ask` question
-  or `mdr_comment` note) whose last reply is the reviewer's, since a clipboard
-  handoff has no live `mdr_ask` to carry that reply. The button's count
+  or `mdr_comment` note) whose last reply is the reviewer's, once the review it
+  came from has ended, since nothing else would carry that reply. While that
+  review is open (its `sessionId` is among the open sessions, passed to
+  `useComments` as `liveSessionIds`), the thread stays out: a marker keeps no
+  trace of whether it was a question whose answer already went back through
+  `mdr_ask`, and sending it would deliver that answer twice. The button's count
   (`handoffCounts`) is the same set. Without ids the prompt said to address
   every marker, which reached agent threads the reviewer never answered. The
   review banner's Send keeps the narrower `sendableComments` (no agent threads),
@@ -2723,11 +2730,12 @@ Key exports from `src/lib/comment-parser.ts`:
 From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
-- `handoffComments(comments)` — the comments a handoff sends: the reviewer's open ones
+- `sendableComments(comments)` — the reviewer's own open comments: the banner's Send set and the badge count
+- `handoffComments(comments, liveSessionIds?)` — what the Hand off button sends: the sendable comments plus open agent threads the reviewer replied to last, from reviews no longer open
 
   A scoped prompt (`commentIds`) tells the agent to leave other markers alone
-  except for their `anchor`, which it must still keep valid when an edit
-  rewrites the text one points at; plain "leave them untouched" contradicted
+  except for their `anchor` and context fields, which it must still keep valid
+  when an edit rewrites the text one points at; plain "leave them untouched" contradicted
   "Keeping anchors valid" whenever two comments shared text. The MCP batch and
   final preambles in `server/mcp-stdio/handler.ts` say the same.
 

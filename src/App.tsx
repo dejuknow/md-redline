@@ -966,6 +966,24 @@ export default function App() {
 
   // Comment state and operations
   const {
+    sessions: reviewSessions,
+    shownSessions: shownReviewSessions,
+    refresh: refreshReviewSessions,
+    fetched: reviewSessionsFetched,
+  } = useReviewSession(
+    activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
+  );
+  // An agent can add files to a review this tab is showing (#117): open them.
+  useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
+  // An agent thread in a review that is still open belongs to the live agent
+  // there: an mdr_ask answer already went back through mdr_ask. Hand off
+  // leaves those threads out (handoffComments).
+  const liveSessionIds = useMemo(
+    () => new Set(reviewSessions.filter((s) => s.status === 'open').map((s) => s.id)),
+    [reviewSessions],
+  );
+
+  const {
     activeCommentId,
     setActiveCommentId,
     comments,
@@ -1017,6 +1035,7 @@ export default function App() {
     setAutoExpandForm,
     requestCommentFocus,
     undoSlot,
+    liveSessionIds,
   });
 
   // `commentCount` is the OPEN count, so the resolved tail is whatever the
@@ -1435,17 +1454,6 @@ export default function App() {
     captureReferences,
     showToast,
   });
-
-  const {
-    sessions: reviewSessions,
-    shownSessions: shownReviewSessions,
-    refresh: refreshReviewSessions,
-    fetched: reviewSessionsFetched,
-  } = useReviewSession(
-    activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
-  );
-  // An agent can add files to a review this tab is showing (#117): open them.
-  useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
 
   // Strip `?review=<id>` from the address bar once a review resolves, so
   // a page reload doesn't re-open the tabs of a completed review and so

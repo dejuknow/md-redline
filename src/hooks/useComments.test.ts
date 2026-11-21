@@ -283,6 +283,26 @@ describe('useComments', () => {
       expect(prompt).toContain('`u1`, `note1`');
     });
 
+    it('leaves out an agent thread whose review is still open', () => {
+      const raw = `Two ${makeComment({
+        id: 'ask1',
+        anchor: 'Two',
+        author: 'Claude',
+        agentInitiated: true,
+        sessionId: 'rev_live',
+        replies: [{ id: 'r1', text: 'yes', author: 'Tester', timestamp: 'x', agent: false }],
+      })}`;
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+        liveSessionIds: new Set(['rev_live']),
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      expect(result.current.handoffCounts.get('/a.md')).toBe(0);
+    });
+
     it('reports a failed copy so the caller does not treat it as a handoff', async () => {
       stubClipboard(() => Promise.reject(new Error('denied')));
       const raw = `One ${makeComment({ id: 'u1', anchor: 'One' })}`;

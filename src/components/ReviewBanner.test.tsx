@@ -216,6 +216,94 @@ describe('ReviewBanner', () => {
     expect(prepareSend).toHaveBeenCalledTimes(1);
   });
 
+  it("a send waiting on one review leaves another review's buttons working", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const other: ReviewSession = { ...session, id: 'rev_2', filePaths: ['/tmp/spec-c.md'] };
+    const prepareSend = vi.fn((paths: string[]) =>
+      paths.includes('/tmp/spec-a.md')
+        ? new Promise<() => void>(() => {}) // rev_1 stays waiting on a save
+        : Promise.resolve(() => {}),
+    );
+    render(
+      <ReviewBanner
+        sessions={[session, other]}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+            ['/tmp/spec-c.md', 1],
+          ])
+        }
+        onResolved={() => {}}
+        prepareSend={prepareSend}
+        commentIdsByFile={
+          new Map([
+            ['/tmp/spec-a.md', ['c1']],
+            ['/tmp/spec-b.md', []],
+            ['/tmp/spec-c.md', ['c9']],
+          ])
+        }
+      />,
+    );
+
+    const sends = screen.getAllByRole('button', { name: /send \d+ comment/i });
+    fireEvent.click(sends[0]);
+    fireEvent.click(sends[1]);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/review-sessions/rev_2/batch', expect.anything()),
+    );
+  });
+
+  // The poll reports hasQueuedBatch seconds later; a finish in between still
+  // carries the queued batch, so it still waits on saves.
+  it('Finish review right after a queued Send checks saves before the poll catches up', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, queued: true }),
+    } as Response);
+    const prepareSend = vi.fn(() => Promise.resolve<(() => void) | null>(() => {}));
+    const { rerender } = render(
+      <ReviewBanner
+        sessions={[session]}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
+        onResolved={() => {}}
+        prepareSend={prepareSend}
+        commentIdsByFile={oneUnsentIds}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /send \d+ comment/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // The parent records c1 as sent; the session itself has not polled yet.
+    rerender(
+      <ReviewBanner
+        sessions={[session]}
+        commentCounts={
+          new Map([
+            ['/tmp/spec-a.md', 1],
+            ['/tmp/spec-b.md', 0],
+          ])
+        }
+        onResolved={() => {}}
+        prepareSend={prepareSend}
+        optimisticSent={{ commentIds: new Set(['c1']), replyKeys: new Set() }}
+        commentIdsByFile={oneUnsentIds}
+      />,
+    );
+    prepareSend.mockClear();
+    prepareSend.mockResolvedValueOnce(null);
+    fireEvent.click(await screen.findByRole('button', { name: /finish review/i }));
+
+    await waitFor(() => expect(prepareSend).toHaveBeenCalledWith(session.filePaths));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   // A finish that carries nothing new hands nothing off: resetting the diff
   // then would hide the agent's last round of edits. Nor does it read any
   // file, so it does not wait on saves, even while the agent is busy.
