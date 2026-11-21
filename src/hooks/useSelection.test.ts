@@ -24,6 +24,9 @@ const INFO: SelectionInfo = {
 let result: { current: ReturnType<typeof useSelection> };
 const hook = () => result.current;
 
+/** MouseEvent.buttons bits, indexed by MouseEvent.button. */
+const BUTTON_BITS = [1, 4, 2, 8, 16];
+
 /** A press as the browser delivers it: pointerdown, then mousedown. */
 function pointerDown(pointerType: string, button = 0) {
   const e = new Event('pointerdown');
@@ -31,14 +34,22 @@ function pointerDown(pointerType: string, button = 0) {
   Object.defineProperty(e, 'button', { value: button });
   act(() => {
     document.dispatchEvent(e);
-    document.dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true }));
+    document.dispatchEvent(
+      new MouseEvent('mousedown', { button, buttons: BUTTON_BITS[button], bubbles: true }),
+    );
   });
 }
 
-/** A second button pressed while the first is held: mousedown only. */
-function chordDown(button: number) {
+/** A second button pressed while `held` is down: mousedown only. */
+function chordDown(button: number, held = 0) {
   act(() => {
-    document.dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true }));
+    document.dispatchEvent(
+      new MouseEvent('mousedown', {
+        button,
+        buttons: BUTTON_BITS[button] | BUTTON_BITS[held],
+        bubbles: true,
+      }),
+    );
   });
 }
 
@@ -756,6 +767,41 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
       expect(window.getSelection()!.toString()).toBe('credentials');
     });
 
+    it('keeps the drag, not a word WebKit picks, when a second button joins it', () => {
+      pointerDown('mouse', 0);
+      const drag = document.createRange();
+      drag.setStart(paragraph.firstChild!, 0);
+      drag.setEnd(paragraph.firstChild!, 5);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(drag);
+      chordDown(2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      // Nothing claimed the click, yet the word is not handed back: the drag
+      // is still in progress and its release commits the drag.
+      expect(window.getSelection()!.toString()).toBe('valid');
+    });
+
+    it('hands back the word itself, not a range reaching back over an image', () => {
+      // "valid " | <img> | "credentials here": the word starts where the
+      // first text node ends, in text-offset terms.
+      paragraph.textContent = 'valid ';
+      paragraph.appendChild(document.createElement('img'));
+      const after = document.createTextNode('credentials here');
+      paragraph.appendChild(after);
+      mockResolve.mockReturnValue(null);
+      pointerDown('mouse', 2);
+      const word = document.createRange();
+      word.setStart(after, 0);
+      word.setEnd(after, 11);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(word);
+      contextMenu(paragraph);
+      const restored = window.getSelection()!.getRangeAt(0);
+      expect(restored.toString()).toBe('credentials');
+      expect(restored.startContainer).toBe(after);
+    });
+
     it('leaves a drag in progress alone when a second button joins it', () => {
       // Left-drag, then the right button while the left is still held.
       pointerDown('mouse', 0);
@@ -769,6 +815,20 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
       mouseUp(0);
       expect(hook().selection).toEqual(INFO);
     });
+  });
+
+  it('does not count a button as held after a release the page never saw', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // A left press whose mouseup was lost (WebKit can drop one while its own
+    // menu has the mouse), then a plain right-click later on.
+    pointerDown('mouse', 0);
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    contextMenu();
+    expect(hook().selection).toBeNull();
   });
 
   it('settles a right-click whose contextmenu a handler stops', () => {

@@ -10,6 +10,9 @@ import type { SelectionInfo } from '../types';
  *   Escape goes down. An Escape pressed while one is open is that layer's
  *   (it closes it), not a request to drop the selection (#100).
  */
+/** MouseEvent.buttons bits, indexed by MouseEvent.button. */
+const BUTTON_BITS = [1, 4, 2, 8, 16];
+
 /** The text offset of a DOM position within `container`. */
 function textOffsetIn(container: Node, node: Node, offset: number): number {
   const range = document.createRange();
@@ -18,7 +21,12 @@ function textOffsetIn(container: Node, node: Node, offset: number): number {
   return range.toString().length;
 }
 
-/** A range over `container`'s text from `start` to `end`, or null past its end. */
+/**
+ * A range over `container`'s text from `start` to `end`, or null past its end.
+ * The start leans forward: an offset at the seam between two text nodes starts
+ * in the later one, so the range does not reach back over whatever sits
+ * between them (an image, say), which a rich copy would then include.
+ */
 function rangeAtTextOffsets(container: Node, start: number, end: number): Range | null {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
@@ -27,7 +35,7 @@ function rangeAtTextOffsets(container: Node, start: number, end: number): Range 
   let node: Text | null;
   while ((node = walker.nextNode() as Text | null)) {
     const length = node.data.length;
-    if (!startSet && start <= seen + length) {
+    if (!startSet && (start < seen + length || (start === seen + length && start === end))) {
       range.setStart(node, start - seen);
       startSet = true;
     }
@@ -193,6 +201,13 @@ export function useSelection(
 
     const beginPress = (e: MouseEvent) => {
       pressSeq += 1;
+      // Rebuilt from the buttons the browser says are down, so a release the
+      // page never saw (WebKit can drop one while its own menu has the mouse)
+      // cannot leave a button counted as held for every later click.
+      heldButtons.clear();
+      BUTTON_BITS.forEach((bit, button) => {
+        if (e.buttons & bit) heldButtons.add(button);
+      });
       heldButtons.add(e.button);
       settledButtons.delete(e.button);
       droppedWord = null;
@@ -429,12 +444,19 @@ export function useSelection(
       // the word with it. So the word is kept as text offsets, the settle is
       // flushed through that rebuild, and the word is found again after it,
       // all before the browser builds its menu.
-      if (word && !e.defaultPrevented && container?.contains(word.startContainer)) {
+      //
+      // Not while another button is held: that is a drag in progress, whose
+      // range routeRightClick already put back for its own release to commit.
+      const chord = [...heldButtons].some((b) => b !== e.button);
+      if (word && !chord && !e.defaultPrevented && container?.contains(word.startContainer)) {
+        const text = word.toString();
         const start = textOffsetIn(container, word.startContainer, word.startOffset);
         const end = textOffsetIn(container, word.endContainer, word.endOffset);
         flushSync(() => settleRightClick(e));
         const restored = rangeAtTextOffsets(container, start, end);
-        if (restored) {
+        // Only the same text: the flush can run other pending work that
+        // changes the document, and then the offsets point somewhere else.
+        if (restored && restored.toString() === text) {
           const sel = window.getSelection();
           sel?.removeAllRanges();
           sel?.addRange(restored);
