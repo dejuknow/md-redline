@@ -897,6 +897,12 @@ body {
 .prose .table-scroll__viewport {
   overflow-x: auto;
 }
+/* Short columns (IDs, priorities, dates) that rehypeWrapTables marks as
+   compact stay on one line, so a wide prose column can't squeeze `G-12` into
+   `G-` over `12`. */
+.prose :where(td, th).table-cell--nowrap {
+  white-space: nowrap;
+}
 /* The wrapper owns the vertical rhythm; drop the table's own margin so it
    isn't doubled up inside the scrollport. */
 .prose .table-scroll__viewport > :where(table) {

@@ -11,7 +11,7 @@ import { visit, SKIP } from 'unist-util-visit';
 import { visitParents } from 'unist-util-visit-parents';
 import { phrasing } from 'hast-util-phrasing';
 import { whitespace } from 'hast-util-whitespace';
-import type { Root, Element, Comment } from 'hast';
+import type { Root, Element, ElementContent, Comment } from 'hast';
 import { rewriteLocalUrls } from './rewriteLocalUrls';
 import { MDR_MARKER_PREFIX } from '../lib/comment-parser';
 
@@ -153,6 +153,91 @@ function rehypeAnnotateSource() {
 }
 
 /**
+ * Longest body cell, in characters, that still counts as a compact column.
+ * Counted in code points, not rendered width, so a column of full-width (CJK)
+ * text can qualify at up to twice the visual width of a Latin one.
+ */
+const COMPACT_CELL_MAX = 16;
+const NOWRAP_CLASS = 'table-cell--nowrap';
+
+function textOf(node: Element | ElementContent): string {
+  if (node.type === 'text') return node.value;
+  if ('children' in node) return node.children.map((c) => textOf(c as ElementContent)).join('');
+  return '';
+}
+
+function classListOf(cell: Element): string[] {
+  const existing = cell.properties?.className;
+  if (existing == null) return [];
+  return Array.isArray(existing) ? existing.map(String) : String(existing).split(/\s+/);
+}
+
+/**
+ * Keep short columns (IDs, priorities, dates, statuses) on one line.
+ *
+ * With `table-layout: auto`, a table whose long prose column wants the full
+ * width squeezes every other column toward its min-content width. A hyphen is a
+ * break opportunity, so an ID column of `G-1`, `G-22` collapses to `G-` over
+ * `1`. A column whose every body cell is short gets `table-cell--nowrap` on its
+ * body cells. Its header gets the class only when it is a single token: a
+ * multi-word header still wraps at its spaces, so a table with several short
+ * columns under descriptive headers fits the width it fit before. Prose
+ * columns are left to wrap, and a table that does grow too wide still scrolls
+ * inside its wrapper.
+ *
+ * Cells are matched by position, so a table that uses colspan or rowspan (raw
+ * HTML only; GFM emits neither) opts out entirely rather than guess.
+ */
+function markCompactColumns(table: Element) {
+  const rows: Element[][] = [];
+  let spanned = false;
+  for (const section of table.children) {
+    if (section.type !== 'element') continue;
+    const sectionRows =
+      section.tagName === 'tr'
+        ? [section]
+        : section.children.filter((r): r is Element => r.type === 'element' && r.tagName === 'tr');
+    for (const row of sectionRows) {
+      const cells = row.children.filter(
+        (c): c is Element => c.type === 'element' && (c.tagName === 'td' || c.tagName === 'th'),
+      );
+      // The class is the pipeline's to give: drop any copy an author wrote in
+      // raw HTML, so a document can't force a prose cell onto one line.
+      for (const cell of cells) {
+        const classes = classListOf(cell);
+        if (classes.includes(NOWRAP_CLASS)) {
+          cell.properties = {
+            ...cell.properties,
+            className: classes.filter((c) => c !== NOWRAP_CLASS),
+          };
+        }
+      }
+      if (
+        cells.some(
+          (c) => Number(c.properties?.colSpan ?? 1) > 1 || Number(c.properties?.rowSpan ?? 1) > 1,
+        )
+      ) {
+        spanned = true;
+      }
+      rows.push(cells);
+    }
+  }
+  if (spanned) return;
+  let columnCount = 0;
+  for (const cells of rows) columnCount = Math.max(columnCount, cells.length);
+  for (let col = 0; col < columnCount; col++) {
+    const column = rows.map((cells) => cells[col]).filter((cell) => cell != null);
+    const body = column.filter((cell) => cell.tagName === 'td');
+    if (body.length === 0) continue;
+    if (body.some((cell) => [...textOf(cell).trim()].length > COMPACT_CELL_MAX)) continue;
+    for (const cell of column) {
+      if (cell.tagName === 'th' && /\s/.test(textOf(cell).trim())) continue;
+      cell.properties = { ...cell.properties, className: [...classListOf(cell), NOWRAP_CLASS] };
+    }
+  }
+}
+
+/**
  * Wrap every <table> in a horizontal-scroll container so wide tables scroll
  * within their own box instead of being clipped by the sheet's `overflow: clip`
  * (which can't become `auto` without capturing the sticky rail header — see the
@@ -168,6 +253,7 @@ function rehypeWrapTables() {
       if (node.tagName !== 'table' || parent == null || typeof index !== 'number') {
         return;
       }
+      markCompactColumns(node);
       const viewport: Element = {
         type: 'element',
         tagName: 'div',
