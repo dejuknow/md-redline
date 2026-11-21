@@ -1129,6 +1129,34 @@ mark.search-highlight-active {
   line-height: inherit;
 }
 
+/* A code chip paints its own inset fill, which covered the fill of any mark
+   around it: a chip the highlight covered whole showed no highlight, while a
+   chip covered partway, which gets its own mark inside it, did. Lay the mark's
+   fill over the chip's instead, so the chip keeps its shape and both cases
+   composite the same two colors. Each mark names its fill in --mark-fill; a
+   mark that sets none (resolved traces) leaves the gradient invalid, which
+   draws nothing. */
+mark.comment-highlight,
+mark.comment-highlight-sent {
+  --mark-fill: var(--theme-comment-bg);
+}
+mark.comment-highlight:hover,
+mark.comment-highlight-active {
+  --mark-fill: var(--theme-comment-bg-hover);
+}
+mark.selection-highlight {
+  --mark-fill: var(--theme-selection-bg);
+}
+mark.search-highlight {
+  --mark-fill: var(--theme-search-bg);
+}
+mark.search-highlight-active {
+  --mark-fill: var(--theme-search-active-bg);
+}
+.prose mark code {
+  background-image: linear-gradient(var(--mark-fill), var(--mark-fill));
+}
+
 /* Browser native selection color */
 ::selection {
   background-color: var(--theme-native-selection);
