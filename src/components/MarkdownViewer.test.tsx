@@ -1776,3 +1776,85 @@ describe('MarkdownViewer viewport scroll anchor', () => {
     }
   });
 });
+
+describe('MarkdownViewer: native selection across a rebuild', () => {
+  // WebKit (Safari) does not collapse a selection whose text
+  // nodes the rebuild destroys. It keeps a corrupt range that still paints,
+  // and copies, whole blocks around the painted selection mark. jsdom, like
+  // Chromium, collapses it on its own, so these tests pin the explicit
+  // collapse the viewer does for WebKit's sake.
+  const markdown = '# Notes\n\nFirst paragraph with some source text.\n\nSecond paragraph.\n';
+
+  it('collapses a selection inside the viewer to its start before rebuilding', async () => {
+    const html = renderMarkdown(markdown);
+    const props = {
+      html,
+      cleanMarkdown: markdown,
+      comments: [],
+      activeCommentId: null,
+      selectionOffset: null,
+      onHighlightClick: vi.fn(),
+    };
+    const { container, rerender } = render(<MarkdownViewer {...props} selectionText={null} />);
+    const paragraph = await waitFor(() => {
+      const p = container.querySelector('.prose p');
+      expect(p).not.toBeNull();
+      return p!;
+    });
+    const prose = paragraph.closest('.prose')!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const collapse = vi.spyOn(selection, 'collapse');
+    try {
+      rerender(<MarkdownViewer {...props} selectionText="source" />);
+      await waitFor(() =>
+        expect(container.querySelector('mark.selection-highlight')).not.toBeNull(),
+      );
+      expect(collapse).toHaveBeenCalledWith(prose, 0);
+      expect(selection.isCollapsed).toBe(true);
+    } finally {
+      collapse.mockRestore();
+      selection.removeAllRanges();
+    }
+  });
+
+  it('leaves a selection outside the viewer alone', async () => {
+    const html = renderMarkdown(markdown);
+    const props = {
+      html,
+      cleanMarkdown: markdown,
+      comments: [],
+      activeCommentId: null,
+      selectionOffset: null,
+      onHighlightClick: vi.fn(),
+    };
+    const outside = document.createElement('p');
+    outside.textContent = 'Text in another panel';
+    document.body.appendChild(outside);
+    const { container, rerender } = render(<MarkdownViewer {...props} selectionText={null} />);
+    await waitFor(() => expect(container.querySelector('.prose p')).not.toBeNull());
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(outside);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const collapse = vi.spyOn(selection, 'collapse');
+    try {
+      rerender(<MarkdownViewer {...props} selectionText="source" />);
+      await waitFor(() =>
+        expect(container.querySelector('mark.selection-highlight')).not.toBeNull(),
+      );
+      expect(collapse).not.toHaveBeenCalled();
+      expect(selection.toString()).toBe('Text in another panel');
+    } finally {
+      collapse.mockRestore();
+      selection.removeAllRanges();
+      outside.remove();
+    }
+  });
+});

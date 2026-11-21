@@ -352,6 +352,26 @@ export const MarkdownViewer = memo(
       const priorAnchor =
         scroller && !arriving && !jumping ? captureViewportAnchor(scroller, container) : undefined;
 
+      // The rebuild below destroys every text node a native selection inside
+      // the viewer points into. Chromium collapses such a selection to a caret
+      // at (container, 0), and the rest of the viewer relies on that: the
+      // committed selection is painted as mark.selection-highlight instead.
+      // WebKit (Safari) keeps a corrupt one, a range that
+      // reports (container, 0) at both ends yet is not collapsed and still
+      // paints, and copies, whole blocks from the first one it touched. Over
+      // the painted mark that showed as several stacked shades of selection
+      // spilling into the margins. Collapse it to Chromium's caret first, so
+      // both engines end in the same state.
+      const nativeSelection = window.getSelection();
+      if (
+        nativeSelection &&
+        nativeSelection.rangeCount > 0 &&
+        ((nativeSelection.anchorNode && container.contains(nativeSelection.anchorNode)) ||
+          (nativeSelection.focusNode && container.contains(nativeSelection.focusNode)))
+      ) {
+        nativeSelection.collapse(container, 0);
+      }
+
       // Set innerHTML from scratch — guarantees a clean starting state
       // Defense-in-depth: rehype-sanitize is the primary sanitizer, but
       // DOMPurify provides a second layer in case of a remark/rehype bypass.
