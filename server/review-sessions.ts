@@ -517,7 +517,7 @@ export class ReviewSessionStore {
     if (s.queuedBatch) {
       const queued = s.queuedBatch;
       s.queuedBatch = null;
-      const prompt = this.batchPrompt(s, queued.commentIds, queued.commentCountsByPath);
+      const prompt = this.batchPrompt(s, queued.commentIds, queued.commentCountsByPath, true);
       const resolvedWaiter = s.waiter;
       s.resolver({ status: 'batch', prompt, commentIds: queued.commentIds });
       // Create a fresh waiter for the next poll cycle.
@@ -788,12 +788,15 @@ export class ReviewSessionStore {
     s: InternalSession,
     commentIds: string[],
     commentCountsByPath: Map<string, number>,
+    stayingOpen: boolean,
   ): string {
     return buildAddressCommentsPrompt({
       filePaths: s.filePaths,
       commentCounts: commentCountsByPath,
       enableResolve: s.enableResolve,
       commentIds,
+      // A finish closes the session, so mdr_ask would have nowhere to go.
+      askSessionId: stayingOpen ? s.id : undefined,
     });
   }
 
@@ -860,7 +863,7 @@ export class ReviewSessionStore {
       // The browser's counts are taken at finish, so they win over the ones
       // recorded when the batch was queued.
       const counts = new Map([...queued.commentCountsByPath, ...(commentCountsByPath ?? [])]);
-      finalPrompt = this.batchPrompt(s, finalIds, counts);
+      finalPrompt = this.batchPrompt(s, finalIds, counts, false);
     }
 
     this.recordSent(s, finalIds ?? [], replyIds);

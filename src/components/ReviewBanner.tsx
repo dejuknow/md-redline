@@ -21,6 +21,12 @@ interface ReviewBannerProps {
   agentCommentCounts?: Map<string, number>;
   /** Called after a successful handoff so the parent can capture diff snapshots for the session's files. */
   onHandoffSuccess: (session: ReviewSession) => void;
+  /**
+   * Returns false (after telling the reviewer why) while any of the files is
+   * still saving or failed to save. The agent reads the files on disk, so a
+   * send then would miss the latest comments.
+   */
+  ensureSaved?: (filePaths: string[]) => boolean;
   onResolved: () => void;
   /**
    * Called after a successful send (batch or send & finish) with the comment
@@ -117,6 +123,7 @@ export function ReviewBanner({
   commentCounts,
   agentCommentCounts,
   onHandoffSuccess,
+  ensureSaved,
   onResolved,
   onBatchSent,
   optimisticSent = NO_OPTIMISTIC,
@@ -128,8 +135,10 @@ export function ReviewBanner({
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // `stayingOpen` is false for Send & finish: the session closes with that
+  // send, so the prompt must not offer mdr_ask on it.
   const buildPromptForSession = useCallback(
-    (s: ReviewSession, ids?: string[]): string => {
+    (s: ReviewSession, ids: string[] | undefined, stayingOpen: boolean): string => {
       const totalComments = s.filePaths.reduce((sum, p) => sum + (commentCounts.get(p) ?? 0), 0);
       if (totalComments === 0 && (!ids || ids.length === 0)) {
         const list = s.filePaths.map((p) => `\`${p}\``).join(', ');
@@ -140,6 +149,7 @@ export function ReviewBanner({
         commentCounts,
         enableResolve: s.enableResolve,
         commentIds: ids,
+        askSessionId: stayingOpen ? s.id : undefined,
       });
     },
     [commentCounts],
@@ -149,10 +159,11 @@ export function ReviewBanner({
     async (s: ReviewSession) => {
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
       if (unsentIds.length === 0) return;
+      if (ensureSaved && !ensureSaved(s.filePaths)) return;
       const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
       setBusyId(s.id);
       try {
-        const prompt = buildPromptForSession(s, unsentIds);
+        const prompt = buildPromptForSession(s, unsentIds, true);
         // Pass per-file commentCounts so the server can rebuild an accurate
         // prompt if this batch ends up merged into an existing queued one
         // (waitingForAgent path).
@@ -199,6 +210,7 @@ export function ReviewBanner({
     },
     [
       buildPromptForSession,
+      ensureSaved,
       commentIdsByFile,
       userRepliedLast,
       optimisticSent,
@@ -211,9 +223,11 @@ export function ReviewBanner({
 
   const handleSendAndFinish = useCallback(
     async (s: ReviewSession) => {
+      const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
+      // Finishing with nothing new to send reads no file, so only a send waits.
+      if (unsentIds.length > 0 && ensureSaved && !ensureSaved(s.filePaths)) return;
       setBusyId(s.id);
       try {
-        const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
         const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
         // A batch queued behind a busy agent is delivered with the finish, so
         // the server needs the counts to rebuild the prompt even when there
@@ -222,7 +236,7 @@ export function ReviewBanner({
         const body =
           unsentIds.length > 0
             ? {
-                prompt: buildPromptForSession(s, unsentIds),
+                prompt: buildPromptForSession(s, unsentIds, false),
                 commentIds: unsentIds,
                 replyIds: replyKeys,
                 commentCounts: commentCountsForSession,
@@ -255,6 +269,7 @@ export function ReviewBanner({
     },
     [
       buildPromptForSession,
+      ensureSaved,
       commentIdsByFile,
       commentCounts,
       userRepliedLast,

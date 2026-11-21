@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import { useTabs } from './hooks/useTabs';
+import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
 import { useCommentDrafts } from './hooks/useCommentDrafts';
 import { useRecentFiles } from './hooks/useRecentFiles';
@@ -191,6 +192,7 @@ export default function App() {
     closeTabsToRight: closeTabsToRightDirect,
     switchTab,
     saveFile,
+    getSaveState,
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,
@@ -687,6 +689,7 @@ export default function App() {
     currentSnapshot,
     currentReference,
     captureReference,
+    captureReferences,
     restoreReference,
     seedReference,
     getReference,
@@ -1420,22 +1423,19 @@ export default function App() {
     [],
   );
 
-  // Combined handoff: snapshot + copy agent prompt
-  const handleHandoff = useCallback(
-    (filePaths: string[]) => {
-      // Build snapshot entries for background files so every handed-off file
-      // gets a diff baseline, not just the active tab.
-      const extra = new Map<string, string>();
-      for (const p of filePaths) {
-        if (p === activeFilePath) continue;
-        const tab = tabs.find((t) => t.filePath === p);
-        if (tab) extra.set(p, tab.rawMarkdown);
-      }
-      captureReference('handoff', extra.size > 0 ? extra : undefined);
-      handleCopyAgentPrompt(filePaths);
-    },
-    [captureReference, handleCopyAgentPrompt, activeFilePath, tabs],
-  );
+  const {
+    handOff: handleHandoff,
+    ensureSaved: ensureHandoffSaved,
+    recordSent: recordHandoffSent,
+  } = useHandoff({
+    activeFilePath,
+    rawMarkdownRef,
+    tabs,
+    getSaveState,
+    copyAgentPrompt: handleCopyAgentPrompt,
+    captureReferences,
+    showToast,
+  });
 
   const {
     sessions: reviewSessions,
@@ -1448,19 +1448,11 @@ export default function App() {
   // An agent can add files to a review this tab is showing (#117): open them.
   useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
 
-  // Mirrors the snapshot logic in handleHandoff so multi-file review sessions
-  // get diff baselines for every involved tab, not just the active one.
+  // A banner Send hands the session's files to the agent, so their diff
+  // references move the same way a Hand off moves them.
   const handleReviewHandoffSuccess = useCallback(
-    (session: { filePaths: string[] }) => {
-      const extra = new Map<string, string>();
-      for (const p of session.filePaths) {
-        if (p === activeFilePath) continue;
-        const tab = tabs.find((t) => t.filePath === p);
-        if (tab) extra.set(p, tab.rawMarkdown);
-      }
-      captureReference('handoff', extra.size > 0 ? extra : undefined);
-    },
-    [tabs, activeFilePath, captureReference],
+    (session: { filePaths: string[] }) => recordHandoffSent(session.filePaths),
+    [recordHandoffSent],
   );
 
   // Strip `?review=<id>` from the address bar once a review resolves, so
@@ -3573,6 +3565,7 @@ export default function App() {
           commentCounts={commentCounts}
           agentCommentCounts={agentCommentCounts}
           onHandoffSuccess={handleReviewHandoffSuccess}
+          ensureSaved={ensureHandoffSaved}
           onResolved={handleReviewResolved}
           onBatchSent={handleBatchSent}
           optimisticSent={optimisticSent}

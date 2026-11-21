@@ -6,6 +6,7 @@ import {
   applyPendingTabState,
   findAccessDeniedTabs,
   isAccessDeniedError,
+  saveStateOf,
   useTabs,
   type TabState,
 } from './useTabs';
@@ -281,6 +282,29 @@ describe('TabState dirty flag', () => {
     const updated = { ...tab, rawMarkdown: '# new', dirty: false };
     expect(updated.dirty).toBe(false);
     expect(updated.rawMarkdown).toBe('# new');
+  });
+});
+
+describe('saveStateOf', () => {
+  it('is saving while a write for the file is queued or in flight', () => {
+    expect(saveStateOf(makeTab('/a.md', { dirty: true }), 1)).toBe('saving');
+  });
+
+  it('is failed when the last write errored and the edit never reached disk', () => {
+    expect(saveStateOf(makeTab('/a.md', { dirty: true, error: 'conflict' }), 0)).toBe('failed');
+  });
+
+  it('is saved once the write landed', () => {
+    expect(saveStateOf(makeTab('/a.md', { dirty: false, isLoading: false }), 0)).toBe('saved');
+  });
+
+  // A load error leaves nothing unsaved: the content shown is what is on disk.
+  it('does not treat a load error as a failed save', () => {
+    expect(saveStateOf(makeTab('/a.md', { error: 'Access denied' }), 0)).toBe('saved');
+  });
+
+  it('is saved for a file that is not open', () => {
+    expect(saveStateOf(undefined, 0)).toBe('saved');
   });
 });
 

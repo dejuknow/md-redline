@@ -2125,6 +2125,23 @@ States, driven by the active file's sendable-comment count:
   so cross-project tabs are opted in per file rather than assumed to belong to
   this review. The active row is tagged "· this file".
 
+What a click does (`src/hooks/useHandoff.ts`):
+- **Waits for saves.** The agent reads the files on disk, not the tabs, so the
+  handoff refuses with a toast while any selected file has a write queued or in
+  flight, or its last write failed (a conflict or server error). `getSaveState`
+  in `useTabs` reports this per path; a load error is not a failed save. The
+  review banner's Send and Send & finish run the same check (`ensureSaved`).
+- **Names the comments it counts.** The prompt passes `commentIds` for the
+  selected files, built by `handoffComments` in `src/lib/agent-prompts.ts` (the
+  reviewer's open comments, no agent questions or notes, nothing resolved), the
+  same set the button's count shows. Without ids the prompt said to address
+  every marker, which reached agent-authored threads the reviewer never sent.
+- **Moves the diff reference only on success, only for the files sent.** Each
+  selected file's text is read at the click and recorded with
+  `captureReferences` once the clipboard write succeeds. A failed copy moves no
+  reference, and a file the picker left out keeps its own, even the active tab.
+  A banner Send records the session's files the same way (`recordSent`).
+
 ### Diff overlay
 After a review handoff, or after an agent saves a before copy with `mdr_baseline`,
 a diff overlay shows what changed since that reference,
@@ -2685,6 +2702,14 @@ Key exports from `src/lib/comment-parser.ts`:
 From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
+- `handoffComments(comments)` — the comments a handoff sends: the reviewer's open ones
+
+  The "Asking me a question" section, which offers `mdr_ask`, appears only when
+  `askSessionId` is passed, and names that session. Pass it only for a session
+  that stays open after the prompt is delivered: a banner Send and a queued
+  batch the server delivers. A clipboard handoff has no session, and Send &
+  finish (or a finish that folds in a queued batch) closes it, so an agent told
+  to pass "the sessionId from this review" had nothing to pass.
 
   Both `enableResolve` modes dispose of a marker based on whether **the
   document changed**, never on whether a reply was written. The agent always

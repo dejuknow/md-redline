@@ -14,6 +14,20 @@ export interface TabState {
   dirty?: boolean;
 }
 
+export type SaveState = 'saving' | 'saved' | 'failed';
+
+/**
+ * Whether a tab's latest edit is on disk. A handoff gates on this, since the
+ * agent reads the file, not the tab: a comment still saving, or one whose
+ * write failed (a conflict, a server error), would be missing from what the
+ * agent sees. A load error is not a failed save; nothing local is unwritten.
+ */
+export function saveStateOf(tab: TabState | undefined, pendingSaves: number): SaveState {
+  if (pendingSaves > 0) return 'saving';
+  if (tab?.dirty && tab.error) return 'failed';
+  return 'saved';
+}
+
 interface PendingTabUpdate {
   tabData: Map<string, TabState>;
   tabOrder: string[];
@@ -179,6 +193,9 @@ export function useTabs(options?: {
   const nextLoadRequestIdRef = useRef(1);
   const abortControllersRef = useRef(new Map<string, AbortController>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Writes queued or in flight per path, for getSaveState. Counted rather
+  // than flagged because the queue can hold several writes for one file.
+  const pendingSavesRef = useRef(new Map<string, number>());
 
   const setTabDataState = useCallback(
     (updater: Map<string, TabState> | ((prev: Map<string, TabState>) => Map<string, TabState>)) => {
@@ -534,6 +551,8 @@ export function useTabs(options?: {
       // is correct because the queue serializes saves, so save1's returned mtime
       // is already written to the ref before save2 runs. Saves to different
       // files share the same queue, which is fine — they don't race anyway.
+      const pending = pendingSavesRef.current;
+      pending.set(path, (pending.get(path) ?? 0) + 1);
       saveQueueRef.current = saveQueueRef.current.then(async () => {
         const currentMtime = tabDataRef.current.get(path)?.mtime;
         try {
@@ -567,6 +586,10 @@ export function useTabs(options?: {
           const msg = err instanceof Error ? err.message : 'Failed to save file';
           updateTab(path, { error: msg });
           onSaveError?.(msg);
+        } finally {
+          const left = (pending.get(path) ?? 1) - 1;
+          if (left > 0) pending.set(path, left);
+          else pending.delete(path);
         }
       });
     },
@@ -579,6 +602,12 @@ export function useTabs(options?: {
       saveFileAt(activeFilePath, content);
     },
     [activeFilePath, saveFileAt],
+  );
+
+  const getSaveState = useCallback(
+    (path: string): SaveState =>
+      saveStateOf(tabDataRef.current.get(path), pendingSavesRef.current.get(path) ?? 0),
+    [],
   );
 
   const getTabSnapshot = useCallback((path: string): TabState | undefined => {
@@ -683,6 +712,7 @@ export function useTabs(options?: {
     switchTab,
     saveFile,
     saveFileAt,
+    getSaveState,
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,

@@ -47,22 +47,30 @@ describe('useDiffSnapshot', () => {
     expect(result.current.currentSnapshot).toBe('saved text');
   });
 
-  it('captureReference with extraEntries saves additional file references', () => {
+  it('captureReferences saves exactly the files it is given', () => {
     const { hookArgs } = setup('/a.md', 'content a');
     const { result, rerender } = renderHook(({ args }) => useDiffSnapshot(...args), {
       initialProps: { args: hookArgs },
     });
 
-    const extras = new Map([
-      ['/b.md', 'content b'],
-      ['/c.md', 'content c'],
-    ]);
-    act(() => result.current.captureReference('handoff', extras));
+    act(() =>
+      result.current.captureReferences(
+        new Map([
+          ['/b.md', 'content b'],
+          ['/c.md', 'content c'],
+        ]),
+        'handoff',
+      ),
+    );
 
-    // Current file has its reference
-    expect(result.current.currentSnapshot).toBe('content a');
+    // A handoff from the picker can leave the active tab out, and its
+    // reference must not move when it does.
+    expect(result.current.currentSnapshot).toBeNull();
+    expect(result.current.getReference('/b.md')).toEqual(
+      expect.objectContaining({ content: 'content b', origin: 'handoff' }),
+    );
+    expect(result.current.getReference('/c.md')?.content).toBe('content c');
 
-    // Switch to /b.md to verify extra entry was saved
     const { hookArgs: bArgs } = setup('/b.md', '');
     rerender({ args: bArgs });
     expect(result.current.currentSnapshot).toBe('content b');

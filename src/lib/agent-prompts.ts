@@ -1,8 +1,28 @@
+import { getEffectiveStatus, type MdComment } from '../types';
+
+/**
+ * The comments a handoff sends: the reviewer's own open ones. An agent's
+ * question or note (`agentInitiated`) is answered in place, and a resolved
+ * comment is finished in either mode (#159). The Hand off button counts these,
+ * the prompt names them by id, and the eval adapters hand over the same set.
+ */
+export function handoffComments(comments: readonly MdComment[]): MdComment[] {
+  return comments.filter((c) => !c.agentInitiated && getEffectiveStatus(c) !== 'resolved');
+}
+
 export interface BuildAddressCommentsPromptOptions {
   filePaths: string[];
   commentCounts: Map<string, number>;
   enableResolve: boolean;
   commentIds?: string[];
+  /**
+   * The review session the agent can post `mdr_ask` questions into. Only a
+   * session that stays open after this prompt is delivered qualifies: a
+   * clipboard handoff has none, and Send & finish closes its session, so in
+   * both cases the prompt leaves `mdr_ask` out rather than point the agent at
+   * a sessionId it does not have.
+   */
+  askSessionId?: string;
 }
 
 export function buildAddressCommentsPrompt({
@@ -10,6 +30,7 @@ export function buildAddressCommentsPrompt({
   commentCounts,
   enableResolve,
   commentIds,
+  askSessionId,
 }: BuildAddressCommentsPromptOptions): string {
   if (filePaths.length === 0) return '';
 
@@ -61,6 +82,14 @@ export function buildAddressCommentsPrompt({
     'and a comment that already carried a reply from you, with no later reply from me, was answered in an earlier round. ' +
     'If I replied after your last reply on an open comment, address my latest reply and add a new reply.';
 
+  const askSection = askSessionId
+    ? `## Asking me a question
+
+If a comment is ambiguous, or you encounter a planning fork while editing where the right answer would meaningfully change your edit, you may call the \`mdr_ask\` tool to post one or more anchored questions to me. Pass \`sessionId\` "${askSessionId}", the file path, the exact text to anchor against, and your question. The tool blocks until I have replied to every question. Prefer asking over guessing when the answer matters.
+
+`
+    : '';
+
   const isSingle = filePaths.length === 1;
   const fileRef = isSingle ? filePaths[0] : 'the files listed below';
   const fileList = isSingle
@@ -111,11 +140,7 @@ ${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
 4. ${afterAction}
 5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it
 
-## Asking me a question
-
-If a comment is ambiguous, or you encounter a planning fork while editing where the right answer would meaningfully change your edit, you may call the \`mdr_ask\` tool to post one or more anchored questions to me. Pass the \`sessionId\` from this review and the file path, the exact text to anchor against, and your question. The tool blocks until I have replied to every question. Prefer asking over guessing when the answer matters.
-
-## How to respond
+${askSection}## How to respond
 
 After you are done, give me a brief summary:
 - How many comments you addressed${isSingle ? '' : ' (grouped by file)'}

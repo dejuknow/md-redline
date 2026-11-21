@@ -111,6 +111,9 @@ describe('ReviewBanner', () => {
     expect(callBody.prompt).toContain("I've left review comments");
     expect(callBody.prompt).toContain('/tmp/spec-a.md');
     expect(callBody.commentIds).toEqual(['c1', 'c2', 'c3']);
+    // The session stays open after a batch, so the agent may ask in it.
+    expect(callBody.prompt).toContain('mdr_ask');
+    expect(callBody.prompt).toContain('"rev_1"');
 
     expect(onHandoffSuccess).toHaveBeenCalledWith(session);
     expect(onResolved).not.toHaveBeenCalled();
@@ -120,6 +123,38 @@ describe('ReviewBanner', () => {
     const toastMessage = showToast.mock.calls[0][0];
     expect(toastMessage).toContain('3 comments');
   });
+
+  it.each([/send \d+ comment/i, /send \d+ & finish/i])(
+    '%s sends nothing while the session files have unsaved comments',
+    async (button) => {
+      const ensureSaved = vi.fn(() => false);
+      render(
+        <ReviewBanner
+          sessions={[session]}
+          commentCounts={
+            new Map([
+              ['/tmp/spec-a.md', 1],
+              ['/tmp/spec-b.md', 0],
+            ])
+          }
+          onHandoffSuccess={() => {}}
+          onResolved={() => {}}
+          ensureSaved={ensureSaved}
+          commentIdsByFile={
+            new Map([
+              ['/tmp/spec-a.md', ['c1']],
+              ['/tmp/spec-b.md', []],
+            ])
+          }
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: button }));
+
+      await waitFor(() => expect(ensureSaved).toHaveBeenCalledWith(session.filePaths));
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('Finish review with zero unsent comments POSTs to /finish with commentCounts but no prompt', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
@@ -271,6 +306,8 @@ describe('ReviewBanner', () => {
     const callBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(callBody.prompt).toBeDefined();
     expect(callBody.commentIds).toEqual(['c1', 'c2']);
+    // Finish closes the session, so the prompt must not offer mdr_ask on it.
+    expect(callBody.prompt).not.toContain('mdr_ask');
     expect(callBody.commentCounts).toEqual({ '/tmp/spec-a.md': 1, '/tmp/spec-b.md': 1 });
 
     expect(onHandoffSuccess).toHaveBeenCalledWith(session);

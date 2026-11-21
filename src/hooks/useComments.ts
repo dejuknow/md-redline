@@ -27,12 +27,12 @@ import {
 } from '../lib/comment-parser';
 import { randomId } from '../lib/random-id';
 import { computeUserRepliedLast } from '../lib/answered-comments';
-import { getEffectiveStatus, type MdComment } from '../types';
+import { getEffectiveStatus } from '../types';
 import { findHiddenHtmlComments, renderMarkdown } from '../markdown/pipeline';
 import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
-import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
+import { buildAddressCommentsPrompt, handoffComments } from '../lib/agent-prompts';
 import type { ShowToast } from './useToast';
 import type { UndoEntry, UndoSlot } from './useUndoSlot';
 
@@ -165,11 +165,10 @@ export function useComments(params: UseCommentsParams) {
       const resolvedCounts = new Map<string, number>();
       const idsByFile = new Map<string, string[]>();
       const agentCounts = new Map<string, number>();
-      const isCounted = (c: MdComment) => getEffectiveStatus(c) !== 'resolved';
       for (const tab of tabs) {
         if (tab.filePath === activeFilePath) {
           const userComments = comments.filter((c) => !c.agentInitiated);
-          const countedComments = userComments.filter(isCounted);
+          const countedComments = handoffComments(comments);
           counts.set(tab.filePath, countedComments.length);
           idsByFile.set(
             tab.filePath,
@@ -187,7 +186,7 @@ export function useComments(params: UseCommentsParams) {
           try {
             const { comments: tabComments } = parseComments(tab.rawMarkdown);
             const userTabComments = tabComments.filter((c) => !c.agentInitiated);
-            const countedTabComments = userTabComments.filter(isCounted);
+            const countedTabComments = handoffComments(tabComments);
             counts.set(tab.filePath, countedTabComments.length);
             idsByFile.set(
               tab.filePath,
@@ -455,29 +454,42 @@ export function useComments(params: UseCommentsParams) {
     updateAndSave(removeResolvedComments(rawMarkdownRef.current ?? ''));
   }, [updateAndSave, rawMarkdownRef]);
 
+  /**
+   * Copy the handoff prompt for the given files. Resolves true once the
+   * clipboard holds it, so the caller only treats a successful copy as a
+   * handoff (the diff reference moves on it).
+   */
   const handleCopyAgentPrompt = useCallback(
-    (filePaths: string[]) => {
-      if (filePaths.length === 0) return;
+    async (filePaths: string[]): Promise<boolean> => {
+      if (filePaths.length === 0) return false;
+      // Name exactly the comments the button counts. Without ids the prompt
+      // told the agent to address every marker in the file, which reached
+      // agent-authored threads the reviewer never handed off.
+      const commentIds = filePaths.flatMap((path) => commentIdsByFile.get(path) ?? []);
       const prompt = buildAddressCommentsPrompt({
         filePaths,
         commentCounts,
         enableResolve,
+        commentIds,
       });
 
       const fileCount = filePaths.length;
-      navigator.clipboard.writeText(prompt).then(
-        () =>
-          showToast(
-            `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}. Now tracking changes.`,
-            'success',
-          ),
+      try {
+        await navigator.clipboard.writeText(prompt);
+      } catch {
         // The clipboard API needs a secure context. "Try from localhost" was
         // wrong advice for anyone reaching md-redline through a proxy, which
         // MD_REDLINE_ALLOWED_HOSTS now makes a supported setup.
-        () => showToast("Couldn't copy to clipboard. Needs https:// or localhost.", 'error'),
+        showToast("Couldn't copy to clipboard. Needs https:// or localhost.", 'error');
+        return false;
+      }
+      showToast(
+        `Copied agent instructions for ${fileCount} file${fileCount !== 1 ? 's' : ''}. Now tracking changes.`,
+        'success',
       );
+      return true;
     },
-    [commentCounts, showToast, enableResolve],
+    [commentCounts, commentIdsByFile, showToast, enableResolve],
   );
 
   const handleHighlightClick = useCallback((commentId: string) => {

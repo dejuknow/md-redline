@@ -113,14 +113,30 @@ describe('buildAddressCommentsPrompt — anchor maintenance', () => {
 });
 
 describe('buildAddressCommentsPrompt — mdr_ask hint', () => {
-  it('mentions the mdr_ask tool so agents know it exists', () => {
+  it('mentions the mdr_ask tool and names the session when one is live', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/a.md'],
+      commentCounts: new Map([['/tmp/a.md', 1]]),
+      enableResolve: false,
+      askSessionId: 'sess-123',
+    });
+    expect(prompt).toContain('mdr_ask');
+    expect(prompt.toLowerCase()).toMatch(/anchored.*question/);
+    expect(prompt).toContain('"sess-123"');
+  });
+
+  // A clipboard handoff has no session, and Send & finish closes the one it
+  // had, so an agent told to pass "the sessionId from this review" has
+  // nothing it could pass.
+  it('leaves mdr_ask out when there is no live session to ask in', () => {
     const prompt = buildAddressCommentsPrompt({
       filePaths: ['/tmp/a.md'],
       commentCounts: new Map([['/tmp/a.md', 1]]),
       enableResolve: false,
     });
-    expect(prompt).toContain('mdr_ask');
-    expect(prompt.toLowerCase()).toMatch(/anchored.*question/);
+    expect(prompt).not.toContain('mdr_ask');
+    expect(prompt).not.toContain('sessionId');
+    expect(prompt).toContain('leave the marker in place and ask me about it');
   });
 });
 

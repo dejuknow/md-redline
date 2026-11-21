@@ -594,6 +594,9 @@ describe('ReviewSessionStore', () => {
         expect(result.commentIds).toEqual(['c2']);
         // The rebuilt prompt must reference the queued comment ID.
         expect(result.prompt).toMatch(/`c2`/);
+        // The session stays open after a batch, so the agent can ask in it.
+        expect(result.prompt).toContain(`mdr_ask`);
+        expect(result.prompt).toContain(`"${session.id}"`);
       }
       expect(store.getQueuedBatch(session.id)).toBeNull();
     });
@@ -651,6 +654,8 @@ describe('ReviewSessionStore', () => {
       expect(result.status).toBe('done');
       if (result.status === 'done') {
         expect(result.prompt).toMatch(/`c2`/);
+        // Finish closes the session, so there is nowhere to ask.
+        expect(result.prompt).not.toContain('mdr_ask');
       }
       expect(store.getQueuedBatch(session.id)).toBeNull();
       expect(store.getSession(session.id)?.sentCommentIds).toEqual(['c1', 'c2']);
