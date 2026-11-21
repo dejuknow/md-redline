@@ -1092,3 +1092,39 @@ describe('CommentCard — anchor badges', () => {
     expect(screen.queryByText('Changed')).toBeNull();
   });
 });
+
+describe('CommentCard links', () => {
+  it('turns URLs in the comment and its replies into new-tab links', async () => {
+    renderCard({
+      comment: {
+        ...baseComment,
+        text: 'See https://example.com/spec?id=1, then decide.',
+        replies: [
+          {
+            id: 'r1',
+            text: 'Also www.example.org',
+            author: 'Dennis',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+    const link = await screen.findByRole('link', { name: 'https://example.com/spec?id=1' });
+    expect(link.getAttribute('href')).toBe('https://example.com/spec?id=1');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link.closest('p')?.textContent).toBe('See https://example.com/spec?id=1, then decide.');
+    const replyLink = screen.getByRole('link', { name: 'www.example.org' });
+    expect(replyLink.getAttribute('href')).toBe('https://www.example.org');
+  });
+
+  it('a click on a link does not also select the card', async () => {
+    const onActivate = vi.fn();
+    renderCard({
+      comment: { ...baseComment, text: 'https://example.com' },
+      onActivate,
+    });
+    fireEvent.click(await screen.findByRole('link', { name: 'https://example.com' }));
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+});

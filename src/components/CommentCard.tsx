@@ -15,6 +15,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import type { CommentCardEditorState } from '../lib/comment-editor-state';
 import { timeAgo } from '../lib/time-ago';
 import { ActionButton } from './ActionButton';
+import { LinkifiedText } from './LinkifiedText';
 
 interface Props {
   comment: MdComment;
@@ -393,7 +394,7 @@ export const CommentCard = memo(function CommentCard({
               ? `${comment.recoveredAnchor}\n\nOriginally anchored to: "${comment.anchor}"`
               : comment.anchor
           }
-          className={`comment-quote flex-1 min-w-0 line-clamp-2 ${isResolved ? 'comment-quote-resolved' : ''}`}
+          className={`comment-quote flex-1 min-w-0 line-clamp-2 wrap-anywhere ${isResolved ? 'comment-quote-resolved' : ''}`}
         >
           &ldquo;{comment.recoveredAnchor ?? comment.anchor}&rdquo;
         </div>
@@ -505,11 +506,11 @@ export const CommentCard = memo(function CommentCard({
           <div>
             <p
               ref={textRef}
-              className={`text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere ${
                 isResolved ? 'text-content-muted line-through' : 'text-content'
               } ${!isTextExpanded ? 'line-clamp-4' : ''}`}
             >
-              {comment.text}
+              <LinkifiedText text={comment.text} />
             </p>
             {(isClamped || isTextExpanded) && (
               <button
@@ -660,8 +661,8 @@ export const CommentCard = memo(function CommentCard({
                   </div>
                 ) : (
                   <>
-                    <p className="text-content-secondary leading-relaxed whitespace-pre-wrap">
-                      {reply.text}
+                    <p className="text-content-secondary leading-relaxed whitespace-pre-wrap wrap-anywhere">
+                      <LinkifiedText text={reply.text} />
                     </p>
                     <div className="mt-1 flex items-center justify-between gap-2">
                       <span className="min-w-0 flex flex-1 items-center gap-1 text-content-muted">
