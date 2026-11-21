@@ -1201,6 +1201,12 @@ describe('/api/pick-file', () => {
   });
 });
 
+// These tests run the macOS branch on every CI runner, so on Windows the real
+// temp folders carry backslashes that the AppleScript literal escapes.
+function appleScriptEscape(path: string) {
+  return path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 describe('/api/pick-folder', () => {
   it('persists the picked folder to trustedRoots', async () => {
     const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-persist-'));
@@ -1250,7 +1256,7 @@ describe('/api/pick-folder', () => {
     expect(calls).toHaveLength(1);
     const argsJoined = calls[0].args.join(' ');
     expect(argsJoined).toContain('choose folder');
-    expect(argsJoined).toContain(`default location POSIX file "${targetPath}"`);
+    expect(argsJoined).toContain(`default location POSIX file "${appleScriptEscape(targetPath)}"`);
 
     await new Promise((r) => setTimeout(r, 50));
     await rm(realHome, { recursive: true, force: true });
@@ -1281,7 +1287,9 @@ describe('/api/pick-folder', () => {
     );
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
-    expect(calls[0].args.join(' ')).toContain(`default location POSIX file "${pickedRoot}"`);
+    expect(calls[0].args.join(' ')).toContain(
+      `default location POSIX file "${appleScriptEscape(pickedRoot)}"`,
+    );
 
     await new Promise((r) => setTimeout(r, 50));
     await rm(realHome, { recursive: true, force: true });
