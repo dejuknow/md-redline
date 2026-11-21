@@ -190,6 +190,33 @@ test.describe('An unsent comment draft', () => {
     expect(readFileSync(FIXTURE_1, 'utf8')).toBe(edited);
   });
 
+  // #212: a form that never left gets the same check as one handed back.
+  test('is refused when the file changes while the form stays open', async ({ page }) => {
+    await openFixture(page);
+    const draft = 'Typed while the agent edited the file';
+    await startDraft(page, 'brute force attacks', draft);
+    await expect(form(page).getByRole('button', { name: 'Comment' })).toBeEnabled();
+
+    const edited = TEST_DOC_BASELINE.replace('## Section Three', '## Section Three, revised');
+    await expect(async () => {
+      writeFileSync(FIXTURE_1, edited);
+      await expect(page.locator('.prose')).toContainText('Section Three, revised', {
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 15_000 });
+    await expect(selectionMark(page)).toHaveCount(0);
+
+    // Said at once, not only after a refused submit.
+    await expect(form(page).getByRole('alert')).toContainText(
+      'The file changed since you selected this text',
+      { timeout: 5000 },
+    );
+    await expect(form(page).getByRole('button', { name: 'Comment' })).toBeDisabled();
+    await draftField(page).press(withMod('Enter'));
+    await expect(draftField(page)).toHaveValue(draft);
+    expect(readFileSync(FIXTURE_1, 'utf8')).toBe(edited);
+  });
+
   test('comes back saying it cannot be placed when the file lost its text meanwhile', async ({
     page,
   }) => {

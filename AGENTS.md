@@ -1124,6 +1124,20 @@ cannot show.
   - While a draft handed back is open, a change makes it not postable from
     then on, and the file going back to exactly what it was makes it postable
     again.
+  - **A form that never left gets the same check (#212).** Any committed
+    selection is judged against the markdown and view it was made on, so an
+    edit landing while the reader types makes it not postable too, and the
+    file going back makes it postable again. Without this, an open form kept
+    Comment available after an edit and placement only checked that the words
+    still existed somewhere, so it could post on another copy of them. A
+    selection made after the edit is placed as usual. With nothing typed, the
+    form collapses to the status pill, which then gives the same reason
+    ("The file changed since you selected this text." / "Select it again to
+    comment."); with a draft, the form stays and goes straight to the
+    failed state with that reason, Comment off, as a draft handed back does,
+    and comes back if the file returns to what it was. Selecting the same words
+    again reopens a quick-comment form; the file merely going back does not, so
+    focus stays where the reader put it.
   - A selection made in the diff overlay counts as changed whenever the
     plain viewer shows the file instead: its offset and context were read over
     the diff's text, deleted blocks included, and point elsewhere in the plain
@@ -1131,15 +1145,15 @@ cannot show.
     viewer still comes back postable over the diff, as before.
   - The alert says why, rather than the #191 copy, which blames symbols in the
     selected text: "The file changed since you selected this text." or "This
-    text was selected in the diff view." (`restoredReason`, passed as
-    `failedReason` to `CommentForm`).
+    text was selected in the diff view." (`unplaceableReason`, passed as
+    `failedReason` to `CommentForm`, whose status pill uses it too).
   - A draft whose submit had already failed (#191) comes back failed whatever
     the file says now: the form reports `failed` with its text.
-  - Not postable means `restoredUnplaceable`: the selection is neither painted
+  - Not postable means `selectionUnplaceable`: the selection is neither painted
     nor offered to "re-anchor to selection", since the viewer would find the
     words somewhere else, and `App` refuses its submit. Submit also checks the
     file's current source (`rawMarkdownRef`, through the same `draftDocKey`)
-    against what the selection was made on, since a file-watcher update can
+    against what the selection was made on (`selectionDoc`), since a file-watcher update can
     reach the source before the screen.
   - The commit that switches files renders before the selection is cleared,
     with the outgoing file's selection still committed. The hook tracks which

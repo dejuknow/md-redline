@@ -924,6 +924,7 @@ export default function App() {
   const escapeOwnedElsewhereRef = useRef<() => boolean>(() => false);
   const {
     selection,
+    pendingSelection,
     commentSelection,
     isPending,
     clearSelection,
@@ -1645,14 +1646,15 @@ export default function App() {
   const {
     reportDraft,
     restoredDraft,
-    restoredDoc,
-    restoredUnplaceable,
-    restoredReason,
+    selectionDoc,
+    selectionUnplaceable,
+    unplaceableReason,
     selectionStale,
     formKey: draftFormKey,
   } = useCommentDrafts({
     surfaceFile: viewMode === 'rendered' && !firstLoadInProgress ? activeFilePath : null,
     selection,
+    pendingSelection,
     docText: draftDocText,
     underDiff: renderedDiffVisible,
     clearSelection,
@@ -1663,7 +1665,7 @@ export default function App() {
   // somewhere else, and "re-anchor to selection" would move a comment there.
   // Nor another file's, for the one commit that switches files before the
   // selection is cleared.
-  const paintedSelection = restoredUnplaceable || selectionStale ? null : selection;
+  const paintedSelection = selectionUnplaceable || selectionStale ? null : selection;
   const mermaidRendererEnabled = mermaidFullscreen.isOpen || renderedViewerActive;
   const mermaidSvgMap = useMermaidRenderer(
     cleanMarkdown,
@@ -2381,8 +2383,8 @@ export default function App() {
   const selectionPlaceable = useMemo(
     () =>
       !commentSelection ||
-      (!restoredUnplaceable && canPlaceRenderedSelection(cleanMarkdown, commentSelection)),
-    [cleanMarkdown, commentSelection, canPlaceRenderedSelection, restoredUnplaceable],
+      (!selectionUnplaceable && canPlaceRenderedSelection(cleanMarkdown, commentSelection)),
+    [cleanMarkdown, commentSelection, canPlaceRenderedSelection, selectionUnplaceable],
   );
   // For the keyboard shortcuts, which read refs rather than re-subscribing.
   // The form gave way on its own; the keyboard's request to open it is spent,
@@ -2396,14 +2398,21 @@ export default function App() {
   selectionPlaceableRef.current = selectionPlaceable;
   const canPlaceSelection = useCallback(
     (sel: SelectionInfo) =>
-      // The draft handed back on a changed file: its Comment item would only
-      // reopen a form whose submit is refused.
+      // The committed selection can no longer take a comment (its file changed
+      // since it was made, or it was made in the diff view): its Comment item
+      // would only open a form whose submit is refused. A draft handed back
+      // also matches by text and offset, as it always has; any other
+      // selection only by identity, so a fresh selection of the same words
+      // made after the edit keeps its Comment item.
       !(
-        restoredUnplaceable &&
+        selectionUnplaceable &&
         selection !== null &&
-        (sel === selection || (sel.text === selection.text && sel.offset === selection.offset))
+        (sel === selection ||
+          (restoredDraft !== null &&
+            sel.text === selection.text &&
+            sel.offset === selection.offset))
       ) && canPlaceRenderedSelection(cleanMarkdown, sel),
-    [cleanMarkdown, canPlaceRenderedSelection, restoredUnplaceable, selection],
+    [cleanMarkdown, canPlaceRenderedSelection, selectionUnplaceable, selection, restoredDraft],
   );
 
   // Context menu handlers
@@ -3899,7 +3908,7 @@ export default function App() {
               autoExpand={autoExpandForm}
               initialDraft={restoredDraft ?? undefined}
               onDraftChange={reportDraft}
-              failedReason={restoredReason ?? undefined}
+              failedReason={unplaceableReason ?? undefined}
               placeable={selectionPlaceable}
               hidden={viewerCtxMenu.isOpen}
               overlayOpen={activeModal !== null || drawerOpen}
@@ -3909,11 +3918,11 @@ export default function App() {
                 // other words, so it is refused the way an unplaceable one
                 // is. Checked again against the source being written, which
                 // a file-watcher update can reach before the screen does.
-                restoredUnplaceable ||
+                selectionUnplaceable ||
                 selectionStale ||
-                (restoredDoc !== null &&
+                (selectionDoc !== null &&
                   draftDocKey(parseComments(rawMarkdownRef.current ?? '').cleanMarkdown, html) !==
-                    restoredDoc)
+                    selectionDoc)
                   ? false
                   : handleAddComment(anchor, text, ctxBefore, ctxAfter, hintOffset)
               }

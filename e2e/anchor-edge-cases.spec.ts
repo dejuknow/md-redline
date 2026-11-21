@@ -300,7 +300,7 @@ test.describe('A selection the file cannot place', () => {
 });
 
 test.describe('A comment the file cannot place', () => {
-  test('keeps the form open with the draft when the file changes under it (#191)', async ({
+  test('keeps the form open with the draft when the file changes under it (#191, #212)', async ({
     page,
   }) => {
     // The selection places when it is made, so the up-front check passes. The
@@ -319,15 +319,17 @@ test.describe('A comment the file cannot place', () => {
     await page.getByPlaceholder('Add your comment...').fill(draft);
 
     // Rewrite the file without the selected text and wait for the app to load it.
+    // Any change to the file makes the selection unplaceable (#212), so the
+    // form says why at once and Comment turns off, keeping the draft.
     const changed = '# Anchor Edge Cases\n\nShip the green launch today.\n\nOther text.\n';
     writeFileSync(fixturePath, changed);
     await expect(page.locator('.prose')).toContainText('green launch', { timeout: 15_000 });
 
-    await form.getByRole('button', { name: 'Comment' }).click();
-
-    await expect(page.getByText(/Couldn't anchor that comment/)).toBeVisible();
+    await expect(form.getByRole('alert')).toContainText(
+      'The file changed since you selected this text',
+    );
+    await expect(form.getByRole('button', { name: 'Comment' })).toBeDisabled();
     await expect(page.getByPlaceholder('Add your comment...')).toHaveValue(draft);
-    await expect(form.getByRole('alert')).toContainText('find this text in the file');
     expect(readFileSync(fixturePath, 'utf8')).toBe(changed);
 
     // The text coming back clears the failure and Comment works again.
@@ -356,7 +358,9 @@ test.describe('A form the keyboard opened', () => {
     // Nothing typed, and the file loses the text: the empty form gives way.
     writeFileSync(fixturePath, changed);
     await expect(page.locator('.prose')).toContainText('green launch', { timeout: 15_000 });
-    await expect(form.getByRole('status')).toContainText('Can’t comment on this text.');
+    await expect(form.getByRole('status')).toContainText(
+      'The file changed since you selected this text.',
+    );
     await expect(input).toHaveCount(0);
 
     // The text comes back. The reader did not ask for the composer again, so

@@ -68,10 +68,11 @@ interface Props {
    */
   onDraftChange?: (draft: CommentDraft) => void;
   /**
-   * Why a draft handed back after the reader was away (#196) cannot be
-   * posted, so a failed submit says so rather than blaming the selected text:
-   * the file changed since its selection was made, or the selection was made
-   * in the diff view and the plain view shows the file now.
+   * Why the selection cannot take a comment when the selected text is not to
+   * blame: the file changed since it was made, whether the form stayed open
+   * (#212) or its draft was handed back after the reader was away (#196), or
+   * it was made in the diff view and the plain view shows the file now. A
+   * failed submit and the status pill say so instead of blaming the text.
    */
   failedReason?: 'changed' | 'diff';
 }
@@ -272,19 +273,50 @@ export function CommentForm({
   // selection is handled above). Placeable again: Comment comes back, but a
   // failed submit on a selection that was placeable all along stays failed.
   // No longer placeable: an empty form gives way to the status as it would
-  // for a new selection; a draft stays, and submit says why.
-  const prevAvailabilityRef = useRef({ selectionKey, placeable });
+  // for a new selection; a draft stays, and submit says why (or, when the
+  // file changed, the form says so at once).
+  const prevAvailabilityRef = useRef({ selectionKey, placeable, selection });
   useEffect(() => {
     const prev = prevAvailabilityRef.current;
-    prevAvailabilityRef.current = { selectionKey, placeable };
-    if (!isExpanded || prev.selectionKey !== selectionKey || prev.placeable === placeable) return;
+    prevAvailabilityRef.current = { selectionKey, placeable, selection };
+    if (prev.selectionKey !== selectionKey || prev.placeable === placeable) return;
+    if (!isExpanded) {
+      // Selecting the same words again after an edit made them unplaceable
+      // (#212) gives the same key, so the selection-change effect above never
+      // runs; open the form here the way quick comment does for a new one.
+      // Only for a new selection: the file going back to what it was leaves
+      // the reader wherever they are now (Find, another field).
+      if (placeable && prev.selection !== selection && settings.quickComment && !isPending) {
+        onLock();
+        setIsExpanded(true);
+      }
+      return;
+    }
     if (placeable) {
       setAnchorFailed(false);
     } else if (!text.trim()) {
       setIsExpanded(false);
       onUnlock();
+    } else if (failedReason) {
+      // The file changed under a typed draft (#212): show why now, the way a
+      // draft handed back does, rather than leave Comment and the templates
+      // offering a submit that will be refused.
+      setAnchorFailed(true);
+      setShowTemplates(false);
+      setPrefillPristine(false);
     }
-  }, [selectionKey, placeable, isExpanded, text, onUnlock]);
+  }, [
+    selectionKey,
+    placeable,
+    selection,
+    failedReason,
+    isExpanded,
+    text,
+    onLock,
+    onUnlock,
+    settings.quickComment,
+    isPending,
+  ]);
 
   // Baseline for the scroll-delta fallback, captured once per mount (the
   // selection-change effect above refreshes it for subsequent selections).
@@ -520,10 +552,24 @@ export function CommentForm({
       {!placeable && statusRegionReady && (
         <div className="selection-pill-enter px-3 py-1.5 max-w-[calc(100vw-24px)] bg-surface-raised border border-border rounded-2xl shadow-lg">
           <div className="max-w-72 text-xs text-danger-text">
-            <p className="font-semibold">Can&rsquo;t comment on this text.</p>
-            <p className="mt-0.5">
-              Part of it is written differently in the file. Try a shorter selection.
-            </p>
+            {failedReason === 'changed' ? (
+              <>
+                <p className="font-semibold">The file changed since you selected this text.</p>
+                <p className="mt-0.5">Select it again to comment.</p>
+              </>
+            ) : failedReason === 'diff' ? (
+              <>
+                <p className="font-semibold">This text was selected in the diff view.</p>
+                <p className="mt-0.5">Select it again here, or show the diff to comment there.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">Can&rsquo;t comment on this text.</p>
+                <p className="mt-0.5">
+                  Part of it is written differently in the file. Try a shorter selection.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

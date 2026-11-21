@@ -362,6 +362,21 @@ describe('CommentForm on a selection the file cannot place', () => {
     expect(status.isConnected).toBe(true);
   });
 
+  // #212: an edit landing under a selection is not the selected text's fault.
+  it('says the file changed when that is why the pill cannot comment', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
+    const { update } = renderControlledForm({ placeable: true });
+
+    await screen.findByRole('button', { name: /Comment/ });
+    const status = screen.getByRole('status');
+    update({ placeable: false, failedReason: 'changed' });
+    await waitFor(() =>
+      expect(status.textContent).toContain('The file changed since you selected this text.'),
+    );
+    expect(status.textContent).toContain('Select it again to comment.');
+    expect(status.textContent).not.toContain(UNPLACEABLE_DETAIL);
+  });
+
   it('shows why a selection cannot be commented on', async () => {
     fetchPreferences.mockResolvedValue({ settings: { templates: TEMPLATES_3 } });
     renderForm({ placeable: false });
@@ -493,6 +508,63 @@ describe('CommentForm on a selection the file cannot place', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(onUnlock).toHaveBeenCalledTimes(1);
     expect(onLock).toHaveBeenCalledTimes(1);
+  });
+
+  // #212: an edit makes the open, empty form unplaceable and it gives way.
+  // Selecting the same words again has the same key, so only the change back
+  // to placeable can reopen it.
+  it('reopens a quickComment form when the same words are selected again after an edit', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onLock = vi.fn();
+    const onUnlock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onLock, onUnlock });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    update({ placeable: false, failedReason: 'changed' });
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+
+    update({ placeable: true, failedReason: undefined, selection: { ...selection } });
+    expect(await screen.findByPlaceholderText('Add your comment...')).toBeTruthy();
+    expect(onLock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reopen a quickComment form when the file merely goes back', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const onLock = vi.fn();
+    const { update } = renderControlledForm({ placeable: true, onLock });
+
+    await screen.findByPlaceholderText('Add your comment...');
+    update({ placeable: false, failedReason: 'changed' });
+    // The same selection object: no new gesture, only the file reverting.
+    update({ placeable: true, failedReason: undefined });
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows why at once when the file changes under a typed draft', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { templates: TEMPLATES_3, quickComment: true },
+    });
+    const { update } = renderControlledForm({ placeable: true });
+
+    const field = await screen.findByPlaceholderText('Add your comment...');
+    fireEvent.change(field, { target: { value: 'half a thought' } });
+    update({ placeable: false, failedReason: 'changed' });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/The file changed since you selected this text/);
+    expect(screen.getByRole('button', { name: 'Comment' })).toHaveProperty('disabled', true);
+    expect((field as HTMLTextAreaElement).value).toBe('half a thought');
+
+    // The file going back makes it postable again.
+    update({ placeable: true, failedReason: undefined });
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Comment' })).toHaveProperty('disabled', false);
   });
 
   it('keeps a typed draft open when its selection widens to unplaceable text', async () => {
