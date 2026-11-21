@@ -222,6 +222,54 @@ describe('wrapText return value', () => {
   });
 });
 
+describe('wrapText across inline code chips', () => {
+  // A highlight that ends or starts partway into an inline code span used to
+  // split the <code> in two. Each half kept the chip's padding, so the line
+  // reflowed under the reader as soon as the selection landed.
+  const paint = (html: string, text: string) => {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    wrapText(container, text, (mark) => {
+      mark.className = 'selection-highlight';
+    });
+    return container;
+  };
+
+  it('does not split a code chip the highlight ends inside', () => {
+    const container = paint(
+      '<p>notes (<code>slack.md</code>, <code>jira.md</code>, <code>code.md</code>)</p>',
+      'notes (slack.md, ji',
+    );
+    const codes = Array.from(container.querySelectorAll('code')).map((c) => c.textContent);
+    expect(codes).toEqual(['slack.md', 'jira.md', 'code.md']);
+    const marked = Array.from(container.querySelectorAll('mark.selection-highlight'))
+      .map((m) => m.textContent)
+      .join('');
+    expect(marked).toBe('notes (slack.md, ji');
+    expect(container.querySelector('code mark.selection-highlight')?.textContent).toBe('ji');
+  });
+
+  it('does not split a code chip the highlight starts inside', () => {
+    const container = paint('<p>see <code>jira.md</code> and more</p>', 'ra.md and');
+    const codes = Array.from(container.querySelectorAll('code')).map((c) => c.textContent);
+    expect(codes).toEqual(['jira.md']);
+    expect(container.querySelector('code mark.selection-highlight')?.textContent).toBe('ra.md');
+    expect(container.textContent).toBe('see jira.md and more');
+  });
+
+  it('keeps a code chip covered from its first character whole inside the mark', () => {
+    const container = paint('<p>see <code>jira.md</code> and more</p>', 'jira.md and');
+    expect(container.querySelectorAll('code')).toHaveLength(1);
+    expect(container.querySelector('mark.selection-highlight > code')?.textContent).toBe('jira.md');
+  });
+
+  it('does not split a code chip nested in bold', () => {
+    const container = paint('<p>see <strong><code>jira.md</code></strong> end</p>', 'see ji');
+    const codes = Array.from(container.querySelectorAll('code')).map((c) => c.textContent);
+    expect(codes).toEqual(['jira.md']);
+  });
+});
+
 describe('MarkdownViewer onHighlightsPainted: unpainted anchors (#99)', () => {
   it('reports the id of an open comment whose anchor is in the file but not the render', async () => {
     // renderMarkdown defaults renderHtmlComments to false, so the HTML

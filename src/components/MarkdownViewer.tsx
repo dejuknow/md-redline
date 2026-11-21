@@ -1041,12 +1041,63 @@ export function wrapText(
       range.setStart(firstWrap.node, firstWrap.start);
       range.setEnd(lastWrap.node, lastWrap.end);
 
-      try {
-        const fragment = range.extractContents();
-        mark.appendChild(fragment);
-        range.insertNode(mark);
-      } catch {
-        // Skip if extraction fails
+      // extractContents() would split a chip the range only partly covers
+      // into two chips, each with its own padding, and the line reflows.
+      // Pull such an end of the range out to the chip's edge: a chip covered
+      // from its first (or to its last) character moves into the mark whole,
+      // and a chip covered partway gets its own mark inside it instead.
+      const innerRanges: Range[] = [];
+      const startChip = findChipAncestor(firstWrap.node);
+      if (startChip && !startChip.contains(lastWrap.node)) {
+        const inner = document.createRange();
+        inner.setStart(firstWrap.node, firstWrap.start);
+        inner.setEnd(startChip, startChip.childNodes.length);
+        const before = document.createRange();
+        before.setStart(startChip, 0);
+        before.setEnd(firstWrap.node, firstWrap.start);
+        if (before.toString() === '') {
+          range.setStartBefore(startChip);
+        } else {
+          innerRanges.push(inner);
+          range.setStartAfter(startChip);
+        }
+      }
+      const endChip = findChipAncestor(lastWrap.node);
+      if (endChip && !endChip.contains(firstWrap.node)) {
+        const inner = document.createRange();
+        inner.setStart(endChip, 0);
+        inner.setEnd(lastWrap.node, lastWrap.end);
+        const after = document.createRange();
+        after.setStart(lastWrap.node, lastWrap.end);
+        after.setEnd(endChip, endChip.childNodes.length);
+        if (after.toString() === '') {
+          range.setEndAfter(endChip);
+        } else {
+          innerRanges.push(inner);
+          range.setEndBefore(endChip);
+        }
+      }
+
+      for (const inner of innerRanges) {
+        const innerMark = document.createElement('mark');
+        configure(innerMark);
+        try {
+          const fragment = inner.extractContents();
+          innerMark.appendChild(fragment);
+          inner.insertNode(innerMark);
+        } catch {
+          // Skip if extraction fails
+        }
+      }
+
+      if (!range.collapsed) {
+        try {
+          const fragment = range.extractContents();
+          mark.appendChild(fragment);
+          range.insertNode(mark);
+        } catch {
+          // Skip if extraction fails
+        }
       }
     } else {
       // Single wrap in this block — use surroundContents
@@ -1093,6 +1144,20 @@ const BLOCK_TAGS = new Set([
   'SECTION',
   'ARTICLE',
 ]);
+
+/** Inline elements drawn as a box (padding, fill, radius). Splitting one in two
+ *  draws two boxes, so a highlight must never cut through one. */
+const CHIP_TAGS = new Set(['CODE', 'KBD']);
+
+/** The outermost chip element holding `node`, stopping at its block. The code
+ *  inside a fenced block is not a chip: it has no box of its own. */
+function findChipAncestor(node: Node): Element | null {
+  let chip: Element | null = null;
+  for (let el = node.parentElement; el && !BLOCK_TAGS.has(el.tagName); el = el.parentElement) {
+    if (CHIP_TAGS.has(el.tagName) && el.parentElement?.tagName !== 'PRE') chip = el;
+  }
+  return chip;
+}
 
 function getBlockParent(node: Node): Element | null {
   let el = node.parentElement;
