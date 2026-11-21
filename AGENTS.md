@@ -2564,6 +2564,16 @@ dropdown, show a miniature live page preview per theme (`ThemePreview.tsx`: shee
 background, fake text lines, a highlighter stroke, an accent stroke) instead of a
 plain color dot.
 
+Comment and reply text is plain text, but its `http://`, `https://` and `www.` URLs render
+as links (`LinkifiedText.tsx` over `linkify()` in `src/lib/linkify.ts`) that open in a new
+tab with `rel="noopener noreferrer"`; a `www.` link gets an `https://` href. Trailing
+sentence punctuation (ASCII, typographic quotes, CJK full-width), an unbalanced closing
+bracket, and the `<...>` and backtick delimiters stay out of the link, and other schemes
+stay text. A click on a link does not select its card, and a right-click shows the
+browser's link menu rather than the comment context menu. Comment text, replies and the
+anchor quote wrap anywhere (`wrap-anywhere`), so a long URL or unbroken string never runs
+past the card's edge.
+
 Comment cards (`CommentCard.tsx`) carry the same red-pen language into the rail, drawer, and
 popover. The anchor excerpt is a serif italic pull-quote (`.comment-quote`) with a left rule
 in the highlighter color, not a monospace chip; a resolved comment's quote switches to a

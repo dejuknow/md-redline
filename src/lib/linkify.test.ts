@@ -69,6 +69,41 @@ describe('linkify', () => {
     expect(links('foowww.example.com')).toEqual([]);
   });
 
+  it('leaves a www. with no host as text', () => {
+    expect(linkify('use www.. later')).toEqual([{ kind: 'text', text: 'use www.. later' }]);
+    expect(links('www.) or www.!?')).toEqual([]);
+  });
+
+  it('stops at markdown autolink and code-span delimiters', () => {
+    expect(links('see <https://x.com>')).toEqual(['https://x.com']);
+    expect(links('see `https://x.com`')).toEqual(['https://x.com']);
+  });
+
+  it('trims typographic quotes and CJK punctuation', () => {
+    expect(links('\u201Chttps://x.com\u201D')).toEqual(['https://x.com']);
+    expect(links('https://x.com\u3002')).toEqual(['https://x.com']);
+    expect(links('\uFF08https://x.com/a\uFF09')).toEqual(['https://x.com/a']);
+  });
+
+  it('links a scheme right after punctuation but not after a letter', () => {
+    expect(links('Done.https://x.com')).toEqual(['https://x.com']);
+    expect(links('see:https://x.com')).toEqual(['https://x.com']);
+    expect(links('xhttps://x.com')).toEqual([]);
+  });
+
+  it('does not link the www. host of an email address', () => {
+    expect(links('mail me@www.example.com')).toEqual([]);
+  });
+
+  it('splits two links joined by a comma', () => {
+    expect(links('https://a.com,https://b.com')).toEqual(['https://a.com', 'https://b.com']);
+  });
+
+  it('keeps a URL nested in a query string inside its link', () => {
+    const url = 'https://www.google.com/url?q=https://x.com/a&sa=D';
+    expect(links(url)).toEqual([url]);
+  });
+
   it('ignores other schemes', () => {
     expect(links('javascript:alert(1) mailto:a@b.com ftp://x.com')).toEqual([]);
   });
