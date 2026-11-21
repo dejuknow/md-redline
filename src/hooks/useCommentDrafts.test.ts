@@ -22,6 +22,7 @@ interface Props {
   docText?: string;
   /** The diff overlay is showing the file; defaults to false. */
   underDiff?: boolean;
+  pendingSelection?: SelectionInfo | null;
 }
 
 /**
@@ -274,8 +275,8 @@ describe('useCommentDrafts', () => {
       const { h } = parkAndReturn(ORIGINAL);
 
       expect(h.result.current.restoredDraft?.text).toBe('half a thought');
-      expect(h.result.current.restoredUnplaceable).toBe(false);
-      expect(h.result.current.restoredDoc).toBe(ORIGINAL);
+      expect(h.result.current.selectionUnplaceable).toBe(false);
+      expect(h.result.current.selectionDoc).toBe(ORIGINAL);
     });
 
     it('hands back a draft on a changed file, with its text, as not postable', () => {
@@ -284,22 +285,22 @@ describe('useCommentDrafts', () => {
       // Committed all the same, so the form opens on it with the text.
       expect(h.adoptSelection).toHaveBeenLastCalledWith(sel);
       expect(h.result.current.restoredDraft?.text).toBe('half a thought');
-      expect(h.result.current.restoredUnplaceable).toBe(true);
-      expect(h.result.current.restoredDoc).toBe(ORIGINAL);
+      expect(h.result.current.selectionUnplaceable).toBe(true);
+      expect(h.result.current.selectionDoc).toBe(ORIGINAL);
     });
 
     it('stops being postable when the file changes after it came back', () => {
       const { h, sel } = parkAndReturn(ORIGINAL);
       h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
 
-      expect(h.result.current.restoredUnplaceable).toBe(true);
+      expect(h.result.current.selectionUnplaceable).toBe(true);
     });
 
     it('is postable again if the file goes back to what it was', () => {
       const { h, sel } = parkAndReturn();
       h.rerender({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL });
 
-      expect(h.result.current.restoredUnplaceable).toBe(false);
+      expect(h.result.current.selectionUnplaceable).toBe(false);
     });
 
     it('stays not postable through another trip away', () => {
@@ -310,7 +311,7 @@ describe('useCommentDrafts', () => {
       h.rerender({ surfaceFile: '/a.md', selection: null, docText: EDITED });
       h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
 
-      expect(h.result.current.restoredUnplaceable).toBe(true);
+      expect(h.result.current.selectionUnplaceable).toBe(true);
     });
 
     it('lets the next selection be placed as usual', () => {
@@ -319,8 +320,9 @@ describe('useCommentDrafts', () => {
       h.rerender({ surfaceFile: '/a.md', selection: next, docText: EDITED });
 
       expect(h.result.current.restoredDraft).toBeNull();
-      expect(h.result.current.restoredUnplaceable).toBe(false);
-      expect(h.result.current.restoredDoc).toBeNull();
+      expect(h.result.current.selectionUnplaceable).toBe(false);
+      // Made on the edited file, so that is what a submit checks against.
+      expect(h.result.current.selectionDoc).toBe(EDITED);
     });
 
     it('counts a change that lands while the form is still open', () => {
@@ -337,8 +339,8 @@ describe('useCommentDrafts', () => {
       h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
 
       // The selection was made on the original.
-      expect(h.result.current.restoredUnplaceable).toBe(true);
-      expect(h.result.current.restoredDoc).toBe(ORIGINAL);
+      expect(h.result.current.selectionUnplaceable).toBe(true);
+      expect(h.result.current.selectionDoc).toBe(ORIGINAL);
     });
 
     it('does not count a change for a draft started on a pending selection', () => {
@@ -357,7 +359,7 @@ describe('useCommentDrafts', () => {
       h.rerender({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL });
 
       expect(h.result.current.restoredDraft?.text).toBe('half');
-      expect(h.result.current.restoredUnplaceable).toBe(false);
+      expect(h.result.current.selectionUnplaceable).toBe(false);
     });
 
     it("judges each file's draft by that file, across a quick switch", () => {
@@ -376,7 +378,7 @@ describe('useCommentDrafts', () => {
       // Back to A, which changed, then straight back to B, which did not.
       h.rerender({ surfaceFile: '/a.md', selection: selB, docText: 'A second' });
       h.rerender({ surfaceFile: '/a.md', selection: selA, docText: 'A second' });
-      expect(h.result.current.restoredUnplaceable).toBe(true);
+      expect(h.result.current.selectionUnplaceable).toBe(true);
       // The commit that switches still has A's selection: nothing is handed
       // back for B until its own selection is committed.
       h.rerender({ surfaceFile: '/b.md', selection: selA, docText: 'B' });
@@ -385,7 +387,7 @@ describe('useCommentDrafts', () => {
 
       expect(h.adoptSelection).toHaveBeenLastCalledWith(selB);
       expect(h.result.current.restoredDraft?.text).toBe('on B');
-      expect(h.result.current.restoredUnplaceable).toBe(false);
+      expect(h.result.current.selectionUnplaceable).toBe(false);
     });
 
     it('only matches a selection made in the diff view while the diff still shows', () => {
@@ -404,12 +406,12 @@ describe('useCommentDrafts', () => {
       h.rerender({ surfaceFile: '/a.md', selection: sel, underDiff: false });
 
       // Its offset was read over the diff's text, deleted blocks included.
-      expect(h.result.current.restoredUnplaceable).toBe(true);
-      expect(h.result.current.restoredReason).toBe('diff');
+      expect(h.result.current.selectionUnplaceable).toBe(true);
+      expect(h.result.current.unplaceableReason).toBe('diff');
 
       h.rerender({ surfaceFile: '/a.md', selection: sel, underDiff: true });
-      expect(h.result.current.restoredUnplaceable).toBe(false);
-      expect(h.result.current.restoredReason).toBeNull();
+      expect(h.result.current.selectionUnplaceable).toBe(false);
+      expect(h.result.current.unplaceableReason).toBeNull();
     });
 
     it('lets a selection made in the plain view come back over the diff', () => {
@@ -423,7 +425,7 @@ describe('useCommentDrafts', () => {
       h.rerender({ surfaceFile: '/a.md', selection: null, underDiff: true });
       h.rerender({ surfaceFile: '/a.md', selection: sel, underDiff: true });
 
-      expect(h.result.current.restoredUnplaceable).toBe(false);
+      expect(h.result.current.selectionUnplaceable).toBe(false);
     });
 
     it("marks a selection still on screen from the file just left as another file's", () => {
@@ -440,6 +442,92 @@ describe('useCommentDrafts', () => {
       const next = makeSelection('on b');
       h.rerender({ surfaceFile: '/b.md', selection: next });
       expect(h.result.current.selectionStale).toBe(false);
+    });
+  });
+
+  // #212: a form that never left gets the same check as a draft handed back.
+  describe('when the file changes under a form that stays open', () => {
+    const ORIGINAL = 'original document';
+    const EDITED = 'edited document';
+
+    function openForm() {
+      const sel = makeSelection('TODO');
+      const h = setup({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL });
+      act(() =>
+        h.result.current.reportDraft({ selection: sel, text: 'half', prefillPristine: false }),
+      );
+      return { h, sel };
+    }
+
+    it('is postable while the file is unchanged', () => {
+      const { h } = openForm();
+
+      expect(h.result.current.selectionUnplaceable).toBe(false);
+      expect(h.result.current.unplaceableReason).toBeNull();
+      expect(h.result.current.selectionDoc).toBe(ORIGINAL);
+    });
+
+    it('stops being postable when an edit lands, and says the file changed', () => {
+      const { h, sel } = openForm();
+      h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
+
+      expect(h.result.current.selectionUnplaceable).toBe(true);
+      expect(h.result.current.unplaceableReason).toBe('changed');
+      // Submit checks the source it writes against the original.
+      expect(h.result.current.selectionDoc).toBe(ORIGINAL);
+    });
+
+    it('is postable again if the file goes back to what it was', () => {
+      const { h, sel } = openForm();
+      h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
+      h.rerender({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL });
+
+      expect(h.result.current.selectionUnplaceable).toBe(false);
+    });
+
+    it('judges a plain selection with no form the same way', () => {
+      const sel = makeSelection('TODO');
+      const h = setup({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL });
+      h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
+
+      expect(h.result.current.unplaceableReason).toBe('changed');
+    });
+
+    it('lets a selection made after the edit be placed', () => {
+      const { h, sel } = openForm();
+      h.rerender({ surfaceFile: '/a.md', selection: sel, docText: EDITED });
+      const next = makeSelection('TODO');
+      h.rerender({ surfaceFile: '/a.md', selection: next, docText: EDITED });
+
+      expect(h.result.current.selectionUnplaceable).toBe(false);
+      expect(h.result.current.selectionDoc).toBe(EDITED);
+    });
+
+    // Touch and pen: committed only when the reader taps, by which time an
+    // edit may have landed. The selection was made on the markdown before it.
+    it('judges a pending selection by the markdown it was made on', () => {
+      const sel = makeSelection('TODO');
+      const h = setup({ surfaceFile: '/a.md', selection: null, docText: ORIGINAL });
+      h.rerender({
+        surfaceFile: '/a.md',
+        selection: null,
+        pendingSelection: sel,
+        docText: ORIGINAL,
+      });
+      h.rerender({ surfaceFile: '/a.md', selection: null, pendingSelection: sel, docText: EDITED });
+      // The tap commits the same object.
+      h.rerender({ surfaceFile: '/a.md', selection: sel, pendingSelection: null, docText: EDITED });
+
+      expect(h.result.current.unplaceableReason).toBe('changed');
+      expect(h.result.current.selectionDoc).toBe(ORIGINAL);
+    });
+
+    it('stops a selection made in the diff view when the diff is hidden', () => {
+      const sel = makeSelection('TODO');
+      const h = setup({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL, underDiff: true });
+      h.rerender({ surfaceFile: '/a.md', selection: sel, docText: ORIGINAL, underDiff: false });
+
+      expect(h.result.current.unplaceableReason).toBe('diff');
     });
   });
 });

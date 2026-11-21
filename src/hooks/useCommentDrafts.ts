@@ -11,6 +11,12 @@ interface Params {
   /** The committed selection, from useSelection. */
   selection: SelectionInfo | null;
   /**
+   * A touch or pen selection not yet committed, from useSelection. Committing
+   * it later keeps the same object, and it was made on the markdown on screen
+   * now, not on whatever an edit has left by the time the reader taps.
+   */
+  pendingSelection?: SelectionInfo | null;
+  /**
    * The active file's text as a selection reads it: its markdown without
    * comments, and anything else that changes the rendered page. A draft whose
    * file no longer reads as it did when its selection was made is not
@@ -55,8 +61,10 @@ interface Restored extends KeptDraft {
  * file changed meanwhile, the selection may now point at other words, or at a
  * copy of the same words the reader never chose, and nothing on the page can
  * prove which. So the draft comes back unplaceable, with its text, and the
- * reader selects again. Comments added, resolved or replied to do not count
- * as a change, since they leave the markdown the reader selects in alone.
+ * reader selects again. The same holds for a form that never left: an edit
+ * landing while the reader types makes its selection unplaceable too (#212).
+ * Comments added, resolved or replied to do not count as a change, since they
+ * leave the markdown the reader selects in alone.
  *
  * Kept in memory for the session. Closing the tab does not drop the draft, so
  * opening the file again brings it back; a page reload does.
@@ -64,6 +72,7 @@ interface Restored extends KeptDraft {
 export function useCommentDrafts({
   surfaceFile,
   selection,
+  pendingSelection = null,
   docText,
   underDiff,
   clearSelection,
@@ -90,21 +99,44 @@ export function useCommentDrafts({
     docText: string;
     underDiff: boolean;
   }>({ selection: null, docText, underDiff });
-  // The file the committed selection was made in, as state so a render can
-  // tell a selection that is still another file's.
-  const [owner, setOwner] = useState<{ selection: SelectionInfo | null; file: string | null }>({
-    selection: null,
-    file: null,
-  });
+  // The file, markdown and view the committed selection was made in, as state
+  // so a render can tell a selection that is still another file's, or one
+  // whose file has changed under an open form (#212).
+  const [owner, setOwner] = useState<{
+    selection: SelectionInfo | null;
+    file: string | null;
+    doc: string;
+    underDiff: boolean;
+  }>({ selection: null, file: null, doc: docText, underDiff });
+  // The markdown and view a pending selection was made on, for when it is
+  // committed.
+  const pendingDocRef = useRef<{
+    selection: SelectionInfo | null;
+    docText: string;
+    underDiff: boolean;
+  }>({ selection: null, docText, underDiff });
   useLayoutEffect(() => {
     selectionRef.current = selection;
     docTextRef.current = docText;
     underDiffRef.current = underDiff;
-    if (selectionDocRef.current.selection !== selection) {
-      selectionDocRef.current = { selection, docText, underDiff };
-      setOwner({ selection, file: surfaceFile });
+    if (pendingSelection !== null && pendingDocRef.current.selection !== pendingSelection) {
+      pendingDocRef.current = { selection: pendingSelection, docText, underDiff };
     }
-  }, [selection, docText, underDiff, surfaceFile]);
+    if (selectionDocRef.current.selection !== selection) {
+      const pending = pendingDocRef.current;
+      const madeOn =
+        selection !== null && pending.selection === selection
+          ? pending
+          : { selection, docText, underDiff };
+      selectionDocRef.current = madeOn;
+      setOwner({
+        selection,
+        file: surfaceFile,
+        doc: madeOn.docText,
+        underDiff: madeOn.underDiff,
+      });
+    }
+  }, [selection, pendingSelection, docText, underDiff, surfaceFile]);
 
   const [restored, setRestored] = useState<Restored | null>(null);
 
@@ -164,12 +196,23 @@ export function useCommentDrafts({
       ? restored
       : null;
 
+  // What the committed selection was made on. A draft handed back brings its
+  // own: committing it again records the markdown on screen now, not the one
+  // its selection was read from. Any other selection was made on the markdown
+  // recorded when it was committed, so a form left open while the file
+  // changes is judged the same way as one taken away and back (#212).
+  const madeOn =
+    current ??
+    (selection !== null && owner.selection === selection && owner.file === surfaceFile
+      ? owner
+      : null);
+
   const reason: 'changed' | 'diff' | null =
-    current === null
+    madeOn === null
       ? null
-      : current.doc !== docText
+      : madeOn.doc !== docText
         ? 'changed'
-        : current.underDiff && !underDiff
+        : madeOn.underDiff && !underDiff
           ? 'diff'
           : null;
 
@@ -182,19 +225,21 @@ export function useCommentDrafts({
      */
     restoredDraft: current?.draft ?? null,
     /**
-     * The markdown the handed-back draft's selection was made on, to check
-     * the file against again at submit. Null with no draft handed back.
+     * The markdown the committed selection was made on, to check the file
+     * against again at submit. Null with no committed selection, and for the
+     * render or two before a new one is recorded.
      */
-    restoredDoc: current?.doc ?? null,
+    selectionDoc: madeOn?.doc ?? null,
     /**
-     * The draft handed back cannot be posted: the file's markdown is not the
-     * one its selection was made on, or its selection was made in the diff
-     * overlay and the plain viewer shows the file now. Its selection must not
-     * be painted either, since the viewer would find the words somewhere else.
+     * The committed selection cannot take a comment: the file's markdown is
+     * not the one it was made on, or it was made in the diff overlay and the
+     * plain viewer shows the file now. That holds for a draft handed back and
+     * for a form that stayed open. Its selection must not be painted either,
+     * since the viewer would find the words somewhere else.
      */
-    restoredUnplaceable: reason !== null,
-    /** Why the draft handed back cannot be posted, or null when it can. */
-    restoredReason: reason,
+    selectionUnplaceable: reason !== null,
+    /** Why the committed selection cannot take a comment, or null when it can. */
+    unplaceableReason: reason,
     /**
      * The committed selection still belongs to a file that is no longer on
      * screen: the commit that switches files renders before the selection is
