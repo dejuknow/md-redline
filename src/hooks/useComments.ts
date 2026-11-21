@@ -212,7 +212,7 @@ export function useComments(params: UseCommentsParams) {
         tab.filePath,
         fileComments.filter((c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved').length,
       );
-      const handoff = handoffComments(fileComments, liveSessionIds);
+      const handoff = handoffComments(fileComments, liveSessionIds, author);
       handoffCountsByFile.set(tab.filePath, handoff.length);
       handoffIds.set(
         tab.filePath,
@@ -227,7 +227,7 @@ export function useComments(params: UseCommentsParams) {
       handoffCounts: handoffCountsByFile,
       handoffIdsByFile: handoffIds,
     };
-  }, [tabs, activeFilePath, comments, liveSessionIds]);
+  }, [tabs, activeFilePath, comments, liveSessionIds, author]);
 
   // Threads the reviewer replied to after the agent's last reply, each mapped
   // to that reply's key (id plus a hash of its text). A sent thread is pending

@@ -2731,7 +2731,7 @@ From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
 - `sendableComments(comments)` — the reviewer's own open comments: the banner's Send set and the badge count
-- `handoffComments(comments, liveSessionIds?)` — what the Hand off button sends: the sendable comments plus open agent threads the reviewer replied to last, from reviews no longer open
+- `handoffComments(comments, liveSessionIds?, reviewer?)` — what the Hand off button sends: the sendable comments plus open agent threads the reviewer replied to last, from reviews no longer open. `reviewer` is the reader's author name, consulted only for a reply written before the `agent` stamp; without it (the eval adapters) such a reply never counts
 
   A scoped prompt (`commentIds`) tells the agent to leave other markers alone
   except for their `anchor` and context fields, which it must still keep valid

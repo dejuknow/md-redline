@@ -21,7 +21,7 @@ describe('sendableComments and handoffComments', () => {
     id: 'note-answered',
     author: 'Claude',
     agentInitiated: true,
-    replies: [{ id: 'r1', text: 'yes, rename it', author: 'Dennis', timestamp: 'x' }],
+    replies: [{ id: 'r1', text: 'yes, rename it', author: 'Dennis', timestamp: 'x', agent: false }],
   });
   const noteAgentHasLastWord = comment({
     id: 'note-agent-last',
@@ -57,6 +57,40 @@ describe('sendableComments and handoffComments', () => {
     const fromEndedReview = comment({ ...noteIAnswered, id: 'ended', sessionId: 'rev_old' });
     const ids = handoffComments([mine, inLiveReview, fromEndedReview], new Set(['rev_live']));
     expect(ids.map((c) => c.id)).toEqual(['mine', 'ended']);
+  });
+
+  // A reply written before the `agent` stamp (#102) has only its author name
+  // to go on. Only the reviewer's own name makes it theirs (#227).
+  describe('a reply written before the agent stamp', () => {
+    const legacy = (id: string, author: string) =>
+      comment({
+        id,
+        author: 'Claude',
+        agentInitiated: true,
+        replies: [{ id: 'r1', text: 'reply', author, timestamp: 'x' }],
+      });
+
+    it("counts as the reviewer's when it carries the reviewer's name", () => {
+      expect(handoffComments([legacy('mine', 'Dennis')], undefined, 'Dennis')).toHaveLength(1);
+    });
+
+    it('leaves out a thread a second agent replied to', () => {
+      expect(handoffComments([legacy('other-agent', 'Codex')], undefined, 'Dennis')).toEqual([]);
+    });
+
+    it('leaves out a thread the same agent replied to under another name', () => {
+      expect(
+        handoffComments([legacy('renamed-agent', 'Claude Code')], undefined, 'Dennis'),
+      ).toEqual([]);
+    });
+
+    it('leaves the thread out when the reviewer is not known', () => {
+      expect(handoffComments([legacy('unknown', 'Dennis')])).toEqual([]);
+    });
+
+    it("does not count a reviewer who shares the agent author's name", () => {
+      expect(handoffComments([legacy('same-name', 'Claude')], undefined, 'Claude')).toEqual([]);
+    });
   });
 });
 
