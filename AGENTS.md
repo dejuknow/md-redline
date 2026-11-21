@@ -580,8 +580,9 @@ matches. A server with another home, such as the e2e suite's on 3101, is never
 opened, stopped or upgraded by a plain `mdr`. If one holds a strict
 `MD_REDLINE_PORT`, the start error names it as an mdr with a different home.
 After starting, the browser open and the MCP base URL resolve their port through
-`requireAppPort`, which fails with a "stopped responding" error when no matching
-server answers rather than falling back to the default port unchecked.
+`requireAppPort`, which retries for 3s and then fails with a "not responding"
+error rather than falling back to the default port unchecked. Homes compare by
+realpath, so a symlinked spelling of the same home still matches.
 
 **Browser launcher** — the CLI opens the resolved URL in the OS default
 browser: `open` (macOS), `xdg-open` (Linux), `cmd /c start` (Windows). Set

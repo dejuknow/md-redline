@@ -364,14 +364,14 @@ async function runBaselineOn(port: number): Promise<string> {
 
 describe('a server that stops answering right after the start check', () => {
   it('fails instead of opening the default port unchecked', async () => {
-    // ensureServerRunning and the access grant each find the server; the URL
-    // builder's lookup is the third. Before the fix a miss there fell back to
-    // DEFAULT_SERVER_PORT without any check and opened it anyway.
-    let configHits = 0;
+    // The server answers as mdr until the access grant arrives, then stops,
+    // so only the URL builder's lookup misses. Before the fix that miss fell
+    // back to DEFAULT_SERVER_PORT without any check and opened it anyway.
+    let granted = false;
     const server = createServer((req, res) => {
+      if (req.url === '/api/grant-access') granted = true;
       if (req.url === '/api/config') {
-        configHits += 1;
-        if (configHits <= 2) {
+        if (!granted) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ homeDir: FAKE_HOME }));
           return;
@@ -426,7 +426,7 @@ describe('a server that stops answering right after the start check', () => {
       child.once('close', () => resolvePromise(all));
     });
 
-    expect(output).toContain('mdr stopped responding right after it started');
+    expect(output).toContain('mdr is not responding');
     expect(output).not.toContain('Opened in browser');
   }, 20_000);
 });

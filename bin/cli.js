@@ -62,6 +62,8 @@ const MAX_PORT_SCAN = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
+/** How long requireAppPort keeps looking before it gives up on the server. */
+const APP_PORT_RETRY_MS = 3_000;
 const UPDATE_CHECK_WAIT_MS = 6_000;
 const UPDATE_CHECK_POLL_MS = 100;
 const SESSIONS_REQUEST_TIMEOUT_MS = 5_000;
@@ -745,9 +747,18 @@ async function buildUrl(file, dir) {
  * @returns {Promise<number>}
  */
 async function requireAppPort() {
-  const serverPort = await findServerPort();
+  // Retried, because checkServer gives up after 1s and a healthy server can
+  // miss one probe while busy (a dev-mode compile, a Windows cold start).
+  // Failing on a single miss would turn that into an error the old fallback
+  // never showed.
+  const deadline = Date.now() + APP_PORT_RETRY_MS;
+  let serverPort = await findServerPort();
+  while (!serverPort && Date.now() < deadline) {
+    await delay(POLL_INTERVAL_MS);
+    serverPort = await findServerPort();
+  }
   if (!serverPort) {
-    throw new Error('mdr stopped responding right after it started. Run the command again.');
+    throw new Error('mdr is not responding. Run the command again.');
   }
   return (await findClientPort(serverPort)) ?? serverPort;
 }

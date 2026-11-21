@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import { realpathSync } from 'fs';
 import { resolve } from 'path';
 
 import { isValidPort } from './ports.js';
@@ -96,10 +97,32 @@ export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000, ho
     // e2e suite's on 3101. It still writes the shared port file, so without
     // this check a plain `mdr` opened the user's file in the test server,
     // which refused it with a 403 and then shut down under the open tab.
-    return homeDir === undefined || resolve(data.homeDir) === resolve(homeDir);
+    return homeDir === undefined || sameDir(data.homeDir, homeDir);
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether two spellings name the same directory. Through realpath, so a
+ * symlinked spelling (macOS /tmp is /private/tmp) is not taken for another
+ * home and answered with a duplicate server. No case folding: on a
+ * case-sensitive volume that would merge two real directories.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameDir(a, b) {
+  /** @param {string} p */
+  const canon = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  return canon(a) === canon(b);
 }
 
 /**
