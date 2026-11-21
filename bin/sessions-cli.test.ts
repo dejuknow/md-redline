@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 
 // `mdr sessions` against a fake server, driven the same way as
 // find-server-cli.test.ts: MD_REDLINE_PORT names the fake, and a dead named
@@ -11,7 +11,10 @@ import { join } from 'path';
 // never listed or ended.
 
 const BIN = join(__dirname, 'md-redline');
-const HOME = '/home/reviewer';
+// Through resolve(), as resolveHomeDir does: on Windows a POSIX path gains the
+// drive letter, and the server's file paths have to start with the same home
+// for the table to shorten them to ~.
+const HOME = resolve('/home/reviewer');
 
 const OPEN_SESSION = {
   id: 'rev_open',

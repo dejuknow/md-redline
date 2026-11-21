@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+import { createBrowserStub } from './cli-browser-stub.js';
 
 // Which running server a command acts on. Every command that needs one picks it
 // through findServerPort, and picking the wrong one is not a failure the user
@@ -15,6 +17,12 @@ import { join } from 'path';
 // developer's machine is their own dev server.
 
 const BIN = join(__dirname, 'md-redline');
+const CLI_VERSION = (
+  JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as { version: string }
+).version;
+
+/** The home every fake server reports and every findServer run uses, unless a test says otherwise. */
+const FAKE_HOME = '/tmp/fake-home';
 
 const servers: Server[] = [];
 const children: ChildProcess[] = [];
@@ -25,12 +33,12 @@ let scratch: string | null = null;
  * to return an object with a `homeDir` string, so anything less is not
  * something the CLI would ever select.
  */
-function startFakeServer(): Promise<{ port: number }> {
+function startFakeServer(homeDir = FAKE_HOME): Promise<{ port: number }> {
   return new Promise((resolvePromise, reject) => {
     const server = createServer((req, res) => {
       if (req.url === '/api/config') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ homeDir: '/tmp/fake-home' }));
+        res.end(JSON.stringify({ homeDir }));
         return;
       }
       res.writeHead(404);
@@ -99,6 +107,7 @@ function findServer(
         TMP: dir,
         MD_REDLINE_PORT: '',
         PORT: '',
+        MD_REDLINE_HOME: FAKE_HOME,
         ...env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -173,6 +182,29 @@ describe('choosing which running server to act on', () => {
   it('still prefers the port file when nothing was named', async () => {
     // How a server that scanned upward past a busy default gets found at all.
     const recorded = await startFakeServer();
+    writePortFile(recorded.port);
+
+    expect(await findServer()).toBe(String(recorded.port));
+  });
+
+  it('skips a recorded server serving another home', async () => {
+    // The report: the e2e suite's server on 3101 (its own MD_REDLINE_HOME)
+    // wrote the shared port file, and a plain `mdr file.md` opened there. That
+    // server refused the file with a 403, then shut down under the open tab.
+    const other = await startFakeServer('/tmp/e2e-home');
+    writePortFile(other.port);
+
+    expect(await findServer()).toBe('none');
+  });
+
+  it('skips a named server serving another home', async () => {
+    const other = await startFakeServer('/tmp/e2e-home');
+
+    expect(await findServer({ MD_REDLINE_PORT: String(other.port) })).toBe('none');
+  });
+
+  it('accepts a home spelled with a trailing separator', async () => {
+    const recorded = await startFakeServer(`${FAKE_HOME}/`);
     writePortFile(recorded.port);
 
     expect(await findServer()).toBe(String(recorded.port));
@@ -285,20 +317,104 @@ describe('a named port held by another program (#58)', () => {
         resolvePromise(typeof address === 'object' && address ? address.port : 0);
       });
     });
+    const started = Date.now();
+    const output = await runBaselineOn(port);
+
+    expect(output).toContain(`port ${port} (MD_REDLINE_PORT) is in use by another program`);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+
+  it('names an mdr serving another home as the holder', async () => {
+    const other = await startFakeServer('/tmp/e2e-home');
+
+    const output = await runBaselineOn(other.port);
+
+    expect(output).toContain(
+      `port ${other.port} (MD_REDLINE_PORT) is in use by an mdr serving a different home`,
+    );
+  }, 20_000);
+});
+
+/** `mdr baseline` against a strict port, capturing stdout and stderr together. */
+async function runBaselineOn(port: number): Promise<string> {
+  const doc = join(scratchDir(), 'doc.md');
+  writeFileSync(doc, '# Doc\n');
+
+  return new Promise<string>((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [BIN, 'baseline', doc], {
+      env: {
+        ...process.env,
+        TMPDIR: scratchDir(),
+        TEMP: scratchDir(),
+        TMP: scratchDir(),
+        MD_REDLINE_HOME: scratchDir(),
+        MD_REDLINE_PORT: String(port),
+        PORT: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    children.push(child);
+    let all = '';
+    child.stdout.on('data', (chunk) => (all += String(chunk)));
+    child.stderr.on('data', (chunk) => (all += String(chunk)));
+    child.once('error', reject);
+    child.once('close', () => resolvePromise(all));
+  });
+}
+
+describe('a server that stops answering right after the start check', () => {
+  it('fails instead of opening the default port unchecked', async () => {
+    // The server answers as mdr until the access grant arrives, then stops,
+    // so only the URL builder's lookup misses. Before the fix that miss fell
+    // back to DEFAULT_SERVER_PORT without any check and opened it anyway.
+    let granted = false;
+    const server = createServer((req, res) => {
+      if (req.url === '/api/grant-access') granted = true;
+      if (req.url === '/api/config') {
+        if (!granted) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ homeDir: FAKE_HOME }));
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      if (req.url === '/api/version') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ version: CLI_VERSION }));
+        return;
+      }
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+      });
+    });
+    servers.push(server);
+    const port = await new Promise<number>((resolvePromise) => {
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        resolvePromise(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
     const doc = join(scratchDir(), 'doc.md');
     writeFileSync(doc, '# Doc\n');
 
-    const started = Date.now();
     const output = await new Promise<string>((resolvePromise, reject) => {
-      const child = spawn(process.execPath, [BIN, 'baseline', doc], {
+      const child = spawn(process.execPath, [BIN, doc], {
         env: {
           ...process.env,
           TMPDIR: scratchDir(),
           TEMP: scratchDir(),
           TMP: scratchDir(),
-          MD_REDLINE_HOME: scratchDir(),
+          MD_REDLINE_HOME: FAKE_HOME,
           MD_REDLINE_PORT: String(port),
           PORT: '',
+          MDR_BROWSER: '',
+          // Never reached when the fix holds; a no-op if it regresses.
+          MD_REDLINE_BROWSER: createBrowserStub(scratchDir()),
+          NO_UPDATE_NOTIFIER: '1',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -310,7 +426,7 @@ describe('a named port held by another program (#58)', () => {
       child.once('close', () => resolvePromise(all));
     });
 
-    expect(output).toContain(`port ${port} (MD_REDLINE_PORT) is in use by another program`);
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(output).toContain('mdr is not responding');
+    expect(output).not.toContain('Opened in browser');
   }, 20_000);
 });

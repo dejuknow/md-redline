@@ -62,6 +62,8 @@ const MAX_PORT_SCAN = 10;
 const PORT_FILE = join(tmpdir(), 'md-redline.port');
 const START_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
+/** How long requireAppPort keeps looking before it gives up on the server. */
+const APP_PORT_RETRY_MS = 3_000;
 const UPDATE_CHECK_WAIT_MS = 6_000;
 const UPDATE_CHECK_POLL_MS = 100;
 const SESSIONS_REQUEST_TIMEOUT_MS = 5_000;
@@ -203,12 +205,15 @@ async function readPortFile() {
  * @returns {Promise<number | null>} The first port answering as mdr, or null.
  */
 async function findServerPort() {
+  // Only a server serving this CLI's home is ours. Another home is another
+  // instance, with its own trusted roots, sessions and lifetime.
+  const probe = { homeDir: resolveHomeDir() };
   // A named port means that instance and no other (#58). Falling back to the
   // recorded or scanned server opened files inside a different instance, and
   // could shut that one down to "upgrade" a server the user never named. With
   // nothing on the named port, callers start one there instead.
   if (STRICT_SERVER_PORT !== null) {
-    return (await checkServer(STRICT_SERVER_PORT)) ? STRICT_SERVER_PORT : null;
+    return (await checkServer(STRICT_SERVER_PORT, probe)) ? STRICT_SERVER_PORT : null;
   }
   // No guard against the two being equal: serverProbeOrder dedupes, so a
   // repeated base contributes nothing and shifts nothing.
@@ -219,7 +224,7 @@ async function findServerPort() {
     scanCount: MAX_PORT_SCAN,
   });
   for (const port of order) {
-    if (await checkServer(port)) return port;
+    if (await checkServer(port, probe)) return port;
   }
   return null;
 }
@@ -641,8 +646,14 @@ async function ensureServerRunning() {
     STRICT_SERVER_PORT !== null &&
     (await portAcceptsConnections(STRICT_SERVER_PORT))
   ) {
+    // findServerPort skips an mdr serving another home, so the holder can be
+    // mdr itself. Say which, or the message sends the user hunting for some
+    // other program.
+    const holder = (await checkServer(STRICT_SERVER_PORT))
+      ? `an mdr serving a different home than ${resolveHomeDir()}`
+      : 'another program';
     throw new Error(
-      `port ${STRICT_SERVER_PORT} (MD_REDLINE_PORT) is in use by another program. ` +
+      `port ${STRICT_SERVER_PORT} (MD_REDLINE_PORT) is in use by ${holder}. ` +
         'Free it, or set MD_REDLINE_PORT to another port.',
     );
   }
@@ -713,18 +724,43 @@ async function ensureServerRunning() {
  * @returns {Promise<string>}
  */
 async function buildUrl(file, dir) {
-  const serverPort = await findServerPort();
-  // This server's own dev client when there is one, else the server itself:
-  // a client found by scanning alone can belong to another instance and show
-  // that instance's files (#58).
-  const clientPort = serverPort ? await findClientPort(serverPort) : null;
-  const port = clientPort ?? serverPort ?? DEFAULT_SERVER_PORT;
+  const port = await requireAppPort();
   // 127.0.0.1 rather than localhost: browsers prefer ::1 too, so a
   // localhost URL can land on whatever app squats the port on IPv6.
   const baseUrl = `http://127.0.0.1:${port}`;
   if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
   if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
   return baseUrl;
+}
+
+/**
+ * The port to open the app on, right after ensureServerRunning: this server's
+ * own dev client when there is one, else the server itself. A client found by
+ * scanning alone can belong to another instance and show that instance's files
+ * (#58).
+ *
+ * Throws rather than guessing when no server for this home answers. The old
+ * fallback was DEFAULT_SERVER_PORT, unchecked, which could be a server with
+ * another home or nothing at all, the same wrong-instance open findServerPort
+ * refuses everywhere else.
+ *
+ * @returns {Promise<number>}
+ */
+async function requireAppPort() {
+  // Retried, because checkServer gives up after 1s and a healthy server can
+  // miss one probe while busy (a dev-mode compile, a Windows cold start).
+  // Failing on a single miss would turn that into an error the old fallback
+  // never showed.
+  const deadline = Date.now() + APP_PORT_RETRY_MS;
+  let serverPort = await findServerPort();
+  while (!serverPort && Date.now() < deadline) {
+    await delay(POLL_INTERVAL_MS);
+    serverPort = await findServerPort();
+  }
+  if (!serverPort) {
+    throw new Error('mdr is not responding. Run the command again.');
+  }
+  return (await findClientPort(serverPort)) ?? serverPort;
 }
 
 /**
@@ -1304,10 +1340,7 @@ async function runMcpStdio() {
     openInBrowser,
     ensureServerRunning: async () => {
       await ensureServerRunning();
-      const serverPort = await findServerPort();
-      const clientPort = serverPort ? await findClientPort(serverPort) : null;
-      const port = clientPort ?? serverPort ?? DEFAULT_SERVER_PORT;
-      currentBaseUrl = `http://127.0.0.1:${port}`;
+      currentBaseUrl = `http://127.0.0.1:${await requireAppPort()}`;
     },
   });
 }

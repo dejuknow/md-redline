@@ -1,4 +1,6 @@
 import { execSync } from 'child_process';
+import { realpathSync } from 'fs';
+import { resolve } from 'path';
 
 import { isValidPort } from './ports.js';
 
@@ -72,9 +74,11 @@ export function killPort(
  * @param {object} [options]
  * @param {typeof fetch} [options.fetchFn]
  * @param {number} [options.timeoutMs]
+ * @param {string} [options.homeDir] Only accept a server serving this home
+ *   (MD_REDLINE_HOME, else the OS home). Omitted, any mdr server counts.
  * @returns {Promise<boolean>} true only when the port answers as mdr itself
  */
-export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000 } = {}) {
+export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000, homeDir } = {}) {
   try {
     // 127.0.0.1, never `localhost`: the server binds IPv4 loopback only,
     // while `localhost` resolves to ::1 first. If another app holds the
@@ -88,10 +92,39 @@ export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000 } =
     // (e.g. Next.js) return 200 with their SPA shell for unknown paths,
     // which would otherwise fool the port scan and hijack the browser open.
     const data = /** @type {Record<string, unknown> | null} */ (await response.json());
-    return !!data && typeof data === 'object' && typeof data.homeDir === 'string';
+    if (!data || typeof data !== 'object' || typeof data.homeDir !== 'string') return false;
+    // A server with another home is someone else's instance, most often the
+    // e2e suite's on 3101. It still writes the shared port file, so without
+    // this check a plain `mdr` opened the user's file in the test server,
+    // which refused it with a 403 and then shut down under the open tab.
+    return homeDir === undefined || sameDir(data.homeDir, homeDir);
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether two spellings name the same directory. Through the native realpath,
+ * so a symlinked spelling (macOS /tmp is /private/tmp) or a case variant on a
+ * case-insensitive volume (/users/x for /Users/x) is not taken for another
+ * home and answered with a duplicate server. The JS realpathSync keeps the
+ * input's casing; the native one returns the casing on disk. No blanket case
+ * folding: on a case-sensitive volume that would merge two real directories.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameDir(a, b) {
+  /** @param {string} p */
+  const canon = (p) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  return canon(a) === canon(b);
 }
 
 /**

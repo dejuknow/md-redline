@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { homedir } from 'os';
+import { resolve } from 'path';
 
 import {
   FALLBACK_PORT,
@@ -108,12 +109,21 @@ describe('resolveHomeDir', () => {
     expect(resolveHomeDir(env)).toBe(homedir());
   });
 
+  // Expected through resolve() so the test holds on Windows, where an
+  // absolute POSIX path gains the current drive letter.
   it('uses an explicit value', () => {
-    expect(resolveHomeDir({ MD_REDLINE_HOME: '/tmp/mdr-home' })).toBe('/tmp/mdr-home');
+    expect(resolveHomeDir({ MD_REDLINE_HOME: '/tmp/mdr-home' })).toBe(resolve('/tmp/mdr-home'));
   });
 
   it('trims surrounding whitespace', () => {
-    expect(resolveHomeDir({ MD_REDLINE_HOME: '  /tmp/mdr-home  ' })).toBe('/tmp/mdr-home');
+    expect(resolveHomeDir({ MD_REDLINE_HOME: '  /tmp/mdr-home  ' })).toBe(resolve('/tmp/mdr-home'));
+  });
+
+  it('makes a relative value absolute against the cwd', () => {
+    // The server reports this on /api/config and the CLI compares it with its
+    // own. A raw `.` would be re-resolved on the CLI's side, against a cwd
+    // that need not be the server's.
+    expect(resolveHomeDir({ MD_REDLINE_HOME: '.' })).toBe(process.cwd());
   });
 });
 

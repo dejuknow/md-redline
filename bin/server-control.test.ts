@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, symlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 import {
   buildKillCommand,
@@ -130,6 +133,43 @@ describe('checkServer', () => {
   it('returns false when JSON lacks mdr-specific fields', async () => {
     const fetchFn = vi.fn(async () => mkResponse(true, 200, { foo: 'bar' }));
     await expect(checkServer(3001, { fetchFn })).resolves.toBe(false);
+  });
+
+  it('accepts only a server serving the given home when one is given', async () => {
+    const fetchFn = vi.fn(async () => mkResponse(true, 200, { homeDir: '/Users/test' }));
+    await expect(checkServer(3001, { fetchFn, homeDir: '/Users/test' })).resolves.toBe(true);
+    await expect(checkServer(3001, { fetchFn, homeDir: '/tmp/e2e-home' })).resolves.toBe(false);
+    // Omitted, any mdr counts: gracefulShutdown waits on one particular server.
+    await expect(checkServer(3001, { fetchFn })).resolves.toBe(true);
+  });
+
+  it.runIf(process.platform === 'darwin' || process.platform === 'win32')(
+    'takes a case variant of the home for the same home on a case-insensitive volume',
+    async () => {
+      const real = mkdtempSync(join(tmpdir(), 'mdr-Home-'));
+      try {
+        const fetchFn = vi.fn(async () => mkResponse(true, 200, { homeDir: real }));
+        await expect(
+          checkServer(3001, { fetchFn, homeDir: real.replace('mdr-Home-', 'mdr-home-') }),
+        ).resolves.toBe(true);
+      } finally {
+        rmSync(real, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('takes a symlinked spelling of the home for the same home', async () => {
+    const real = mkdtempSync(join(tmpdir(), 'mdr-home-'));
+    const link = `${real}-link`;
+    // 'junction' needs no admin rights on Windows; other platforms ignore it.
+    symlinkSync(real, link, 'junction');
+    try {
+      const fetchFn = vi.fn(async () => mkResponse(true, 200, { homeDir: real }));
+      await expect(checkServer(3001, { fetchFn, homeDir: link })).resolves.toBe(true);
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(real, { recursive: true, force: true });
+    }
   });
 });
 
