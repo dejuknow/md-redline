@@ -1,7 +1,7 @@
 import { readFile, mkdtemp, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildAddressCommentsPrompt } from '../../src/lib/agent-prompts.js';
+import { buildAddressCommentsPrompt, handoffComments } from '../../src/lib/agent-prompts.js';
 import { parseComments } from '../../src/lib/comment-parser.js';
 import { runClaude } from './run-claude.js';
 import type { AgentAdapter } from '../types.js';
@@ -34,10 +34,14 @@ export const claudeCliRemove: AgentAdapter = {
       const raw = await readFile(tempFile, 'utf-8');
       const { comments } = parseComments(raw);
 
+      // The Hand off button names the reviewer's open comments by id, and
+      // offers no mdr_ask since a clipboard handoff has no session to ask in.
+      const sent = handoffComments(comments);
       const handoff = buildAddressCommentsPrompt({
         filePaths: [tempFile],
-        commentCounts: new Map([[tempFile, comments.length]]),
+        commentCounts: new Map([[tempFile, sent.length]]),
         enableResolve: false,
+        commentIds: sent.map((c) => c.id),
       });
 
       await runClaude(`${handoff}\n\n## This review\n\n${casePrompt}`, tempDir);

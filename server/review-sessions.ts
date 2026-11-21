@@ -153,6 +153,12 @@ export interface ReviewSession {
    */
   sentReplyIds: string[];
   waitingForAgent: boolean;
+  /**
+   * A batch the reviewer sent while the agent was busy is waiting to go out.
+   * A finish folds it into the final prompt, so the browser checks that the
+   * files have saved before finishing whenever one is queued.
+   */
+  hasQueuedBatch: boolean;
 }
 
 /**
@@ -169,7 +175,8 @@ export type SessionTerminalReason =
   | 'agent_silent'
   | null;
 
-interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
+// hasQueuedBatch is derived from queuedBatch in toPublic, never stored.
+interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt' | 'hasQueuedBatch'> {
   /** The files the session was created with, before any addFiles (#117). */
   originalFilePaths: string[];
   resolver: (result: ReviewResult) => void;
@@ -517,7 +524,7 @@ export class ReviewSessionStore {
     if (s.queuedBatch) {
       const queued = s.queuedBatch;
       s.queuedBatch = null;
-      const prompt = this.batchPrompt(s, queued.commentIds, queued.commentCountsByPath);
+      const prompt = this.batchPrompt(s, queued.commentIds, queued.commentCountsByPath, true);
       const resolvedWaiter = s.waiter;
       s.resolver({ status: 'batch', prompt, commentIds: queued.commentIds });
       // Create a fresh waiter for the next poll cycle.
@@ -788,12 +795,15 @@ export class ReviewSessionStore {
     s: InternalSession,
     commentIds: string[],
     commentCountsByPath: Map<string, number>,
+    stayingOpen: boolean,
   ): string {
     return buildAddressCommentsPrompt({
       filePaths: s.filePaths,
       commentCounts: commentCountsByPath,
       enableResolve: s.enableResolve,
       commentIds,
+      // A finish closes the session, so mdr_ask would have nowhere to go.
+      askSessionId: stayingOpen ? s.id : undefined,
     });
   }
 
@@ -860,7 +870,7 @@ export class ReviewSessionStore {
       // The browser's counts are taken at finish, so they win over the ones
       // recorded when the batch was queued.
       const counts = new Map([...queued.commentCountsByPath, ...(commentCountsByPath ?? [])]);
-      finalPrompt = this.batchPrompt(s, finalIds, counts);
+      finalPrompt = this.batchPrompt(s, finalIds, counts, false);
     }
 
     this.recordSent(s, finalIds ?? [], replyIds);
@@ -1532,6 +1542,7 @@ export class ReviewSessionStore {
       sentCommentIds: [...s.sentCommentIds],
       sentReplyIds: [...s.sentReplyIds],
       waitingForAgent: s.waitingForAgent,
+      hasQueuedBatch: s.queuedBatch !== null,
     };
   }
 }

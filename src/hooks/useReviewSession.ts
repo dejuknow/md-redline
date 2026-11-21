@@ -13,6 +13,11 @@ export interface ReviewSession {
    */
   sentReplyIds?: string[];
   waitingForAgent: boolean;
+  /**
+   * A batch sent while the agent was busy waits on the server; a finish
+   * folds it in. Absent from a server that predates the field.
+   */
+  hasQueuedBatch?: boolean;
   origin: 'user' | 'agent';
   /** ISO timestamp when the session was created. Always populated by the server's toPublic; used to tiebreak overlapping sessions for the same file. */
   createdAt: string;
@@ -39,6 +44,7 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
       x.status !== y.status ||
       x.enableResolve !== y.enableResolve ||
       x.waitingForAgent !== y.waitingForAgent ||
+      x.hasQueuedBatch !== y.hasQueuedBatch ||
       x.lastAgentActivityAt !== y.lastAgentActivityAt ||
       x.author !== y.author ||
       x.filePaths.length !== y.filePaths.length ||

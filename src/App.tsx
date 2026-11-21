@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import { useTabs } from './hooks/useTabs';
+import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
 import { useCommentDrafts } from './hooks/useCommentDrafts';
 import { useRecentFiles } from './hooks/useRecentFiles';
@@ -191,6 +192,8 @@ export default function App() {
     closeTabsToRight: closeTabsToRightDirect,
     switchTab,
     saveFile,
+    getSaveState,
+    whenSaved,
     getTabSnapshot,
     reloadFile,
     retryAllAccessDenied,
@@ -687,6 +690,7 @@ export default function App() {
     currentSnapshot,
     currentReference,
     captureReference,
+    captureReferences,
     restoreReference,
     seedReference,
     getReference,
@@ -962,6 +966,24 @@ export default function App() {
 
   // Comment state and operations
   const {
+    sessions: reviewSessions,
+    shownSessions: shownReviewSessions,
+    refresh: refreshReviewSessions,
+    fetched: reviewSessionsFetched,
+  } = useReviewSession(
+    activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
+  );
+  // An agent can add files to a review this tab is showing (#117): open them.
+  useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
+  // An agent thread in a review that is still open belongs to the live agent
+  // there: an mdr_ask answer already went back through mdr_ask. Hand off
+  // leaves those threads out (handoffComments).
+  const liveSessionIds = useMemo(
+    () => new Set(reviewSessions.filter((s) => s.status === 'open').map((s) => s.id)),
+    [reviewSessions],
+  );
+
+  const {
     activeCommentId,
     setActiveCommentId,
     comments,
@@ -970,6 +992,7 @@ export default function App() {
     missingAnchors,
     newOrphanIds,
     commentCounts,
+    handoffCounts,
     resolvedCommentCounts,
     commentIdsByFile,
     userRepliedLast,
@@ -1012,6 +1035,7 @@ export default function App() {
     setAutoExpandForm,
     requestCommentFocus,
     undoSlot,
+    liveSessionIds,
   });
 
   // `commentCount` is the OPEN count, so the resolved tail is whatever the
@@ -1420,48 +1444,16 @@ export default function App() {
     [],
   );
 
-  // Combined handoff: snapshot + copy agent prompt
-  const handleHandoff = useCallback(
-    (filePaths: string[]) => {
-      // Build snapshot entries for background files so every handed-off file
-      // gets a diff baseline, not just the active tab.
-      const extra = new Map<string, string>();
-      for (const p of filePaths) {
-        if (p === activeFilePath) continue;
-        const tab = tabs.find((t) => t.filePath === p);
-        if (tab) extra.set(p, tab.rawMarkdown);
-      }
-      captureReference('handoff', extra.size > 0 ? extra : undefined);
-      handleCopyAgentPrompt(filePaths);
-    },
-    [captureReference, handleCopyAgentPrompt, activeFilePath, tabs],
-  );
-
-  const {
-    sessions: reviewSessions,
-    shownSessions: shownReviewSessions,
-    refresh: refreshReviewSessions,
-    fetched: reviewSessionsFetched,
-  } = useReviewSession(
-    activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
-  );
-  // An agent can add files to a review this tab is showing (#117): open them.
-  useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
-
-  // Mirrors the snapshot logic in handleHandoff so multi-file review sessions
-  // get diff baselines for every involved tab, not just the active one.
-  const handleReviewHandoffSuccess = useCallback(
-    (session: { filePaths: string[] }) => {
-      const extra = new Map<string, string>();
-      for (const p of session.filePaths) {
-        if (p === activeFilePath) continue;
-        const tab = tabs.find((t) => t.filePath === p);
-        if (tab) extra.set(p, tab.rawMarkdown);
-      }
-      captureReference('handoff', extra.size > 0 ? extra : undefined);
-    },
-    [tabs, activeFilePath, captureReference],
-  );
+  const { handOff: handleHandoff, prepareSend: prepareBannerSend } = useHandoff({
+    activeFilePath,
+    rawMarkdownRef,
+    tabs,
+    getSaveState,
+    whenSaved,
+    copyAgentPrompt: handleCopyAgentPrompt,
+    captureReferences,
+    showToast,
+  });
 
   // Strip `?review=<id>` from the address bar once a review resolves, so
   // a page reload doesn't re-open the tabs of a completed review and so
@@ -3050,7 +3042,9 @@ export default function App() {
         onExecute: () => void navigator.clipboard.writeText(markdown).catch(() => {}),
       });
     }
-    if (commentCount > 0) {
+    // Same gate as the Hand off button (handoffCounts), not the open count,
+    // which also includes agent questions the reviewer has not answered.
+    if (activeFilePath && (handoffCounts.get(activeFilePath) ?? 0) > 0) {
       cmds.push({
         id: 'copy-agent-prompt',
         label: 'Hand off to agent (copy instructions)',
@@ -3093,6 +3087,7 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
+    handoffCounts,
     paletteSelectionMarkdown,
     resolvedCommentCount,
     settings.enableResolve,
@@ -3258,7 +3253,8 @@ export default function App() {
   }, [reviewSessions, optimisticSentIds, optimisticSentReplyKeys]);
 
   // Tab badges answer "does this file have open comments", so they include
-  // agent-initiated ones. The handoff button keeps the sendable-only map.
+  // agent-initiated ones. The handoff button counts what it sends
+  // (handoffCounts).
   const tabCommentCounts = useMemo(() => {
     const merged = new Map<string, number>();
     for (const [path, count] of commentCounts) {
@@ -3572,7 +3568,7 @@ export default function App() {
           sessions={shownReviewSessions}
           commentCounts={commentCounts}
           agentCommentCounts={agentCommentCounts}
-          onHandoffSuccess={handleReviewHandoffSuccess}
+          prepareSend={prepareBannerSend}
           onResolved={handleReviewResolved}
           onBatchSent={handleBatchSent}
           optimisticSent={optimisticSent}
@@ -3648,7 +3644,7 @@ export default function App() {
                       setSearchFocusTrigger((t) => t + 1);
                     }
                   }}
-                  commentCounts={commentCounts}
+                  commentCounts={handoffCounts}
                   activeFilePath={activeFilePath}
                   onCopyAgentPrompt={handleHandoff}
                   hasDiffSnapshot={currentSnapshot != null}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useComments, type UseCommentsParams } from './useComments';
 import { useUndoSlot, type UndoEntry } from './useUndoSlot';
@@ -168,6 +168,160 @@ describe('useComments', () => {
 
       expect(result.current.commentCounts.get('active.md')).toBe(1);
       expect(result.current.commentCounts.get('other.md')).toBe(3);
+    });
+  });
+
+  describe('handleCopyAgentPrompt', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function stubClipboard(writeText: (text: string) => Promise<void>) {
+      vi.stubGlobal('navigator', { ...globalThis.navigator, clipboard: { writeText } });
+    }
+
+    // The button counts the reviewer's own open comments, so the prompt has to
+    // name exactly those. Without ids it told the agent to address every
+    // marker, which pulled in agent-authored threads and resolved comments the
+    // reviewer never handed off.
+    it('scopes the prompt to the comments the button counts, across files', async () => {
+      const activeRaw = rawWithComments(
+        { before: 'One ', marker: makeComment({ id: 'u1', anchor: 'One' }) },
+        {
+          before: ' Two ',
+          marker: makeComment({ id: 'agent1', anchor: 'Two', agentInitiated: true }),
+        },
+        {
+          before: ' Three ',
+          marker: makeComment({ id: 'done1', anchor: 'Three', status: 'resolved' }),
+        },
+      );
+      const otherRaw = `X ${makeComment({ id: 'o1', anchor: 'X' })}`;
+      const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+      stubClipboard(writeText);
+      const params = defaultParams({
+        rawMarkdown: activeRaw,
+        tabs: [
+          { filePath: '/a.md', rawMarkdown: activeRaw },
+          { filePath: '/b.md', rawMarkdown: otherRaw },
+        ],
+        activeFilePath: '/a.md',
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      let copied: boolean | undefined;
+      await act(async () => {
+        copied = await result.current.handleCopyAgentPrompt(['/a.md', '/b.md']);
+      });
+
+      expect(copied).toBe(true);
+      const prompt = writeText.mock.calls[0][0] as string;
+      expect(prompt).toContain('Address ONLY the comments with the following IDs');
+      expect(prompt).toContain('`u1`');
+      expect(prompt).toContain('`o1`');
+      expect(prompt).not.toContain('`agent1`');
+      expect(prompt).not.toContain('`done1`');
+    });
+
+    // The palette command is gated on the open count, which includes agent
+    // questions. A prompt scoped to no ids would forbid touching any marker.
+    it('copies nothing when the files hold none of the reviewer comments', async () => {
+      const writeText = vi.fn(() => Promise.resolve());
+      stubClipboard(writeText);
+      const raw = `One ${makeComment({ id: 'agent1', anchor: 'One', agentInitiated: true })}`;
+      const showToast = vi.fn();
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+        showToast,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      let copied: boolean | undefined;
+      await act(async () => {
+        copied = await result.current.handleCopyAgentPrompt(['/a.md']);
+      });
+
+      expect(copied).toBe(false);
+      expect(writeText).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('No comments'), 'info');
+    });
+
+    it('hands off an agent thread the reviewer replied to last, and counts it on the button', async () => {
+      const raw = rawWithComments(
+        { before: 'One ', marker: makeComment({ id: 'u1', anchor: 'One' }) },
+        {
+          before: ' Two ',
+          marker: makeComment({
+            id: 'note1',
+            anchor: 'Two',
+            author: 'Claude',
+            agentInitiated: true,
+            replies: [{ id: 'r1', text: 'yes', author: 'Tester', timestamp: 'x' }],
+          }),
+        },
+      );
+      const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+      stubClipboard(writeText);
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      // The banner's Send set stays the reviewer's own comments: an answered
+      // mdr_ask question already reached the agent through mdr_ask.
+      expect(result.current.commentIdsByFile.get('/a.md')).toEqual(['u1']);
+      expect(result.current.handoffCounts.get('/a.md')).toBe(2);
+
+      await act(async () => {
+        await result.current.handleCopyAgentPrompt(['/a.md']);
+      });
+      const prompt = writeText.mock.calls[0][0];
+      expect(prompt).toContain('`u1`, `note1`');
+    });
+
+    it('leaves out an agent thread whose review is still open', () => {
+      const raw = `Two ${makeComment({
+        id: 'ask1',
+        anchor: 'Two',
+        author: 'Claude',
+        agentInitiated: true,
+        sessionId: 'rev_live',
+        replies: [{ id: 'r1', text: 'yes', author: 'Tester', timestamp: 'x', agent: false }],
+      })}`;
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+        liveSessionIds: new Set(['rev_live']),
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      expect(result.current.handoffCounts.get('/a.md')).toBe(0);
+    });
+
+    it('reports a failed copy so the caller does not treat it as a handoff', async () => {
+      stubClipboard(() => Promise.reject(new Error('denied')));
+      const raw = `One ${makeComment({ id: 'u1', anchor: 'One' })}`;
+      const showToast = vi.fn();
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+        showToast,
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      let copied: boolean | undefined;
+      await act(async () => {
+        copied = await result.current.handleCopyAgentPrompt(['/a.md']);
+      });
+
+      expect(copied).toBe(false);
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining("Couldn't copy"), 'error');
     });
   });
 

@@ -1,8 +1,73 @@
+import { getEffectiveStatus, type MdComment } from '../types';
+
+/**
+ * The reviewer's own open comments: what the review banner's Send counts and
+ * sends, and what a tab's badge counts as theirs. An agent's question or note
+ * (`agentInitiated`) is left out, since a reply to an `mdr_ask` question
+ * reaches the agent through `mdr_ask`; a resolved comment is finished in
+ * either mode (#159).
+ */
+export function sendableComments(comments: readonly MdComment[]): MdComment[] {
+  return comments.filter((c) => !c.agentInitiated && getEffectiveStatus(c) !== 'resolved');
+}
+
+const NO_LIVE_SESSIONS: ReadonlySet<string> = new Set();
+
+/**
+ * What the Hand off button sends: the sendable comments plus each open agent
+ * thread whose last reply is the reviewer's, once the review it came from has
+ * ended. Nothing else would carry that reply, so without it a "yes" under an
+ * agent's note would never reach an agent.
+ *
+ * While that review is still open (`liveSessionIds` holds its `sessionId`),
+ * the thread belongs to the agent there: an answered `mdr_ask` question went
+ * back through `mdr_ask` already, and a marker keeps no trace of which kind
+ * of agent thread it is, so sending it would deliver the answer twice. An
+ * agent thread with no reply from the reviewer, or where the agent has the
+ * last word, stays out too: the agent would only be answering itself.
+ *
+ * The button counts these, the prompt names them by id, and the eval
+ * adapters hand over the same set. Document order is kept.
+ */
+export function handoffComments(
+  comments: readonly MdComment[],
+  liveSessionIds: ReadonlySet<string> = NO_LIVE_SESSIONS,
+): MdComment[] {
+  return comments.filter((c) => {
+    if (getEffectiveStatus(c) === 'resolved') return false;
+    if (!c.agentInitiated) return true;
+    if (c.sessionId !== undefined && liveSessionIds.has(c.sessionId)) return false;
+    return reviewerRepliedLast(c);
+  });
+}
+
+/**
+ * Whether the last reply on an agent's thread is the reviewer's. A reply's own
+ * `agent` stamp decides (#102); an unstamped one counts as the reviewer's when
+ * someone other than the thread's agent author wrote it.
+ * `computeUserRepliedLast` cannot answer this: it asks whether the thread's
+ * author has the last word, which on an agent's thread is the agent.
+ */
+function reviewerRepliedLast(c: MdComment): boolean {
+  const last = c.replies?.[c.replies.length - 1];
+  if (last === undefined) return false;
+  if (typeof last.agent === 'boolean') return !last.agent;
+  return Boolean(last.author) && last.author !== c.author;
+}
+
 export interface BuildAddressCommentsPromptOptions {
   filePaths: string[];
   commentCounts: Map<string, number>;
   enableResolve: boolean;
   commentIds?: string[];
+  /**
+   * The review session the agent can post `mdr_ask` questions into. Only a
+   * session that stays open after this prompt is delivered qualifies: a
+   * clipboard handoff has none, and Send & finish closes its session, so in
+   * both cases the prompt leaves `mdr_ask` out rather than point the agent at
+   * a sessionId it does not have.
+   */
+  askSessionId?: string;
 }
 
 export function buildAddressCommentsPrompt({
@@ -10,11 +75,15 @@ export function buildAddressCommentsPrompt({
   commentCounts,
   enableResolve,
   commentIds,
+  askSessionId,
 }: BuildAddressCommentsPromptOptions): string {
   if (filePaths.length === 0) return '';
 
-  const scopeInstruction = commentIds
-    ? `Address ONLY the comments with the following IDs: ${commentIds.map((id) => `\`${id}\``).join(', ')}. Leave any other comment markers in the file untouched.`
+  // An empty list scopes to nothing, which would read "the following IDs: ."
+  // and forbid touching every marker, so it means unscoped instead.
+  const scopedIds = commentIds && commentIds.length > 0 ? commentIds : null;
+  const scopeInstruction = scopedIds
+    ? `Address ONLY the comments with the following IDs: ${scopedIds.map((id) => `\`${id}\``).join(', ')}. Do not reply to, resolve, or remove any other comment marker in the file. The one exception is when your edit rewrites text another marker points at: then update that marker's \`anchor\` and its context fields as "Keeping anchors valid" below describes, and change nothing else in it.`
     : null;
 
   // Both modes distinguish "I edited the document" from "I answered a
@@ -47,6 +116,9 @@ export function buildAddressCommentsPrompt({
   // finished and leaves them out of Send, so a reply there is never read.
   // Neither mode said so, and agents answered the reader's closing reply on a
   // resolved thread in 5 of 6 runs (eval cases 22 and 23; 0 of 6 since).
+  // Every prompt the app builds now names its comments by id and a resolved
+  // one is never among them, so for resolved threads this is a backstop, and
+  // cases 22 and 23 pass on the scope line as much as on this rule.
   //
   // Both rules are judged from the file as the agent FIRST read it. Step 3
   // has it reply to every comment it addresses and resolve mode resolves them,
@@ -60,6 +132,14 @@ export function buildAddressCommentsPrompt({
     'a comment whose marker has `"status":"resolved"` is finished, even if my reply is the latest in its thread, ' +
     'and a comment that already carried a reply from you, with no later reply from me, was answered in an earlier round. ' +
     'If I replied after your last reply on an open comment, address my latest reply and add a new reply.';
+
+  const askSection = askSessionId
+    ? `## Asking me a question
+
+If a comment is ambiguous, or you encounter a planning fork while editing where the right answer would meaningfully change your edit, you may call the \`mdr_ask\` tool to post one or more anchored questions to me. Pass \`sessionId\` "${askSessionId}", the file path, the exact text to anchor against, and your question. The tool blocks until I have replied to every question. Prefer asking over guessing when the answer matters.
+
+`
+    : '';
 
   const isSingle = filePaths.length === 1;
   const fileRef = isSingle ? filePaths[0] : 'the files listed below';
@@ -105,17 +185,13 @@ You MUST edit the files at the exact paths listed above. Do NOT copy them to a d
 
 ## What to do
 ${scopeInstruction ? `\n${scopeInstruction}\n` : ''}
-1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${commentIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
+1. ${isSingle ? `Read ${filePaths[0]}` : 'For each file listed above,'} ${scopedIds ? 'find the `<!-- @comment{...} -->` markers with the IDs listed above' : 'find all `<!-- @comment{...} -->` markers'}
 2. For each comment, read the \`text\` field and address the feedback by editing the document or answering the question. ${settledRule}
 3. ${replyStep}
 4. ${afterAction}
 5. If a comment is unclear or you are unsure how to address it, leave the marker in place and ask me about it
 
-## Asking me a question
-
-If a comment is ambiguous, or you encounter a planning fork while editing where the right answer would meaningfully change your edit, you may call the \`mdr_ask\` tool to post one or more anchored questions to me. Pass the \`sessionId\` from this review and the file path, the exact text to anchor against, and your question. The tool blocks until I have replied to every question. Prefer asking over guessing when the answer matters.
-
-## How to respond
+${askSection}## How to respond
 
 After you are done, give me a brief summary:
 - How many comments you addressed${isSingle ? '' : ' (grouped by file)'}

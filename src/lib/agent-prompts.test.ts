@@ -1,5 +1,64 @@
 import { describe, expect, it } from 'vitest';
-import { buildAddressCommentsPrompt } from './agent-prompts';
+import { buildAddressCommentsPrompt, handoffComments, sendableComments } from './agent-prompts';
+import type { MdComment } from '../types';
+
+function comment(overrides: Partial<MdComment>): MdComment {
+  return {
+    id: 'c',
+    anchor: 'a',
+    text: 't',
+    author: 'Dennis',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  } as MdComment;
+}
+
+describe('sendableComments and handoffComments', () => {
+  const mine = comment({ id: 'mine' });
+  const mineResolved = comment({ id: 'mine-resolved', status: 'resolved' });
+  const note = comment({ id: 'note', author: 'Claude', agentInitiated: true });
+  const noteIAnswered = comment({
+    id: 'note-answered',
+    author: 'Claude',
+    agentInitiated: true,
+    replies: [{ id: 'r1', text: 'yes, rename it', author: 'Dennis', timestamp: 'x' }],
+  });
+  const noteAgentHasLastWord = comment({
+    id: 'note-agent-last',
+    author: 'Claude',
+    agentInitiated: true,
+    replies: [
+      { id: 'r1', text: 'yes', author: 'Dennis', timestamp: 'x' },
+      { id: 'r2', text: 'done', author: 'Claude', timestamp: 'y', agent: true },
+    ],
+  });
+  const noteAnsweredResolved = comment({
+    ...noteIAnswered,
+    id: 'note-resolved',
+    status: 'resolved',
+  });
+  const all = [mine, mineResolved, note, noteIAnswered, noteAgentHasLastWord, noteAnsweredResolved];
+
+  it("sendable is the reviewer's own open comments", () => {
+    expect(sendableComments(all).map((c) => c.id)).toEqual(['mine']);
+  });
+
+  // A clipboard handoff has no live mdr_ask to carry a reply on an agent's
+  // thread, so the thread goes with the handoff while the reviewer has the
+  // last word on it.
+  it('a handoff adds open agent threads where the reviewer replied last, in document order', () => {
+    expect(handoffComments(all).map((c) => c.id)).toEqual(['mine', 'note-answered']);
+  });
+
+  // An answered mdr_ask question looks exactly like a note the reviewer
+  // replied to, and its answer already went back through mdr_ask.
+  it('leaves out an agent thread whose review is still open', () => {
+    const inLiveReview = comment({ ...noteIAnswered, id: 'live', sessionId: 'rev_live' });
+    const fromEndedReview = comment({ ...noteIAnswered, id: 'ended', sessionId: 'rev_old' });
+    const ids = handoffComments([mine, inLiveReview, fromEndedReview], new Set(['rev_live']));
+    expect(ids.map((c) => c.id)).toEqual(['mine', 'ended']);
+  });
+});
 
 describe('buildAddressCommentsPrompt', () => {
   it('builds a single-file handoff prompt', () => {
@@ -44,7 +103,12 @@ describe('buildAddressCommentsPrompt', () => {
     expect(prompt).toContain('c2');
     expect(prompt).toContain('c3');
     expect(prompt).toContain('ONLY');
-    expect(prompt).toContain('Leave any other comment markers');
+    expect(prompt).toContain('Do not reply to, resolve, or remove any other comment marker');
+    // A shared anchor: editing for a listed comment can rewrite text another
+    // marker points at, and "leave it untouched" would forbid keeping it valid.
+    expect(prompt).toContain(
+      'update that marker\'s `anchor` and its context fields as "Keeping anchors valid"',
+    );
   });
 
   it('addresses all comments when commentIds is absent (backward compat)', () => {
@@ -112,15 +176,44 @@ describe('buildAddressCommentsPrompt — anchor maintenance', () => {
   });
 });
 
+describe('buildAddressCommentsPrompt — comment scope', () => {
+  it('treats an empty id list as unscoped rather than scoping to nothing', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/a.md'],
+      commentCounts: new Map([['/tmp/a.md', 0]]),
+      enableResolve: false,
+      commentIds: [],
+    });
+    expect(prompt).not.toContain('Address ONLY');
+    expect(prompt).toContain('find all `<!-- @comment{...} -->` markers');
+  });
+});
+
 describe('buildAddressCommentsPrompt — mdr_ask hint', () => {
-  it('mentions the mdr_ask tool so agents know it exists', () => {
+  it('mentions the mdr_ask tool and names the session when one is live', () => {
+    const prompt = buildAddressCommentsPrompt({
+      filePaths: ['/tmp/a.md'],
+      commentCounts: new Map([['/tmp/a.md', 1]]),
+      enableResolve: false,
+      askSessionId: 'sess-123',
+    });
+    expect(prompt).toContain('mdr_ask');
+    expect(prompt.toLowerCase()).toMatch(/anchored.*question/);
+    expect(prompt).toContain('"sess-123"');
+  });
+
+  // A clipboard handoff has no session, and Send & finish closes the one it
+  // had, so an agent told to pass "the sessionId from this review" has
+  // nothing it could pass.
+  it('leaves mdr_ask out when there is no live session to ask in', () => {
     const prompt = buildAddressCommentsPrompt({
       filePaths: ['/tmp/a.md'],
       commentCounts: new Map([['/tmp/a.md', 1]]),
       enableResolve: false,
     });
-    expect(prompt).toContain('mdr_ask');
-    expect(prompt.toLowerCase()).toMatch(/anchored.*question/);
+    expect(prompt).not.toContain('mdr_ask');
+    expect(prompt).not.toContain('sessionId');
+    expect(prompt).toContain('leave the marker in place and ask me about it');
   });
 });
 

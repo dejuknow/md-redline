@@ -17,7 +17,10 @@ import { ServerUnreachableError } from './client';
 
 const BATCH_PREAMBLE = (sessionId: string) =>
   `Review batch received (session ${sessionId}). Address ONLY the comments ` +
-  `listed below. Leave any other comment markers in the file untouched.\n\n` +
+  `listed below. Do not reply to, resolve, or remove any other comment ` +
+  `marker in the file, except to keep its anchor and context fields valid ` +
+  `when your edit rewrites the text it points at, as the instructions ` +
+  `below describe.\n\n` +
   `IMPORTANT: After you finish addressing these comments, you MUST call ` +
   `mdr_request_review again with sessionId "${sessionId}" (no filePaths). ` +
   `The review is NOT complete. The user may have more feedback. ` +
@@ -26,8 +29,10 @@ const BATCH_PREAMBLE = (sessionId: string) =>
 
 const DONE_PREAMBLE =
   'Review handed off (final batch). The user has finished reviewing. ' +
-  'Address ONLY the comments listed below. Leave any other comment markers ' +
-  'in the file untouched. Do not poll for more feedback.\n\n===\n\n';
+  'Address ONLY the comments listed below. Do not reply to, resolve, or remove ' +
+  'any other comment marker in the file, except to keep its anchor and context ' +
+  'fields valid when your edit rewrites the text it points at, as the ' +
+  'instructions below describe. Do not poll for more feedback.\n\n===\n\n';
 
 const DONE_NO_COMMENTS =
   'Review complete. The user has no more feedback. Continue with your original plan.';

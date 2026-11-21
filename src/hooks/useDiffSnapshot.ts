@@ -84,11 +84,11 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
   const currentSnapshot = currentReference?.content ?? null;
 
   /**
-   * Capture the active file (and any extra handoff files) as a new reference.
+   * Capture the active file as a new reference.
    * Returns the PREVIOUS reference for the active file so callers can offer Undo.
    */
   const captureReference = useCallback(
-    (origin: 'handoff' | 'review', extraEntries?: Map<string, string>): DiffReference | null => {
+    (origin: 'handoff' | 'review'): DiffReference | null => {
       if (!activeFilePath) return null;
       const prev = refsRef.current.get(activeFilePath) ?? null;
       const now = Date.now();
@@ -101,11 +101,6 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
       const apply = (base: Map<string, DiffReference>) => {
         const next = new Map(base);
         next.set(activeFilePath, { content, capturedAt: now, origin });
-        if (extraEntries) {
-          for (const [path, content] of extraEntries) {
-            next.set(path, { content, capturedAt: now, origin: 'handoff' });
-          }
-        }
         return next;
       };
       refsRef.current = apply(refsRef.current);
@@ -113,6 +108,30 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
       return prev;
     },
     [activeFilePath, rawMarkdownRef],
+  );
+
+  /**
+   * Capture exactly the given files, with the content the caller read. A
+   * handoff names its files and reads them at the click, so neither the
+   * active tab nor an edit made while the clipboard write was pending can
+   * slip into the reference.
+   */
+  const captureReferences = useCallback(
+    (entries: ReadonlyMap<string, string>, origin: 'handoff' | 'review') => {
+      if (entries.size === 0) return;
+      const now = Date.now();
+      // Same mirror-then-updater shape as captureReference; see its comment.
+      const apply = (base: Map<string, DiffReference>) => {
+        const next = new Map(base);
+        for (const [path, content] of entries) {
+          next.set(path, { content, capturedAt: now, origin });
+        }
+        return next;
+      };
+      refsRef.current = apply(refsRef.current);
+      setRefs(apply);
+    },
+    [],
   );
 
   /**
@@ -167,6 +186,7 @@ export function useDiffSnapshot(activeFilePath: string | null, rawMarkdownRef: R
     currentReference,
     currentSnapshot,
     captureReference,
+    captureReferences,
     restoreReference,
     seedReference,
     getReference,

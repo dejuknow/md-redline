@@ -594,6 +594,9 @@ describe('ReviewSessionStore', () => {
         expect(result.commentIds).toEqual(['c2']);
         // The rebuilt prompt must reference the queued comment ID.
         expect(result.prompt).toMatch(/`c2`/);
+        // The session stays open after a batch, so the agent can ask in it.
+        expect(result.prompt).toContain(`mdr_ask`);
+        expect(result.prompt).toContain(`"${session.id}"`);
       }
       expect(store.getQueuedBatch(session.id)).toBeNull();
     });
@@ -621,6 +624,20 @@ describe('ReviewSessionStore', () => {
         const handoffPreambleCount = (result.prompt.match(/## Comment format/g) ?? []).length;
         expect(handoffPreambleCount).toBe(1);
       }
+    });
+
+    it('reports a queued batch on the public session until it is delivered', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      expect(store.getSession(session.id)?.hasQueuedBatch).toBe(false);
+
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 1]]));
+      // Queued between polls: the agent is not marked busy, yet the batch waits.
+      expect(store.getSession(session.id)?.waitingForAgent).toBe(false);
+      expect(store.getSession(session.id)?.hasQueuedBatch).toBe(true);
+
+      store.beginWaitPark(session.id);
+      await store.waitForSession(session.id);
+      expect(store.getSession(session.id)?.hasQueuedBatch).toBe(false);
     });
 
     it('deliverQueuedBatchIfAny returns false when no batch is queued', () => {
@@ -651,6 +668,8 @@ describe('ReviewSessionStore', () => {
       expect(result.status).toBe('done');
       if (result.status === 'done') {
         expect(result.prompt).toMatch(/`c2`/);
+        // Finish closes the session, so there is nowhere to ask.
+        expect(result.prompt).not.toContain('mdr_ask');
       }
       expect(store.getQueuedBatch(session.id)).toBeNull();
       expect(store.getSession(session.id)?.sentCommentIds).toEqual(['c1', 'c2']);

@@ -30,7 +30,8 @@ const chevronIcon = (
 interface Props {
   activeFilePath: string;
   commentCounts: Map<string, number>;
-  onCopyAgentPrompt: (filePaths: string[]) => void;
+  /** Resolves true when the handoff went out; the picker stays open otherwise. */
+  onCopyAgentPrompt: (filePaths: string[]) => Promise<boolean> | void;
 }
 
 /**
@@ -61,6 +62,10 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
   const filesWithComments = Array.from(commentCounts.entries())
     .filter(([, count]) => count > 0)
     .map(([path, count]) => ({ path, count }));
+
+  // A file whose last comment went away while the picker was open (an agent
+  // resolved it, say) drops off the list, so it drops out of the handoff too.
+  const selectedPaths = filesWithComments.filter((f) => selected.has(f.path)).map((f) => f.path);
 
   const activeCount = commentCounts.get(activeFilePath) ?? 0;
   const disabled = activeCount === 0;
@@ -199,22 +204,22 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           {/* Action button */}
           <div className="border-t border-border-subtle mt-1.5 pt-1.5 px-3 pb-1">
             <button
-              onClick={() => {
-                const paths = Array.from(selected);
-                if (paths.length === 0) return;
-                onCopyAgentPrompt(paths);
-                setOpen(false);
+              onClick={async () => {
+                if (selectedPaths.length === 0) return;
+                // A refused handoff (a file that failed to save) keeps the
+                // picker and its selection, so the reviewer need not pick again.
+                if ((await onCopyAgentPrompt(selectedPaths)) !== false) setOpen(false);
               }}
-              disabled={selected.size === 0}
+              disabled={selectedPaths.length === 0}
               className={`w-full text-xs px-2 py-1.5 rounded-md font-medium transition-opacity ${
-                selected.size > 0
+                selectedPaths.length > 0
                   ? 'bg-primary-bg-strong text-primary-text hover:opacity-90'
                   : 'bg-surface-inset text-content-muted cursor-not-allowed'
               }`}
             >
-              {selected.size === 0
+              {selectedPaths.length === 0
                 ? 'Select files to hand off'
-                : `Copy handoff for ${selected.size} file${selected.size !== 1 ? 's' : ''}`}
+                : `Copy handoff for ${selectedPaths.length} file${selectedPaths.length !== 1 ? 's' : ''}`}
             </button>
           </div>
         </div>

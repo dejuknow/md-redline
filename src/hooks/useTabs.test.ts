@@ -6,6 +6,7 @@ import {
   applyPendingTabState,
   findAccessDeniedTabs,
   isAccessDeniedError,
+  saveStateOf,
   useTabs,
   type TabState,
 } from './useTabs';
@@ -284,6 +285,29 @@ describe('TabState dirty flag', () => {
   });
 });
 
+describe('saveStateOf', () => {
+  it('is saving while a write for the file is queued or in flight', () => {
+    expect(saveStateOf(makeTab('/a.md', { dirty: true }), 1)).toBe('saving');
+  });
+
+  it('is failed when the last write errored and the edit never reached disk', () => {
+    expect(saveStateOf(makeTab('/a.md', { dirty: true, error: 'conflict' }), 0)).toBe('failed');
+  });
+
+  it('is saved once the write landed', () => {
+    expect(saveStateOf(makeTab('/a.md', { dirty: false, isLoading: false }), 0)).toBe('saved');
+  });
+
+  // A load error leaves nothing unsaved: the content shown is what is on disk.
+  it('does not treat a load error as a failed save', () => {
+    expect(saveStateOf(makeTab('/a.md', { error: 'Access denied' }), 0)).toBe('saved');
+  });
+
+  it('is saved for a file that is not open', () => {
+    expect(saveStateOf(undefined, 0)).toBe('saved');
+  });
+});
+
 describe('TabState errorKind', () => {
   it('applyPendingTabState initializes errorKind to null', () => {
     const result = applyPendingTabState(new Map(), [], null, '/tmp/x.md', true);
@@ -412,5 +436,57 @@ describe('useTabs: external content hooks', () => {
     });
 
     expect(onPathResolved).not.toHaveBeenCalled();
+  });
+});
+
+describe('useTabs save state', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  // Two writes queued for one file: the first lands, the second fails. The
+  // first must not mark the file clean while the second is still out, or the
+  // failure reads as saved and a handoff goes out without the edit on disk.
+  it('reports a failed save when the newest of two queued writes fails', async () => {
+    const path = '/tmp/doc.md';
+    const puts: Array<(res: Response) => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          return new Promise<Response>((resolve) => puts.push(resolve));
+        }
+        return Promise.resolve(jsonResponse(200, { path, content: '# Doc\n', mtime: 1 }));
+      }),
+    );
+    const { result } = renderHook(() => useTabs());
+    await act(() => result.current.openTab(path));
+
+    act(() => {
+      result.current.setRawMarkdown('first');
+      result.current.saveFile('first');
+      result.current.setRawMarkdown('second');
+      result.current.saveFile('second');
+    });
+    expect(result.current.getSaveState(path)).toBe('saving');
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    await act(async () => {
+      puts[0](jsonResponse(200, { success: true, path, mtime: 2 }));
+    });
+    await waitFor(() => expect(puts).toHaveLength(2));
+    await act(async () => {
+      puts[1](jsonResponse(500, { error: 'disk full' }));
+      await result.current.whenSaved();
+    });
+
+    expect(result.current.getSaveState(path)).toBe('failed');
   });
 });
