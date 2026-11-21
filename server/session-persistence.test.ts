@@ -414,6 +414,7 @@ describe('createSessionSaver', () => {
       releaseSlowWrite = resolve;
     });
     let asyncWriteCalls = 0;
+    let asyncWritesDone = 0;
     const saver = createSessionSaver({
       path,
       getState,
@@ -424,15 +425,16 @@ describe('createSessionSaver', () => {
         // while this write is still in flight.
         await gate;
         await writeFile(p, content, 'utf8');
+        asyncWritesDone += 1;
       },
     });
 
     saver.schedule();
-    // Let the debounce fire and the async write begin; it is now blocked on
-    // the gate, holding the "first" snapshot it captured before the state
-    // changed below.
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(asyncWriteCalls).toBe(1);
+    // Wait for the debounce to fire and the async write to begin; it is now
+    // blocked on the gate, holding the "first" snapshot it captured before
+    // the state changed below. Polled rather than slept: a slow Windows
+    // runner can take longer than any fixed delay to get here.
+    await vi.waitFor(() => expect(asyncWriteCalls).toBe(1));
 
     // A newer state lands and is flushed synchronously, simulating a
     // shutdown that interrupts the async write above mid-flight.
@@ -442,8 +444,12 @@ describe('createSessionSaver', () => {
 
     // Let the slow async write finish; its stale "first" snapshot must not
     // overwrite what flushSync already wrote.
+    // The saver notices the stale write and writes the current state again,
+    // so two writes finish. Read only after both have: this test's writer is
+    // a plain writeFile, which truncates first, so a read during either one
+    // can see an empty or half-written file.
     releaseSlowWrite();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.waitFor(() => expect(asyncWritesDone).toBe(2));
     const final = JSON.parse(await readFile(path, 'utf8'));
     expect(final.sessions[0].id).toBe('second');
   });
