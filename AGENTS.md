@@ -582,7 +582,9 @@ opened, stopped or upgraded by a plain `mdr`. If one holds a strict
 After starting, the browser open and the MCP base URL resolve their port through
 `requireAppPort`, which retries for 3s and then fails with a "not responding"
 error rather than falling back to the default port unchecked. Homes compare by
-realpath, so a symlinked spelling of the same home still matches.
+native realpath, so a symlinked or (on a case-insensitive volume) differently
+cased spelling of the same home still matches, and `resolveHomeDir` makes a
+relative `MD_REDLINE_HOME` absolute so `/api/config` never reports a bare `.`.
 
 **Browser launcher** — the CLI opens the resolved URL in the OS default
 browser: `open` (macOS), `xdg-open` (Linux), `cmd /c start` (Windows). Set

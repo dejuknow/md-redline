@@ -143,6 +143,21 @@ describe('checkServer', () => {
     await expect(checkServer(3001, { fetchFn })).resolves.toBe(true);
   });
 
+  it.runIf(process.platform === 'darwin' || process.platform === 'win32')(
+    'takes a case variant of the home for the same home on a case-insensitive volume',
+    async () => {
+      const real = mkdtempSync(join(tmpdir(), 'mdr-Home-'));
+      try {
+        const fetchFn = vi.fn(async () => mkResponse(true, 200, { homeDir: real }));
+        await expect(
+          checkServer(3001, { fetchFn, homeDir: real.replace('mdr-Home-', 'mdr-home-') }),
+        ).resolves.toBe(true);
+      } finally {
+        rmSync(real, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('takes a symlinked spelling of the home for the same home', async () => {
     const real = mkdtempSync(join(tmpdir(), 'mdr-home-'));
     const link = `${real}-link`;

@@ -104,10 +104,12 @@ export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000, ho
 }
 
 /**
- * Whether two spellings name the same directory. Through realpath, so a
- * symlinked spelling (macOS /tmp is /private/tmp) is not taken for another
- * home and answered with a duplicate server. No case folding: on a
- * case-sensitive volume that would merge two real directories.
+ * Whether two spellings name the same directory. Through the native realpath,
+ * so a symlinked spelling (macOS /tmp is /private/tmp) or a case variant on a
+ * case-insensitive volume (/users/x for /Users/x) is not taken for another
+ * home and answered with a duplicate server. The JS realpathSync keeps the
+ * input's casing; the native one returns the casing on disk. No blanket case
+ * folding: on a case-sensitive volume that would merge two real directories.
  *
  * @param {string} a
  * @param {string} b
@@ -117,7 +119,7 @@ function sameDir(a, b) {
   /** @param {string} p */
   const canon = (p) => {
     try {
-      return realpathSync(p);
+      return realpathSync.native(p);
     } catch {
       return resolve(p);
     }

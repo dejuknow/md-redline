@@ -13,6 +13,7 @@
  */
 
 import { homedir } from 'os';
+import { resolve } from 'path';
 
 /**
  * Blank counts as unset. A plain `??` kept an empty string, and an empty base
@@ -25,5 +26,10 @@ import { homedir } from 'os';
  * @returns {string}
  */
 export function resolveHomeDir(env = process.env) {
-  return env.MD_REDLINE_HOME?.trim() || homedir();
+  // Absolute, resolved against this process's cwd. The server reports this
+  // value on /api/config and the CLI matches it against its own: a relative
+  // `.` reported as-is would be re-resolved against the CLI's cwd and match a
+  // server whose home is some other directory.
+  const named = env.MD_REDLINE_HOME?.trim();
+  return named ? resolve(named) : homedir();
 }
