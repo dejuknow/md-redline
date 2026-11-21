@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { grantClipboard } from './helpers/clipboard';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -151,8 +152,9 @@ test.describe('Copy selection', () => {
   test('Copy as Markdown rebuilds a ragged selection, keeping its formatting and scope', async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(context, browserName);
     await openFixture(page);
     await page.evaluate(() => {
       const strong = [...document.querySelectorAll('.prose strong')].find((el) =>

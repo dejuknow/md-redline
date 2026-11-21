@@ -24,11 +24,32 @@ const INFO: SelectionInfo = {
 let result: { current: ReturnType<typeof useSelection> };
 const hook = () => result.current;
 
-function pointerDown(pointerType: string) {
+/** MouseEvent.buttons bits, indexed by MouseEvent.button. */
+const BUTTON_BITS = [1, 4, 2, 8, 16];
+
+/** A press as the browser delivers it: pointerdown, then mousedown. */
+function pointerDown(pointerType: string, button = 0) {
   const e = new Event('pointerdown');
   Object.defineProperty(e, 'pointerType', { value: pointerType });
+  Object.defineProperty(e, 'button', { value: button });
   act(() => {
     document.dispatchEvent(e);
+    document.dispatchEvent(
+      new MouseEvent('mousedown', { button, buttons: BUTTON_BITS[button], bubbles: true }),
+    );
+  });
+}
+
+/** A second button pressed while `held` is down: mousedown only. */
+function chordDown(button: number, held = 0) {
+  act(() => {
+    document.dispatchEvent(
+      new MouseEvent('mousedown', {
+        button,
+        buttons: BUTTON_BITS[button] | BUTTON_BITS[held],
+        bubbles: true,
+      }),
+    );
   });
 }
 
@@ -592,5 +613,265 @@ describe('useSelection Escape with a release that never came', () => {
       document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true }));
     });
     expect(hook().selection).toBeNull();
+  });
+});
+
+describe('useSelection right-clicks in WebKit (#229)', () => {
+  function contextMenu(target: EventTarget = document, init: MouseEventInit = {}) {
+    act(() => {
+      target.dispatchEvent(
+        new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true, ...init }),
+      );
+    });
+  }
+
+  it('settles a right-click from contextmenu when no mouseup follows', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // WebKit on macOS swallows the mouseup of a press that opened a context
+    // menu, so a right-click elsewhere has to clear the selection here.
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    contextMenu();
+    expect(hook().selection).toBeNull();
+  });
+
+  it('does not settle the same right-click twice when mouseup does follow', () => {
+    pointerDown('mouse');
+    mouseUp();
+
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    contextMenu();
+    expect(hook().selection).toBeNull();
+    // Chromium on macOS still sends the mouseup. It is the same press, so it
+    // must not resolve again and commit whatever the range says by then.
+    mockResolve.mockReturnValue(INFO);
+    mouseUp(2);
+    expect(hook().selection).toBeNull();
+  });
+
+  it('leaves a press that was already released to its mouseup', () => {
+    pointerDown('mouse');
+    mouseUp();
+
+    // Windows order: mouseup, then contextmenu. The mouseup settled it.
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    mouseUp(2);
+    expect(hook().selection).toBeNull();
+    mockResolve.mockReturnValue(INFO);
+    contextMenu();
+    expect(hook().selection).toBeNull();
+  });
+
+  describe('the word WebKit selects on a right-click', () => {
+    let paragraph: HTMLParagraphElement;
+
+    beforeEach(() => {
+      paragraph = document.createElement('p');
+      paragraph.textContent = 'valid credentials here';
+      document.body.appendChild(paragraph);
+      window.getSelection()!.removeAllRanges();
+    });
+
+    afterEach(() => {
+      window.getSelection()!.removeAllRanges();
+      paragraph.remove();
+    });
+
+    function browserSelectsWord() {
+      const range = document.createRange();
+      range.setStart(paragraph.firstChild!, 6);
+      range.setEnd(paragraph.firstChild!, 17);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+    }
+
+    /** Stands in for the viewer opening a menu of ours for this click. */
+    function viewerClaimsClick(seen: { text?: string }) {
+      const claim = (e: Event) => {
+        seen.text = window.getSelection()!.toString();
+        e.preventDefault();
+      };
+      paragraph.addEventListener('contextmenu', claim);
+      return () => paragraph.removeEventListener('contextmenu', claim);
+    }
+
+    it('is hidden from the viewer and stays dropped when the viewer takes the menu', () => {
+      const seen: { text?: string } = {};
+      const release = viewerClaimsClick(seen);
+      pointerDown('mouse', 2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(seen.text).toBe('');
+      expect(window.getSelection()!.isCollapsed).toBe(true);
+      release();
+    });
+
+    it("comes back for the browser's own menu when nothing claims the click", () => {
+      // Look Up and Copy in Safari's menu act on that word.
+      mockResolve.mockReturnValue(null);
+      pointerDown('mouse', 2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+      expect(hook().selection).toBeNull();
+    });
+
+    it('is kept on Shift, which asks for the browser menu', () => {
+      pointerDown('mouse', 2);
+      browserSelectsWord();
+      contextMenu(paragraph, { shiftKey: true });
+      expect(window.getSelection()!.toString()).toBe('credentials');
+    });
+
+    it('leaves a selection the reader made before the press', () => {
+      browserSelectsWord();
+      pointerDown('mouse', 2);
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+    });
+
+    it('puts back a selection elsewhere that the word replaced', () => {
+      // Text selected outside the viewer (a sidebar, a locked composer's
+      // document range) when the press began. WebKit swaps it for the word.
+      const other = document.createElement('p');
+      other.textContent = 'sidebar text';
+      document.body.appendChild(other);
+      const before = document.createRange();
+      before.selectNodeContents(other);
+      window.getSelection()!.addRange(before);
+      const seen: { text?: string } = {};
+      const release = viewerClaimsClick(seen);
+      pointerDown('mouse', 2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(seen.text).toBe('sidebar text');
+      expect(window.getSelection()!.toString()).toBe('sidebar text');
+      release();
+      other.remove();
+    });
+
+    it('is left alone when no mouse press is behind the menu', () => {
+      // A long press on a touch selection opens the menu with no mousedown.
+      const e = new Event('pointerdown');
+      Object.defineProperty(e, 'pointerType', { value: 'touch' });
+      act(() => {
+        document.dispatchEvent(e);
+      });
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+    });
+
+    it('keeps the drag, not a word WebKit picks, when a second button joins it', () => {
+      pointerDown('mouse', 0);
+      const drag = document.createRange();
+      drag.setStart(paragraph.firstChild!, 0);
+      drag.setEnd(paragraph.firstChild!, 5);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(drag);
+      chordDown(2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      // Nothing claimed the click, yet the word is not handed back: the drag
+      // is still in progress and its release commits the drag.
+      expect(window.getSelection()!.toString()).toBe('valid');
+    });
+
+    it('hands back the word itself, not a range reaching back over an image', () => {
+      // "valid " | <img> | "credentials here": the word starts where the
+      // first text node ends, in text-offset terms.
+      paragraph.textContent = 'valid ';
+      paragraph.appendChild(document.createElement('img'));
+      const after = document.createTextNode('credentials here');
+      paragraph.appendChild(after);
+      mockResolve.mockReturnValue(null);
+      pointerDown('mouse', 2);
+      const word = document.createRange();
+      word.setStart(after, 0);
+      word.setEnd(after, 11);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(word);
+      contextMenu(paragraph);
+      const restored = window.getSelection()!.getRangeAt(0);
+      expect(restored.toString()).toBe('credentials');
+      expect(restored.startContainer).toBe(after);
+    });
+
+    it('leaves a drag in progress alone when a second button joins it', () => {
+      // Left-drag, then the right button while the left is still held.
+      pointerDown('mouse', 0);
+      browserSelectsWord();
+      chordDown(2);
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+      // The left button's release still settles the drag.
+      mouseUp(2);
+      mockResolve.mockReturnValue(INFO);
+      mouseUp(0);
+      expect(hook().selection).toEqual(INFO);
+    });
+  });
+
+  it('does not count a button as held after a release the page never saw', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // A left press whose mouseup was lost (WebKit can drop one while its own
+    // menu has the mouse), then a plain right-click later on.
+    pointerDown('mouse', 0);
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    contextMenu();
+    expect(hook().selection).toBeNull();
+  });
+
+  it('settles a right-click whose contextmenu a handler stops', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // A link in a comment stops contextmenu to keep the browser's link menu.
+    const link = document.createElement('a');
+    link.addEventListener('contextmenu', (e) => e.stopPropagation());
+    document.body.appendChild(link);
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    contextMenu(link);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(hook().selection).toBeNull();
+    link.remove();
+  });
+
+  it('does not commit the word on Shift+right-click', () => {
+    mockResolve.mockReturnValue(INFO);
+    pointerDown('mouse', 2);
+    contextMenu(document, { shiftKey: true });
+    expect(hook().selection).toBeNull();
+  });
+
+  it('skips the repeat mouseup of a ctrl+click even after Ctrl comes up', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // A macOS ctrl+click is a secondary press of the primary button. If Ctrl
+    // is released first, its mouseup no longer reads as secondary.
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 0);
+    contextMenu(document, { button: 0, ctrlKey: true });
+    expect(hook().selection).toBeNull();
+    mockResolve.mockReturnValue(INFO);
+    mouseUp(0);
+    expect(hook().selection).toBeNull();
+    platform.mockRestore();
   });
 });

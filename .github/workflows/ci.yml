@@ -45,7 +45,34 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: End-to-end tests
-        run: npm run test:e2e
+        run: npm run test:e2e -- --project=chromium
+
+  # The selection, copy and context-menu specs in WebKit (Safari's engine). On
+  # macOS, not Linux: the behaviours behind #228 and #229 (the word a
+  # right-click selects, the mouseup a context menu swallows) are WebKit's
+  # macOS editing behaviour, and Linux WebKit would pass without the fixes.
+  webkit:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install webkit
+
+      - name: End-to-end tests (WebKit)
+        run: npx playwright test --project=webkit
 
   # Unit and CLI tests across all three OSes. This is where platform-specific
   # behaviour lives: process spawning, path handling, and the browser launcher
