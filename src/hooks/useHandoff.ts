@@ -90,13 +90,19 @@ export function useHandoff({
   );
 
   /**
-   * Record a banner Send. The session names its files, which need not
-   * include the active tab, so only those files' references move.
+   * The banner's Send, run at the click: read the session files' text now
+   * (the active tab may change while the request is out), wait for their
+   * saves, and hand back the commit that records that text once the send
+   * succeeds. Only the session's files move, never the active tab as such.
    */
-  const recordSent = useCallback(
-    (filePaths: string[]) => captureReferences(contentsOf(filePaths), 'handoff'),
-    [contentsOf, captureReferences],
+  const prepareSend = useCallback(
+    async (filePaths: string[]): Promise<(() => void) | null> => {
+      const atClick = contentsOf(filePaths);
+      if (!(await ensureSaved(filePaths))) return null;
+      return () => captureReferences(atClick, 'handoff');
+    },
+    [contentsOf, ensureSaved, captureReferences],
   );
 
-  return { handOff, ensureSaved, recordSent };
+  return { handOff, ensureSaved, prepareSend };
 }

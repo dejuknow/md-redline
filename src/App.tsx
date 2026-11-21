@@ -1425,11 +1425,7 @@ export default function App() {
     [],
   );
 
-  const {
-    handOff: handleHandoff,
-    ensureSaved: ensureHandoffSaved,
-    recordSent: recordHandoffSent,
-  } = useHandoff({
+  const { handOff: handleHandoff, prepareSend: prepareBannerSend } = useHandoff({
     activeFilePath,
     rawMarkdownRef,
     tabs,
@@ -1450,13 +1446,6 @@ export default function App() {
   );
   // An agent can add files to a review this tab is showing (#117): open them.
   useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
-
-  // A banner Send hands the session's files to the agent, so their diff
-  // references move the same way a Hand off moves them.
-  const handleReviewHandoffSuccess = useCallback(
-    (session: { filePaths: string[] }) => recordHandoffSent(session.filePaths),
-    [recordHandoffSent],
-  );
 
   // Strip `?review=<id>` from the address bar once a review resolves, so
   // a page reload doesn't re-open the tabs of a completed review and so
@@ -3571,8 +3560,7 @@ export default function App() {
           sessions={shownReviewSessions}
           commentCounts={commentCounts}
           agentCommentCounts={agentCommentCounts}
-          onHandoffSuccess={handleReviewHandoffSuccess}
-          ensureSaved={ensureHandoffSaved}
+          prepareSend={prepareBannerSend}
           onResolved={handleReviewResolved}
           onBatchSent={handleBatchSent}
           optimisticSent={optimisticSent}

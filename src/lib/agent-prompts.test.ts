@@ -94,7 +94,10 @@ describe('buildAddressCommentsPrompt', () => {
     expect(prompt).toContain('c2');
     expect(prompt).toContain('c3');
     expect(prompt).toContain('ONLY');
-    expect(prompt).toContain('Leave any other comment markers');
+    expect(prompt).toContain('Do not reply to, resolve, or remove any other comment marker');
+    // A shared anchor: editing for a listed comment can rewrite text another
+    // marker points at, and "leave it untouched" would forbid keeping it valid.
+    expect(prompt).toContain('The one change another marker may need is to its `anchor`');
   });
 
   it('addresses all comments when commentIds is absent (backward compat)', () => {

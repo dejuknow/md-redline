@@ -576,11 +576,16 @@ export function useTabs(options?: {
           if (!res.ok || !data) {
             throw new Error(getApiErrorMessage(res, data, 'Failed to save file'));
           }
+          // A newer write for this file is still queued, so the tab holds
+          // text this one did not carry: it stays dirty until that write
+          // lands. Clearing it here let a failure of the newer write read as
+          // saved, since a failure only sets `error`.
+          const newerWriteQueued = (pending.get(path) ?? 0) > 1;
           updateTab(path, {
             lastSaved: new Date(),
             error: null,
             mtime: data.mtime,
-            dirty: false,
+            ...(newerWriteQueued ? {} : { dirty: false }),
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Failed to save file';

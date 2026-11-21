@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import { isCommentSent } from '../lib/answered-comments';
@@ -19,14 +19,16 @@ interface ReviewBannerProps {
   sessions: ReviewSession[];
   commentCounts: Map<string, number>;
   agentCommentCounts?: Map<string, number>;
-  /** Called after a successful handoff so the parent can capture diff snapshots for the session's files. */
-  onHandoffSuccess: (session: ReviewSession) => void;
+  /** Called after a send that handed comments to the agent. */
+  onHandoffSuccess?: (session: ReviewSession) => void;
   /**
-   * Waits for any write still out on the files, and resolves false (after
-   * telling the reviewer why) if one failed. The agent reads the files on
-   * disk, so a send then would miss the latest comments.
+   * Run at the click, before anything is posted. Reads the files' text as it
+   * is now, waits for any write still out on them, and resolves to a commit
+   * that records that text as the diff reference once the send succeeds, or
+   * to null (after telling the reviewer why) if a write failed. The agent
+   * reads the files on disk, so a send then would miss the latest comments.
    */
-  ensureSaved?: (filePaths: string[]) => Promise<boolean>;
+  prepareSend?: (filePaths: string[]) => Promise<(() => void) | null>;
   onResolved: () => void;
   /**
    * Called after a successful send (batch or send & finish) with the comment
@@ -87,6 +89,8 @@ function unsentCommentIds(
 // The reply keys a batch carries: the last reply of each thread being sent
 // that has one. The server records them (as `replyIds`) so the thread is not
 // offered again for the same reply text.
+const NO_COMMIT = () => {};
+
 function replyKeysFor(ids: string[], userRepliedLast: ReadonlyMap<string, string>): string[] {
   return ids.flatMap((id) => userRepliedLast.get(id) ?? []);
 }
@@ -123,7 +127,7 @@ export function ReviewBanner({
   commentCounts,
   agentCommentCounts,
   onHandoffSuccess,
-  ensureSaved,
+  prepareSend,
   onResolved,
   onBatchSent,
   optimisticSent = NO_OPTIMISTIC,
@@ -134,6 +138,9 @@ export function ReviewBanner({
   onJumpToAsk,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Claimed synchronously at the click, before any await: a second click
+  // landing while the first waits on a save must not post the same batch.
+  const sendingRef = useRef(false);
 
   // `stayingOpen` is false for Send & finish: the session closes with that
   // send, so the prompt must not offer mdr_ask on it.
@@ -158,11 +165,13 @@ export function ReviewBanner({
   const handleSendBatch = useCallback(
     async (s: ReviewSession) => {
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
-      if (unsentIds.length === 0) return;
-      if (ensureSaved && !(await ensureSaved(s.filePaths))) return;
+      if (unsentIds.length === 0 || sendingRef.current) return;
+      sendingRef.current = true;
       const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
       setBusyId(s.id);
       try {
+        const commit = prepareSend ? await prepareSend(s.filePaths) : NO_COMMIT;
+        if (!commit) return;
         const prompt = buildPromptForSession(s, unsentIds, true);
         // Pass per-file commentCounts so the server can rebuild an accurate
         // prompt if this batch ends up merged into an existing queued one
@@ -191,7 +200,8 @@ export function ReviewBanner({
           return;
         }
         const data = (await res.json()) as { ok: boolean; queued?: boolean };
-        onHandoffSuccess(s);
+        commit();
+        onHandoffSuccess?.(s);
         onBatchSent?.(unsentIds, replyKeys);
         if (data.queued) {
           showToast?.(
@@ -205,12 +215,13 @@ export function ReviewBanner({
           );
         }
       } finally {
+        sendingRef.current = false;
         setBusyId(null);
       }
     },
     [
       buildPromptForSession,
-      ensureSaved,
+      prepareSend,
       commentIdsByFile,
       userRepliedLast,
       optimisticSent,
@@ -226,10 +237,13 @@ export function ReviewBanner({
       const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
       // The agent reads the files when this finish carries comments: ours, or
       // a batch the server queued while the agent was busy (it folds that in).
-      const carriesComments = unsentIds.length > 0 || s.waitingForAgent;
-      if (carriesComments && ensureSaved && !(await ensureSaved(s.filePaths))) return;
+      const carriesComments = unsentIds.length > 0 || s.hasQueuedBatch === true;
+      if (sendingRef.current) return;
+      sendingRef.current = true;
       setBusyId(s.id);
       try {
+        const commit = carriesComments && prepareSend ? await prepareSend(s.filePaths) : NO_COMMIT;
+        if (!commit) return;
         const replyKeys = replyKeysFor(unsentIds, userRepliedLast);
         // A batch queued behind a busy agent is delivered with the finish, so
         // the server needs the counts to rebuild the prompt even when there
@@ -263,19 +277,22 @@ export function ReviewBanner({
         }
         // A finish with nothing new hands nothing off, so the diff keeps
         // showing the agent's last round instead of resetting to now.
+        // A queued batch's files were recorded when it was sent.
         if (unsentIds.length > 0) {
-          onHandoffSuccess(s);
+          commit();
+          onHandoffSuccess?.(s);
           onBatchSent?.(unsentIds, replyKeys);
         }
         showToast?.('Review finished and sent to agent', 'success');
         onResolved();
       } finally {
+        sendingRef.current = false;
         setBusyId(null);
       }
     },
     [
       buildPromptForSession,
-      ensureSaved,
+      prepareSend,
       commentIdsByFile,
       commentCounts,
       userRepliedLast,

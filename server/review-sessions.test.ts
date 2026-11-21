@@ -626,6 +626,20 @@ describe('ReviewSessionStore', () => {
       }
     });
 
+    it('reports a queued batch on the public session until it is delivered', async () => {
+      const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+      expect(store.getSession(session.id)?.hasQueuedBatch).toBe(false);
+
+      store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 1]]));
+      // Queued between polls: the agent is not marked busy, yet the batch waits.
+      expect(store.getSession(session.id)?.waitingForAgent).toBe(false);
+      expect(store.getSession(session.id)?.hasQueuedBatch).toBe(true);
+
+      store.beginWaitPark(session.id);
+      await store.waitForSession(session.id);
+      expect(store.getSession(session.id)?.hasQueuedBatch).toBe(false);
+    });
+
     it('deliverQueuedBatchIfAny returns false when no batch is queued', () => {
       const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
       expect(store.deliverQueuedBatchIfAny(session.id)).toBe(false);

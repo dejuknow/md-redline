@@ -153,6 +153,12 @@ export interface ReviewSession {
    */
   sentReplyIds: string[];
   waitingForAgent: boolean;
+  /**
+   * A batch the reviewer sent while the agent was busy is waiting to go out.
+   * A finish folds it into the final prompt, so the browser checks that the
+   * files have saved before finishing whenever one is queued.
+   */
+  hasQueuedBatch: boolean;
 }
 
 /**
@@ -169,7 +175,8 @@ export type SessionTerminalReason =
   | 'agent_silent'
   | null;
 
-interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt'> {
+// hasQueuedBatch is derived from queuedBatch in toPublic, never stored.
+interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt' | 'hasQueuedBatch'> {
   /** The files the session was created with, before any addFiles (#117). */
   originalFilePaths: string[];
   resolver: (result: ReviewResult) => void;
@@ -1535,6 +1542,7 @@ export class ReviewSessionStore {
       sentCommentIds: [...s.sentCommentIds],
       sentReplyIds: [...s.sentReplyIds],
       waitingForAgent: s.waitingForAgent,
+      hasQueuedBatch: s.queuedBatch !== null,
     };
   }
 }

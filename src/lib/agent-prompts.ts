@@ -68,7 +68,7 @@ export function buildAddressCommentsPrompt({
   // and forbid touching every marker, so it means unscoped instead.
   const scopedIds = commentIds && commentIds.length > 0 ? commentIds : null;
   const scopeInstruction = scopedIds
-    ? `Address ONLY the comments with the following IDs: ${scopedIds.map((id) => `\`${id}\``).join(', ')}. Leave any other comment markers in the file untouched.`
+    ? `Address ONLY the comments with the following IDs: ${scopedIds.map((id) => `\`${id}\``).join(', ')}. Do not reply to, resolve, or remove any other comment marker in the file. The one change another marker may need is to its \`anchor\`: if your edit rewrites the text it points at, update it as "Keeping anchors valid" below describes.`
     : null;
 
   // Both modes distinguish "I edited the document" from "I answered a

@@ -438,3 +438,55 @@ describe('useTabs: external content hooks', () => {
     expect(onPathResolved).not.toHaveBeenCalled();
   });
 });
+
+describe('useTabs save state', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  // Two writes queued for one file: the first lands, the second fails. The
+  // first must not mark the file clean while the second is still out, or the
+  // failure reads as saved and a handoff goes out without the edit on disk.
+  it('reports a failed save when the newest of two queued writes fails', async () => {
+    const path = '/tmp/doc.md';
+    const puts: Array<(res: Response) => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          return new Promise<Response>((resolve) => puts.push(resolve));
+        }
+        return Promise.resolve(jsonResponse(200, { path, content: '# Doc\n', mtime: 1 }));
+      }),
+    );
+    const { result } = renderHook(() => useTabs());
+    await act(() => result.current.openTab(path));
+
+    act(() => {
+      result.current.setRawMarkdown('first');
+      result.current.saveFile('first');
+      result.current.setRawMarkdown('second');
+      result.current.saveFile('second');
+    });
+    expect(result.current.getSaveState(path)).toBe('saving');
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    await act(async () => {
+      puts[0](jsonResponse(200, { success: true, path, mtime: 2 }));
+    });
+    await waitFor(() => expect(puts).toHaveLength(2));
+    await act(async () => {
+      puts[1](jsonResponse(500, { error: 'disk full' }));
+      await result.current.whenSaved();
+    });
+
+    expect(result.current.getSaveState(path)).toBe('failed');
+  });
+});

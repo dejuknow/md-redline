@@ -221,7 +221,7 @@ chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
 - `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own. Reuse needs an exact match on the requested file set, compared against both the session's current files and the files it started with, so a session widened by `mdr_add_files` is found again when its original files are asked for (#117). A larger session is never joined for a smaller request, since one Done would then end both reviews. The MCP client sends a process-scoped UUID, or `MD_REDLINE_CLIENT_ID` when set (`resolveClientId` in `server/mcp-stdio/client.ts`), for clients that start a fresh `mdr mcp` per tool call and would otherwise never match their own session. It must be at most 256 characters, checked when `mdr mcp` starts.
-- `GET /api/review-sessions` — list open sessions
+- `GET /api/review-sessions` — list open sessions. Each carries `hasQueuedBatch`, true while a batch sent during a busy agent waits for delivery (a finish folds it in).
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent. When the agent is busy with the previous batch, or no `/wait` poll is parked, the batch is queued instead (`{ ok: true, queued: true }`): its ids count as sent right away, and the next `/wait` delivers it with a prompt rebuilt from `commentCounts`. Optional `commentCounts` (`{ [filePath]: n }`) keeps the per-file counts in that prompt accurate; keys outside the session's files are ignored. Optional `replyIds` (array of strings, else 400) names the reviewer replies the batch carries, one per thread being sent that has a reviewer reply last. Each entry is a reply id plus a hash of the reply text (`replyKey` in `src/lib/answered-comments.ts`), so an edited reply, which keeps its id, counts as new; the server treats entries as opaque. They are recorded, deduplicated, in the session's `sentReplyIds` next to `sentCommentIds`, and never join `commentIds`, which the agent's prompt is built from verbatim. The banner uses `sentReplyIds` to stop offering a reply that already went out.
 - `POST /api/review-sessions/:id/finish` — send final batch and close session (`{ prompt?, commentIds?, replyIds?, commentCounts? }`). A batch still queued is delivered with the finishing result, not dropped: the terminal prompt is rebuilt for the queued ids plus `commentIds`, with `commentCounts` taking precedence over the counts recorded at queue time, and replaces any `prompt` sent. With nothing queued the `prompt` passes through unchanged. `replyIds` is validated and recorded exactly as on `/batch`. Pending asks do not block finish: inline replies found in the markers are delivered to the agent first, and remaining unanswered asks close as `done_without_reply` with their markers preserved (flags cleared).
@@ -2130,9 +2130,14 @@ What a click does (`src/hooks/useHandoff.ts`):
   handoff waits for any write still out on a selected file (`whenSaved` in
   `useTabs`), then refuses with a toast if a file's last write failed (a
   conflict or server error). `getSaveState` reports this per path; a load error
-  is not a failed save. The review banner's Send runs the same check
-  (`ensureSaved`), and so does Send & finish when it carries comments, its own
-  or a batch the server queued while the agent was busy. The clipboard write
+  is not a failed save. A successful write leaves the tab dirty while a newer
+  write for it is queued, so a failure of that newer one still reads as failed.
+  The review banner's Send runs the same check (`prepareSend`), and so does
+  Send & finish when it carries comments: its own, or a batch the server queued
+  while the agent was busy, which the session reports as `hasQueuedBatch`
+  (`waitingForAgent` is not a proxy: a batch also queues between agent polls).
+  The banner claims its busy state before that wait, so a second click cannot
+  post the same batch twice. The clipboard write
   after that wait can be refused by Safari, which wants it inside the click's
   own task; this only happens when a save was still out at the click.
 - **Names the comments it counts.** The prompt passes `commentIds` for the
@@ -2151,11 +2156,12 @@ What a click does (`src/hooks/useHandoff.ts`):
   selected file's text is read at the click and recorded with
   `captureReferences` once the clipboard write succeeds. A failed copy moves no
   reference, and a file the picker left out keeps its own, even the active tab.
-  A banner Send records the session's files (`recordSent`), not the active tab,
-  but reads their text once the request returns rather than at the click. A
-  finish that sends nothing new records nothing, so the diff keeps showing the
-  agent's last round. A refused handoff leaves the picker open with its
-  selection.
+  A banner Send does the same for the session's files: `prepareSend` reads
+  them at the click and returns a commit the banner runs once the post
+  succeeds. A finish that sends nothing new records nothing, so the diff keeps
+  showing the agent's last round. A refused handoff leaves the picker open with
+  its selection, and a selected file whose comments went away while the picker
+  was open drops out of it.
 
 ### Diff overlay
 After a review handoff, or after an agent saves a before copy with `mdr_baseline`,
@@ -2718,6 +2724,12 @@ From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
 - `handoffComments(comments)` — the comments a handoff sends: the reviewer's open ones
+
+  A scoped prompt (`commentIds`) tells the agent to leave other markers alone
+  except for their `anchor`, which it must still keep valid when an edit
+  rewrites the text one points at; plain "leave them untouched" contradicted
+  "Keeping anchors valid" whenever two comments shared text. The MCP batch and
+  final preambles in `server/mcp-stdio/handler.ts` say the same.
 
   The "Asking me a question" section, which offers `mdr_ask`, appears only when
   `askSessionId` is passed, and names that session. Pass it only for a session

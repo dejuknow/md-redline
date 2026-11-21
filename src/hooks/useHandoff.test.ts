@@ -78,14 +78,41 @@ describe('useHandoff', () => {
     );
   });
 
-  it('records a banner Send for the session files only, not the active tab', () => {
+  // The Send's response can arrive after the reviewer switched tabs, when the
+  // shared active-text ref holds another file. The text is read at the click.
+  it("reads a banner Send's files at the click and records only the session files", async () => {
     const { params, result } = setup();
 
-    act(() => result.current.recordSent(['/b.md', '/not-open.md']));
+    let commit: (() => void) | null = null;
+    await act(async () => {
+      commit = await result.current.prepareSend(['/a.md', '/b.md', '/not-open.md']);
+    });
+    params.rawMarkdownRef.current = 'another tab now active';
+    act(() => commit!());
 
     expect(params.captureReferences).toHaveBeenCalledWith(
-      new Map([['/b.md', 'b at click']]),
+      new Map([
+        ['/a.md', 'active at click'],
+        ['/b.md', 'b at click'],
+      ]),
       'handoff',
+    );
+  });
+
+  it('gives the banner no commit when a session file failed to save', async () => {
+    const { params, result } = setup({
+      getSaveState: (path) => (path === '/b.md' ? 'failed' : 'saved'),
+    });
+
+    let commit: (() => void) | null = () => {};
+    await act(async () => {
+      commit = await result.current.prepareSend(['/a.md', '/b.md']);
+    });
+
+    expect(commit).toBeNull();
+    expect(params.showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/b\.md didn't save/),
+      'error',
     );
   });
 
