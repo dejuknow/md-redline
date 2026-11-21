@@ -618,3 +618,77 @@ describe('renderMarkdown table scroll wrapping (rehypeWrapTables)', () => {
     expect(html).not.toContain('table-scroll');
   });
 });
+
+describe('renderMarkdown compact table columns (markCompactColumns)', () => {
+  const cellsWithNowrap = (html: string) =>
+    [...html.matchAll(/<(td|th)[^>]*class="[^"]*table-cell--nowrap[^"]*"[^>]*>([^<]*)</g)].map(
+      (m) => m[2],
+    );
+
+  it('keeps short ID and priority columns on one line, leaves prose to wrap', () => {
+    const md = [
+      '| ID | Pri | Item |',
+      '| --- | --- | --- |',
+      '| G-1 | P0 | Signed-in visitors on /creators stay in their old account. |',
+      '| G-22 | P1 | Make the YouTube requirement clear on the landing page. |',
+    ].join('\n');
+    expect(cellsWithNowrap(renderMarkdown(md))).toEqual(['ID', 'Pri', 'G-1', 'P0', 'G-22', 'P1']);
+  });
+
+  it('treats a column as prose once any body cell runs long', () => {
+    const md = [
+      '| ID | Source |',
+      '| --- | --- |',
+      '| G-1 | FF48 |',
+      '| G-7 | New (E08, G-12 guest review) |',
+    ].join('\n');
+    expect(cellsWithNowrap(renderMarkdown(md))).toEqual(['ID', 'G-1', 'G-7']);
+  });
+
+  it('lets a multi-word header wrap above short values', () => {
+    // A matrix of yes/no columns under descriptive headers fit the width
+    // before because the headers wrapped; forcing them onto one line would
+    // push it into a horizontal scroll.
+    const md = [
+      '| Feature | Implementation status | Docs |',
+      '| --- | --- | --- |',
+      '| Export | Yes | No |',
+    ].join('\n');
+    expect(cellsWithNowrap(renderMarkdown(md))).toEqual(['Feature', 'Docs', 'Export', 'Yes', 'No']);
+  });
+
+  it('marks a header-only table as nothing', () => {
+    const md = '| ID | Pri |\n| --- | --- |';
+    expect(renderMarkdown(md)).not.toContain('table-cell--nowrap');
+  });
+
+  it('treats a raw HTML <th> row outside <thead> as the header', () => {
+    const md = '<table><tr><th>Assigned reviewer</th></tr><tr><td>G-1</td></tr></table>';
+    expect(cellsWithNowrap(renderMarkdown(md))).toEqual(['G-1']);
+  });
+
+  it('opts a raw HTML table with colspan out entirely', () => {
+    const md = '<table><tr><th colspan="2">Both</th></tr><tr><td>a</td><td>b</td></tr></table>';
+    expect(renderMarkdown(md)).not.toContain('table-cell--nowrap');
+  });
+
+  it('opts a raw HTML table with rowspan out entirely', () => {
+    // A rowspan shifts every later cell in the rows below one position left,
+    // so matching by position would measure the wrong column.
+    const md =
+      '<table><tr><th>ID</th><th>Notes</th></tr>' +
+      '<tr><td rowspan="2">G-1</td><td>short</td></tr>' +
+      '<tr><td>A long explanatory note that should wrap</td></tr></table>';
+    expect(renderMarkdown(md)).not.toContain('table-cell--nowrap');
+  });
+
+  it('strips a nowrap class an author wrote and keeps their other classes', () => {
+    const md =
+      '<table><tr><th>Notes</th></tr>' +
+      '<tr><td class="table-cell--nowrap">A long paragraph an author tried to force onto one line</td></tr>' +
+      '<tr><td class="keep-me">x</td></tr></table>';
+    const html = renderMarkdown(md);
+    expect(html).not.toContain('table-cell--nowrap');
+    expect(html).toContain('class="keep-me"');
+  });
+});
