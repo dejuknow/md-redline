@@ -1240,7 +1240,7 @@ describe('/api/pick-folder', () => {
       execFileImpl,
     });
 
-    const targetPath = '/Users/example/notes';
+    const targetPath = pickedRoot;
     const { response } = await requestJson(
       pickApp,
       `/api/pick-folder?defaultPath=${encodeURIComponent(targetPath)}`,
@@ -1251,6 +1251,37 @@ describe('/api/pick-folder', () => {
     const argsJoined = calls[0].args.join(' ');
     expect(argsJoined).toContain('choose folder');
     expect(argsJoined).toContain(`default location POSIX file "${targetPath}"`);
+
+    await new Promise((r) => setTimeout(r, 50));
+    await rm(realHome, { recursive: true, force: true });
+    await rm(pickedRoot, { recursive: true, force: true });
+  });
+
+  // osascript fails with -1700 before showing anything when the default
+  // location is missing, so a refused folder that was since deleted left the
+  // Allow button doing nothing.
+  it('opens at the nearest existing folder when defaultPath was deleted', async () => {
+    const localHome = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-gone-'));
+    const realHome = await realpath(localHome);
+    const pickedRoot = await mkdtemp(join(tmpdir(), 'md-redline-pickfolder-target-'));
+    const realPicked = await realpath(pickedRoot);
+    const { calls, execFileImpl } = createExecFileStub(realPicked + '\n');
+    const pickApp = createApp({
+      cwd: cwdRoot,
+      homeDir: realHome,
+      platformName: 'darwin',
+      execFileImpl,
+    });
+
+    const goneDir = join(pickedRoot, 'deleted', 'nested');
+    const { response } = await requestJson(
+      pickApp,
+      `/api/pick-folder?defaultPath=${encodeURIComponent(goneDir)}`,
+      PICK,
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args.join(' ')).toContain(`default location POSIX file "${pickedRoot}"`);
 
     await new Promise((r) => setTimeout(r, 50));
     await rm(realHome, { recursive: true, force: true });
