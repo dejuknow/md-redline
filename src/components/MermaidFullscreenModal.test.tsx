@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SelectionInfo } from '../types';
 
 const fetchPreferences = vi.fn();
@@ -75,10 +75,15 @@ function renderModal(overrides: Partial<MermaidFullscreenModalProps>) {
   };
 }
 
-/** Select the label the way a mouse does: press, then release on the canvas. */
-function selectLabel() {
-  const label = document.querySelector('.mermaid-fullscreen-canvas-inner text');
-  if (!label) throw new Error('label not rendered');
+/** Select the label the way a mouse does: press, then release on the canvas.
+ *  The canvas writes the SVG in an effect that can run after the dialog is
+ *  already in the page, so wait for the label rather than expect it. */
+async function selectLabel() {
+  const label = await waitFor(() => {
+    const el = document.querySelector('.mermaid-fullscreen-canvas-inner text');
+    if (!el) throw new Error('label not rendered');
+    return el;
+  });
   act(() => {
     const down = new Event('pointerdown', { bubbles: true });
     Object.defineProperty(down, 'pointerType', { value: 'mouse' });
@@ -103,7 +108,7 @@ describe('MermaidFullscreenModal composer', () => {
     const onAddComment = vi.fn(() => false);
     const { update } = renderModal({ onAddComment });
     await screen.findByRole('dialog', { name: 'Diagram fullscreen view' });
-    selectLabel();
+    await selectLabel();
 
     fireEvent.click(await screen.findByRole('button', { name: /Comment/ }));
     const draft = 'A long comment the reader should not have to type twice';
@@ -127,7 +132,7 @@ describe('MermaidFullscreenModal composer', () => {
     const canPlace = vi.fn(() => true);
     const { update } = renderModal({ canPlace });
     await screen.findByRole('dialog', { name: 'Diagram fullscreen view' });
-    selectLabel();
+    await selectLabel();
     await screen.findByRole('button', { name: /Comment/ });
     const calls = canPlace.mock.calls.length;
     expect(calls).toBeGreaterThan(0);
