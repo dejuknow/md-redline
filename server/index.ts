@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 import { readFile, readdir, stat, realpath, open, unlink } from 'fs/promises';
 import { promises as fsPromises } from 'fs';
 import { watch, statSync, realpathSync, readFileSync, unlinkSync, type FSWatcher } from 'fs';
-import { join, extname, resolve, dirname } from 'path';
+import { join, extname, resolve, dirname, isAbsolute } from 'path';
 import { platform, tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -1150,7 +1150,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
   });
 
   app.post('/api/pick-folder', async (c) => {
-    const defaultPath = c.req.query('defaultPath') ?? '';
+    const defaultPath = nearestExistingDir(c.req.query('defaultPath') ?? '');
     try {
       const path = await new Promise<string>((promiseResolve, reject) => {
         if (platformName === 'darwin') {
@@ -1527,6 +1527,27 @@ export function createAppFull(options: CreateAppOptions = {}) {
   }
 
   return { app, reviewSessions, baselines };
+}
+
+/**
+ * The closest folder at or above `path` that exists, for a folder picker's
+ * starting location; '' when there is none to offer. macOS `choose folder`
+ * fails outright (-1700) when its default location is missing, so a refused
+ * folder that has since been deleted made the Allow button do nothing.
+ */
+function nearestExistingDir(path: string): string {
+  if (!path || !isAbsolute(path)) return '';
+  let current = resolve(path);
+  for (;;) {
+    try {
+      if (statSync(current).isDirectory()) return current;
+    } catch {
+      // Missing or unreadable: try the parent.
+    }
+    const parent = dirname(current);
+    if (parent === current) return '';
+    current = parent;
+  }
 }
 
 export function createApp(options: CreateAppOptions = {}) {
