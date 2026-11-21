@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+import { createBrowserStub } from './cli-browser-stub.js';
 
 // Which running server a command acts on. Every command that needs one picks it
 // through findServerPort, and picking the wrong one is not a failure the user
@@ -15,6 +17,9 @@ import { join } from 'path';
 // developer's machine is their own dev server.
 
 const BIN = join(__dirname, 'md-redline');
+const CLI_VERSION = (
+  JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as { version: string }
+).version;
 
 /** The home every fake server reports and every findServer run uses, unless a test says otherwise. */
 const FAKE_HOME = '/tmp/fake-home';
@@ -356,3 +361,72 @@ async function runBaselineOn(port: number): Promise<string> {
     child.once('close', () => resolvePromise(all));
   });
 }
+
+describe('a server that stops answering right after the start check', () => {
+  it('fails instead of opening the default port unchecked', async () => {
+    // ensureServerRunning and the access grant each find the server; the URL
+    // builder's lookup is the third. Before the fix a miss there fell back to
+    // DEFAULT_SERVER_PORT without any check and opened it anyway.
+    let configHits = 0;
+    const server = createServer((req, res) => {
+      if (req.url === '/api/config') {
+        configHits += 1;
+        if (configHits <= 2) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ homeDir: FAKE_HOME }));
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      if (req.url === '/api/version') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ version: CLI_VERSION }));
+        return;
+      }
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+      });
+    });
+    servers.push(server);
+    const port = await new Promise<number>((resolvePromise) => {
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        resolvePromise(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    const doc = join(scratchDir(), 'doc.md');
+    writeFileSync(doc, '# Doc\n');
+
+    const output = await new Promise<string>((resolvePromise, reject) => {
+      const child = spawn(process.execPath, [BIN, doc], {
+        env: {
+          ...process.env,
+          TMPDIR: scratchDir(),
+          TEMP: scratchDir(),
+          TMP: scratchDir(),
+          MD_REDLINE_HOME: FAKE_HOME,
+          MD_REDLINE_PORT: String(port),
+          PORT: '',
+          MDR_BROWSER: '',
+          // Never reached when the fix holds; a no-op if it regresses.
+          MD_REDLINE_BROWSER: createBrowserStub(scratchDir()),
+          NO_UPDATE_NOTIFIER: '1',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      children.push(child);
+      let all = '';
+      child.stdout.on('data', (chunk) => (all += String(chunk)));
+      child.stderr.on('data', (chunk) => (all += String(chunk)));
+      child.once('error', reject);
+      child.once('close', () => resolvePromise(all));
+    });
+
+    expect(output).toContain('mdr stopped responding right after it started');
+    expect(output).not.toContain('Opened in browser');
+  }, 20_000);
+});

@@ -722,18 +722,34 @@ async function ensureServerRunning() {
  * @returns {Promise<string>}
  */
 async function buildUrl(file, dir) {
-  const serverPort = await findServerPort();
-  // This server's own dev client when there is one, else the server itself:
-  // a client found by scanning alone can belong to another instance and show
-  // that instance's files (#58).
-  const clientPort = serverPort ? await findClientPort(serverPort) : null;
-  const port = clientPort ?? serverPort ?? DEFAULT_SERVER_PORT;
+  const port = await requireAppPort();
   // 127.0.0.1 rather than localhost: browsers prefer ::1 too, so a
   // localhost URL can land on whatever app squats the port on IPv6.
   const baseUrl = `http://127.0.0.1:${port}`;
   if (file) return `${baseUrl}?file=${encodeURIComponent(file)}`;
   if (dir) return `${baseUrl}?dir=${encodeURIComponent(dir)}`;
   return baseUrl;
+}
+
+/**
+ * The port to open the app on, right after ensureServerRunning: this server's
+ * own dev client when there is one, else the server itself. A client found by
+ * scanning alone can belong to another instance and show that instance's files
+ * (#58).
+ *
+ * Throws rather than guessing when no server for this home answers. The old
+ * fallback was DEFAULT_SERVER_PORT, unchecked, which could be a server with
+ * another home or nothing at all, the same wrong-instance open findServerPort
+ * refuses everywhere else.
+ *
+ * @returns {Promise<number>}
+ */
+async function requireAppPort() {
+  const serverPort = await findServerPort();
+  if (!serverPort) {
+    throw new Error('mdr stopped responding right after it started. Run the command again.');
+  }
+  return (await findClientPort(serverPort)) ?? serverPort;
 }
 
 /**
@@ -1313,10 +1329,7 @@ async function runMcpStdio() {
     openInBrowser,
     ensureServerRunning: async () => {
       await ensureServerRunning();
-      const serverPort = await findServerPort();
-      const clientPort = serverPort ? await findClientPort(serverPort) : null;
-      const port = clientPort ?? serverPort ?? DEFAULT_SERVER_PORT;
-      currentBaseUrl = `http://127.0.0.1:${port}`;
+      currentBaseUrl = `http://127.0.0.1:${await requireAppPort()}`;
     },
   });
 }
