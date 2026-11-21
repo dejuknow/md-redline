@@ -27,6 +27,7 @@ import {
 } from '../lib/comment-parser';
 import { randomId } from '../lib/random-id';
 import { computeUserRepliedLast } from '../lib/answered-comments';
+import { writeTextWhenReady, type DeferredCopyResult } from '../lib/clipboard';
 import { getEffectiveStatus, type MdComment } from '../types';
 import { findHiddenHtmlComments, renderMarkdown } from '../markdown/pipeline';
 import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
@@ -212,7 +213,7 @@ export function useComments(params: UseCommentsParams) {
         tab.filePath,
         fileComments.filter((c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved').length,
       );
-      const handoff = handoffComments(fileComments, liveSessionIds);
+      const handoff = handoffComments(fileComments, liveSessionIds, author);
       handoffCountsByFile.set(tab.filePath, handoff.length);
       handoffIds.set(
         tab.filePath,
@@ -227,7 +228,7 @@ export function useComments(params: UseCommentsParams) {
       handoffCounts: handoffCountsByFile,
       handoffIdsByFile: handoffIds,
     };
-  }, [tabs, activeFilePath, comments, liveSessionIds]);
+  }, [tabs, activeFilePath, comments, liveSessionIds, author]);
 
   // Threads the reviewer replied to after the agent's last reply, each mapped
   // to that reply's key (id plus a hash of its text). A sent thread is pending
@@ -473,16 +474,21 @@ export function useComments(params: UseCommentsParams) {
   /**
    * Copy the handoff prompt for the given files. Resolves true once the
    * clipboard holds it, so the caller only treats a successful copy as a
-   * handoff (the diff reference moves on it).
+   * handoff (the diff reference moves on it). With `ready` (a save still in
+   * flight, #226), the clipboard write starts now and the prompt lands only
+   * once `ready` resolves true; a false `ready` copies nothing and shows
+   * nothing, since its own toast already said why.
    */
   const handleCopyAgentPrompt = useCallback(
-    async (filePaths: string[]): Promise<boolean> => {
+    async (filePaths: string[], ready?: Promise<boolean>): Promise<boolean> => {
       if (filePaths.length === 0) return false;
       // Name exactly the comments the button counts. Without ids the prompt
       // told the agent to address every marker in the file, which reached
       // agent-authored threads the reviewer never handed off.
       const commentIds = filePaths.flatMap((path) => handoffIdsByFile.get(path) ?? []);
       if (commentIds.length === 0) {
+        // A failed save has its own toast; one message is enough.
+        if (ready && !(await ready)) return false;
         showToast('No comments of yours to hand off in this file.', 'info');
         return false;
       }
@@ -494,9 +500,19 @@ export function useComments(params: UseCommentsParams) {
       });
 
       const fileCount = filePaths.length;
-      try {
-        await navigator.clipboard.writeText(prompt);
-      } catch {
+      let result: DeferredCopyResult;
+      if (ready) {
+        result = await writeTextWhenReady(prompt, ready);
+      } else {
+        try {
+          await navigator.clipboard.writeText(prompt);
+          result = 'copied';
+        } catch {
+          result = 'failed';
+        }
+      }
+      if (result === 'not-ready') return false;
+      if (result === 'failed') {
         // The clipboard API needs a secure context. "Try from localhost" was
         // wrong advice for anyone reaching md-redline through a proxy, which
         // MD_REDLINE_ALLOWED_HOSTS now makes a supported setup.

@@ -27,32 +27,38 @@ const NO_LIVE_SESSIONS: ReadonlySet<string> = new Set();
  * last word, stays out too: the agent would only be answering itself.
  *
  * The button counts these, the prompt names them by id, and the eval
- * adapters hand over the same set. Document order is kept.
+ * adapters hand over the same set. Document order is kept. `reviewer` is the
+ * reader's author name, used only for replies written before the stamp.
  */
 export function handoffComments(
   comments: readonly MdComment[],
   liveSessionIds: ReadonlySet<string> = NO_LIVE_SESSIONS,
+  reviewer?: string,
 ): MdComment[] {
   return comments.filter((c) => {
     if (getEffectiveStatus(c) === 'resolved') return false;
     if (!c.agentInitiated) return true;
     if (c.sessionId !== undefined && liveSessionIds.has(c.sessionId)) return false;
-    return reviewerRepliedLast(c);
+    return reviewerRepliedLast(c, reviewer);
   });
 }
 
 /**
  * Whether the last reply on an agent's thread is the reviewer's. A reply's own
- * `agent` stamp decides (#102); an unstamped one counts as the reviewer's when
- * someone other than the thread's agent author wrote it.
+ * `agent` stamp decides (#102). One written before the stamp existed counts
+ * only when it carries the reviewer's own name (and not the thread author's):
+ * "anyone but the thread's author" also matched a second agent, or the same
+ * agent under another display name, and sent an agent-to-agent thread (#227).
+ * A reviewer who has since renamed themselves loses that old thread from the
+ * handoff, which leaves it where it was before agent threads were handed off.
  * `computeUserRepliedLast` cannot answer this: it asks whether the thread's
  * author has the last word, which on an agent's thread is the agent.
  */
-function reviewerRepliedLast(c: MdComment): boolean {
+function reviewerRepliedLast(c: MdComment, reviewer: string | undefined): boolean {
   const last = c.replies?.[c.replies.length - 1];
   if (last === undefined) return false;
   if (typeof last.agent === 'boolean') return !last.agent;
-  return Boolean(last.author) && last.author !== c.author;
+  return Boolean(reviewer) && last.author === reviewer && last.author !== c.author;
 }
 
 export interface BuildAddressCommentsPromptOptions {

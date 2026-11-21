@@ -2140,14 +2140,21 @@ What a click does (`src/hooks/useHandoff.ts`):
   queued until a poll shows more sent ids, since the poll reports the flag a
   few seconds late. The banner claims a per-session busy slot before that
   wait, so a second click cannot post the same batch twice while another
-  review's buttons keep working. The clipboard write
-  after that wait can be refused by Safari, which wants it inside the click's
-  own task; this only happens when a save was still out at the click.
+  review's buttons keep working. Safari refuses a clipboard write that starts
+  after that wait, outside the click's own task, so when a save is still out at
+  the click Hand off starts the write at once with a `ClipboardItem` whose
+  content is a promise, and the prompt lands once the save has
+  (`writeTextWhenReady` in `src/lib/clipboard.ts`). A failed save copies
+  nothing and shows only its own toast. Without `ClipboardItem` it waits, then
+  uses `writeText`.
 - **Names the comments it counts.** The prompt passes `commentIds` for the
   selected files, built by `handoffComments` in `src/lib/agent-prompts.ts`: the
   reviewer's open comments, plus each open agent thread (an `mdr_ask` question
   or `mdr_comment` note) whose last reply is the reviewer's, once the review it
-  came from has ended, since nothing else would carry that reply. While that
+  came from has ended, since nothing else would carry that reply. The reply's
+  `agent` stamp decides whose it is; an unstamped reply (written before the
+  stamp) counts only when its author is the reviewer's current name and not
+  the thread's author, so a second agent's old reply does not qualify. While that
   review is open (its `sessionId` is among the open sessions, passed to
   `useComments` as `liveSessionIds`), the thread stays out: a marker keeps no
   trace of whether it was a question whose answer already went back through
@@ -2731,7 +2738,7 @@ From `src/lib/agent-prompts.ts`:
 
 - `buildAddressCommentsPrompt(options)` — generate LLM prompt for addressing review comments
 - `sendableComments(comments)` — the reviewer's own open comments: the banner's Send set and the badge count
-- `handoffComments(comments, liveSessionIds?)` — what the Hand off button sends: the sendable comments plus open agent threads the reviewer replied to last, from reviews no longer open
+- `handoffComments(comments, liveSessionIds?, reviewer?)` — what the Hand off button sends: the sendable comments plus open agent threads the reviewer replied to last, from reviews no longer open. `reviewer` is the reader's author name, consulted only for a reply written before the `agent` stamp; without it (the eval adapters) such a reply never counts
 
   A scoped prompt (`commentIds`) tells the agent to leave other markers alone
   except for their `anchor` and context fields, which it must still keep valid
