@@ -1,5 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { buildAddressCommentsPrompt } from './agent-prompts';
+import { buildAddressCommentsPrompt, handoffComments, sendableComments } from './agent-prompts';
+import type { MdComment } from '../types';
+
+function comment(overrides: Partial<MdComment>): MdComment {
+  return {
+    id: 'c',
+    anchor: 'a',
+    text: 't',
+    author: 'Dennis',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  } as MdComment;
+}
+
+describe('sendableComments and handoffComments', () => {
+  const mine = comment({ id: 'mine' });
+  const mineResolved = comment({ id: 'mine-resolved', status: 'resolved' });
+  const note = comment({ id: 'note', author: 'Claude', agentInitiated: true });
+  const noteIAnswered = comment({
+    id: 'note-answered',
+    author: 'Claude',
+    agentInitiated: true,
+    replies: [{ id: 'r1', text: 'yes, rename it', author: 'Dennis', timestamp: 'x' }],
+  });
+  const noteAgentHasLastWord = comment({
+    id: 'note-agent-last',
+    author: 'Claude',
+    agentInitiated: true,
+    replies: [
+      { id: 'r1', text: 'yes', author: 'Dennis', timestamp: 'x' },
+      { id: 'r2', text: 'done', author: 'Claude', timestamp: 'y', agent: true },
+    ],
+  });
+  const noteAnsweredResolved = comment({
+    ...noteIAnswered,
+    id: 'note-resolved',
+    status: 'resolved',
+  });
+  const all = [mine, mineResolved, note, noteIAnswered, noteAgentHasLastWord, noteAnsweredResolved];
+
+  it("sendable is the reviewer's own open comments", () => {
+    expect(sendableComments(all).map((c) => c.id)).toEqual(['mine']);
+  });
+
+  // A clipboard handoff has no live mdr_ask to carry a reply on an agent's
+  // thread, so the thread goes with the handoff while the reviewer has the
+  // last word on it.
+  it('a handoff adds open agent threads where the reviewer replied last, in document order', () => {
+    expect(handoffComments(all).map((c) => c.id)).toEqual(['mine', 'note-answered']);
+  });
+});
 
 describe('buildAddressCommentsPrompt', () => {
   it('builds a single-file handoff prompt', () => {

@@ -974,6 +974,7 @@ export default function App() {
     missingAnchors,
     newOrphanIds,
     commentCounts,
+    handoffCounts,
     resolvedCommentCounts,
     commentIdsByFile,
     userRepliedLast,
@@ -3044,9 +3045,9 @@ export default function App() {
         onExecute: () => void navigator.clipboard.writeText(markdown).catch(() => {}),
       });
     }
-    // Same gate as the Hand off button: the reviewer's own open comments, not
-    // the open count, which also includes agent questions.
-    if (activeFilePath && (commentCounts.get(activeFilePath) ?? 0) > 0) {
+    // Same gate as the Hand off button (handoffCounts), not the open count,
+    // which also includes agent questions the reviewer has not answered.
+    if (activeFilePath && (handoffCounts.get(activeFilePath) ?? 0) > 0) {
       cmds.push({
         id: 'copy-agent-prompt',
         label: 'Hand off to agent (copy instructions)',
@@ -3089,7 +3090,7 @@ export default function App() {
     return cmds;
   }, [
     commentCount,
-    commentCounts,
+    handoffCounts,
     paletteSelectionMarkdown,
     resolvedCommentCount,
     settings.enableResolve,
@@ -3255,7 +3256,8 @@ export default function App() {
   }, [reviewSessions, optimisticSentIds, optimisticSentReplyKeys]);
 
   // Tab badges answer "does this file have open comments", so they include
-  // agent-initiated ones. The handoff button keeps the sendable-only map.
+  // agent-initiated ones. The handoff button counts what it sends
+  // (handoffCounts).
   const tabCommentCounts = useMemo(() => {
     const merged = new Map<string, number>();
     for (const [path, count] of commentCounts) {
@@ -3646,7 +3648,7 @@ export default function App() {
                       setSearchFocusTrigger((t) => t + 1);
                     }
                   }}
-                  commentCounts={commentCounts}
+                  commentCounts={handoffCounts}
                   activeFilePath={activeFilePath}
                   onCopyAgentPrompt={handleHandoff}
                   hasDiffSnapshot={currentSnapshot != null}

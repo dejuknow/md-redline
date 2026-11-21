@@ -1,13 +1,43 @@
 import { getEffectiveStatus, type MdComment } from '../types';
 
 /**
- * The comments a handoff sends: the reviewer's own open ones. An agent's
- * question or note (`agentInitiated`) is answered in place, and a resolved
- * comment is finished in either mode (#159). The Hand off button counts these,
- * the prompt names them by id, and the eval adapters hand over the same set.
+ * The reviewer's own open comments: what the review banner's Send counts and
+ * sends, and what a tab's badge counts as theirs. An agent's question or note
+ * (`agentInitiated`) is left out, since a reply to an `mdr_ask` question
+ * reaches the agent through `mdr_ask`; a resolved comment is finished in
+ * either mode (#159).
+ */
+export function sendableComments(comments: readonly MdComment[]): MdComment[] {
+  return comments.filter((c) => !c.agentInitiated && getEffectiveStatus(c) !== 'resolved');
+}
+
+/**
+ * What the Hand off button sends: the sendable comments plus each open agent
+ * thread whose last reply is the reviewer's. A clipboard handoff has no live
+ * `mdr_ask` to carry that reply, so without it a "yes" under an agent's note
+ * would never reach an agent. An agent thread with no reply from the reviewer,
+ * or where the agent has the last word, stays out: the agent would only be
+ * answering itself. The button counts these, the prompt names them by id, and
+ * the eval adapters hand over the same set. Document order is kept.
  */
 export function handoffComments(comments: readonly MdComment[]): MdComment[] {
-  return comments.filter((c) => !c.agentInitiated && getEffectiveStatus(c) !== 'resolved');
+  return comments.filter(
+    (c) => getEffectiveStatus(c) !== 'resolved' && (!c.agentInitiated || reviewerRepliedLast(c)),
+  );
+}
+
+/**
+ * Whether the last reply on an agent's thread is the reviewer's. A reply's own
+ * `agent` stamp decides (#102); an unstamped one counts as the reviewer's when
+ * someone other than the thread's agent author wrote it.
+ * `computeUserRepliedLast` cannot answer this: it asks whether the thread's
+ * author has the last word, which on an agent's thread is the agent.
+ */
+function reviewerRepliedLast(c: MdComment): boolean {
+  const last = c.replies?.[c.replies.length - 1];
+  if (last === undefined) return false;
+  if (typeof last.agent === 'boolean') return !last.agent;
+  return Boolean(last.author) && last.author !== c.author;
 }
 
 export interface BuildAddressCommentsPromptOptions {

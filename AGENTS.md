@@ -2136,10 +2136,15 @@ What a click does (`src/hooks/useHandoff.ts`):
   after that wait can be refused by Safari, which wants it inside the click's
   own task; this only happens when a save was still out at the click.
 - **Names the comments it counts.** The prompt passes `commentIds` for the
-  selected files, built by `handoffComments` in `src/lib/agent-prompts.ts` (the
-  reviewer's open comments, no agent questions or notes, nothing resolved), the
-  same set the button's count shows. Without ids the prompt said to address
-  every marker, which reached agent-authored threads the reviewer never sent.
+  selected files, built by `handoffComments` in `src/lib/agent-prompts.ts`: the
+  reviewer's open comments, plus each open agent thread (an `mdr_ask` question
+  or `mdr_comment` note) whose last reply is the reviewer's, since a clipboard
+  handoff has no live `mdr_ask` to carry that reply. The button's count
+  (`handoffCounts`) is the same set. Without ids the prompt said to address
+  every marker, which reached agent threads the reviewer never answered. The
+  review banner's Send keeps the narrower `sendableComments` (no agent threads),
+  because an answer to an `mdr_ask` question already reaches the agent through
+  `mdr_ask` and would otherwise go out twice.
   With no such comment in the files, nothing is copied (the palette command is
   gated on the same count). The eval adapters hand over the same ids.
 - **Moves the diff reference only on success, only for the files sent.** Each

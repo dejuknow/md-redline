@@ -248,6 +248,41 @@ describe('useComments', () => {
       expect(showToast).toHaveBeenCalledWith(expect.stringContaining('No comments'), 'info');
     });
 
+    it('hands off an agent thread the reviewer replied to last, and counts it on the button', async () => {
+      const raw = rawWithComments(
+        { before: 'One ', marker: makeComment({ id: 'u1', anchor: 'One' }) },
+        {
+          before: ' Two ',
+          marker: makeComment({
+            id: 'note1',
+            anchor: 'Two',
+            author: 'Claude',
+            agentInitiated: true,
+            replies: [{ id: 'r1', text: 'yes', author: 'Tester', timestamp: 'x' }],
+          }),
+        },
+      );
+      const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+      stubClipboard(writeText);
+      const params = defaultParams({
+        rawMarkdown: raw,
+        tabs: [{ filePath: '/a.md', rawMarkdown: raw }],
+        activeFilePath: '/a.md',
+      });
+      const { result } = renderHook(() => useComments(params));
+
+      // The banner's Send set stays the reviewer's own comments: an answered
+      // mdr_ask question already reached the agent through mdr_ask.
+      expect(result.current.commentIdsByFile.get('/a.md')).toEqual(['u1']);
+      expect(result.current.handoffCounts.get('/a.md')).toBe(2);
+
+      await act(async () => {
+        await result.current.handleCopyAgentPrompt(['/a.md']);
+      });
+      const prompt = writeText.mock.calls[0][0];
+      expect(prompt).toContain('`u1`, `note1`');
+    });
+
     it('reports a failed copy so the caller does not treat it as a handoff', async () => {
       stubClipboard(() => Promise.reject(new Error('denied')));
       const raw = `One ${makeComment({ id: 'u1', anchor: 'One' })}`;

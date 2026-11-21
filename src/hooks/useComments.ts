@@ -27,12 +27,16 @@ import {
 } from '../lib/comment-parser';
 import { randomId } from '../lib/random-id';
 import { computeUserRepliedLast } from '../lib/answered-comments';
-import { getEffectiveStatus } from '../types';
+import { getEffectiveStatus, type MdComment } from '../types';
 import { findHiddenHtmlComments, renderMarkdown } from '../markdown/pipeline';
 import { DEFAULT_HIDDEN_COMMENT_PREFIXES } from '../lib/settings';
 import type { MarkdownViewerHandle } from '../components/MarkdownViewer';
 import type { RawViewHandle } from '../components/RawView';
-import { buildAddressCommentsPrompt, handoffComments } from '../lib/agent-prompts';
+import {
+  buildAddressCommentsPrompt,
+  handoffComments,
+  sendableComments,
+} from '../lib/agent-prompts';
 import type { ShowToast } from './useToast';
 import type { UndoEntry, UndoSlot } from './useUndoSlot';
 
@@ -159,59 +163,68 @@ export function useComments(params: UseCommentsParams) {
   // earlier resolve-mode session, by an agent session started with it on, by
   // a collaborator, or by hand. Every surface shows those as resolved too, so
   // nothing offers a reply that would never be sent.
-  const { commentCounts, resolvedCommentCounts, commentIdsByFile, agentCommentCounts } =
-    useMemo(() => {
-      const counts = new Map<string, number>();
-      const resolvedCounts = new Map<string, number>();
-      const idsByFile = new Map<string, string[]>();
-      const agentCounts = new Map<string, number>();
-      for (const tab of tabs) {
-        if (tab.filePath === activeFilePath) {
-          const userComments = comments.filter((c) => !c.agentInitiated);
-          const countedComments = handoffComments(comments);
-          counts.set(tab.filePath, countedComments.length);
-          idsByFile.set(
-            tab.filePath,
-            countedComments.map((c) => c.id),
-          );
-          resolvedCounts.set(
-            tab.filePath,
-            userComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
-          );
-          const agentComments = comments.filter(
-            (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
-          );
-          agentCounts.set(tab.filePath, agentComments.length);
-        } else {
-          try {
-            const { comments: tabComments } = parseComments(tab.rawMarkdown);
-            const userTabComments = tabComments.filter((c) => !c.agentInitiated);
-            const countedTabComments = handoffComments(tabComments);
-            counts.set(tab.filePath, countedTabComments.length);
-            idsByFile.set(
-              tab.filePath,
-              countedTabComments.map((c) => c.id),
-            );
-            resolvedCounts.set(
-              tab.filePath,
-              userTabComments.filter((c) => getEffectiveStatus(c) === 'resolved').length,
-            );
-            const agentTabComments = tabComments.filter(
-              (c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved',
-            );
-            agentCounts.set(tab.filePath, agentTabComments.length);
-          } catch {
-            counts.set(tab.filePath, 0);
-          }
+  //
+  // The Hand off button counts and sends a wider set (`handoffComments`): it
+  // also takes an agent thread the reviewer replied to last, since a clipboard
+  // handoff has no live mdr_ask to carry that reply.
+  const {
+    commentCounts,
+    resolvedCommentCounts,
+    commentIdsByFile,
+    agentCommentCounts,
+    handoffCounts,
+    handoffIdsByFile,
+  } = useMemo(() => {
+    const counts = new Map<string, number>();
+    const resolvedCounts = new Map<string, number>();
+    const idsByFile = new Map<string, string[]>();
+    const agentCounts = new Map<string, number>();
+    const handoffCountsByFile = new Map<string, number>();
+    const handoffIds = new Map<string, string[]>();
+    for (const tab of tabs) {
+      let fileComments: MdComment[];
+      if (tab.filePath === activeFilePath) {
+        fileComments = comments;
+      } else {
+        try {
+          fileComments = parseComments(tab.rawMarkdown).comments;
+        } catch {
+          counts.set(tab.filePath, 0);
+          handoffCountsByFile.set(tab.filePath, 0);
+          continue;
         }
       }
-      return {
-        commentCounts: counts,
-        resolvedCommentCounts: resolvedCounts,
-        commentIdsByFile: idsByFile,
-        agentCommentCounts: agentCounts,
-      };
-    }, [tabs, activeFilePath, comments]);
+      const sendable = sendableComments(fileComments);
+      counts.set(tab.filePath, sendable.length);
+      idsByFile.set(
+        tab.filePath,
+        sendable.map((c) => c.id),
+      );
+      resolvedCounts.set(
+        tab.filePath,
+        fileComments.filter((c) => !c.agentInitiated && getEffectiveStatus(c) === 'resolved')
+          .length,
+      );
+      agentCounts.set(
+        tab.filePath,
+        fileComments.filter((c) => c.agentInitiated && getEffectiveStatus(c) !== 'resolved').length,
+      );
+      const handoff = handoffComments(fileComments);
+      handoffCountsByFile.set(tab.filePath, handoff.length);
+      handoffIds.set(
+        tab.filePath,
+        handoff.map((c) => c.id),
+      );
+    }
+    return {
+      commentCounts: counts,
+      resolvedCommentCounts: resolvedCounts,
+      commentIdsByFile: idsByFile,
+      agentCommentCounts: agentCounts,
+      handoffCounts: handoffCountsByFile,
+      handoffIdsByFile: handoffIds,
+    };
+  }, [tabs, activeFilePath, comments]);
 
   // Threads the reviewer replied to after the agent's last reply, each mapped
   // to that reply's key (id plus a hash of its text). A sent thread is pending
@@ -465,14 +478,14 @@ export function useComments(params: UseCommentsParams) {
       // Name exactly the comments the button counts. Without ids the prompt
       // told the agent to address every marker in the file, which reached
       // agent-authored threads the reviewer never handed off.
-      const commentIds = filePaths.flatMap((path) => commentIdsByFile.get(path) ?? []);
+      const commentIds = filePaths.flatMap((path) => handoffIdsByFile.get(path) ?? []);
       if (commentIds.length === 0) {
         showToast('No comments of yours to hand off in this file.', 'info');
         return false;
       }
       const prompt = buildAddressCommentsPrompt({
         filePaths,
-        commentCounts,
+        commentCounts: handoffCounts,
         enableResolve,
         commentIds,
       });
@@ -493,7 +506,7 @@ export function useComments(params: UseCommentsParams) {
       );
       return true;
     },
-    [commentCounts, commentIdsByFile, showToast, enableResolve],
+    [handoffCounts, handoffIdsByFile, showToast, enableResolve],
   );
 
   const handleHighlightClick = useCallback((commentId: string) => {
@@ -575,6 +588,7 @@ export function useComments(params: UseCommentsParams) {
     commentIdsByFile,
     userRepliedLast,
     agentCommentCounts,
+    handoffCounts,
     commentCount,
     updateAndSave,
     handleAddComment,
