@@ -134,6 +134,7 @@ export function useSelection(
     const handlePointerDown = (e: PointerEvent) => {
       pressReleased = false;
       settledByContextMenu = false;
+      pressButton = typeof e.button === 'number' ? e.button : 0;
       // A new gesture invalidates any timer armed by the previous one.
       epochRef.current += 1;
       if (e.pointerType) lastPointerType = e.pointerType;
@@ -147,13 +148,16 @@ export function useSelection(
     // fires mouseup after a press that opened a context menu, so for a
     // right-click there the mouseup handling below runs from contextmenu
     // instead (settleRightClick), and the later mouseup Chromium does send is
-    // then skipped as a repeat.
+    // then skipped as a repeat. The repeat is matched by the press's button,
+    // not by isSecondaryClick: a ctrl+click whose Ctrl comes up before the
+    // button ends in a mouseup that no longer reads as secondary.
     let pressReleased = true;
     let settledByContextMenu = false;
+    let pressButton = 0;
 
     const handleMouseUp = (e: MouseEvent) => {
       pressReleased = true;
-      if (settledByContextMenu && isSecondaryClick(e)) {
+      if (settledByContextMenu && e.button === pressButton) {
         settledByContextMenu = false;
         return;
       }
@@ -161,7 +165,9 @@ export function useSelection(
     };
 
     const settleRightClick = (e: MouseEvent) => {
-      if (pressReleased || !isSecondaryClick(e)) return;
+      // Shift+secondary is the browser's menu, which the viewer leaves alone.
+      // Settling here would commit the word WebKit selected for that menu.
+      if (pressReleased || !isSecondaryClick(e) || e.shiftKey) return;
       pressReleased = true;
       settledByContextMenu = true;
       settleMouseUp(e);
@@ -314,25 +320,39 @@ export function useSelection(
     // cursor, before contextmenu reaches the page. That selection is the
     // browser's, not the reader's: the viewer took it for a right-click on the
     // reader's own selection, so a comment highlight opened no comment menu,
-    // and the mouseup that followed committed the word (#229). A secondary
-    // press that began with nothing selected cannot have selected anything
-    // itself, so drop what it produced before anything routes the click.
-    // Chromium selects nothing here, so this never fires there. Capture phase
-    // on window, so it runs before the viewer's own handlers and nothing can
-    // stop it first.
-    let pressBeganWithSelection = false;
+    // and the press then committed the word (#229). Undo it before anything
+    // routes the click: put back the range the press began with, or collapse
+    // when there was none. Browsers that select nothing on a right-click leave
+    // the range as it was, so this does nothing there. Capture phase on
+    // window, so it runs before the viewer's own handlers and nothing can stop
+    // it first.
+    let rangeAtPress: Range | null = null;
     const recordPressSelection = () => {
       const sel = window.getSelection();
-      pressBeganWithSelection = sel !== null && !sel.isCollapsed;
+      rangeAtPress =
+        sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
     };
     const dropBrowserWordSelection = (e: MouseEvent) => {
       // Shift asks for the browser's own menu, which acts on that word.
-      if (!isSecondaryClick(e) || e.shiftKey || pressBeganWithSelection) return;
+      if (!isSecondaryClick(e) || e.shiftKey) return;
       const sel = window.getSelection();
       const container = containerRef.current;
-      if (!sel || sel.isCollapsed || !container || !sel.anchorNode) return;
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !container || !sel.anchorNode) return;
       if (!container.contains(sel.anchorNode)) return;
-      sel.collapseToStart();
+      const current = sel.getRangeAt(0);
+      if (
+        rangeAtPress &&
+        current.compareBoundaryPoints(Range.START_TO_START, rangeAtPress) === 0 &&
+        current.compareBoundaryPoints(Range.END_TO_END, rangeAtPress) === 0
+      ) {
+        return; // the reader's own selection, untouched by the press
+      }
+      if (rangeAtPress) {
+        sel.removeAllRanges();
+        sel.addRange(rangeAtPress);
+      } else {
+        sel.collapseToStart();
+      }
     };
 
     window.addEventListener('pointerdown', recordPressSelection, true);

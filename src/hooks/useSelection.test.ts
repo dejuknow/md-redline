@@ -24,9 +24,10 @@ const INFO: SelectionInfo = {
 let result: { current: ReturnType<typeof useSelection> };
 const hook = () => result.current;
 
-function pointerDown(pointerType: string) {
+function pointerDown(pointerType: string, button = 0) {
   const e = new Event('pointerdown');
   Object.defineProperty(e, 'pointerType', { value: pointerType });
+  Object.defineProperty(e, 'button', { value: button });
   act(() => {
     document.dispatchEvent(e);
   });
@@ -612,7 +613,7 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
     // WebKit on macOS swallows the mouseup of a press that opened a context
     // menu, so a right-click elsewhere has to clear the selection here.
     mockResolve.mockReturnValue(null);
-    pointerDown('mouse');
+    pointerDown('mouse', 2);
     contextMenu();
     expect(hook().selection).toBeNull();
   });
@@ -622,7 +623,7 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
     mouseUp();
 
     mockResolve.mockReturnValue(null);
-    pointerDown('mouse');
+    pointerDown('mouse', 2);
     contextMenu();
     expect(hook().selection).toBeNull();
     // Chromium on macOS still sends the mouseup. It is the same press, so it
@@ -638,7 +639,7 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
 
     // Windows order: mouseup, then contextmenu. The mouseup settled it.
     mockResolve.mockReturnValue(null);
-    pointerDown('mouse');
+    pointerDown('mouse', 2);
     mouseUp(2);
     expect(hook().selection).toBeNull();
     mockResolve.mockReturnValue(INFO);
@@ -670,14 +671,14 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
     }
 
     it('is dropped when the press began with nothing selected', () => {
-      pointerDown('mouse');
+      pointerDown('mouse', 2);
       browserSelectsWord();
       contextMenu(paragraph);
       expect(window.getSelection()!.isCollapsed).toBe(true);
     });
 
     it('is kept on Shift, which asks for the browser menu', () => {
-      pointerDown('mouse');
+      pointerDown('mouse', 2);
       browserSelectsWord();
       contextMenu(paragraph, { shiftKey: true });
       expect(window.getSelection()!.toString()).toBe('credentials');
@@ -685,9 +686,50 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
 
     it('leaves a selection the reader made before the press', () => {
       browserSelectsWord();
-      pointerDown('mouse');
+      pointerDown('mouse', 2);
       contextMenu(paragraph);
       expect(window.getSelection()!.toString()).toBe('credentials');
     });
+
+    it('puts back a selection elsewhere that the word replaced', () => {
+      // Text selected outside the viewer (a sidebar, a locked composer's
+      // document range) when the press began. WebKit swaps it for the word.
+      const other = document.createElement('p');
+      other.textContent = 'sidebar text';
+      document.body.appendChild(other);
+      const before = document.createRange();
+      before.selectNodeContents(other);
+      window.getSelection()!.addRange(before);
+      pointerDown('mouse', 2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('sidebar text');
+      other.remove();
+    });
+  });
+
+  it('does not commit the word on Shift+right-click', () => {
+    mockResolve.mockReturnValue(INFO);
+    pointerDown('mouse', 2);
+    contextMenu(document, { shiftKey: true });
+    expect(hook().selection).toBeNull();
+  });
+
+  it('skips the repeat mouseup of a ctrl+click even after Ctrl comes up', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // A macOS ctrl+click is a secondary press of the primary button. If Ctrl
+    // is released first, its mouseup no longer reads as secondary.
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 0);
+    contextMenu(document, { button: 0, ctrlKey: true });
+    expect(hook().selection).toBeNull();
+    mockResolve.mockReturnValue(INFO);
+    mouseUp(0);
+    expect(hook().selection).toBeNull();
+    platform.mockRestore();
   });
 });
