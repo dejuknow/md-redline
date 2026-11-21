@@ -132,6 +132,8 @@ export function useSelection(
     // next press of the same double- or triple-click from a new gesture.
     let lastCommit: { epoch: number; detail: number } | null = null;
     const handlePointerDown = (e: PointerEvent) => {
+      pressReleased = false;
+      settledByContextMenu = false;
       // A new gesture invalidates any timer armed by the previous one.
       epochRef.current += 1;
       if (e.pointerType) lastPointerType = e.pointerType;
@@ -141,7 +143,31 @@ export function useSelection(
         ) != null;
     };
 
+    // Whether the press in progress has been released. WebKit on macOS never
+    // fires mouseup after a press that opened a context menu, so for a
+    // right-click there the mouseup handling below runs from contextmenu
+    // instead (settleRightClick), and the later mouseup Chromium does send is
+    // then skipped as a repeat.
+    let pressReleased = true;
+    let settledByContextMenu = false;
+
     const handleMouseUp = (e: MouseEvent) => {
+      pressReleased = true;
+      if (settledByContextMenu && isSecondaryClick(e)) {
+        settledByContextMenu = false;
+        return;
+      }
+      settleMouseUp(e);
+    };
+
+    const settleRightClick = (e: MouseEvent) => {
+      if (pressReleased || !isSecondaryClick(e)) return;
+      pressReleased = true;
+      settledByContextMenu = true;
+      settleMouseUp(e);
+    };
+
+    const settleMouseUp = (e: MouseEvent) => {
       if (lastPointerType !== 'mouse') return;
       // A secondary press ON the selection is spared, and only there. That
       // gesture opens the viewer's context menu, whose items act on the
@@ -284,8 +310,38 @@ export function useSelection(
       }, 150);
     };
 
+    // On macOS, WebKit answers a right-click by selecting the word under the
+    // cursor, before contextmenu reaches the page. That selection is the
+    // browser's, not the reader's: the viewer took it for a right-click on the
+    // reader's own selection, so a comment highlight opened no comment menu,
+    // and the mouseup that followed committed the word (#229). A secondary
+    // press that began with nothing selected cannot have selected anything
+    // itself, so drop what it produced before anything routes the click.
+    // Chromium selects nothing here, so this never fires there. Capture phase
+    // on window, so it runs before the viewer's own handlers and nothing can
+    // stop it first.
+    let pressBeganWithSelection = false;
+    const recordPressSelection = () => {
+      const sel = window.getSelection();
+      pressBeganWithSelection = sel !== null && !sel.isCollapsed;
+    };
+    const dropBrowserWordSelection = (e: MouseEvent) => {
+      // Shift asks for the browser's own menu, which acts on that word.
+      if (!isSecondaryClick(e) || e.shiftKey || pressBeganWithSelection) return;
+      const sel = window.getSelection();
+      const container = containerRef.current;
+      if (!sel || sel.isCollapsed || !container || !sel.anchorNode) return;
+      if (!container.contains(sel.anchorNode)) return;
+      sel.collapseToStart();
+    };
+
+    window.addEventListener('pointerdown', recordPressSelection, true);
+    window.addEventListener('contextmenu', dropBrowserWordSelection, true);
     document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('mouseup', handleMouseUp);
+    // Bubble phase on document: after the viewer's own contextmenu handler,
+    // the same order a mouseup arriving after the menu opens has.
+    document.addEventListener('contextmenu', settleRightClick);
     window.addEventListener('keydown', handleKeyDown, true);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('selectionchange', handleSelectionChange);
@@ -297,8 +353,11 @@ export function useSelection(
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('pointerdown', recordPressSelection, true);
+      window.removeEventListener('contextmenu', dropBrowserWordSelection, true);
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('contextmenu', settleRightClick);
       window.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keyup', handleKeyUp);
       document.removeEventListener('selectionchange', handleSelectionChange);

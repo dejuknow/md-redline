@@ -594,3 +594,100 @@ describe('useSelection Escape with a release that never came', () => {
     expect(hook().selection).toBeNull();
   });
 });
+
+describe('useSelection right-clicks in WebKit (#229)', () => {
+  function contextMenu(target: EventTarget = document, init: MouseEventInit = {}) {
+    act(() => {
+      target.dispatchEvent(
+        new MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true, ...init }),
+      );
+    });
+  }
+
+  it('settles a right-click from contextmenu when no mouseup follows', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // WebKit on macOS swallows the mouseup of a press that opened a context
+    // menu, so a right-click elsewhere has to clear the selection here.
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse');
+    contextMenu();
+    expect(hook().selection).toBeNull();
+  });
+
+  it('does not settle the same right-click twice when mouseup does follow', () => {
+    pointerDown('mouse');
+    mouseUp();
+
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse');
+    contextMenu();
+    expect(hook().selection).toBeNull();
+    // Chromium on macOS still sends the mouseup. It is the same press, so it
+    // must not resolve again and commit whatever the range says by then.
+    mockResolve.mockReturnValue(INFO);
+    mouseUp(2);
+    expect(hook().selection).toBeNull();
+  });
+
+  it('leaves a press that was already released to its mouseup', () => {
+    pointerDown('mouse');
+    mouseUp();
+
+    // Windows order: mouseup, then contextmenu. The mouseup settled it.
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse');
+    mouseUp(2);
+    expect(hook().selection).toBeNull();
+    mockResolve.mockReturnValue(INFO);
+    contextMenu();
+    expect(hook().selection).toBeNull();
+  });
+
+  describe('the word WebKit selects on a right-click', () => {
+    let paragraph: HTMLParagraphElement;
+
+    beforeEach(() => {
+      paragraph = document.createElement('p');
+      paragraph.textContent = 'valid credentials here';
+      document.body.appendChild(paragraph);
+      window.getSelection()!.removeAllRanges();
+    });
+
+    afterEach(() => {
+      window.getSelection()!.removeAllRanges();
+      paragraph.remove();
+    });
+
+    function browserSelectsWord() {
+      const range = document.createRange();
+      range.setStart(paragraph.firstChild!, 6);
+      range.setEnd(paragraph.firstChild!, 17);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+    }
+
+    it('is dropped when the press began with nothing selected', () => {
+      pointerDown('mouse');
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(window.getSelection()!.isCollapsed).toBe(true);
+    });
+
+    it('is kept on Shift, which asks for the browser menu', () => {
+      pointerDown('mouse');
+      browserSelectsWord();
+      contextMenu(paragraph, { shiftKey: true });
+      expect(window.getSelection()!.toString()).toBe('credentials');
+    });
+
+    it('leaves a selection the reader made before the press', () => {
+      browserSelectsWord();
+      pointerDown('mouse');
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+    });
+  });
+});
