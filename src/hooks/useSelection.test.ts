@@ -24,12 +24,21 @@ const INFO: SelectionInfo = {
 let result: { current: ReturnType<typeof useSelection> };
 const hook = () => result.current;
 
+/** A press as the browser delivers it: pointerdown, then mousedown. */
 function pointerDown(pointerType: string, button = 0) {
   const e = new Event('pointerdown');
   Object.defineProperty(e, 'pointerType', { value: pointerType });
   Object.defineProperty(e, 'button', { value: button });
   act(() => {
     document.dispatchEvent(e);
+    document.dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true }));
+  });
+}
+
+/** A second button pressed while the first is held: mousedown only. */
+function chordDown(button: number) {
+  act(() => {
+    document.dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true }));
   });
 }
 
@@ -670,11 +679,35 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
       window.getSelection()!.addRange(range);
     }
 
-    it('is dropped when the press began with nothing selected', () => {
+    /** Stands in for the viewer opening a menu of ours for this click. */
+    function viewerClaimsClick(seen: { text?: string }) {
+      const claim = (e: Event) => {
+        seen.text = window.getSelection()!.toString();
+        e.preventDefault();
+      };
+      paragraph.addEventListener('contextmenu', claim);
+      return () => paragraph.removeEventListener('contextmenu', claim);
+    }
+
+    it('is hidden from the viewer and stays dropped when the viewer takes the menu', () => {
+      const seen: { text?: string } = {};
+      const release = viewerClaimsClick(seen);
       pointerDown('mouse', 2);
       browserSelectsWord();
       contextMenu(paragraph);
+      expect(seen.text).toBe('');
       expect(window.getSelection()!.isCollapsed).toBe(true);
+      release();
+    });
+
+    it("comes back for the browser's own menu when nothing claims the click", () => {
+      // Look Up and Copy in Safari's menu act on that word.
+      mockResolve.mockReturnValue(null);
+      pointerDown('mouse', 2);
+      browserSelectsWord();
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+      expect(hook().selection).toBeNull();
     });
 
     it('is kept on Shift, which asks for the browser menu', () => {
@@ -700,12 +733,49 @@ describe('useSelection right-clicks in WebKit (#229)', () => {
       const before = document.createRange();
       before.selectNodeContents(other);
       window.getSelection()!.addRange(before);
+      const seen: { text?: string } = {};
+      const release = viewerClaimsClick(seen);
       pointerDown('mouse', 2);
       browserSelectsWord();
       contextMenu(paragraph);
+      expect(seen.text).toBe('sidebar text');
       expect(window.getSelection()!.toString()).toBe('sidebar text');
+      release();
       other.remove();
     });
+
+    it('leaves a drag in progress alone when a second button joins it', () => {
+      // Left-drag, then the right button while the left is still held.
+      pointerDown('mouse', 0);
+      browserSelectsWord();
+      chordDown(2);
+      contextMenu(paragraph);
+      expect(window.getSelection()!.toString()).toBe('credentials');
+      // The left button's release still settles the drag.
+      mouseUp(2);
+      mockResolve.mockReturnValue(INFO);
+      mouseUp(0);
+      expect(hook().selection).toEqual(INFO);
+    });
+  });
+
+  it('settles a right-click whose contextmenu a handler stops', () => {
+    pointerDown('mouse');
+    mouseUp();
+    expect(hook().selection).toEqual(INFO);
+
+    // A link in a comment stops contextmenu to keep the browser's link menu.
+    const link = document.createElement('a');
+    link.addEventListener('contextmenu', (e) => e.stopPropagation());
+    document.body.appendChild(link);
+    mockResolve.mockReturnValue(null);
+    pointerDown('mouse', 2);
+    contextMenu(link);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(hook().selection).toBeNull();
+    link.remove();
   });
 
   it('does not commit the word on Shift+right-click', () => {

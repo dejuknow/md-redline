@@ -132,9 +132,6 @@ export function useSelection(
     // next press of the same double- or triple-click from a new gesture.
     let lastCommit: { epoch: number; detail: number } | null = null;
     const handlePointerDown = (e: PointerEvent) => {
-      pressReleased = false;
-      settledByContextMenu = false;
-      pressButton = typeof e.button === 'number' ? e.button : 0;
       // A new gesture invalidates any timer armed by the previous one.
       epochRef.current += 1;
       if (e.pointerType) lastPointerType = e.pointerType;
@@ -144,16 +141,36 @@ export function useSelection(
         ) != null;
     };
 
-    // Whether the press in progress has been released. WebKit on macOS never
-    // fires mouseup after a press that opened a context menu, so for a
-    // right-click there the mouseup handling below runs from contextmenu
-    // instead (settleRightClick), and the later mouseup Chromium does send is
-    // then skipped as a repeat. The repeat is matched by the press's button,
-    // not by isSecondaryClick: a ctrl+click whose Ctrl comes up before the
-    // button ends in a mouseup that no longer reads as secondary.
+    // The press in progress, one per mousedown. Not per pointerdown: a second
+    // button pressed while the first is held (a chord) fires mousedown but no
+    // pointerdown, and must not be mistaken for the press it joins.
+    //
+    // WebKit on macOS never fires mouseup after a press that opened a context
+    // menu, so for a right-click the mouseup handling runs from contextmenu
+    // instead (settleRightClick), and the mouseup Chromium does send later is
+    // skipped as a repeat. The repeat is matched by the press's button, not by
+    // isSecondaryClick: a ctrl+click whose Ctrl comes up before the button
+    // ends in a mouseup that no longer reads as secondary.
+    let pressSeq = 0;
     let pressReleased = true;
     let settledByContextMenu = false;
     let pressButton = 0;
+    // The native range when the press began, and the word WebKit selected in
+    // its place, if it did (see routeRightClick).
+    let rangeAtPress: Range | null = null;
+    let droppedWord: Range | null = null;
+    let fallbackSettle: ReturnType<typeof setTimeout> | undefined;
+
+    const beginPress = (e: MouseEvent) => {
+      pressSeq += 1;
+      pressReleased = false;
+      settledByContextMenu = false;
+      pressButton = e.button;
+      droppedWord = null;
+      const sel = window.getSelection();
+      rangeAtPress =
+        sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
+    };
 
     const handleMouseUp = (e: MouseEvent) => {
       pressReleased = true;
@@ -320,21 +337,27 @@ export function useSelection(
     // cursor, before contextmenu reaches the page. That selection is the
     // browser's, not the reader's: the viewer took it for a right-click on the
     // reader's own selection, so a comment highlight opened no comment menu,
-    // and the press then committed the word (#229). Undo it before anything
-    // routes the click: put back the range the press began with, or collapse
-    // when there was none. Browsers that select nothing on a right-click leave
-    // the range as it was, so this does nothing there. Capture phase on
-    // window, so it runs before the viewer's own handlers and nothing can stop
-    // it first.
-    let rangeAtPress: Range | null = null;
-    const recordPressSelection = () => {
-      const sel = window.getSelection();
-      rangeAtPress =
-        sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
-    };
-    const dropBrowserWordSelection = (e: MouseEvent) => {
+    // and the press then committed the word (#229). So while the click is
+    // routed (this capture listener runs before the viewer's handlers) the
+    // range the press began with is put back, or the selection collapses when
+    // there was none. Browsers that select nothing on a right-click leave the
+    // range as it was, so nothing happens there.
+    //
+    // The word is the browser's to use, though: Look Up and Copy in its own
+    // menu act on it. finishRightClick gives it back when nothing claimed the
+    // click for a menu of ours.
+    const routeRightClick = (e: MouseEvent) => {
+      if (!isSecondaryClick(e)) return;
+      // Settle even when a handler stops the event before it reaches
+      // finishRightClick (a link's own menu in a comment does). The guard in
+      // settleRightClick makes this a no-op when finishRightClick ran.
+      const seq = pressSeq;
+      clearTimeout(fallbackSettle);
+      fallbackSettle = setTimeout(() => {
+        if (pressSeq === seq) settleRightClick(e);
+      }, 0);
       // Shift asks for the browser's own menu, which acts on that word.
-      if (!isSecondaryClick(e) || e.shiftKey) return;
+      if (e.shiftKey) return;
       const sel = window.getSelection();
       const container = containerRef.current;
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !container || !sel.anchorNode) return;
@@ -347,6 +370,7 @@ export function useSelection(
       ) {
         return; // the reader's own selection, untouched by the press
       }
+      droppedWord = current.cloneRange();
       if (rangeAtPress) {
         sel.removeAllRanges();
         sel.addRange(rangeAtPress);
@@ -355,13 +379,25 @@ export function useSelection(
       }
     };
 
-    window.addEventListener('pointerdown', recordPressSelection, true);
-    window.addEventListener('contextmenu', dropBrowserWordSelection, true);
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('mouseup', handleMouseUp);
     // Bubble phase on document: after the viewer's own contextmenu handler,
     // the same order a mouseup arriving after the menu opens has.
-    document.addEventListener('contextmenu', settleRightClick);
+    const finishRightClick = (e: MouseEvent) => {
+      settleRightClick(e);
+      // Nothing claimed the click, so the browser's menu opens: hand it back
+      // the word it selected for that menu.
+      if (droppedWord && !e.defaultPrevented) {
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(droppedWord);
+      }
+      droppedWord = null;
+    };
+
+    window.addEventListener('mousedown', beginPress, true);
+    window.addEventListener('contextmenu', routeRightClick, true);
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('contextmenu', finishRightClick);
     window.addEventListener('keydown', handleKeyDown, true);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('selectionchange', handleSelectionChange);
@@ -373,11 +409,12 @@ export function useSelection(
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('pointerdown', recordPressSelection, true);
-      window.removeEventListener('contextmenu', dropBrowserWordSelection, true);
+      window.removeEventListener('mousedown', beginPress, true);
+      window.removeEventListener('contextmenu', routeRightClick, true);
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('contextmenu', settleRightClick);
+      document.removeEventListener('contextmenu', finishRightClick);
+      clearTimeout(fallbackSettle);
       window.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keyup', handleKeyUp);
       document.removeEventListener('selectionchange', handleSelectionChange);
