@@ -119,16 +119,16 @@ describe('SettingsContext hydrate race', () => {
     const { result } = renderHook(() => useSettings(), { wrapper });
     await waitFor(() => expect(result.current.hydrated).toBe(true));
 
-    expect(result.current.settings.proseFont).toBe('serif');
+    expect(result.current.settings.proseFont).toBe('sans');
 
     act(() => {
-      result.current.updateProseFont('sans');
+      result.current.updateProseFont('serif');
     });
 
-    expect(result.current.settings.proseFont).toBe('sans');
+    expect(result.current.settings.proseFont).toBe('serif');
     expect(savePreferencesToDisk).toHaveBeenCalledWith(
       expect.objectContaining({
-        settings: expect.objectContaining({ proseFont: 'sans' }),
+        settings: expect.objectContaining({ proseFont: 'serif' }),
       }),
     );
   });

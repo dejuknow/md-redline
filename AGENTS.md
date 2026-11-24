@@ -2530,7 +2530,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 - **Show templates by default** — when Quick comment opens the form immediately, also show the template picker. When the selection pill is used, the form opens with the grid hidden; toggle it with the footer button to show templates.
 - **Templates** — customizable comment templates
 - **Mermaid fullscreen panel collapsed** — start with comment panel closed in fullscreen view
-- **Prose typeface**: `'serif'` or `'sans'`, default `'serif'`. Controls the rendered document body font (`[data-prose-font]` attribute plus `.prose` font-family in `src/index.css`). Set from the General tab.
+- **Prose typeface**: `'serif'` or `'sans'`, default `'sans'`. Controls the rendered document body font (`[data-prose-font]` attribute plus `.prose` font-family in `src/index.css`). Set from the General tab.
 - **Document width**: `'narrow' | 'default' | 'wide'` (520/672/860px column caps, `DOC_WIDTH_COLS` in `src/lib/page-geometry.ts`), default `'default'`. Feeds the page geometry's `colMax`; also settable from the command palette ("Document width: ..."). The rail threshold (888px) is width-setting independent since `COL_MIN` governs it.
 - **Prose size**: `'small' | 'default' | 'large'` (14px/16px/18px), default `'default'`. Controls the rendered document body font size (`[data-prose-size]` attribute plus `.prose` font-size rules in `src/index.css`); the typography plugin's em-based spacing scales proportionally with it. Set from the General tab; also settable from the command palette ("Prose size: ...").
 - **Keep line breaks**: boolean, default `false`. When on, `remark-breaks` (in `src/markdown/pipeline.ts`, via the `keepLineBreaks` render option) turns each single newline inside a paragraph into a `<br>`, the way Obsidian and GitHub comments render. Off follows CommonMark, where a soft break renders as a space, which is also what GitHub's file view does. The DOM text does not change (remark-rehype emits a `<br>` followed by a `"\n"` text node), so comment anchoring behaves the same either way. Applies to the rendered view and the rendered diff; fenced code is untouched. Set from the General tab; also togglable from the command palette ("Keep line breaks: On/Off").
@@ -2550,9 +2550,10 @@ into `Rewrite this`).
 ### Themes
 
 Light: light, sepia, solarized, github. Dark: dark, nord, rose-pine, catppuccin. System follows OS.
-The default light and dark themes use a red-pen palette (warm neutrals, crimson accent).
-The document viewer renders on a raised sheet via the `.doc-sheet` class, with the shadow
-value supplied per-theme through `--theme-sheet-shadow`. Rendered code blocks (`pre`) and
+The default light and dark themes use cool neutral surfaces with a deep crimson accent
+(`#9a2d27` light, `#c9534b` dark) and amber comment highlights. The document viewer renders
+on a sheet via the `.doc-sheet` class (hairline border); its shadow is supplied per-theme
+through `--theme-sheet-shadow`, and the default light and dark themes set it to `none`. Rendered code blocks (`pre`) and
 raw-view fenced code use `--theme-code-text`, falling back to `--theme-text` so that a theme
 setting no value renders code at the same strength as the prose around it. No theme
 currently overrides it.

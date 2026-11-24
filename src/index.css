@@ -81,7 +81,7 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Prose typeface. Sans is inherited from body; serif is opt-out via settings. */
+/* Prose typeface. Sans is inherited from body and is the default; serif is a setting. */
 [data-prose-font='serif'] .prose {
   font-family: var(--font-serif);
 }
@@ -99,22 +99,22 @@ body {
 :root, [data-theme="light"] {
   color-scheme: light;
   --theme-bg: #ffffff;
-  --theme-bg-secondary: #f4f2ed;
+  --theme-bg-secondary: #f7f7f8;
   --theme-bg-raised: #ffffff;
-  --theme-bg-inset: #edeae2;
-  --theme-border: #e3dfd6;
-  --theme-border-subtle: #edeae2;
-  --theme-text: #24211c;
-  --theme-text-secondary: #57534a;
-  --theme-text-muted: #6f6a5e;
-  --theme-text-faint: #b5afa2;
-  --theme-accent: #b42b23;
-  --theme-accent-hover: #9c241d;
-  --theme-accent-bg: rgba(180, 43, 35, 0.07);
-  --theme-accent-bg-strong: rgba(180, 43, 35, 0.14);
-  --theme-accent-text: #a8281f;
-  --theme-accent-border: rgba(180, 43, 35, 0.35);
-  --theme-accent-ring: rgba(180, 43, 35, 0.25);
+  --theme-bg-inset: #f0f0f2;
+  --theme-border: #e4e4e7;
+  --theme-border-subtle: #ededef;
+  --theme-text: #18181b;
+  --theme-text-secondary: #3f3f46;
+  --theme-text-muted: #6b6b74;
+  --theme-text-faint: #a1a1aa;
+  --theme-accent: #9a2d27;
+  --theme-accent-hover: #842520;
+  --theme-accent-bg: rgba(154, 45, 39, 0.07);
+  --theme-accent-bg-strong: rgba(154, 45, 39, 0.13);
+  --theme-accent-text: #902a24;
+  --theme-accent-border: rgba(154, 45, 39, 0.32);
+  --theme-accent-ring: rgba(154, 45, 39, 0.24);
   --theme-on-accent: #ffffff;
   --theme-danger: #ef4444;
   --theme-danger-bg: #fef2f2;
@@ -132,8 +132,8 @@ body {
   --theme-status-open-text: #2563eb;
   --theme-status-resolved-bg: #dcfce7;
   --theme-status-resolved-text: #16a34a;
-  --theme-tint: rgba(0, 0, 0, 0.1);
-  --theme-tint-primary: rgba(180, 43, 35, 0.15);
+  --theme-tint: rgba(0, 0, 0, 0.07);
+  --theme-tint-primary: rgba(154, 45, 39, 0.13);
   --theme-tint-success: rgba(16, 185, 129, 0.18);
   --theme-tint-danger: rgba(239, 68, 68, 0.15);
   --theme-comment-bg: #fef3c7;
@@ -153,44 +153,44 @@ body {
   --theme-diff-added-text: #065f46;
   --theme-diff-removed-bg: #fef2f2;
   --theme-diff-removed-text: #991b1b;
-  --theme-gradient-from: #f4f2ed;
-  --theme-gradient-to: rgba(180, 43, 35, 0.04);
+  --theme-gradient-from: #f7f7f8;
+  --theme-gradient-to: rgba(154, 45, 39, 0.03);
   --theme-search-bg: rgba(74, 222, 128, 0.3);
   --theme-search-active-bg: #f97316;
   --theme-search-active-text: #ffffff;
-  --theme-scrollbar-thumb: #cdc7ba;
-  --theme-scrollbar-thumb-hover: #b3ac9d;
-  --theme-scrollbar-track: #edeae2;
-  --theme-sheet-shadow: 0 1px 2px rgba(35, 30, 24, 0.05), 0 6px 20px rgba(35, 30, 24, 0.06);
+  --theme-scrollbar-thumb: #d4d4d8;
+  --theme-scrollbar-thumb-hover: #a1a1aa;
+  --theme-scrollbar-track: #f0f0f2;
+  --theme-sheet-shadow: none;
 }
 
 /* ========== Dark Theme ========== */
 [data-theme="dark"] {
   color-scheme: dark;
-  --theme-bg: #1d1b18;
-  --theme-bg-secondary: #0f0e0d;
-  --theme-bg-raised: #26231e;
-  --theme-bg-inset: #16140f;
-  --theme-border: #35312a;
-  --theme-border-subtle: #292622;
-  --theme-text: #ebe7df;
-  --theme-text-secondary: #b3ac9f;
-  --theme-text-muted: #8d877b;
-  --theme-text-faint: #57524a;
+  --theme-bg: #161618;
+  --theme-bg-secondary: #0f0f11;
+  --theme-bg-raised: #1c1c1f;
+  --theme-bg-inset: #0b0b0c;
+  --theme-border: #2a2a2e;
+  --theme-border-subtle: #222225;
+  --theme-text: #ececef;
+  --theme-text-secondary: #b4b4bc;
+  --theme-text-muted: #8b8b94;
+  --theme-text-faint: #52525b;
   /* Bold ink sits a step above --theme-text so body can hold full strength.
      The weights compensate for halation; see the prose section for the reasoning. */
-  --theme-prose-bold: #f7f4ee;
+  --theme-prose-bold: #f7f7f9;
   --theme-prose-body-weight: 350;
   --theme-prose-bold-weight: 780;
   --theme-raw-bold-weight: 700;
-  --theme-accent: #e0584f;
-  --theme-accent-hover: #e97a72;
-  --theme-accent-bg: rgba(224, 88, 79, 0.12);
-  --theme-accent-bg-strong: rgba(224, 88, 79, 0.22);
-  --theme-accent-text: #e8837b;
-  --theme-accent-border: rgba(224, 88, 79, 0.4);
-  --theme-accent-ring: rgba(224, 88, 79, 0.3);
-  --theme-on-accent: #1d1512;
+  --theme-accent: #c9534b;
+  --theme-accent-hover: #d66a62;
+  --theme-accent-bg: rgba(201, 83, 75, 0.12);
+  --theme-accent-bg-strong: rgba(201, 83, 75, 0.22);
+  --theme-accent-text: #e07d75;
+  --theme-accent-border: rgba(201, 83, 75, 0.4);
+  --theme-accent-ring: rgba(201, 83, 75, 0.3);
+  --theme-on-accent: #ffffff;
   --theme-danger: #f87171;
   --theme-danger-bg: rgba(239, 68, 68, 0.15);
   --theme-danger-text: #f87171;
@@ -207,12 +207,12 @@ body {
   --theme-status-open-text: #93c5fd;
   --theme-status-resolved-bg: rgba(34, 197, 94, 0.2);
   --theme-status-resolved-text: #86efac;
-  --theme-tint: rgba(235, 231, 223, 0.12);
-  --theme-tint-primary: rgba(224, 88, 79, 0.25);
+  --theme-tint: rgba(236, 236, 239, 0.1);
+  --theme-tint-primary: rgba(201, 83, 75, 0.25);
   --theme-tint-success: rgba(52, 211, 153, 0.25);
   --theme-tint-danger: rgba(248, 113, 113, 0.2);
   --theme-comment-bg: rgba(245, 158, 11, 0.32);
-  --theme-comment-bg-opaque: #624514;
+  --theme-comment-bg-opaque: #5d4214;
   --theme-comment-bg-hover: rgba(245, 158, 11, 0.42);
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #fbbf24;
@@ -225,15 +225,15 @@ body {
   --theme-diff-added-text: #6ee7b7;
   --theme-diff-removed-bg: rgba(239, 68, 68, 0.15);
   --theme-diff-removed-text: #fca5a5;
-  --theme-gradient-from: #0f0e0d;
-  --theme-gradient-to: rgba(224, 88, 79, 0.06);
+  --theme-gradient-from: #0f0f11;
+  --theme-gradient-to: rgba(201, 83, 75, 0.05);
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(249, 115, 22, 0.7);
   --theme-search-active-text: #ffffff;
-  --theme-scrollbar-thumb: #45403a;
-  --theme-scrollbar-thumb-hover: #57524a;
-  --theme-scrollbar-track: #1d1b18;
-  --theme-sheet-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 26px rgba(0, 0, 0, 0.42);
+  --theme-scrollbar-thumb: #3a3a40;
+  --theme-scrollbar-thumb-hover: #52525b;
+  --theme-scrollbar-track: #161618;
+  --theme-sheet-shadow: none;
 }
 
 /* ========== Sepia Theme ========== */
