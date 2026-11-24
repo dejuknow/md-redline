@@ -183,13 +183,13 @@ body {
   --theme-prose-body-weight: 350;
   --theme-prose-bold-weight: 780;
   --theme-raw-bold-weight: 700;
-  --theme-accent: #c9534b;
-  --theme-accent-hover: #d66a62;
-  --theme-accent-bg: rgba(201, 83, 75, 0.12);
-  --theme-accent-bg-strong: rgba(201, 83, 75, 0.22);
+  --theme-accent: #be4d45;
+  --theme-accent-hover: #ad433c;
+  --theme-accent-bg: rgba(190, 77, 69, 0.12);
+  --theme-accent-bg-strong: rgba(190, 77, 69, 0.22);
   --theme-accent-text: #e07d75;
-  --theme-accent-border: rgba(201, 83, 75, 0.4);
-  --theme-accent-ring: rgba(201, 83, 75, 0.3);
+  --theme-accent-border: rgba(190, 77, 69, 0.4);
+  --theme-accent-ring: rgba(190, 77, 69, 0.3);
   --theme-on-accent: #ffffff;
   --theme-danger: #f87171;
   --theme-danger-bg: rgba(239, 68, 68, 0.15);
@@ -208,7 +208,7 @@ body {
   --theme-status-resolved-bg: rgba(34, 197, 94, 0.2);
   --theme-status-resolved-text: #86efac;
   --theme-tint: rgba(236, 236, 239, 0.1);
-  --theme-tint-primary: rgba(201, 83, 75, 0.25);
+  --theme-tint-primary: rgba(190, 77, 69, 0.25);
   --theme-tint-success: rgba(52, 211, 153, 0.25);
   --theme-tint-danger: rgba(248, 113, 113, 0.2);
   --theme-comment-bg: rgba(245, 158, 11, 0.32);
@@ -226,7 +226,7 @@ body {
   --theme-diff-removed-bg: rgba(239, 68, 68, 0.15);
   --theme-diff-removed-text: #fca5a5;
   --theme-gradient-from: #0f0f11;
-  --theme-gradient-to: rgba(201, 83, 75, 0.05);
+  --theme-gradient-to: rgba(190, 77, 69, 0.05);
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(249, 115, 22, 0.7);
   --theme-search-active-text: #ffffff;

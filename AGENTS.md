@@ -2551,7 +2551,7 @@ into `Rewrite this`).
 
 Light: light, sepia, solarized, github. Dark: dark, nord, rose-pine, catppuccin. System follows OS.
 The default light and dark themes use cool neutral surfaces with a deep crimson accent
-(`#9a2d27` light, `#c9534b` dark) and amber comment highlights. The document viewer renders
+(`#9a2d27` light, `#be4d45` dark) and amber comment highlights. The document viewer renders
 on a sheet via the `.doc-sheet` class (hairline border); its shadow is supplied per-theme
 through `--theme-sheet-shadow`, and the default light and dark themes set it to `none`. Rendered code blocks (`pre`) and
 raw-view fenced code use `--theme-code-text`, falling back to `--theme-text` so that a theme
