@@ -167,15 +167,15 @@ body {
 /* ========== Dark Theme ========== */
 [data-theme="dark"] {
   color-scheme: dark;
-  --theme-bg: #161618;
-  --theme-bg-secondary: #0f0f11;
-  --theme-bg-raised: #1c1c1f;
-  --theme-bg-inset: #0b0b0c;
-  --theme-border: #2a2a2e;
-  --theme-border-subtle: #222225;
+  --theme-bg: #1f1f22;
+  --theme-bg-secondary: #1a1a1d;
+  --theme-bg-raised: #27272b;
+  --theme-bg-inset: #141416;
+  --theme-border: #323237;
+  --theme-border-subtle: #2a2a2f;
   --theme-text: #ececef;
   --theme-text-secondary: #b4b4bc;
-  --theme-text-muted: #8b8b94;
+  --theme-text-muted: #92929b;
   --theme-text-faint: #52525b;
   /* Bold ink sits a step above --theme-text so body can hold full strength.
      The weights compensate for halation; see the prose section for the reasoning. */
@@ -212,7 +212,7 @@ body {
   --theme-tint-success: rgba(52, 211, 153, 0.25);
   --theme-tint-danger: rgba(248, 113, 113, 0.2);
   --theme-comment-bg: rgba(245, 158, 11, 0.32);
-  --theme-comment-bg-opaque: #5d4214;
+  --theme-comment-bg-opaque: #64481b;
   --theme-comment-bg-hover: rgba(245, 158, 11, 0.42);
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #fbbf24;
@@ -225,14 +225,14 @@ body {
   --theme-diff-added-text: #6ee7b7;
   --theme-diff-removed-bg: rgba(239, 68, 68, 0.15);
   --theme-diff-removed-text: #fca5a5;
-  --theme-gradient-from: #0f0f11;
+  --theme-gradient-from: #1a1a1d;
   --theme-gradient-to: rgba(190, 77, 69, 0.05);
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(249, 115, 22, 0.7);
   --theme-search-active-text: #ffffff;
-  --theme-scrollbar-thumb: #3a3a40;
+  --theme-scrollbar-thumb: #3f3f46;
   --theme-scrollbar-thumb-hover: #52525b;
-  --theme-scrollbar-track: #161618;
+  --theme-scrollbar-track: #1f1f22;
   --theme-sheet-shadow: none;
 }
 
