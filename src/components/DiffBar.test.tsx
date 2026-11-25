@@ -12,6 +12,7 @@ function renderBar(overrides: Partial<React.ComponentProps<typeof DiffBar>> = {}
     onDiffPrev: vi.fn(),
     onDiffNext: vi.fn(),
     onMarkReviewed: vi.fn(),
+    onDiffToggle: vi.fn(),
     ...overrides,
   };
   return { props, ...render(<DiffBar {...props} />) };

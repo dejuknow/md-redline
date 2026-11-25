@@ -6,6 +6,7 @@ import { clickCardAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
 import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
+import { setRailDensity } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -77,7 +78,7 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
  * anchor to) and live on the List surface instead; switch density to see them.
  */
 async function switchToListDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+  await setRailDensity(page, 'list');
 }
 
 /** Enable a boolean setting via the Settings panel toggle */

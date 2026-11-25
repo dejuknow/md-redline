@@ -6,6 +6,7 @@ import { clickCardAction, clickReplyAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 import { withMod } from './helpers/shortcuts';
+import { openCommentOptions, setRailDensity } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -126,7 +127,7 @@ async function clickVisibleProsePointOutsideCommentForm(page: Page) {
  * default Anchored density renders margin cards without that chrome.
  */
 async function switchToListDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+  await setRailDensity(page, 'list');
 }
 
 // ---------------------------------------------------------------------------
@@ -379,7 +380,7 @@ test.describe('Comment lifecycle', () => {
 });
 
 test.describe('Bulk actions outside List density', () => {
-  test('the rail kebab deletes every comment while Anchored density is active', async ({
+  test('the comments menu deletes every comment while Anchored density is active', async ({
     page,
   }) => {
     await openFixture(page);
@@ -388,23 +389,27 @@ test.describe('Bulk actions outside List density', () => {
 
     // No density switch: the point is that this works from Anchored, where
     // the List footer's Delete All button doesn't exist.
-    await expect(
-      page.locator('[data-rail-header] button', { hasText: 'Anchored' }),
-    ).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('[data-rail-actions]').click();
-    await page.getByText('Delete all comments…').click();
+    const menu = await openCommentOptions(page);
+    await expect(menu.locator('[data-rail-density="anchored"]')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await menu.getByText('Delete all comments…').click();
     await page.locator('.fixed.inset-0').getByRole('button', { name: 'Delete All' }).click();
 
     await expect(page.getByText('Kebab comment A')).not.toBeVisible();
     await expect(page.getByText('Kebab comment B')).not.toBeVisible();
   });
 
-  test('the rail kebab disappears once there are no comments left', async ({ page }) => {
+  test('the comments menu offers no bulk actions until there are comments', async ({ page }) => {
     await openFixture(page);
-    await expect(page.locator('[data-rail-actions]')).toHaveCount(0);
+    let menu = await openCommentOptions(page);
+    await expect(menu.getByText('Delete all comments…')).toHaveCount(0);
+    await page.keyboard.press('Escape');
 
     await addComment(page, 'valid credentials', 'Only comment');
-    await expect(page.locator('[data-rail-actions]')).toBeVisible();
+    menu = await openCommentOptions(page);
+    await expect(menu.getByText('Delete all comments…')).toBeVisible();
   });
 
   test('the palette delete-all confirms first, and cancelling keeps the comments', async ({
@@ -700,6 +705,9 @@ test.describe('Sidebar toggle', () => {
 
   test('sidebar toggle button hides and shows the rail', async ({ page }) => {
     await openFixture(page);
+    // A card for the rail to show: on a comment-free file the toggle reads
+    // off until it brings up the rail's empty note.
+    await addComment(page, 'valid credentials', 'Rail note');
 
     const toggleBtn = page.locator('button[title*="Toggle comments rail"]');
     const rail = page.locator('[data-comments-rail]');
@@ -747,15 +755,17 @@ test.describe('List density scroll isolation', () => {
 
     await switchToListDensity(page);
 
-    const railHeader = page.locator('[data-rail-header]');
+    const railHeader = page.locator('[data-comments-rail] > .sticky');
     const before = await railHeader.boundingBox();
 
-    // Scroll the document deep; the pinned rail must not move.
+    // Scroll the document deep; the pinned rail must not scroll away. It
+    // starts below the scroller's 12px top padding and pins at its top, so it
+    // may rise by that much and no more.
     await page.locator('[data-doc-page]').hover();
     await page.mouse.wheel(0, 2000);
     await page.waitForTimeout(200);
     const after = await railHeader.boundingBox();
-    expect(Math.abs(after!.y - before!.y)).toBeLessThan(4);
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(13);
 
     // The list scrolls on its own without moving the document.
     const scrollTopBefore = await page

@@ -503,8 +503,21 @@ test.describe('Session persistence', () => {
   });
 
   test('rail visibility persists across reload', async ({ page }) => {
+    // A comment, so the rail has a card to show: on a comment-free file the
+    // toggle reads off until it brings up the rail's empty note.
+    writeFileSync(
+      FIXTURE_1,
+      FIXTURE_1_ORIGINAL.replace(
+        'valid credentials',
+        '<!-- @comment{"id":"persist-1","anchor":"valid credentials","text":"Keep me","author":"User","timestamp":"2024-01-01T00:00:00.000Z","replies":[]} -->valid credentials',
+      ),
+    );
     await openFixture(page);
     await expect(page.locator('[data-comments-rail]')).toBeVisible();
+    await expect(page.locator('button[title*="Toggle comments rail"]')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
 
     // Use the toolbar button instead of keyboard shortcut (unreliable in headless)
     const toggleBtn = page.locator('button[title*="Toggle comments rail"]');

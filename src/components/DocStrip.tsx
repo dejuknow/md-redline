@@ -8,10 +8,6 @@ import type { ViewMode } from '../lib/view-mode';
 export interface DocStripProps {
   /** The tab bar, rendered in its strip look. */
   tabs: React.ReactNode;
-  /** Rail controls (prev/next, density, "N open", bulk actions). App passes
-   * them only while the rail is shown, so their presence is also what tells
-   * the comments toggle to drop its own count. */
-  railControls?: React.ReactNode;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
   hasDiffSnapshot: boolean;
@@ -25,13 +21,13 @@ export interface DocStripProps {
    * the click, so the copy item's own checkmark is never seen. */
   onCopyDocument: (announce?: boolean) => void;
   copyFeedback: boolean;
-  /** Whether a comments surface (rail or drawer) is on screen. */
-  commentsSurfaceVisible: boolean;
-  openCommentCount: number;
-  onToggleComments: () => void;
+  /** The comments split button (see CommentsButton). */
+  comments: React.ReactNode;
+  /** Hand off, last in the row; null while a review owns sending. */
+  handOff?: React.ReactNode;
 }
 
-/** Under this strip width, view, diff and copy fold into the View menu. */
+/** Under this strip width, the view switch folds into the menu with diff and copy. */
 const NARROW_STRIP_WIDTH = 600;
 
 const iconButtonClass = (pressed: boolean) =>
@@ -122,18 +118,18 @@ function CopyIcon({ done }: { done: boolean }) {
 
 /**
  * The document panel's top row: the open tabs on the left, attached to the
- * page below like folder tabs, and the document's controls on the right
- * (view mode, diff, search, copy, then the comments toggle).
- * The tabs scroll in their own region, so the controls never cover a tab.
+ * page below like folder tabs, and the document's controls on the right:
+ * the view switch, find, a menu with diff and copy, the comments split
+ * button, then Hand off. The controls stay few so the tabs keep the width;
+ * the tabs scroll in their own region, so the controls never cover a tab.
  *
  * Every control keeps the title, aria-label and test id it had in the old
- * panel toolbar and title row; e2e specs and screen readers find them by
- * those. When the strip gets narrow, view, diff and copy fold into a View
- * menu while search and the comments toggle stay out.
+ * panel toolbar; e2e specs and screen readers find them by those. When the
+ * strip gets narrow, the view switch folds into the menu too, which then
+ * reads "View".
  */
 export function DocStrip({
   tabs,
-  railControls,
   viewMode,
   onViewModeChange,
   hasDiffSnapshot,
@@ -145,9 +141,8 @@ export function DocStrip({
   onSearch,
   onCopyDocument,
   copyFeedback,
-  commentsSurfaceVisible,
-  openCommentCount,
-  onToggleComments,
+  comments,
+  handOff,
 }: DocStripProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   // Not measured yet counts as wide: render the wide layout until we know better.
@@ -157,7 +152,7 @@ export function DocStrip({
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!narrow) setViewMenuOpen(false);
+    setViewMenuOpen(false);
   }, [narrow]);
 
   // Closes on a press or focus outside, and on Escape unless another overlay
@@ -182,22 +177,16 @@ export function DocStrip({
       : 'Show diff';
   const searchLabel = `Find in document (${modLabel}+F)`;
   const copyLabel = copyFeedback ? 'Copied!' : 'Copy document (comment markers stripped)';
-  const commentsLabel = `Toggle comments rail (${modLabel}+\\)`;
-  // With zero changes the overlay has nothing to paint, so the toggle stays
-  // visually quiet even while it is on; aria-pressed still reports the state.
-  const diffShowingChanges = diffEnabled && diffChunkCount > 0;
-  // The rail controls already say "N open"; repeat the count only without them.
-  const showCommentCount = !railControls && openCommentCount > 0;
 
   const setView = (mode: ViewMode) => {
     if (mode !== viewMode) onViewModeChange(mode);
   };
 
   const diffCount = diffChunkCount > 0 && (
-    <span className="text-[12px] tabular-nums">{diffChunkCount}</span>
+    <span className="text-[12px] tabular-nums text-content-muted">{diffChunkCount}</span>
   );
   const diffPendingDot = diffPending && !diffEnabled && (
-    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-content-secondary animate-pulse" />
+    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-content-secondary animate-pulse" />
   );
 
   const searchButton = (
@@ -224,223 +213,184 @@ export function DocStrip({
     </Tooltip>
   );
 
-  // No Tooltip wrapper: the title is the e2e and screen-reader handle, and a
-  // Tooltip stashes it while hovered. The fixed minimum width holds the
-  // button's size steady as the count comes and goes with the rail, so the
-  // controls to its left do not slide under the pointer on a view switch.
-  const commentsButton = (
-    <button
-      type="button"
-      className={`h-7 min-w-[46px] px-1.5 flex items-center justify-center gap-1.5 rounded-md text-[13px] font-medium transition-colors ${
-        commentsSurfaceVisible
-          ? 'bg-tint text-content'
-          : 'text-content-muted hover:text-content hover:bg-tint'
-      }`}
-      onClick={onToggleComments}
-      aria-label={commentsLabel}
-      aria-pressed={commentsSurfaceVisible}
-      title={commentsLabel}
-    >
-      <svg
-        className="w-4 h-4"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.3}
+  const viewMenu = (
+    <div ref={viewMenuRef} className="relative">
+      <button
+        type="button"
+        className={`relative h-7 flex items-center rounded-md transition-colors ${
+          narrow ? 'pl-2 pr-1.5 gap-1 text-[13px] font-medium' : 'w-7 justify-center'
+        } ${
+          viewMenuOpen
+            ? 'bg-tint text-content'
+            : narrow
+              ? 'text-content-secondary hover:text-content hover:bg-tint'
+              : 'text-content-muted hover:text-content hover:bg-tint'
+        }`}
+        onClick={() => setViewMenuOpen((open) => !open)}
+        aria-label="View options"
+        title={narrow ? 'View options' : 'Diff and copy'}
+        aria-haspopup="menu"
+        aria-expanded={viewMenuOpen}
       >
-        <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" strokeLinejoin="round" />
-      </svg>
-      {showCommentCount && <span className="tabular-nums">{openCommentCount}</span>}
-    </button>
+        {narrow ? (
+          <>
+            View
+            <svg
+              className="w-3 h-3"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.4}
+            >
+              <path d="M3.5 5.5L7 9l3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </>
+        ) : (
+          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="3.5" cy="8" r="1.3" />
+            <circle cx="8" cy="8" r="1.3" />
+            <circle cx="12.5" cy="8" r="1.3" />
+          </svg>
+        )}
+        {diffPendingDot}
+      </button>
+      {viewMenuOpen && (
+        <div
+          role="menu"
+          aria-label="View options"
+          className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-surface shadow-lg py-1"
+        >
+          {narrow && (
+            <>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={!isRaw}
+                className={menuItemClass}
+                onClick={() => {
+                  setView('rendered');
+                  setViewMenuOpen(false);
+                }}
+                aria-label={renderedLabel}
+                title={renderedLabel}
+              >
+                <RenderedIcon />
+                <span className="flex-1">Rendered</span>
+                {!isRaw && <span aria-hidden="true">&#10003;</span>}
+              </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={isRaw}
+                className={menuItemClass}
+                onClick={() => {
+                  setView('raw');
+                  setViewMenuOpen(false);
+                }}
+                aria-label={rawLabel}
+                title={rawLabel}
+              >
+                <RawIcon />
+                <span className="flex-1">Raw markdown</span>
+                {isRaw && <span aria-hidden="true">&#10003;</span>}
+              </button>
+              <div className="my-1 h-px bg-border-subtle" aria-hidden="true" />
+            </>
+          )}
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={diffEnabled}
+            disabled={!hasDiffSnapshot}
+            className={`${menuItemClass} relative`}
+            onClick={() => {
+              onDiffToggle();
+              setViewMenuOpen(false);
+            }}
+            aria-label={diffLabel}
+            title={diffLabel}
+          >
+            <DiffIcon />
+            <span className="flex-1">{diffEnabled ? 'Hide diff' : 'Show diff'}</span>
+            {diffCount}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="copy-button"
+            className={menuItemClass}
+            onClick={() => {
+              onCopyDocument(true);
+              setViewMenuOpen(false);
+            }}
+            aria-label="Copy document without comment markers"
+            title={copyLabel}
+          >
+            <CopyIcon done={copyFeedback} />
+            <span className="flex-1">Copy document</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 
   return (
     <div
       ref={rootRef}
       data-doc-strip
-      className="h-[42px] flex items-end gap-0.5 px-1.5 bg-surface-secondary border-b border-border rounded-t-[9px] shrink-0"
+      className="h-[42px] flex items-end gap-0.5 pr-1.5 bg-surface-secondary border-b border-border rounded-t-[9px] [[data-review-band]+&]:rounded-t-none shrink-0"
+      // Adds to the strip's own inset rather than replacing it.
+      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.375rem)' }}
     >
       <div className="min-w-0 flex-1 self-stretch flex items-end">{tabs}</div>
 
       <div
-        className="self-center flex items-center gap-1.5 shrink-0 pl-2"
+        className="self-center flex items-center gap-1 shrink-0 pl-2"
         data-testid="panel-toolbar"
       >
-        {railControls}
-
-        {narrow ? (
-          <div ref={viewMenuRef} className="relative">
-            <button
-              type="button"
-              className={`h-7 pl-2 pr-1.5 flex items-center gap-1 rounded-md text-[13px] font-medium transition-colors ${
-                viewMenuOpen
-                  ? 'bg-tint text-content'
-                  : 'text-content-secondary hover:text-content hover:bg-tint'
-              }`}
-              onClick={() => setViewMenuOpen((open) => !open)}
-              aria-label="View options"
-              aria-haspopup="menu"
-              aria-expanded={viewMenuOpen}
-            >
-              View
-              <svg
-                className="w-3 h-3"
-                viewBox="0 0 14 14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.4}
+        {!narrow && (
+          <div role="group" aria-label="View" className="flex bg-surface-inset rounded-md p-0.5">
+            <Tooltip text={renderedLabel}>
+              <button
+                type="button"
+                className={segmentClass(!isRaw)}
+                onClick={() => setView('rendered')}
+                aria-label={renderedLabel}
+                aria-pressed={!isRaw}
+                title={renderedLabel}
               >
-                <path d="M3.5 5.5L7 9l3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {diffPendingDot}
-            </button>
-            {viewMenuOpen && (
-              <div
-                role="menu"
-                aria-label="View options"
-                className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-surface shadow-lg py-1"
+                <RenderedIcon />
+              </button>
+            </Tooltip>
+            <Tooltip text={rawLabel}>
+              <button
+                type="button"
+                className={segmentClass(isRaw)}
+                onClick={() => setView('raw')}
+                aria-label={rawLabel}
+                aria-pressed={isRaw}
+                title={rawLabel}
               >
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={!isRaw}
-                  className={menuItemClass}
-                  onClick={() => {
-                    setView('rendered');
-                    setViewMenuOpen(false);
-                  }}
-                  aria-label={renderedLabel}
-                  title={renderedLabel}
-                >
-                  <RenderedIcon />
-                  <span className="flex-1">Rendered</span>
-                  {!isRaw && <span aria-hidden="true">&#10003;</span>}
-                </button>
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={isRaw}
-                  className={menuItemClass}
-                  onClick={() => {
-                    setView('raw');
-                    setViewMenuOpen(false);
-                  }}
-                  aria-label={rawLabel}
-                  title={rawLabel}
-                >
-                  <RawIcon />
-                  <span className="flex-1">Raw markdown</span>
-                  {isRaw && <span aria-hidden="true">&#10003;</span>}
-                </button>
-                <div className="my-1 h-px bg-border-subtle" aria-hidden="true" />
-                <button
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={diffEnabled}
-                  disabled={!hasDiffSnapshot}
-                  className={`${menuItemClass} relative`}
-                  onClick={() => {
-                    onDiffToggle();
-                    setViewMenuOpen(false);
-                  }}
-                  aria-label={diffLabel}
-                  title={diffLabel}
-                >
-                  <DiffIcon />
-                  <span className="flex-1">Diff</span>
-                  {diffCount}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="copy-button"
-                  className={menuItemClass}
-                  onClick={() => {
-                    onCopyDocument(true);
-                    setViewMenuOpen(false);
-                  }}
-                  aria-label="Copy document without comment markers"
-                  title={copyLabel}
-                >
-                  <CopyIcon done={copyFeedback} />
-                  <span className="flex-1">Copy document</span>
-                </button>
-              </div>
-            )}
+                <RawIcon />
+              </button>
+            </Tooltip>
           </div>
+        )}
+        {narrow ? (
+          <>
+            {viewMenu}
+            {searchButton}
+          </>
         ) : (
           <>
-            <div role="group" aria-label="View" className="flex bg-surface-inset rounded-md p-0.5">
-              <Tooltip text={renderedLabel}>
-                <button
-                  type="button"
-                  className={segmentClass(!isRaw)}
-                  onClick={() => setView('rendered')}
-                  aria-label={renderedLabel}
-                  aria-pressed={!isRaw}
-                  title={renderedLabel}
-                >
-                  <RenderedIcon />
-                </button>
-              </Tooltip>
-              <Tooltip text={rawLabel}>
-                <button
-                  type="button"
-                  className={segmentClass(isRaw)}
-                  onClick={() => setView('raw')}
-                  aria-label={rawLabel}
-                  aria-pressed={isRaw}
-                  title={rawLabel}
-                >
-                  <RawIcon />
-                </button>
-              </Tooltip>
-            </div>
-
-            {/* Always shown, disabled with an explanatory title until a
-                snapshot exists, so the path to the diff is discoverable. */}
-            <Tooltip text={diffLabel}>
-              <button
-                type="button"
-                disabled={!hasDiffSnapshot}
-                className={`relative h-7 px-2 flex items-center gap-1.5 rounded-md border border-border text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${
-                  diffShowingChanges
-                    ? 'bg-tint text-content'
-                    : 'text-content-secondary hover:text-content hover:bg-tint'
-                }`}
-                onClick={onDiffToggle}
-                aria-label={diffLabel}
-                aria-pressed={diffEnabled}
-                title={diffLabel}
-              >
-                <DiffIcon />
-                Diff
-                {diffCount}
-                {diffPendingDot}
-              </button>
-            </Tooltip>
-
             {searchButton}
-
-            {/* Copies clean markdown: comment markers are agent metadata
-                nobody wants on the clipboard. */}
-            <Tooltip text={copyLabel}>
-              <button
-                type="button"
-                data-testid="copy-button"
-                className={iconButtonClass(false)}
-                onClick={() => onCopyDocument()}
-                aria-label="Copy document without comment markers"
-                title={copyLabel}
-              >
-                <CopyIcon done={copyFeedback} />
-              </button>
-            </Tooltip>
+            {viewMenu}
           </>
         )}
 
-        {narrow && searchButton}
-        {commentsButton}
+        <div className="w-px h-[18px] mx-1 bg-border" aria-hidden="true" />
+        {comments}
+        {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
       </div>
     </div>
   );

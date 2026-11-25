@@ -164,8 +164,9 @@ async function agentEditsNearTheTop(
   );
 }
 
+/** The diff bar's toggle, which the agent's changes bring up. */
 const diffToggle = (page: Page, state: 'Show' | 'Hide') =>
-  page.locator(`[data-doc-strip] button[title^="${state} diff"]`);
+  page.locator(`[data-diff-bar-toggle][title="${state} diff"]`);
 
 test.describe('Reading position across tabs', () => {
   let fixtureDir = '';

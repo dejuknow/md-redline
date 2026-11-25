@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
+import { setRailDensity } from './strip';
 
 export async function selectText(page: Page, text: string) {
   await page.evaluate((targetText) => {
@@ -72,7 +73,7 @@ export async function openCommentsDrawer(page: Page) {
  * assertions that need to see reply bodies or that surface's controls.
  */
 export async function switchToListDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+  await setRailDensity(page, 'list');
 }
 
 /**

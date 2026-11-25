@@ -75,20 +75,22 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/MarkdownViewer.tsx`: rendered markdown, selection handling, highlight painting
 - `src/components/RawView.tsx`: raw markdown view with syntax highlighting and diff overlay
 - `src/components/RenderedDiffView.tsx`: rendered prose view of the diff overlay
-- `src/components/AppHeader.tsx`: the main column's top row: the review row or the active file's name and folder with Hand off, the command palette chip, and Exit focus
-- `src/components/ReviewBanner.tsx`: review session rows (send batch, finish, cancel, end review); `layout="header"` is the app header's one-row form
+- `src/components/ReviewBand.tsx`: the review row as a band across the top of the document panel, mounted only while a review is shown
+- `src/components/StatusBar.tsx`: the bottom line on the frame: the active file's path, notices, Exit focus, and the Commands and Shortcuts hints
+- `src/components/CommentsButton.tsx`: the comments split button in the tab strip: the rail toggle plus a menu with Anchored/List, prev/next and the bulk actions
+- `src/components/ReviewBanner.tsx`: review session rows (send batch, finish, cancel, end review); `layout="header"` is the review band's one-row form
 - `src/components/ReviewRow.tsx`: the shared review row shape (`SessionRow`), the agent row and the pending-question chip
-- `src/components/ReviewHeaderMenus.tsx`: the header's Other reviews popover, the More review actions menu, and `useDismiss`
-- `src/lib/header-session.ts`: `pickHeaderSessions`, which review takes the header row and which wait behind "+N"
-- `src/components/DocStrip.tsx`: the document panel's top row: tabs on the left, document controls (view mode, diff, search, copy, comments toggle) on the right
-- `src/components/DiffBar.tsx`: row under the tab strip with the change count, diff reference label, prev/next change and Mark reviewed
+- `src/components/ReviewHeaderMenus.tsx`: the review band's Other reviews popover, the More review actions menu, and `useDismiss`
+- `src/lib/header-session.ts`: `pickHeaderSessions`, which review takes the review band and which wait behind "+N"
+- `src/components/DocStrip.tsx`: the document panel's tab row: tabs on the left; on the right the view switch, find, the View options menu (diff, copy), the comments button and Hand off
+- `src/components/DiffBar.tsx`: row under the tab strip with the change count, Show/Hide diff, diff reference label, prev/next change and Mark reviewed
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
-- `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the change count on the tab strip's Diff toggle (`DocStrip`)
+- `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the change count in the diff bar (`DiffBar`) and the strip's View options menu (`DocStrip`)
 - `bin/cli.js`: auto-start CLI and browser opener
 - `eval/runner.ts`: eval harness; default adapter is currently `claude-cli`
 
@@ -869,109 +871,110 @@ the server waits 60s before clearing `waitingForAgent`.
 ### Tab strip
 
 The tabs are attached to the top of the document panel (`[data-doc-panel]`) in
-one 42px row, `DocStrip.tsx` (`[data-doc-strip]`). Tabs come first, via
-`TabBar`'s `variant="strip"`: the active tab is a folder tab (`bg-surface`,
-border on top and sides, none on the bottom) whose row is laid 1px over the
-strip's bottom rule so the tab joins the page below; inactive tabs are muted text
-with no background. The tabs scroll in their own region, so the controls never
-cover a tab. The strip is not inside an `overflow-clip` ancestor (only the panel
-body below it clips), which is what lets the "Show all open tabs" menu
-(`tab-list-menu`) hang below it unclipped.
+one 42px row, `DocStrip.tsx` (`[data-doc-strip]`). With no review shown it is
+the panel's first row, so the panel's top lines up with the sidebar's. Tabs
+come first, via `TabBar`'s `variant="strip"`: the active tab is a folder tab
+(`bg-surface`, border on top and sides, none on the bottom) whose row is laid
+1px over the strip's bottom rule so the tab joins the page below; inactive tabs
+are muted text with no background. The strip is not inside an `overflow-clip`
+ancestor (only the panel body below it clips), which is what lets the "Show all
+open tabs" menu (`tab-list-menu`) hang below it unclipped.
 
-The controls group on the right (`data-testid="panel-toolbar"`) holds, in order:
-the rail controls (`RailDensityControl`, only while the rail is shown), the
-rendered/raw segmented control ("View raw markdown" / "Switch to rendered view"
-on the segment that changes the view), the Diff toggle ("Show diff" / "Hide
-diff", disabled with an explanatory title until a reference exists, with the
-change count and the pending pulse), search ("Find in document (Cmd+F)"), copy
-(`copy-button`), the comments toggle ("Toggle comments rail (Cmd+\)",
-`aria-pressed` while the rail or drawer is shown, carrying the open count only
-while the rail is hidden, since the rail controls already say "N open"). Hand off
-is not here: it lives in the app header. Pressed toggles use a neutral `bg-tint`,
-not crimson.
-Under 600px of strip width (`useElementNarrowerThan`), view, diff and copy fold into a
-**View** menu button (`aria-label="View options"`) whose items keep the same
-titles and test id; search and the comments toggle stay out. The menu closes on
-an outside press, on focus moving outside it (the command palette or find bar
-taking focus) and on Escape, which it leaves to the palette while that is open
-(`useDismiss`). Copy from the menu shows a toast ("Copied the document without
-comment markers." or "Couldn't copy the document."), since the menu closes and
-takes the copy item's checkmark with it.
+Tabs shrink before they scroll. The tabs' scrollport is sized to their natural
+widths (flex-basis auto, no `flex-1`) and may shrink; inactive tabs shrink down
+to 112px and the active tab to 120px (both capped at 200px), with the file name
+truncating. Only past those floors does the scrollport overflow, which brings up
+the scroll arrows and the tab list. The open-file button sits right after the
+scrollport, not inside it, so a tab can never scroll under it.
 
-The open-file button is sticky at the right edge of the tab strip, so it overlays
-whichever tab ends there. The strip carries a `scroll-pr-10` that must stay at or
-above that button's `w-9`, otherwise the browser parks the active tab underneath
-it when scrolling the tab into view.
+The controls group on the right (`data-testid="panel-toolbar"`) is kept short
+so the tabs keep the width. In order:
 
-### App header
+- the rendered/raw segmented control ("View raw markdown" / "Switch to rendered
+  view" on the segment that changes the view);
+- search ("Find in document (Cmd+F)");
+- the **View options** menu (`aria-label="View options"`, a `⋯` icon, titled
+  "Diff and copy"): the diff item (`menuitemcheckbox`, labeled "Show diff" /
+  "Hide diff", titled the same, disabled with an explanatory title until a
+  reference exists, with the change count) and Copy document (`copy-button`).
+  The diff pending pulse sits on the menu button. Copy from the menu shows a
+  toast ("Copied the document without comment markers." or "Couldn't copy the
+  document."), since the menu closes and takes the copy item's checkmark with it;
+- a hairline, then the comments split button (`CommentsButton.tsx`, see
+  Comments rail);
+- Hand off (`HandOffButton`), last, while the active file is in no shown review.
 
-Above the panel, the main column (`[data-main-column]`) starts with one 44px
-row, `AppHeader.tsx` (`[data-app-header]`). It merged the old review banner and
-the old toolbar status row, so there is one chrome row instead of two.
+Under 600px of strip width (`useElementNarrowerThan`), the rendered/raw choice
+folds into the same menu too, and its button reads **View** with a chevron; the
+items keep the same titles and test id. The menu closes on an outside press, on
+focus moving outside it (the command palette or find bar taking focus) and on
+Escape, which it leaves to the palette while that is open (`useDismiss`).
 
-- **No review open:** the active file's name (semibold) and its folder (muted,
-  home shortened to `~`) on the left, inside `[data-header-status]`, which is
-  `min-w-0` with each part `truncate`, so a long name gives way before the
-  actions do. Hand off (`HandOffButton`) sits right-aligned in
-  `[data-header-actions]` (`shrink-0`).
-- **A review open:** the row is the review (`ReviewBanner layout="header"`, its
-  wrapper keeps `data-testid="review-banner"`, inside the header's
-  `[data-header-banner]` slot). App passes the banner as
-  `renderBanner(compact)`, null when `shownReviewSessions` is empty. Hand off is
-  hidden while the active file is in one of the shown reviews, whose own send
-  actions replace it; on a file in none of them it stays, in
-  `[data-header-actions]` after the review row.
-- Hand off, when enabled, is the header's filled crimson primary (`bg-primary
-text-on-primary`, 13px, both split segments), like a review's Send N comments.
-  Disabled, it stays the quiet icon button.
-- Load errors, "Loading..." and the lost-access notice with its compact Allow
-  button (`toolbar-allow-access`) render in the row either way, in
-  `[data-header-notices]` after the status, capped at 40% of the header, each
-  text truncating with its full text in `title`. Beside the file name the
-  notice is `shrink-0`, so a long name or folder gives way first. Beside a
-  review row it gives way instead, down to 96px, and only after the row has
-  folded (see the compact rule below). The lost-access pair shows exactly when
-  `errorKind === 'access-denied' && !accessRequestShown`, alongside a review row
-  too.
-- Then a 1px hairline and the command palette chip (`aria-label="Command
-palette"`, showing `⌘K`, or `Ctrl+K` off Apple platforms). The chip calls
-  App's `openCommandPalette()`, the same function the `Cmd+K` shortcut runs, so
-  it reads the selection for "Copy selection as markdown" first. It carries
-  `data-preserve-selection`: without it, the mouseup of the click dropped a
-  painted selection before the palette could read it.
-- In focus mode, an **Exit focus** button (`data-focus-chip`, title "Exit focus
-  mode", with the `⌘.` hint) ends the row, after the file name
-  (`data-focus-file-name`) when a review row has taken the status. The file
-  name hides while any notice shows, so the notice and the review row both fit.
+Its left padding is `calc(var(--window-inset-left, 0px) + 0.375rem)`: a desktop
+shell sets `--window-inset-left` to clear its window controls when no sidebar
+covers them (focus mode). The browser build never sets it.
+
+### Diff bar
+
+Under the strip, `DiffBar.tsx` (`[data-diff-bar]`) shows while the diff overlay
+is on or while there are changes to review. It holds the change count
+(`[data-diff-count]`, only while there are changes), a **Show diff** / **Hide
+diff** button (`[data-diff-bar-toggle]`, `aria-pressed`, titled the same), the
+reference label (`diff-reference-label`) and previous/next change while the
+overlay is on, and **Mark reviewed** at the right end. The bar is the diff
+toggle where it matters: it comes up the moment there is something to review.
+
+### Review band
+
+While a review is shown, `ReviewBand.tsx` (`[data-review-band]`) is the
+document panel's first row, above the tabs (the strip then drops its top
+corners). It is the review (`ReviewBanner layout="header"`, its wrapper keeps
+`data-testid="review-banner"`, inside the band's `[data-header-banner]` slot);
+App mounts it only when `shownReviewSessions` is non-empty, so with no review
+the panel's top lines up with the sidebar's. Hand off is hidden while the active
+file is in one of the shown reviews, whose own send actions replace it; on a
+file in none of them it stays in the strip.
 
 Whether the review row renders compact (see Review banner) is measured, not a
 breakpoint (`src/lib/header-fit.ts`). After every render, on a resize and on any
-change inside the header, `measureHeader` adds up what the wide row needs: the
-row's trailing group (`[data-row-end]`: +N and the actions) in full, its status
-(`[data-row-status]`) at 160px or its own width if shorter, a notice in full up to
-its cap, and every other item (palette chip, Exit focus, Hand off) at its width.
-`nextHeaderFit` folds the row when that is wider than the header, remembers how
+change inside the band, `measureHeader` adds up what the wide row needs: the
+row's trailing group (`[data-row-end]`: +N and the actions) in full, and its
+status (`[data-row-status]`) at 160px or its own width if shorter.
+`nextHeaderFit` folds the row when that is wider than the band, remembers how
 much folding saved, and unfolds only once the wide row would fit with 24px to
 spare, so it never flip-flops; another review taking a folded row is tried wide
-again. The slot's `min-width` is set to the row's least width, so the row never
-runs under the notice: the notice gives way first, and only when even a 96px
-notice leaves no room does the row give up the difference, so the palette chip
-and Exit focus always stay in the header. Unmeasured (no layout) counts as wide.
-There is no More menu of the header's own: keyboard shortcuts stay on `?` and
-the palette.
+again. The slot's `min-width` is set to the row's least width. Unmeasured (no
+layout) counts as wide.
 
-Its left padding is `calc(var(--window-inset-left, 0px) + 0.25rem)`: the inset
-adds to its own 4px. A desktop shell sets
-`--window-inset-left` on `[data-app-header]` to clear its window controls; the
-browser build never sets it. It applies in every sidebar state (open, the
-collapsed rail, focus mode), and `e2e/app-chrome.spec.ts` pins that.
+Its left padding is `calc(var(--window-inset-left, 0px) + 0.5rem)`, for the same
+desktop shell inset as the strip.
+
+### Status bar
+
+`StatusBar.tsx` (`[data-status-bar]`) is a 28px line on the frame under both
+panels:
+
+- the active file's full path (`[data-status-path]`, home shortened to `~`),
+  truncating with the full path in its `title`;
+- load errors, "Loading..." and the lost-access notice with its compact Allow
+  button (`toolbar-allow-access`), in `[data-status-notices]`, each text
+  truncating with its full text in `title`. The lost-access pair shows exactly
+  when `errorKind === 'access-denied' && !accessRequestShown`;
+- on the right: in focus mode an **Exit focus** button (`data-focus-chip`, title
+  "Exit focus mode", with the `⌘.` hint); the **Commands** hint
+  (`aria-label="Command palette"`, `⌘K` or `Ctrl+K`), which calls App's
+  `openCommandPalette()`, the same function the `Cmd+K` shortcut runs, so it
+  reads the selection for "Copy selection as markdown" first, and carries
+  `data-preserve-selection` so the click's mouseup does not drop a painted
+  selection; and the **Shortcuts** hint (`aria-label="Keyboard shortcuts"`),
+  which opens the shortcuts panel like `?`.
 
 ### Folder permission requests
 
 Opening a file outside the allowed roots is a consent moment, not a failure, and
 `AccessRequest.tsx` is the only place that says so. The document area renders it
 over the sheet (`variant="page"`), the explorer renders the quieter
-`variant="panel"` when a browse is refused, and the app header stays out of it
+`variant="panel"` when a browse is refused, and the status bar stays out of it
 whenever the card is up. Three surfaces shouting the same absolute path in
 `text-danger` was the state this replaced; if a fourth surface ever needs to
 report a refused folder, give it a variant here rather than its own copy.
@@ -993,7 +996,7 @@ Two conditions gate it, and they are not the same one:
   The `!rawMarkdown` term is load-bearing: `reloadFile` keeps the loaded content
   on failure, so a directory that rotates out from under an open file 403s a tab
   the user is still reading. The card must not cover a document it cannot give
-  back. Those tabs keep their content and the app header reports the refusal with
+  back. Those tabs keep their content and the status bar reports the refusal with
   its own compact Allow button, so exactly one surface ever owns the ask.
 - `accessDeniedDir` may be null (`?file=~`, a Windows drive-relative path, both
   of which `getParentDir` answers with `''`). Null names no folder but still
@@ -1042,7 +1045,7 @@ all, so that dot is their only signal.
 
 ### Review banner
 
-When a review session is active, the app header's row becomes the review's
+When a review session is active, the review band (see Review band) is the review's
 status and actions (`ReviewBanner layout="header"`). Each row puts its status on
 the left (truncating in the header) and its actions on the right in the order
 pending-question chip, quiet, secondary, primary, so the jump to a waiting
@@ -1053,7 +1056,7 @@ no review covers the active file); **End review** and
 **Cancel review** are quiet (no fill), and the question chip is the crimson tint
 (`bg-primary-bg`).
 
-The header shows one review. `pickHeaderSessions` picks it: a review with an agent
+The band shows one review. `pickHeaderSessions` picks it: a review with an agent
 question awaiting a reply first, then a reviewer-origin review that is ready to
 send (every file's count loaded, not `waitingForAgent`, and at least one unsent
 comment), then the first in the list; ties keep list order. That pick is redone
@@ -1083,7 +1086,7 @@ them (a dialog, or the command palette, which carries `data-overlay`). The tab
 strip's View menu uses the same `useDismiss` hook (`src/hooks/useDismiss.ts`).
 App's Escape guard treats the popover as owning the key.
 
-When the wide row does not fit the header (measured, see App header) the row is
+When the wide row does not fit the band (measured, see Review band) the row is
 **compact**: its quiet and secondary actions move into a menu button (`aria-label="More review actions"`, a
 `role="menu"` of `menuitem`s with the same labels). The primary action and the
 pending-question chip stay in the row, on agent and reviewer rows alike.
@@ -1545,7 +1548,7 @@ Two details are load-bearing:
 The palette entry is called `Copy selection as markdown`, spelling out its
 subject because nothing sits under the cursor there. Like the menu, it resolves
 the markdown when the palette opens (`paletteSelectionMarkdown`, read by
-`openCommandPalette()`, behind both Cmd+K and the header chip, before the palette
+`openCommandPalette()`, behind both Cmd+K and the status bar's Commands hint, before the palette
 focuses its input) and copies that text, so it
 covers a committed selection and a pending touch or pen one alike (#163).
 Reading at run time failed both ways: focusing the palette's input takes the
@@ -1675,8 +1678,8 @@ that jumped into the page margin in one step (a fast flick, which the browser
 can coalesce into a single move) moved the anchor nowhere, and even a slow drag
 stopped at its last in-text sample. It now clamps the point into the part of
 the container actually on screen (its box, intersected with its scrolling pane
-and the window, since a long document runs past the pane and the app header
-and tab strip cover the top of the window) and looks up the caret again: beside a line means that
+and the window, since a long document runs past the pane and the review band
+and tab strip cover the top of the panel) and looks up the caret again: beside a line means that
 line's start or end, past the top or bottom of the pane the first or last
 visible line.
 
@@ -1730,25 +1733,33 @@ check.
 The single comment surface for the rendered view: a fixed-width column at the
 right edge of the document page, inside the same width-managed page unit as
 the prose column (`src/lib/page-geometry.ts`, `CommentsRail.tsx`). Two
-densities, switched via the segmented control (`RailDensityControl`,
-`[data-rail-header]`) that renders at the start of the tab strip's controls
-group while the rail is shown (a header inside the rail occluded the anchored cards), and
-persisted per-user (see below). Each density segment shows a crimson
-focus-visible ring on keyboard focus.
+densities, Anchored and List, chosen in the comments button's menu and
+persisted per-user (see below).
 
-`RailDensityControl` is the whole comment cluster, not just the toggle. Left to
-right: prev/next comment buttons (`[data-rail-prev]`, `[data-rail-next]`, wired
-to the same `handleJumpToPrev` / `handleJumpToNext` as the `P`/`N` shortcuts,
-which their tooltips name; disabled when the file has no comments), the density
-segmented control, the open count, and an overflow kebab
-(`[data-rail-actions]`). The kebab opens a `ContextMenu` with the bulk actions:
-**Resolve all open** (resolve workflow on, open comments exist), **Clear
-resolved** (resolved comments exist, in either mode), and **Delete all
-comments...** (always, behind the same `ConfirmDialog` the list footer uses).
-The kebab is hidden entirely when the file has no comments. These duplicate
-`CommentListSurface`'s footer buttons on purpose: the footer only exists in List
-density and the drawer, so the kebab is the one route that works in Anchored
-density too.
+The comments button (`CommentsButton.tsx`, `[data-comments-button]`) in the tab
+strip is a split button. The bubble ("Toggle comments rail (Cmd+\)",
+`aria-pressed` while the rail draws something or the drawer is open) shows or
+hides the rail, or the drawer where the rail cannot fit, and carries the open
+count. The chevron (`[data-rail-actions]`, "Comment options") opens a menu:
+**Layout** with Anchored and List as `menuitemradio` items (`[data-rail-density]`,
+left out where the rail cannot show), previous/next comment (`[data-rail-prev]`,
+`[data-rail-next]`, wired to the same `handleJumpToPrev` / `handleJumpToNext` as
+the `P`/`N` shortcuts it names; disabled with no comments), then, while the file
+has comments, the bulk actions: **Resolve all open** (resolve workflow on, open
+comments exist), **Clear resolved** (resolved comments exist, in either mode),
+and **Delete all comments...** (behind a `ConfirmDialog`, which closes itself if
+the comments disappear underneath it). These duplicate `CommentListSurface`'s
+footer buttons on purpose: the footer only exists in List density and the
+drawer, so the menu is the one route that works in Anchored density too.
+Picking a layout also brings the rail up.
+
+**An empty Anchored rail answers the toggle.** With Anchored density and no open
+comments the rail has no cards and its gutter collapses (see Page geometry), so
+toggling the pane would change nothing on screen. Instead the bubble (or picking
+Anchored) sets `emptyRailRequested`, which reserves the gutter and shows a "No
+comments yet" note (`[data-rail-empty]`); a second press puts it away. The
+request drops on a file switch and once a card exists. The bubble reads pressed
+only while the rail draws something, so on a comment-free file it starts off.
 
 **Deleting a comment or a reply can be undone.** Every single-delete route (the
 card's trash icon, the `D` key, the command palette, the highlight's and card's
@@ -2298,8 +2309,8 @@ selection when Escape closes an overlay (#100).
 
 ### Handoff button
 
-`src/components/HandOffButton.tsx` (right-aligned in the app header, hidden while a
-review is open) is md-redline's
+`src/components/HandOffButton.tsx` (last in the tab strip's controls, hidden while the
+active file is in a shown review) is md-redline's
 "submit review": it copies the agent prompt for the review comments so they
 can be handed back to the agent. Its scope follows the **active tab**, never
 the whole set of open tabs, because reviewers keep unrelated docs from
@@ -2377,7 +2388,7 @@ What a click does (`src/hooks/useHandoff.ts`):
 
 After a review handoff, or after an agent saves a before copy with `mdr_baseline`,
 a diff overlay shows what changed since that reference,
-available in both rendered and raw views via the tab strip's Diff toggle. The handoff
+available in both rendered and raw views via the diff bar and the tab strip's View options menu. The handoff
 captures a **diff reference** per file (`{ content, capturedAt, origin, agentName? }`,
 persisted in `localStorage` under `md-redline-snapshots`; legacy bare-string
 values are migrated on load). The change set is computed by `useDiffLines`
@@ -2617,7 +2628,7 @@ conflict still 409s; Reload discards the open edit and loads the disk content.
 ### Left sidebar (full height)
 
 The sidebar owns the window's full left edge, top to bottom; the main column
-(the app header, then the document panel with its tab strip) starts to its right. Two states:
+(the document panel, with the review band while a review is shown, then its tab strip) starts to its right; the status bar runs under both. Two states:
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): logo + close X in an
   h-11 identity row (aligns with the chrome row), Explorer/Outline view tabs
@@ -2627,7 +2638,7 @@ The sidebar owns the window's full left edge, top to bottom; the main column
   Explorer and Show Outline icon buttons, spacer, settings gear at the
   bottom. Clicking an icon expands the panel to that view.
 
-There is no explorer toggle in the app header or the tab strip; `Cmd+B` still toggles
+There is no explorer toggle in the tab strip; `Cmd+B` still toggles
 (rail <-> panel), and the whole sidebar (rail included) hides in focus mode.
 The app logo and the settings gear live only in the sidebar.
 
@@ -2674,7 +2685,7 @@ Sidebar view (`Cmd+Shift+O`) showing heading structure for quick navigation.
 `Cmd+.` toggles focus mode: the file explorer and the comments rail both hide
 (their prior visibility is snapshotted first), leaving just the document. An
 **Exit focus** button (`data-focus-chip`, title "Exit focus mode") appears at the
-right end of the app header; click it, or press `Cmd+.` again, to exit and
+right end of the status bar; click it, or press `Cmd+.` again, to exit and
 restore the panes to their snapshotted state, whatever mix they were in. The density strip and section breadcrumb both stay available in focus
 mode. Toggling
 the explorer or the rail individually while focus mode is active (`Cmd+B`,
@@ -2695,19 +2706,21 @@ with no Exit focus button present to explain why or restore them. Toggle the exp
 The desktop shell (a separate private shell around this app) styles the window
 chrome from outside, so these hooks are a contract. Keep them when restyling:
 
-- `data-app-root`: the root element that holds the frame background and padding.
-- `data-app-header`: the main column's top row (see App header above).
+- `data-app-root`: the root element that holds the frame background; its first
+  child is the padded row of panels, its last the status bar.
+- `data-review-band`: the review row at the top of the document panel, present only
+  while a review is shown (see Review band above).
+- `data-status-bar`: the bottom line on the frame (see Status bar above).
 - `data-sidebar-logo`: the logo container pinned to the top left of the sidebar,
   the same element in the expanded panel and the icon rail.
 - `[data-sidebar-panel]`: the expanded sidebar panel.
-- `--window-inset-left`: a CSS variable the shell sets on `[data-app-header]` to
-  clear native window controls. The header's left padding adds it, whatever the
-  sidebar state.
+- `--window-inset-left`: a CSS variable the shell sets (on `[data-doc-strip]` and
+  `[data-review-band]`, or any ancestor) to clear native window controls when no
+  sidebar covers them. Both rows' left padding adds it, whatever the sidebar state.
 
 The main column (`data-main-column`), the document panel (`data-doc-panel`) and
-its tab strip (`data-doc-strip`) are also stable. There is no status bar: the
-window's bottom edge is the document panel's. `Cmd+K` is reachable from the
-app header's command chip, and `?` still opens the shortcuts panel.
+its tab strip (`data-doc-strip`) are also stable. With no review shown, the
+document panel's top lines up with the sidebar's.
 
 ### Keyboard shortcuts
 
@@ -2911,7 +2924,7 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 
 ### Command palette
 
-`Cmd+K`, or the app header's `⌘K` chip, opens the palette; both run App's
+`Cmd+K`, or the status bar's Commands hint, opens the palette; both run App's
 `openCommandPalette()`. Commands include: navigation (next/prev comment, find),
 tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),

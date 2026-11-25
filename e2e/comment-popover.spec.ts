@@ -6,6 +6,7 @@ import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 import { addComment, clickCardAction, getCard } from './helpers/comments';
 import { withMod } from './helpers/shortcuts';
+import { setRailDensity } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -64,11 +65,11 @@ async function toggleSetting(page: Page, settingName: string) {
 }
 
 async function switchToListDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+  await setRailDensity(page, 'list');
 }
 
 async function switchToAnchoredDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'Anchored' }).click();
+  await setRailDensity(page, 'anchored');
 }
 
 /**

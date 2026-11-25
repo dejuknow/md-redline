@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { resetTestAppState } from './helpers/test-state';
+import { setRailDensity } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
@@ -112,7 +113,7 @@ async function addComment(page: Page, anchor: string, text: string) {
  * assertions so they target a surface where that UI actually exists.
  */
 async function switchToListDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+  await setRailDensity(page, 'list');
 }
 
 test('comment whose anchor disappears moves into Needs re-anchoring section', async ({ page }) => {

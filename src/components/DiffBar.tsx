@@ -7,6 +7,7 @@ interface Props {
   onDiffPrev: () => void;
   onDiffNext: () => void;
   onMarkReviewed: () => void;
+  onDiffToggle: () => void;
 }
 
 const navButtonClass =
@@ -18,6 +19,8 @@ const navButtonClass =
  * Mark reviewed has to stay reachable without turning the overlay on, as it
  * was in the old panel toolbar. The reference label and prev/next only mean
  * something while the overlay paints the changes, so they wait for it.
+ * Show diff / Hide diff sits by the count: this bar appears the moment there
+ * is something to review, so it is the strip's diff toggle where it matters.
  */
 export function DiffBar({
   diffEnabled,
@@ -26,6 +29,7 @@ export function DiffBar({
   onDiffPrev,
   onDiffNext,
   onMarkReviewed,
+  onDiffToggle,
 }: Props) {
   if (!diffEnabled && diffChunkCount === 0) return null;
 
@@ -34,13 +38,27 @@ export function DiffBar({
       data-diff-bar
       className="h-9 flex items-center gap-2 px-3 border-b border-border-subtle text-[13px] shrink-0"
     >
-      <span className="text-content-secondary tabular-nums whitespace-nowrap">
+      <span
+        className="text-content-secondary tabular-nums whitespace-nowrap"
+        data-diff-count={diffChunkCount > 0 ? diffChunkCount : undefined}
+      >
         {diffChunkCount === 0
           ? 'No changes'
           : diffChunkCount === 1
             ? '1 change'
             : `${diffChunkCount} changes`}
       </span>
+
+      <button
+        type="button"
+        data-diff-bar-toggle
+        className="rounded-md px-2 py-0.5 font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors whitespace-nowrap"
+        onClick={onDiffToggle}
+        aria-pressed={diffEnabled}
+        title={diffEnabled ? 'Hide diff' : 'Show diff'}
+      >
+        {diffEnabled ? 'Hide diff' : 'Show diff'}
+      </button>
 
       {diffEnabled && referenceLabel && (
         <span
@@ -102,7 +120,7 @@ export function DiffBar({
       {diffChunkCount > 0 && (
         <button
           type="button"
-          className="rounded-md px-2 py-0.5 font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors whitespace-nowrap"
+          className="ml-auto rounded-md px-2 py-0.5 font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors whitespace-nowrap"
           onClick={onMarkReviewed}
           title="Mark reviewed"
         >

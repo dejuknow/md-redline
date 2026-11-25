@@ -74,13 +74,12 @@ const tabControlButtonClassStrip =
   'self-center flex h-[26px] w-[26px] items-center justify-center shrink-0 rounded-md text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
 
 // Drawn inside the document panel's top row; the row background and its
-// bottom rule belong to the strip, not to this component. w-9 (36px) is
-// load-bearing: it has to stay in step with the scrollport's scroll-pr-10
-// below, which is what keeps a tab from scrolling under this button.
-// The button stops 1px short of the bottom so the strip's rule
-// keeps running under it; the hover fill is on an inner chip.
+// bottom rule belong to the strip, not to this component. It sits after the
+// tabs' scrollport rather than inside it, so a tab can never scroll under it.
+// The button stops 1px short of the bottom so the strip's rule keeps running
+// under it; the hover fill is on an inner chip.
 const tabActionButtonClassStrip =
-  'group/open sticky right-0 z-10 flex self-stretch mb-px w-9 items-center justify-center bg-surface-secondary shrink-0 text-content-muted transition-colors hover:text-content';
+  'group/open flex self-stretch mb-px w-9 items-center justify-center shrink-0 text-content-muted transition-colors hover:text-content';
 
 export function TabBar({
   tabs,
@@ -256,14 +255,11 @@ export function TabBar({
           </button>
         )}
 
-        {/* scroll-pr-10 is what keeps scrollIntoView from tucking a tab under
-            the sticky open-file button, so it has to stay >= that button's
-            w-9. The extra 4px is breathing room, not a second constraint. */}
-        <div
-          ref={tabsViewportRef}
-          className="min-w-0 flex-1 h-full overflow-x-auto no-scrollbar scroll-pr-10"
-        >
-          <div ref={tabsContentRef} className="flex h-full min-w-max items-end gap-0.5">
+        {/* Sized to the tabs' natural widths (flex-basis auto) and allowed to
+            shrink: the tabs then shrink toward their floors before anything
+            scrolls, and overflow past the floors is what scrolls. */}
+        <div ref={tabsViewportRef} className="min-w-0 h-full overflow-x-auto no-scrollbar">
+          <div ref={tabsContentRef} className="flex h-full items-end gap-0.5">
             {tabs.map((tab) => {
               const isActive = tab.filePath === activeFilePath;
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
@@ -289,14 +285,14 @@ export function TabBar({
                       onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
                     }
                   }}
-                  className={`group flex items-center gap-1.5 px-3 leading-none shrink-0 max-w-[200px] text-[13px] rounded-t-lg transition-colors ${
+                  className={`group flex items-center gap-1.5 px-3 leading-none max-w-[200px] text-[13px] rounded-t-lg transition-colors ${
                     isActive
-                      ? 'h-[35px] bg-surface border border-border border-b-0 text-content font-medium'
-                      : 'h-[34px] text-content-muted hover:text-content'
+                      ? 'h-[35px] shrink-0 min-w-[120px] bg-surface border border-border border-b-0 text-content font-medium'
+                      : 'h-[34px] shrink min-w-[112px] text-content-muted hover:text-content'
                   }`}
                   title={tabTitle(tab)}
                 >
-                  <span className="truncate">{fileName}</span>
+                  <span className="min-w-0 truncate">{fileName}</span>
                   {count > 0 && (
                     <span
                       className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
@@ -337,28 +333,28 @@ export function TabBar({
                 </button>
               );
             })}
-
-            <button
-              type="button"
-              onClick={onOpenFile}
-              className={tabActionButtonClassStrip}
-              title="Open file"
-              aria-label="Open file"
-            >
-              <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md transition-colors group-hover/open:bg-tint">
-                <svg
-                  className="w-4 h-4"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-              </span>
-            </button>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={onOpenFile}
+          className={tabActionButtonClassStrip}
+          title="Open file"
+          aria-label="Open file"
+        >
+          <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md transition-colors group-hover/open:bg-tint">
+            <svg
+              className="w-4 h-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </span>
+        </button>
 
         {isOverflowing && (
           <>

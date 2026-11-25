@@ -31,10 +31,9 @@ async function openFixture(page: Page) {
   await page.locator('.prose').waitFor({ timeout: 10_000 });
 }
 
+/** The diff bar's toggle: the bar comes up once there are changes to show. */
 function diffToggle(page: Page) {
-  return page
-    .locator('[data-doc-strip]')
-    .locator('button[title^="Show diff"], button[title^="Hide diff"]');
+  return page.locator('[data-diff-bar-toggle]');
 }
 
 test.describe('agent before copy (mdr_baseline)', () => {

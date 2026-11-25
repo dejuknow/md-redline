@@ -30,9 +30,7 @@ function renderStrip(overrides: Partial<React.ComponentProps<typeof DocStrip>> =
     onSearch: vi.fn(),
     onCopyDocument: vi.fn(),
     copyFeedback: false,
-    commentsSurfaceVisible: false,
-    openCommentCount: 0,
-    onToggleComments: vi.fn(),
+    comments: <button type="button" data-testid="comments-slot" />,
     ...overrides,
   };
   return { props, ...render(<DocStrip {...props} />) };
@@ -59,21 +57,27 @@ describe('DocStrip', () => {
     expect(onViewModeChange).toHaveBeenLastCalledWith('rendered');
   });
 
-  it('diff toggle is titled "Show diff" / "Hide diff" and disabled without a snapshot, with the same disabled title PanelToolbar used', () => {
+  it('Diff lives in the strip\'s menu, titled "Show diff" / "Hide diff" and disabled without a snapshot', () => {
     const onDiffToggle = vi.fn();
     const { rerender, props } = renderStrip({ onDiffToggle });
-    const show = screen.getByTitle('Show diff') as HTMLButtonElement;
+    const openMenu = () => fireEvent.click(screen.getByRole('button', { name: 'View options' }));
+    openMenu();
+    const show = within(screen.getByRole('menu')).getByTitle('Show diff') as HTMLButtonElement;
     expect(show.disabled).toBe(false);
-    expect(show.getAttribute('aria-pressed')).toBe('false');
+    expect(show.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(show);
     expect(onDiffToggle).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
 
     rerender(<DocStrip {...props} diffEnabled diffChunkCount={3} />);
-    const hide = screen.getByTitle('Hide diff');
-    expect(hide.getAttribute('aria-pressed')).toBe('true');
+    openMenu();
+    const hide = within(screen.getByRole('menu')).getByTitle('Hide diff');
+    expect(hide.getAttribute('aria-checked')).toBe('true');
     expect(within(hide).getByText('3')).toBeTruthy();
+    openMenu();
 
     rerender(<DocStrip {...props} hasDiffSnapshot={false} />);
+    openMenu();
     const disabled = screen.getByTitle(
       'Show diff. Available after a handoff, or once an agent saves a copy before editing.',
     ) as HTMLButtonElement;
@@ -90,57 +94,39 @@ describe('DocStrip', () => {
     expect(onSearch).toHaveBeenCalledTimes(1);
   });
 
-  it('copy button keeps data-testid "copy-button" and title "Copied!" while copyFeedback', () => {
+  it('copy keeps data-testid "copy-button", sits in the menu and titles "Copied!" while copyFeedback', () => {
     const onCopyDocument = vi.fn();
     const { rerender, props } = renderStrip({ onCopyDocument });
+    expect(screen.queryByTestId('copy-button')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View options' }));
     const copy = screen.getByTestId('copy-button');
     expect(copy.getAttribute('title')).toBe('Copy document (comment markers stripped)');
     expect(copy.getAttribute('aria-label')).toBe('Copy document without comment markers');
     fireEvent.click(copy);
-    expect(onCopyDocument).toHaveBeenCalledTimes(1);
+    // The menu closes on the click, so App confirms with a toast.
+    expect(onCopyDocument).toHaveBeenCalledWith(true);
 
     rerender(<DocStrip {...props} copyFeedback />);
+    fireEvent.click(screen.getByRole('button', { name: 'View options' }));
     expect(screen.getByTestId('copy-button').getAttribute('title')).toBe('Copied!');
   });
 
-  it('comments toggle has title "Toggle comments rail (⌘+\\)", aria-pressed reflects commentsSurfaceVisible, and shows openCommentCount only while the rail is hidden', () => {
-    const onToggleComments = vi.fn();
-    const title = `Toggle comments rail (${mod}+\\)`;
-    const { rerender, props } = renderStrip({ onToggleComments, openCommentCount: 4 });
-
-    // Rail hidden: no rail controls, so the toggle carries the count.
-    let toggle = screen.getByTitle(title);
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
-    expect(within(toggle).getByText('4')).toBeTruthy();
-    fireEvent.click(toggle);
-    expect(onToggleComments).toHaveBeenCalledTimes(1);
-
-    // Rail shown: its controls already say "N open", so the toggle drops it.
-    rerender(
-      <DocStrip
-        {...props}
-        commentsSurfaceVisible
-        railControls={<div data-testid="rail-controls">4 open</div>}
-      />,
-    );
-    toggle = screen.getByTitle(title);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
-    expect(within(toggle).queryByText('4')).toBeNull();
-  });
-
-  it('railControls render first in the controls group when provided', () => {
-    renderStrip({ railControls: <div data-testid="rail-controls">rail</div> });
+  it('renders the comments button, then Hand off last, in the controls group', () => {
+    renderStrip({ handOff: <button type="button" data-testid="handoff-slot" /> });
     const group = screen.getByTestId('panel-toolbar');
-    expect(group.firstElementChild?.getAttribute('data-testid')).toBe('rail-controls');
+    const comments = within(group).getByTestId('comments-slot');
+    const handOff = within(group).getByTestId('handoff-slot');
+    expect(
+      comments.compareDocumentPosition(handOff) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(group.lastElementChild?.contains(handOff)).toBe(true);
   });
 
   it('the controls group carries data-testid "panel-toolbar"', () => {
     renderStrip();
     const group = screen.getByTestId('panel-toolbar');
     expect(within(group).getByTitle('View raw markdown')).toBeTruthy();
-    expect(within(group).getByTestId('copy-button')).toBeTruthy();
-    // Hand off lives in the app header now.
-    expect(within(group).queryByText('Hand off')).toBeNull();
+    expect(within(group).getByRole('button', { name: 'View options' })).toBeTruthy();
   });
 
   it('when its measured width is under 600px, view, diff and copy move into a "View" menu button (aria-label "View options") and search plus comments stay visible', () => {
@@ -150,7 +136,7 @@ describe('DocStrip', () => {
     expect(screen.queryByTitle('Show diff')).toBeNull();
     expect(screen.queryByTestId('copy-button')).toBeNull();
     expect(screen.getByTitle(`Find in document (${mod}+F)`)).toBeTruthy();
-    expect(screen.getByTitle(`Toggle comments rail (${mod}+\\)`)).toBeTruthy();
+    expect(screen.getByTestId('comments-slot')).toBeTruthy();
 
     const viewBtn = screen.getByLabelText('View options');
     expect(viewBtn.getAttribute('aria-expanded')).toBe('false');
@@ -217,34 +203,23 @@ describe('DocStrip', () => {
     }
   });
 
-  it('Copy in the View menu asks for a toast, since the menu closes on the click; the inline button does not', () => {
-    const onCopyDocument = vi.fn();
-    measuredWidth = 599;
-    const { unmount } = renderStrip({ onCopyDocument });
-    fireEvent.click(screen.getByLabelText('View options'));
-    fireEvent.click(within(screen.getByRole('menu')).getByTestId('copy-button'));
-    expect(onCopyDocument).toHaveBeenCalledWith(true);
-    expect(screen.queryByRole('menu')).toBeNull();
-    unmount();
-
-    measuredWidth = 1000;
-    onCopyDocument.mockClear();
-    renderStrip({ onCopyDocument });
-    fireEvent.click(screen.getByTestId('copy-button'));
-    expect(onCopyDocument).toHaveBeenCalledWith();
-  });
-
   it('the diff pending dot is neutral, not crimson', () => {
     renderStrip({ diffPending: true });
-    const dot = screen.getByTitle('Show diff').querySelector('.animate-pulse');
+    const dot = screen
+      .getByRole('button', { name: 'View options' })
+      .querySelector('.animate-pulse');
     expect(dot).toBeTruthy();
     expect(dot!.className).not.toContain('bg-primary');
   });
 
-  it('at 600px or more the controls stay inline with no View menu', () => {
+  it('at 600px or more the view switch stays inline and the menu holds only diff and copy', () => {
     measuredWidth = 600;
     renderStrip();
-    expect(screen.queryByLabelText('View options')).toBeNull();
     expect(screen.getByTitle('View raw markdown')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'View options' }));
+    const menu = screen.getByRole('menu');
+    expect(within(menu).queryByTitle('View raw markdown')).toBeNull();
+    expect(within(menu).getByTitle('Show diff')).toBeTruthy();
+    expect(within(menu).getByTestId('copy-button')).toBeTruthy();
   });
 });

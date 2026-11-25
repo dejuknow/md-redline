@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 import { commentsDrawer, openCommentsDrawer } from './helpers/comments';
+import { copyDocumentFromMenu, openViewMenu } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -209,7 +210,7 @@ test.describe('Copy button', () => {
     await openFixture(page);
     await switchToRaw(page);
 
-    const copyBtn = page.getByTestId('copy-button');
+    const copyBtn = (await openViewMenu(page)).getByTestId('copy-button');
     await expect(copyBtn).toBeVisible();
     await expect(copyBtn).toHaveAttribute('title', 'Copy document (comment markers stripped)');
   });
@@ -217,7 +218,7 @@ test.describe('Copy button', () => {
   test('copy button is also visible in rendered view', async ({ page }) => {
     await openFixture(page);
 
-    const copyBtn = page.getByTestId('copy-button');
+    const copyBtn = (await openViewMenu(page)).getByTestId('copy-button');
     await expect(copyBtn).toBeVisible();
     await expect(copyBtn).toHaveAttribute('title', 'Copy document (comment markers stripped)');
   });
@@ -229,8 +230,8 @@ test.describe('Copy button', () => {
     // Grant clipboard permissions
     await page.context().grantPermissions(['clipboard-write']);
 
-    const copyBtn = page.getByTestId('copy-button');
-    await copyBtn.click();
+    await copyDocumentFromMenu(page);
+    const copyBtn = (await openViewMenu(page)).getByTestId('copy-button');
     await expect(copyBtn).toHaveAttribute('title', 'Copied!');
 
     // Feedback should disappear after ~2 seconds
@@ -278,8 +279,8 @@ test.describe('Copy strips comment markers', () => {
 
     await page.context().grantPermissions(['clipboard-write', 'clipboard-read']);
 
-    await page.getByTestId('copy-button').click();
-    await expect(page.getByTestId('copy-button')).toHaveAttribute('title', 'Copied!');
+    await copyDocumentFromMenu(page);
+    await expect(page.getByText('Copied the document without comment markers.')).toBeVisible();
 
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).not.toContain('@comment');
