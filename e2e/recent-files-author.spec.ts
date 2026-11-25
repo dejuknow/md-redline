@@ -165,7 +165,7 @@ test.describe('Author management', () => {
     // Add a comment — it should have the new author name
     await addComment(page, 'valid credentials', 'Author test comment');
 
-    // The comment card should show the author name (use first() — it also appears in toolbar)
+    // The comment card should show the author name (use first(): the name also appears in the sidebar footer)
     await expect(page.getByText('TestReviewer').first()).toBeVisible();
   });
 
@@ -196,6 +196,6 @@ test.describe('Author management', () => {
     await openFixture(page);
 
     // The default author "User" should be shown in the sidebar footer
-    await expect(page.getByTitle('Click to change author name')).toBeVisible();
+    await expect(page.getByTitle('Click to change author name')).toContainText('User');
   });
 });

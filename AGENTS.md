@@ -2424,11 +2424,12 @@ conflict still 409s; Reload discards the open edit and loads the disk content.
 
 ### Left sidebar (full height)
 The sidebar owns the window's full left edge, top to bottom; the chrome row
-(tabs, author, comments toggle) starts to its right. Two states:
+(tabs, comments toggle) starts to its right. Two states:
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): logo + close X in an
   h-11 identity row (aligns with the chrome row), Explorer/Outline view tabs
-  below it, panel content, and the settings gear pinned in a bottom row.
+  below it, panel content, and the settings gear pinned in a bottom row, with the author name button
+  (`AuthorButton`, click to edit in place) to the right of the gear.
 - **Collapsed icon rail** (`[data-sidebar-rail]`, 40px): logo on top, Show
   Explorer and Show Outline icon buttons, spacer, settings gear at the
   bottom. Clicking an icon expands the panel to that view.
@@ -2523,7 +2524,7 @@ with no focus chip present to explain why or restore them. Toggle the explorer
 
 ### Settings panel
 
-- **Author name** — name attached to comments and replies
+- **Author name** — name attached to comments and replies. Also editable in place from the expanded sidebar's footer; with the sidebar collapsed it is edited here only
 - **Enable resolve workflow** — adds the Resolve action and the open/resolved split, and has agents mark addressed comments resolved instead of removing them (off for AI agent workflows). Reopen and the resolved display work in both modes (#159)
 - **Quick comment**: skip the selection pill and open the comment form immediately on text selection
 - **Comment max length** — character limit per comment (long markers confuse AI parsers)
