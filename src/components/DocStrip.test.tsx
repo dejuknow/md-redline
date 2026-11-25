@@ -161,6 +161,51 @@ describe('DocStrip', () => {
     expect(within(menu).getByTestId('copy-button')).toBeTruthy();
   });
 
+  it('Escape closes the View menu and goes no further, so the find bar stays open', () => {
+    measuredWidth = 599;
+    renderStrip();
+    const outer = vi.fn();
+    document.addEventListener('keydown', outer);
+    try {
+      const viewBtn = screen.getByRole('button', { name: 'View options' });
+      fireEvent.click(viewBtn);
+      expect(screen.getByRole('menu')).toBeTruthy();
+      fireEvent.keyDown(viewBtn, { key: 'Escape' });
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(outer).not.toHaveBeenCalled();
+
+      // Closed, the menu no longer claims the key.
+      fireEvent.keyDown(viewBtn, { key: 'Escape' });
+      expect(outer).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', outer);
+    }
+  });
+
+  it('Copy in the View menu asks for a toast, since the menu closes on the click; the inline button does not', () => {
+    const onCopyDocument = vi.fn();
+    measuredWidth = 599;
+    const { unmount } = renderStrip({ onCopyDocument });
+    fireEvent.click(screen.getByLabelText('View options'));
+    fireEvent.click(within(screen.getByRole('menu')).getByTestId('copy-button'));
+    expect(onCopyDocument).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+    unmount();
+
+    measuredWidth = 1000;
+    onCopyDocument.mockClear();
+    renderStrip({ onCopyDocument });
+    fireEvent.click(screen.getByTestId('copy-button'));
+    expect(onCopyDocument).toHaveBeenCalledWith();
+  });
+
+  it('the diff pending dot is neutral, not crimson', () => {
+    renderStrip({ diffPending: true });
+    const dot = screen.getByTitle('Show diff').querySelector('.animate-pulse');
+    expect(dot).toBeTruthy();
+    expect(dot!.className).not.toContain('bg-primary');
+  });
+
   it('at 600px or more the controls stay inline with no View menu', () => {
     measuredWidth = 600;
     renderStrip();

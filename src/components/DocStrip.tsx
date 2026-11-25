@@ -20,7 +20,9 @@ export interface DocStripProps {
   onDiffToggle: () => void;
   searchActive: boolean;
   onSearch: () => void;
-  onCopyDocument: () => void;
+  /** `announce` asks App to confirm with a toast: the View menu closes on
+   * the click, so the copy item's own checkmark is never seen. */
+  onCopyDocument: (announce?: boolean) => void;
   copyFeedback: boolean;
   /** Whether a comments surface (rail or drawer) is on screen. */
   commentsSurfaceVisible: boolean;
@@ -168,14 +170,21 @@ export function DocStrip({
         setViewMenuOpen(false);
       }
     };
+    // The menu owns Escape while open. Caught on the way down and stopped
+    // there, so App's own Escape (closing the find bar) never sees it; the
+    // selection's Escape, which runs first, already counts an open menu as
+    // owning the key and leaves the selection and any draft alone.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewMenuOpen(false);
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setViewMenuOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
     };
   }, [viewMenuOpen]);
 
@@ -209,7 +218,7 @@ export function DocStrip({
     <span className="text-[12px] tabular-nums">{diffChunkCount}</span>
   );
   const diffPendingDot = diffPending && !diffEnabled && (
-    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary animate-pulse" />
+    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-content-secondary animate-pulse" />
   );
 
   const searchButton = (
@@ -368,7 +377,7 @@ export function DocStrip({
                   data-testid="copy-button"
                   className={menuItemClass}
                   onClick={() => {
-                    onCopyDocument();
+                    onCopyDocument(true);
                     setViewMenuOpen(false);
                   }}
                   aria-label="Copy document without comment markers"
@@ -441,7 +450,7 @@ export function DocStrip({
                 type="button"
                 data-testid="copy-button"
                 className={iconButtonClass(false)}
-                onClick={onCopyDocument}
+                onClick={() => onCopyDocument()}
                 aria-label="Copy document without comment markers"
                 title={copyLabel}
               >

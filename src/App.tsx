@@ -912,19 +912,25 @@ export default function App() {
     },
     [getTabSnapshot, updateTab],
   );
-  const handleCopyDocument = useCallback(() => {
-    // The parser's clean text, so a documentation example of the marker format
-    // inside backticks is copied rather than stripped (#123).
-    const clean = parseComments(rawMarkdownRef.current).cleanMarkdown;
-    navigator.clipboard.writeText(clean).then(
-      () => {
-        setCopyFeedback(true);
-        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-        copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
-      },
-      () => {},
-    );
-  }, []);
+  // `announce` asks for a toast on success too: the View menu closes on the
+  // click, taking the copy item's checkmark with it.
+  const handleCopyDocument = useCallback(
+    (announce?: boolean) => {
+      // The parser's clean text, so a documentation example of the marker
+      // format inside backticks is copied rather than stripped (#123).
+      const clean = parseComments(rawMarkdownRef.current).cleanMarkdown;
+      navigator.clipboard.writeText(clean).then(
+        () => {
+          setCopyFeedback(true);
+          if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+          copyTimerRef.current = setTimeout(() => setCopyFeedback(false), 2000);
+          if (announce) showToast('Copied the document without comment markers.', 'success');
+        },
+        () => showToast("Couldn't copy the document.", 'error'),
+      );
+    },
+    [showToast],
+  );
 
   // Filled in from overlayOpen, next to the start-up reveal just above the
   // returned tree, once every overlay it reads exists.
@@ -3319,9 +3325,10 @@ export default function App() {
   // so it is reassigned every render.
   escapeOwnedElsewhereRef.current = () =>
     overlayOpen ||
-    // A confirm dialog of the rail's or the list's own, whose open state this
-    // component cannot see.
-    document.querySelector('[role="alertdialog"]') !== null;
+    // A confirm dialog of the rail's or the list's own, or a menu of the
+    // strip's (the narrow View menu), whose open state this component cannot
+    // see.
+    document.querySelector('[role="alertdialog"], [role="menu"]') !== null;
   // And one opened during start-up (Cmd+K, Cmd+O, Cmd+F, a dialog, a menu) is
   // the reader asking for the page now. None of them are portaled: they render
   // inside the main column, where visibility: hidden would leave them
@@ -3719,18 +3726,6 @@ export default function App() {
                 }}
                 onMarkReviewed={handleMarkReviewed}
               />
-              {showSearch && (
-                <SearchBar
-                  query={searchQuery}
-                  onQueryChange={handleSearchQueryChange}
-                  matchCount={searchMatchCount}
-                  activeIndex={activeSearchIndex}
-                  onNext={handleSearchNext}
-                  onPrev={handleSearchPrev}
-                  onClose={handleSearchClose}
-                  focusTrigger={searchFocusTrigger}
-                />
-              )}
               <div className="flex-1 min-h-0 flex flex-col">
                 {/* A refused folder covers the document rather than leaving a
                     blank sheet behind an error strip: the ask belongs on the
@@ -3927,6 +3922,21 @@ export default function App() {
                       </div>
                       <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
                     </div>
+                  )}
+                  {/* Inside the body, so it floats below the diff bar when
+                      that shows and never covers its controls. Last, so it
+                      paints over the section breadcrumb at the same z. */}
+                  {showSearch && (
+                    <SearchBar
+                      query={searchQuery}
+                      onQueryChange={handleSearchQueryChange}
+                      matchCount={searchMatchCount}
+                      activeIndex={activeSearchIndex}
+                      onNext={handleSearchNext}
+                      onPrev={handleSearchPrev}
+                      onClose={handleSearchClose}
+                      focusTrigger={searchFocusTrigger}
+                    />
                   )}
                 </div>
               </div>

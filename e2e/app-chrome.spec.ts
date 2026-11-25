@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { addComment } from './helpers/comments';
+import { withMod } from './helpers/shortcuts';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
 
@@ -76,6 +77,52 @@ test.describe('Document panel strip', () => {
     await back.click();
     await expect(page.locator('.raw-view')).not.toBeVisible();
     await expect(page.locator('.prose')).toBeVisible();
+  });
+
+  test('the find bar sits below the diff bar in an 800px window, clear of Mark reviewed', async ({
+    page,
+    context,
+  }) => {
+    await page.setViewportSize({ width: 800, height: 800 });
+    await page.goto(`/?file=${FIXTURE}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await addComment(page, 'Section One', 'placeholder');
+    await page.getByTestId('handoff-button').click();
+    await expect(page.getByText(/tracking changes/i)).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(1000);
+
+    const current = readFileSync(FIXTURE, 'utf-8');
+    writeFileSync(FIXTURE, current.replace('## Section Two', '## Updated Section Two'));
+    await expect(page.getByRole('heading', { name: 'Updated Section Two' })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Diff on, through the View menu when the strip is narrow.
+    const viewMenu = strip(page).getByRole('button', { name: 'View options' });
+    if (await viewMenu.isVisible()) await viewMenu.click();
+    await page.locator('button[title="Show diff"]').click();
+    const diffBar = page.locator('[data-diff-bar]');
+    const markReviewed = diffBar.getByRole('button', { name: 'Mark reviewed' });
+    await expect(markReviewed).toBeVisible();
+
+    await page.keyboard.press(withMod('f'));
+    const searchBar = page.locator('[data-testid="search-bar"]');
+    await expect(searchBar).toBeVisible();
+
+    const barBox = (await diffBar.boundingBox())!;
+    const findBox = (await searchBar.boundingBox())!;
+    expect(findBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
+
+    // And the button takes the click: nothing is painted over it.
+    await markReviewed.click({ trial: true });
+    const hit = await markReviewed.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return top !== null && el.contains(top);
+    });
+    expect(hit).toBe(true);
   });
 
   test('selecting an overflow tab from the tab list works in a 720px window', async ({ page }) => {
