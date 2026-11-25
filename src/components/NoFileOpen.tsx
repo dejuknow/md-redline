@@ -1,6 +1,7 @@
 import type { RecentFile } from '../hooks/useRecentFiles';
 import { getParentDir, middleTruncatePath, tildeShortenPath } from '../lib/path-utils';
 import { isApplePlatform } from '../lib/platform';
+import { AppLogo } from './AppLogo';
 
 interface Props {
   recentFiles: RecentFile[];
@@ -36,7 +37,7 @@ export function NoFileOpen({
       className="absolute inset-0 z-20 overflow-y-auto bg-surface flex justify-center px-6 pt-[16vh] pb-8"
     >
       <div className="w-full max-w-md flex flex-col items-center">
-        <PageIllustration />
+        <AppLogo className="w-14 h-16 text-content-muted" />
 
         <h2 className="mt-5 text-[15px] font-semibold text-content">No file open</h2>
 
@@ -99,47 +100,6 @@ function FileGlyph() {
         d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"
       />
       <path strokeLinecap="round" strokeLinejoin="round" d="M14 3v5h5" />
-    </svg>
-  );
-}
-
-/**
- * A page with one line marked and a comment beside it: what the app does,
- * drawn instead of written.
- */
-function PageIllustration() {
-  return (
-    <svg width="140" height="105" viewBox="0 0 112 84" fill="none" aria-hidden="true">
-      {/* the page behind */}
-      <rect
-        x="30"
-        y="4"
-        width="52"
-        height="68"
-        rx="5"
-        transform="rotate(6 56 38)"
-        className="fill-surface-inset stroke-border-subtle"
-      />
-      {/* the page */}
-      <rect x="24" y="8" width="52" height="68" rx="5" className="fill-surface stroke-border" />
-      <rect x="32" y="18" width="24" height="3" rx="1.5" className="fill-content-faint" />
-      <rect x="32" y="28" width="36" height="2" rx="1" className="fill-border" />
-      <rect x="32" y="34" width="32" height="2" rx="1" className="fill-border" />
-      {/* the marked line */}
-      <rect x="30" y="39" width="34" height="8" rx="2" className="fill-primary/15" />
-      <rect x="32" y="42" width="30" height="2" rx="1" className="fill-primary/70" />
-      <rect x="32" y="52" width="36" height="2" rx="1" className="fill-border" />
-      <rect x="32" y="58" width="28" height="2" rx="1" className="fill-border" />
-      <rect x="32" y="64" width="33" height="2" rx="1" className="fill-border" />
-      {/* the comment */}
-      <path
-        d="M80 32h20a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4h-12l-5 4v-4h-3a4 4 0 0 1-4-4V36a4 4 0 0 1 4-4Z"
-        className="fill-surface stroke-primary"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <rect x="82" y="38" width="16" height="2" rx="1" className="fill-primary/60" />
-      <rect x="82" y="43" width="10" height="2" rx="1" className="fill-primary/60" />
     </svg>
   );
 }

@@ -1,9 +1,9 @@
 /** App logo mark. Keep in sync with public/favicon.svg. */
-export function AppLogo() {
+export function AppLogo({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <span title="md-redline" className="flex items-center shrink-0">
       <svg
-        className="w-5 h-5"
+        className={className}
         viewBox="0 0 100 116"
         style={{
           fillRule: 'evenodd',
