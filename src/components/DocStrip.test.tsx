@@ -183,6 +183,40 @@ describe('DocStrip', () => {
     }
   });
 
+  it('closes the View menu when focus moves outside it, as when the palette opens', () => {
+    measuredWidth = 599;
+    renderStrip();
+    fireEvent.click(screen.getByRole('button', { name: 'View options' }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    try {
+      fireEvent.focusIn(input);
+      expect(screen.queryByRole('menu')).toBeNull();
+    } finally {
+      input.remove();
+    }
+  });
+
+  it('leaves Escape to another overlay that is open, such as the command palette', () => {
+    measuredWidth = 599;
+    renderStrip();
+    const palette = document.createElement('div');
+    palette.setAttribute('data-overlay', '');
+    const outer = vi.fn();
+    document.addEventListener('keydown', outer);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'View options' }));
+      document.body.appendChild(palette);
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      // The palette's own listener gets the key.
+      expect(outer).toHaveBeenCalledTimes(1);
+    } finally {
+      palette.remove();
+      document.removeEventListener('keydown', outer);
+    }
+  });
+
   it('Copy in the View menu asks for a toast, since the menu closes on the click; the inline button does not', () => {
     const onCopyDocument = vi.fn();
     measuredWidth = 599;

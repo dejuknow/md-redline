@@ -314,6 +314,78 @@ test.describe('App header', () => {
     }
   });
 
+  test('focus mode at a 1200px window with a question and a long error keeps the ⌘K chip and Exit focus inside the header', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 1200, height: 800 });
+    writeFileSync(FIXTURE, COMMENTED_DOC);
+    // Two reviews of the open file: the header shows one and a "+1" for the other.
+    const sessionId = await createUserSession(request, baseURL!, FIXTURE);
+    const otherRes = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [FIXTURE, OVERFLOW_FIXTURES[0]], enableResolve: false },
+    });
+    expect(otherRes.status()).toBe(201);
+    const otherId = ((await otherRes.json()) as { sessionId: string }).sessionId;
+    try {
+      await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+      const banner = header(page).getByTestId('review-banner');
+      await expect(banner).toBeVisible({ timeout: 12_000 });
+      await page.waitForTimeout(500);
+      const ask = await request.post(`${baseURL}/api/review-sessions/${sessionId}/agent-comments`, {
+        data: {
+          questions: [{ filePath: FIXTURE, anchor: 'authentication system', text: 'Which one?' }],
+        },
+      });
+      expect(ask.status()).toBe(201);
+      await expect(banner.getByRole('button', { name: /awaiting your reply/ })).toBeVisible({
+        timeout: 10_000,
+      });
+
+      // A second file that fails to load with a long message, which the
+      // header shows as a notice while that tab is active.
+      const broken = OVERFLOW_FIXTURES[1];
+      const longError = `Failed to load file: ${'the disk refused the read again '.repeat(8)}`;
+      await page.route(
+        (url) => url.pathname === '/api/file' && url.searchParams.get('path') === broken,
+        (route) =>
+          route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: longError }),
+          }),
+      );
+      await page.locator('button[title="Open file"]').click();
+      await page.getByPlaceholder('File path or name...').fill(broken);
+      await page.getByPlaceholder('File path or name...').press('Enter');
+      await expect(header(page).locator('[data-header-notices]')).toBeVisible({ timeout: 5_000 });
+      await expect(banner.getByRole('button', { name: /awaiting your reply/ })).toBeVisible();
+
+      await page.keyboard.press(withMod('.'));
+      const exit = header(page).locator('[data-focus-chip]');
+      await expect(exit).toBeVisible();
+
+      const headerBox = (await header(page).boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(headerBox.x + headerBox.width).toBeLessThanOrEqual(viewport.width);
+      for (const el of [header(page).getByRole('button', { name: 'Command palette' }), exit]) {
+        const box = (await el.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(headerBox.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
+      }
+      // The row's actions end before the notice starts: nothing overlaps.
+      const actionsBox = (await banner.locator('[data-row-actions]').first().boundingBox())!;
+      const noticeBox = (await header(page).locator('[data-header-notices]').boundingBox())!;
+      expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(noticeBox.x + 1);
+      // The row folded its secondary actions to fit, rather than overlap.
+      await expect(banner.getByRole('button', { name: 'More review actions' })).toBeVisible();
+    } finally {
+      await abortSession(request, baseURL!, sessionId);
+      await abortSession(request, baseURL!, otherId);
+    }
+  });
+
   test('exit focus lives in the header and restores a mixed pane state', async ({ page }) => {
     // Explorer open, comments rail hidden: not the default pair, so a restore
     // that falls back to defaults would show the rail.
@@ -369,6 +441,130 @@ test.describe('App header', () => {
     await page.keyboard.press(withMod('.'));
     await expect(header(page).locator('[data-focus-chip]')).toBeVisible();
     expect(await firstChildOffset()).toBeGreaterThanOrEqual(72);
+  });
+});
+
+/** A painted mouse selection over the paragraph that holds `text`. */
+async function paintSelection(page: Page, text: string) {
+  await page.evaluate((t) => {
+    const el = [...document.querySelectorAll('.prose p')].find((p) => p.textContent?.includes(t));
+    if (!el) throw new Error('paragraph not found');
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  }, text);
+  await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+}
+
+test.describe('Menus, Escape and copy', () => {
+  test('with the View menu open, ⌘K then one Escape closes the palette', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 800 });
+    await openFixture(page);
+    await strip(page).getByRole('button', { name: 'View options' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+
+    await page.keyboard.press(withMod('k'));
+    const input = page.getByPlaceholder('Type a command...');
+    await expect(input).toBeVisible();
+    // The palette took the focus, so the menu let go.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(input).toHaveCount(0);
+  });
+
+  test('Escape on an open strip or header menu closes it and keeps the painted selection', async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 800, height: 800 });
+    writeFileSync(FIXTURE, COMMENTED_DOC);
+    const sessionId = await createUserSession(request, baseURL!, FIXTURE);
+    try {
+      await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+      const banner = header(page).getByTestId('review-banner');
+      await expect(banner).toBeVisible({ timeout: 12_000 });
+      await page.locator('.prose').waitFor({ timeout: 10_000 });
+      await paintSelection(page, 'authentication system');
+      const painted = page.locator('mark.selection-highlight');
+
+      // Opened from the keyboard: a press outside the document drops the
+      // selection by design, which is not what this pins.
+      await strip(page).getByRole('button', { name: 'View options' }).focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menu')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(painted.first()).toBeVisible();
+
+      await banner.getByRole('button', { name: 'More review actions' }).focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menu', { name: 'More review actions' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(painted.first()).toBeVisible();
+    } finally {
+      await abortSession(request, baseURL!, sessionId);
+    }
+  });
+
+  test('Copy document from the View menu says it copied, or that it could not', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.setViewportSize({ width: 800, height: 800 });
+    await openFixture(page);
+    const copy = () =>
+      page.getByRole('menuitem', { name: 'Copy document without comment markers' }).click();
+
+    await strip(page).getByRole('button', { name: 'View options' }).click();
+    await copy();
+    await expect(page.getByText('Copied the document without comment markers.')).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toContain('# Test Document');
+
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    });
+    await strip(page).getByRole('button', { name: 'View options' }).click();
+    await copy();
+    await expect(page.getByText("Couldn't copy the document.")).toBeVisible();
+  });
+});
+
+test.describe('Hand off beside a review', () => {
+  test('hides only while the active file is in the review', async ({ page, request, baseURL }) => {
+    writeFileSync(FIXTURE, COMMENTED_DOC);
+    const sessionId = await createUserSession(request, baseURL!, FIXTURE);
+    try {
+      await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+      const banner = header(page).getByTestId('review-banner');
+      await expect(banner).toBeVisible({ timeout: 12_000 });
+      await page.locator('.prose').waitFor({ timeout: 10_000 });
+      await expect(page.getByTestId('handoff-button')).toHaveCount(0);
+
+      // Another file, in no review: the review stays, and Hand off is back for it.
+      const other = OVERFLOW_FIXTURES[0];
+      await page.locator('button[title="Open file"]').click();
+      await page.getByPlaceholder('File path or name...').fill(other);
+      await page.getByPlaceholder('File path or name...').press('Enter');
+      await expect(page.getByRole('heading', { name: 'Overflow Tab 1' })).toBeVisible();
+      await expect(banner).toBeVisible();
+      await expect(header(page).getByTestId('handoff-button')).toBeVisible();
+
+      // Back on the reviewed file, the review's own actions replace it.
+      await page.locator(`[data-doc-strip] button.group[title="${FIXTURE}"]`).click();
+      await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible();
+      await expect(page.getByTestId('handoff-button')).toHaveCount(0);
+    } finally {
+      await abortSession(request, baseURL!, sessionId);
+    }
   });
 });
 

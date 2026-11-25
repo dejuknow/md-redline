@@ -1661,9 +1661,11 @@ describe('ReviewBanner: header layout', () => {
     function StableHarness({
       sessions,
       asks,
+      compact = false,
     }: {
       sessions: ReviewSession[];
       asks?: Map<string, number>;
+      compact?: boolean;
     }) {
       const [sentIds, setSentIds] = useState<string[]>([]);
       const optimisticSent = useMemo(
@@ -1673,6 +1675,7 @@ describe('ReviewBanner: header layout', () => {
       return (
         <ReviewBanner
           layout="header"
+          compact={compact}
           sessions={sessions}
           commentCounts={
             new Map([
@@ -1822,9 +1825,95 @@ describe('ReviewBanner: header layout', () => {
       );
       expect(rowText()).toContain('a.md');
       const marked = screen.getByRole('button', { name: 'Other reviews, 1 with questions' });
-      expect(marked.querySelector('[data-questions-marker]')).toBeTruthy();
+      const marker = marked.querySelector('[data-questions-marker]') as HTMLElement;
+      // Amber, the colour for "waiting on you"; crimson is for actions.
+      expect(marker.className).toMatch(/\bbg-warning\b/);
+      expect(marker.className).not.toMatch(/\bbg-primary\b/);
       expect(marked.textContent).toBe('+1');
       expect(marked.getAttribute('title')).toBe('1 other review, 1 with questions');
+    });
+
+    it('holds the row while the Other reviews popover is open, pointer or not', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Other reviews' }));
+      expect(screen.getByRole('dialog', { name: 'Other reviews' })).toBeTruthy();
+      // A question on B outranks A, but the popover is open over A's row.
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('a.md');
+      expect(screen.getByRole('dialog', { name: 'Other reviews' })).toBeTruthy();
+      // Closed, the row goes to B.
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(screen.queryByRole('dialog', { name: 'Other reviews' })).toBeNull();
+      expect(rowText()).toContain('Claude is waiting on your reply.');
+    });
+
+    it('holds the row while its More review actions menu is open', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} compact />);
+      fireEvent.click(screen.getByRole('button', { name: 'More review actions' }));
+      expect(screen.getByRole('menu', { name: 'More review actions' })).toBeTruthy();
+      rerender(
+        <StableHarness
+          sessions={[sessionA, agentB]}
+          asks={new Map([['rev_agent_b', 1]])}
+          compact
+        />,
+      );
+      expect(rowText()).toContain('a.md');
+      expect(screen.getByRole('menuitem', { name: 'Send 2 & finish' })).toBeTruthy();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(rowText()).toContain('Claude is waiting on your reply.');
+    });
+
+    it('holds the row while keyboard focus is inside it', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      const send = screen.getByRole('button', { name: 'Send 2 comments' });
+      act(() => send.focus());
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('a.md');
+      expect(document.activeElement).toBe(send);
+      act(() => send.blur());
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('Claude is waiting on your reply.');
+    });
+
+    it('does not hold for focus a click left behind, once the pointer is gone', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      const banner = screen.getByTestId('review-banner');
+      const send = screen.getByRole('button', { name: 'Send 2 comments' });
+      fireEvent.pointerEnter(banner);
+      fireEvent.pointerDown(send);
+      act(() => send.focus());
+      fireEvent.pointerUp(send);
+      fireEvent.pointerLeave(banner);
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('Claude is waiting on your reply.');
+    });
+
+    it("an inert row leaves the +N button and its popover usable; only the review's own actions are inert", () => {
+      const sessionC: ReviewSession = { ...userSession, id: 'rev_c', filePaths: ['/tmp/b.md'] };
+      const { rerender } = render(<StableHarness sessions={[sessionA, sessionB, sessionC]} />);
+      const banner = screen.getByTestId('review-banner');
+      fireEvent.pointerEnter(banner);
+      // A ends under the pointer: B takes the row, inert.
+      rerender(<StableHarness sessions={[sessionB, sessionC]} />);
+      const actions = banner.querySelector('[data-row-actions]') as HTMLElement;
+      expect(actions.getAttribute('aria-disabled')).toBe('true');
+      const others = screen.getByRole('button', { name: 'Other reviews' });
+      expect(actions.contains(others)).toBe(false);
+      expect(others.closest('[aria-disabled]')).toBeNull();
+      expect(others.closest('.pointer-events-none')).toBeNull();
+      fireEvent.click(others);
+      const popover = screen.getByRole('dialog', { name: 'Other reviews' });
+      // The popover's rows are another review's, live.
+      expect(popover.querySelector('[aria-disabled]')).toBeNull();
     });
   });
 

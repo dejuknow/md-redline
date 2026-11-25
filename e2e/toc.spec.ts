@@ -94,6 +94,39 @@ test.describe('Table of Contents', () => {
     expect(scrollAfter).toBeGreaterThan(scrollBefore);
   });
 
+  test('a heading jump lands the heading just below the section breadcrumb', async ({ page }) => {
+    // Short enough that the jump is not cut short by the end of the document.
+    await page.setViewportSize({ width: 1280, height: 420 });
+    await openFixture(page);
+    await ensureLeftPanelOpen(page);
+    await switchToOutline(page);
+
+    await tocHeading(page, 'Implementation').click();
+    const heading = page.locator('.prose h2', { hasText: 'Implementation' });
+    const pill = page.locator('[data-section-breadcrumb]');
+    await expect(pill).toBeVisible();
+    // Smooth scroll: wait for the heading to stop moving.
+    let last = Number.NaN;
+    await expect
+      .poll(async () => {
+        const top = (await heading.boundingBox())!.y;
+        const settled = Math.abs(top - last) < 0.5;
+        last = top;
+        return settled;
+      })
+      .toBe(true);
+
+    const headingBox = (await heading.boundingBox())!;
+    const pillBox = (await pill.boundingBox())!;
+    const containerTop = await page.evaluate(
+      () =>
+        document.querySelector('.prose')!.closest('.overflow-y-auto')!.getBoundingClientRect().top,
+    );
+    // Below the pill, not under it, and not far below either: the jump put it there.
+    expect(headingBox.y).toBeGreaterThanOrEqual(pillBox.y + pillBox.height);
+    expect(headingBox.y - containerTop).toBeLessThanOrEqual(70);
+  });
+
   test('clicking a heading scrolls raw view to that section', async ({ page }) => {
     await openFixture(page);
     await ensureLeftPanelOpen(page);
