@@ -129,7 +129,7 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           onClick={() => onCopyAgentPrompt([activeFilePath])}
           title="Hand off to agent. Copies instructions for this file."
           data-testid="handoff-button"
-          className={`h-7 flex items-center gap-1.5 pl-2 pr-2.5 text-[13px] font-medium whitespace-nowrap ${
+          className={`h-6 flex items-center gap-1.5 pl-2 pr-2.5 text-[13px] font-medium whitespace-nowrap ${
             hasOtherFiles ? 'rounded-l-md' : 'rounded-md'
           } ${segmentClass}`}
         >

@@ -88,7 +88,7 @@ export function CommentsButton({
         // Outlined, with its divider running the full height, so it reads as
         // one split control rather than two buttons beside the strip's own
         // section rule.
-        className={`h-7 flex items-stretch rounded-md border border-border overflow-hidden transition-colors ${
+        className={`h-6 flex items-stretch rounded-md border border-border overflow-hidden transition-colors ${
           surfaceVisible ? 'bg-tint text-content' : 'text-content-muted'
         }`}
       >

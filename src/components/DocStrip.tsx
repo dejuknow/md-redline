@@ -37,12 +37,12 @@ export interface DocStripProps {
 const NARROW_STRIP_WIDTH = 600;
 
 const iconButtonClass = (pressed: boolean) =>
-  `h-7 w-7 flex items-center justify-center rounded-md transition-colors ${
+  `h-6 w-7 flex items-center justify-center rounded-md transition-colors ${
     pressed ? 'bg-tint text-content' : 'text-content-muted hover:text-content hover:bg-tint'
   }`;
 
 const segmentClass = (on: boolean) =>
-  `h-6 w-7 flex items-center justify-center rounded transition-colors ${
+  `h-5 w-7 flex items-center justify-center rounded transition-colors ${
     on ? 'bg-surface text-content shadow-sm' : 'text-content-muted hover:text-content'
   }`;
 
@@ -227,7 +227,7 @@ export function DocStrip({
     <div ref={viewMenuRef} className="relative">
       <button
         type="button"
-        className={`relative h-7 flex items-center rounded-md transition-colors ${
+        className={`relative h-6 flex items-center rounded-md transition-colors ${
           narrow ? 'pl-2 pr-1.5 gap-1 text-[13px] font-medium' : 'w-7 justify-center'
         } ${
           viewMenuOpen
