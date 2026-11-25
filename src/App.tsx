@@ -106,7 +106,6 @@ import { stripReviewParamFromUrl } from './lib/review-url';
 import { loadActiveTab, pickActiveTab, saveActiveTab } from './lib/active-tab';
 import { selectAgentAsks } from './lib/agent-asks';
 import { CommentsRail } from './components/CommentsRail';
-import { AppLogo } from './components/AppLogo';
 import { IconButton } from './components/IconButton';
 import { getPrimaryModifierLabel } from './lib/platform';
 import { CommentsDrawer } from './components/CommentsDrawer';
@@ -3454,17 +3453,6 @@ export default function App() {
               } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
               style={{ width: explorerVisible ? explorerWidth : 40 }}
             >
-              {/* The collapsed rail's logo. The expanded panel has none: its top
-                  row holds the Explorer and Outline switch instead. */}
-              {!explorerVisible && (
-                <div
-                  data-sidebar-logo
-                  className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none"
-                >
-                  <AppLogo />
-                </div>
-              )}
-
               {/* Expanded panel. Fixed width so its content clips during the
                   width animation instead of reflowing. Mounted only while
                   open (the container keeps animating). */}
@@ -3622,7 +3610,13 @@ export default function App() {
               {!explorerVisible && (
                 <div
                   data-sidebar-rail
-                  className="absolute inset-y-0 left-0 w-10 flex flex-col items-center pt-11 pb-1 gap-1.5"
+                  className="absolute inset-y-0 left-0 w-10 flex flex-col items-center pb-1 gap-1.5"
+                  // The collapsed form of the open panel, item for item: its
+                  // first icon sits on the 34px row the panel's Explorer and
+                  // Outline switch (and the tabs) share, and no logo. A desktop
+                  // shell whose window controls sit over this corner sets
+                  // --window-inset-top to push the icons below them.
+                  style={{ paddingTop: 'calc(var(--window-inset-top, 0px) + 5px)' }}
                 >
                   <IconButton
                     size="md"

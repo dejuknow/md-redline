@@ -85,7 +85,10 @@ export function CommentsButton({
     <div ref={ref} className="relative flex items-center">
       <div
         data-comments-button
-        className={`h-7 flex items-center rounded-md transition-colors ${
+        // Outlined, with its divider running the full height, so it reads as
+        // one split control rather than two buttons beside the strip's own
+        // section rule.
+        className={`h-7 flex items-stretch rounded-md border border-border overflow-hidden transition-colors ${
           surfaceVisible ? 'bg-tint text-content' : 'text-content-muted'
         }`}
       >
@@ -93,7 +96,7 @@ export function CommentsButton({
             and a Tooltip stashes it while hovered. */}
         <button
           type="button"
-          className={`h-7 min-w-[40px] pl-2 pr-1.5 flex items-center justify-center gap-1.5 rounded-l-md text-[13px] font-medium transition-colors ${
+          className={`min-w-[40px] pl-2 pr-1.5 flex items-center justify-center gap-1.5 text-[13px] font-medium transition-colors ${
             surfaceVisible ? '' : 'hover:text-content hover:bg-tint'
           }`}
           onClick={onToggle}
@@ -112,11 +115,11 @@ export function CommentsButton({
           </svg>
           {openCount > 0 && <span className="tabular-nums">{openCount}</span>}
         </button>
-        <span className="w-px h-4 bg-border" aria-hidden="true" />
+        <span className="w-px bg-border" aria-hidden="true" />
         <button
           type="button"
           data-rail-actions
-          className={`h-7 w-6 flex items-center justify-center rounded-r-md transition-colors ${
+          className={`w-6 flex items-center justify-center transition-colors ${
             menuOpen ? 'bg-tint text-content' : 'hover:text-content hover:bg-tint'
           }`}
           onClick={() => setMenuOpen((open) => !open)}

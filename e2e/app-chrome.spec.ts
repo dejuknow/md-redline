@@ -714,21 +714,28 @@ test.describe('Status bar, empty rail and desktop shell hooks', () => {
     for (const w of widths) expect(w).toBeGreaterThanOrEqual(112);
   });
 
-  test('the open sidebar has no logo; the collapsed rail keeps it as data-sidebar-logo', async ({
+  test('neither sidebar state has a logo; the rail lines its first icon up with the tabs', async ({
     page,
   }) => {
     await openFixture(page);
     await expect(page.locator('[data-sidebar-panel]')).toBeVisible();
-    await expect(page.locator('[data-sidebar-logo]')).toHaveCount(0);
     // Explorer and Outline sit in the panel's top row, beside close.
     const top = page.locator('[data-sidebar-top]');
     await expect(top.getByRole('button', { name: /Explorer/ })).toBeVisible();
     await expect(top.getByRole('button', { name: 'Close panel' })).toBeVisible();
 
     await page.keyboard.press(withMod('b'));
-    await expect(page.locator('[data-sidebar-rail]')).toBeVisible();
-    await expect(page.locator('[data-sidebar-logo]')).toHaveCount(1);
-    await expect(page.locator('[data-sidebar-logo]')).toBeVisible();
+    const rail = page.locator('[data-sidebar-rail]');
+    await expect(rail).toBeVisible();
+    await expect(rail.locator('svg[viewBox="0 0 100 116"]')).toHaveCount(0);
+    const center = (loc: ReturnType<typeof page.locator>) =>
+      loc.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return Math.round(r.top + r.height / 2);
+      });
+    const firstIcon = rail.getByRole('button').first();
+    const activeTab = strip(page).locator('button.group').first();
+    expect(Math.abs((await center(firstIcon)) - (await center(activeTab)))).toBeLessThanOrEqual(2);
   });
 
   test('? still opens the keyboard shortcuts panel', async ({ page }) => {

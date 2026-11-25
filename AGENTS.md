@@ -2664,9 +2664,11 @@ The sidebar owns the window's full left edge, top to bottom; the main column
   view tabs and close X share the 34px top row (`[data-sidebar-top]`, the tab
   strip's height, so the two rows share a center line; no logo), then the panel content, and the settings gear pinned in a bottom row, with the author name button
   (`AuthorButton`, click to edit in place) to the right of the gear.
-- **Collapsed icon rail** (`[data-sidebar-rail]`, 40px): logo on top, Show
-  Explorer and Show Outline icon buttons, spacer, settings gear at the
-  bottom. Clicking an icon expands the panel to that view.
+- **Collapsed icon rail** (`[data-sidebar-rail]`, 40px): the open panel
+  folded, item for item, with no logo: Show Explorer and Show Outline icon
+  buttons (the first centered on the 34px row the tabs and the open panel's
+  switch share), spacer, settings gear at the bottom. Clicking an icon expands
+  the panel to that view. The app logo appears only on the empty page.
 
 There is no explorer toggle in the tab strip; `Cmd+B` still toggles
 (rail <-> panel), and the whole sidebar (rail included) hides in focus mode.
@@ -2741,8 +2743,10 @@ chrome from outside, so these hooks are a contract. Keep them when restyling:
 - `data-review-band`: the review row docked at the bottom of the page card, present only
   while a review is shown (see Review band above).
 - `data-status-bar`: the bottom line on the frame (see Status bar above).
-- `data-sidebar-logo`: the logo container pinned to the top left of the collapsed
-  icon rail. The expanded panel has no logo.
+- `--window-inset-top`: a CSS variable a desktop shell sets when its window
+  controls sit over the collapsed rail's top; the rail's top padding adds it,
+  pushing its icons below the controls. (There is no `data-sidebar-logo` any
+  more: the rail has no logo.)
 - `[data-sidebar-panel]`: the expanded sidebar panel; `[data-sidebar-top]` is its
   top row (Explorer/Outline and close).
 - `--window-inset-left`: a CSS variable the shell sets to clear native window
