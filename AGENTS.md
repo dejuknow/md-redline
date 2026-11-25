@@ -51,8 +51,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
   transient-error retry both the document save paths and preferences write through. Windows
   bounces filesystem calls with EPERM/EACCES/EBUSY while a scanner or indexer holds a handle;
   every write of a user-visible file should go through `atomicWriteFile` rather than a bare rename.
-  It also carries the destination's mode onto the replacement, so a save never relaxes 0600 to
-  0644. The retry gate is per-errno, NOT per-platform: EBUSY is contention everywhere (SMB, NFS,
+  It also carries the destination's mode onto the replacement, so a save never relaxes 0600 to 0644. The retry gate is per-errno, NOT per-platform: EBUSY is contention everywhere (SMB, NFS,
   and the FUSE/FileProvider mounts behind Dropbox, Google Drive and iCloud all return it), while
   EPERM/EACCES are retried only on `win32`, because on POSIX they mean a permanent permission
   condition. It also exports `errorCode`, the one place the unchecked cast from a caught
@@ -89,7 +88,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
-- `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the toolbar badge
+- `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the change count on the tab strip's Diff toggle (`DocStrip`)
 - `bin/cli.js`: auto-start CLI and browser opener
 - `eval/runner.ts`: eval harness; default adapter is currently `claude-cli`
 
@@ -114,7 +113,7 @@ Some text <!-- @comment{"id":"uuid","anchor":"highlighted text","text":"comment 
   agent, which is the accepted cost. `CommentCard` reads the stamp too: a reply
   stamped `true` gets no Edit, though it keeps its trash. It does not fall back on
   names, so an unstamped reply keeps both.
-- `status` — `open` or `resolved`, written by the resolve workflow. A `resolved` marker counts as resolved whether or not the reader has the workflow on (#159): the workflow only decides what happens to a comment once it is addressed, marked resolved or removed from the file; a comment is an **orphan** when its `anchor` can no longer be located in the current document *and* position recovery found nothing to attach it to
+- `status` — `open` or `resolved`, written by the resolve workflow. A `resolved` marker counts as resolved whether or not the reader has the workflow on (#159): the workflow only decides what happens to a comment once it is addressed, marked resolved or removed from the file; a comment is an **orphan** when its `anchor` can no longer be located in the current document _and_ position recovery found nothing to attach it to
 - `contextBefore` / `contextAfter` — surrounding text for fuzzy re-matching when anchor is edited
 - `agentInitiated` — `true` when the marker was created by an agent (via `mdr_ask` or `mdr_comment`). Like a reply stamped `agent: true`, such a comment gets no Edit, on its card or in the highlight's context menu; Delete and the reply field stay.
 - `expectsReply` — `true` while an `mdr_ask` question is awaiting the user's answer. Cleared when the user replies (addReply/appendReply), when the session ends (End review / Finish review), or by the stranded-marker sweep after a server restart. A marker with `agentInitiated: true` but no `expectsReply` is "asked, closed": a record, not a pending question.
@@ -128,13 +127,13 @@ Some containers can't hold an inline marker, so `insertComment` relocates one th
 resolves inside them. The `anchor` is never rewritten: it stays the real text, so
 highlighting, orphan detection, and agent handoff are unaffected.
 
-| Container | Where the marker goes | Why |
-|---|---|---|
-| Fenced code block | Before the opening fence, own line | A marker inside is literal text |
+| Container                                                                                        | Where the marker goes                                                                               | Why                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fenced code block                                                                                | Before the opening fence, own line                                                                  | A marker inside is literal text                                                                                                                             |
 | Code block the regex misses: a fence in a blockquote or list item, an indented code block (#136) | Before the top-level block holding it (the code block itself, or its whole list or quote), own line | Literal text too; a marker line right before a nested fence would split the container, and one before a single list item would restart the list's numbering |
-| YAML/TOML frontmatter (offset 0 only) | After the closing fence, own line | It can't go before, and a comment body containing `: ` breaks the YAML parse |
-| HTML comment | Before the block; own line only when the comment owns its line | Nested comments don't exist: the first `-->` closes the outer one and the rest becomes visible text |
-| Inline code span | Before the opening backticks, inline | Inside, every other renderer shows the marker as literal code (#123) |
+| YAML/TOML frontmatter (offset 0 only)                                                            | After the closing fence, own line                                                                   | It can't go before, and a comment body containing `: ` breaks the YAML parse                                                                                |
+| HTML comment                                                                                     | Before the block; own line only when the comment owns its line                                      | Nested comments don't exist: the first `-->` closes the outer one and the rest becomes visible text                                                         |
+| Inline code span                                                                                 | Before the opening backticks, inline                                                                | Inside, every other renderer shows the marker as literal code (#123)                                                                                        |
 
 Placement protects the union of detection's regex fences and every code block
 the parser finds (`getParsedCode`: nested in a blockquote or list item,
@@ -193,6 +192,7 @@ insertion knows about and detection does not, is what silently loses comments.
 ## API endpoints
 
 **Files**
+
 - `GET /api/file?path=` — read markdown file
 - `PUT /api/file` — write markdown file (supports optimistic concurrency via `expectedMtime`)
 - `GET /api/files?dir=` — list markdown files in a directory
@@ -225,6 +225,7 @@ and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
 
 **Review sessions**
+
 - `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own. Reuse needs an exact match on the requested file set, compared against both the session's current files and the files it started with, so a session widened by `mdr_add_files` is found again when its original files are asked for (#117). A larger session is never joined for a smaller request, since one Done would then end both reviews. The MCP client sends a process-scoped UUID, or `MD_REDLINE_CLIENT_ID` when set (`resolveClientId` in `server/mcp-stdio/client.ts`), for clients that start a fresh `mdr mcp` per tool call and would otherwise never match their own session. It must be at most 256 characters, checked when `mdr mcp` starts.
 - `GET /api/review-sessions` — list open sessions. Each carries `hasQueuedBatch`, true while a batch sent during a busy agent waits for delivery (a finish folds it in).
 - `GET /api/review-sessions/:id` — get session details
@@ -243,13 +244,14 @@ chooses, not about every byte that can reach disk during a request.
   - `replies[]` — `{ filePath, commentId, text }` objects to append to existing comments (review mode)
   - Ask mode works on BOTH session origins; asking about the user's own review comments (a `mdr_request_review` handoff) is the flagship case.
   - Length caps enforced server-side: anchor and context 8 KB, text 64 KB.
-  Response includes `failedComments[]` and `failedReplies[]`.
+    Response includes `failedComments[]` and `failedReplies[]`.
 - `GET /api/review-sessions/:id/asks/:askId/wait?timeout=<seconds>` — agent long-polls for the user's reply. With `timeout` it returns `{ status: 'pending' }` when the time runs out, and the MCP handler re-polls every 90s until the ask ends; without it the request parks until the reply. An ask that already ended (reply, release, session abort) returns its result from `getSettledAsk`, even after its session ended, because the reply can land between two polls (#131). A settled result is only returned to its own session, and kept for `TERMINAL_RETENTION_MS` (the agent re-polls within 90s). `timeout` is capped at 240, below Node fetch's 300s header timeout, since a longer poll would fail on the client before the server answered `pending`. A client that drops mid-poll releases the request early; nothing is lost, since the result waits in `getSettledAsk`.
 - `POST /api/review-sessions/:id/asks/:askId/reply` — structured reply channel; resolves the ask. The web UI no longer uses it (users reply inline on the comment card; the file-save sweep resolves the ask), but it remains for programmatic callers.
 - `POST /api/review-sessions/:id/asks/:askId/release` — resolve the ask with `{ status: 'no_reply', reason: 'released' }`. Only producer today is the agent's own tool-call cancellation (no UI button).
 - `GET /api/review-sessions/:id/asks` — list pending asks for the session
 
 **Baselines (agent before copies)**
+
 - `POST /api/baselines` — `{ filePaths, agentName?, onlyIfMissing? }`, at most 64 paths (400 above that). With `onlyIfMissing: true`, a path whose copy the store already holds is left alone and reported in `kept` instead of being re-read; every other check still applies to it. A non-boolean `onlyIfMissing` is 400. Checks each path with the same allowed-roots rule as session creation, then stats and reads it. A path that does not exist yet (its parent does) is captured as an empty copy, so a file the agent is about to create diffs as fully added. All-or-nothing: 403 outside the roots, for a missing parent directory, or on a permission error; 400 for a malformed body or `agentName` (non-string, empty, or over 64 characters), non-`.md`, a directory, or another read error; 413 over 2 MiB (checked from the stat, before reading). Nothing is stored on any failure. 201 `{ baselines: [{ path, capturedAt, agentName?, bytes }], kept: [path] }`.
 - `GET /api/baselines` — metadata only, newest first. The browser polls this every 5s.
 - `GET /api/baselines/content?path=` — one full record `{ path, content, capturedAt, agentName?, bytes }`; 400 without a path or for non-`.md`, 403 outside the roots, 404 when nothing is held.
@@ -375,6 +377,7 @@ the client talks to Vite, whose proxy answers a dead backend with an HTTP 500,
 so the dev setup still sees a plain HTTP error.
 
 **Config and system**
+
 - `GET /api/config` — initial file, directory, home dir
 - `GET /api/version`: `{ version, latest?, updateCheckPending? }`; `latest` is
   present only when the update checker knows a published version strictly
@@ -390,7 +393,7 @@ so the dev setup still sees a plain HTTP error.
   `parseSettings`), then add its one-line sanitizer to `SETTING_SANITIZERS`.
   A round-trip test in `server/preferences.test.ts` backstops the whitelist.
   Two keys sit outside that whitelist: `updateCheck` (`{ latestKnown,
-  checkedAt }`) is the server-owned npm registry cache, written only by the
+checkedAt }`) is the server-owned npm registry cache, written only by the
   update checker, and `PUT /api/preferences` strips it from any client body;
   `updateDismissedVersion` is the viewer's per-version dismissal of the
   update notice and is written by the client like any other setting.
@@ -808,9 +811,22 @@ The `AskWaitResult` type returned by `mdr_ask`'s wait:
 
 ```ts
 type AskWaitResult =
-  | { status: 'reply'; replies: Array<{ questionIndex: number; text: string }>; totalQuestions: number }
-  | { status: 'no_reply'; reason: 'released' | 'tab_closed' | 'cancelled' | 'done_without_reply' | 'timeout' | 'agent_silent' }
-  | { status: 'pending' } // a bounded poll ran out; the handler polls again and never returns it
+  | {
+      status: 'reply';
+      replies: Array<{ questionIndex: number; text: string }>;
+      totalQuestions: number;
+    }
+  | {
+      status: 'no_reply';
+      reason:
+        | 'released'
+        | 'tab_closed'
+        | 'cancelled'
+        | 'done_without_reply'
+        | 'timeout'
+        | 'agent_silent';
+    }
+  | { status: 'pending' }; // a bounded poll ran out; the handler polls again and never returns it
 ```
 
 `mdr_ask` polls in 90-second rounds rather than one request that parks until the
@@ -835,6 +851,7 @@ to re-read the file(s) since the user may have replied inline or edited the doc.
 - `mdr sessions [--json] [--kill ID]` — list the review sessions the running server holds open, oldest first: id, origin, caller (the first 12 characters of `clientId`), age, time since the last heartbeat, and file paths with the home directory shortened to `~`. The caller column is how to tell one agent's sessions from per-process callers that each mint their own (#121). `--json` prints the `GET /api/review-sessions` array unchanged, for scripts. `--kill ID` ends one through `POST /api/review-sessions/:id/abort`, the same route as the banner's cancel button, and exits 1 for an unknown or already-ended ID. It never starts a server: with none running it says so and exits 0 (or prints `[]` under `--json`), except under `--kill`, which exits 1. Formatting lives in `bin/sessions.js`.
 
 Install commands:
+
 - `mdr mcp install` — install for Claude Code (writes to `.mcp.json`)
 - `mdr mcp install --claude-desktop` — install for Claude Desktop
 - `mdr mcp install --claude-code` — explicit Claude Code install
@@ -850,6 +867,7 @@ the server waits 60s before clearing `waitingForAgent`.
 ## UI features
 
 ### Tab strip
+
 The tabs are attached to the top of the document panel (`[data-doc-panel]`) in
 one 42px row, `DocStrip.tsx` (`[data-doc-strip]`). Tabs come first, via
 `TabBar`'s `variant="strip"`: the active tab is a folder tab (`bg-surface`,
@@ -873,7 +891,12 @@ is not here: it lives in the app header. Pressed toggles use a neutral `bg-tint`
 not crimson.
 Under 600px of strip width (`useElementWidth`), view, diff and copy fold into a
 **View** menu button (`aria-label="View options"`) whose items keep the same
-titles and test id; search and the comments toggle stay out.
+titles and test id; search and the comments toggle stay out. The menu closes on
+an outside press, on focus moving outside it (the command palette or find bar
+taking focus) and on Escape, which it leaves to the palette while that is open
+(`useDismiss`). Copy from the menu shows a toast ("Copied the document without
+comment markers." or "Couldn't copy the document."), since the menu closes and
+takes the copy item's checkmark with it.
 
 The open-file button is sticky at the right edge of the tab strip, so it overlays
 whichever tab ends there. The strip carries a `scroll-pr-10` that must stay at or
@@ -881,6 +904,7 @@ above that button's `w-9`, otherwise the browser parks the active tab underneath
 it when scrolling the tab into view.
 
 ### App header
+
 Above the panel, the main column (`[data-main-column]`) starts with one 44px
 row, `AppHeader.tsx` (`[data-app-header]`). It merged the old review banner and
 the old toolbar status row, so there is one chrome row instead of two.
@@ -891,19 +915,26 @@ the old toolbar status row, so there is one chrome row instead of two.
   actions do. Hand off (`HandOffButton`) sits right-aligned in
   `[data-header-actions]` (`shrink-0`).
 - **A review open:** the row is the review (`ReviewBanner layout="header"`, its
-  wrapper keeps `data-testid="review-banner"`) and Hand off is hidden: a review
-  brings its own send actions. App passes the banner as
-  `renderBanner(compact)`, null when `shownReviewSessions` is empty.
+  wrapper keeps `data-testid="review-banner"`, inside the header's
+  `[data-header-banner]` slot). App passes the banner as
+  `renderBanner(compact)`, null when `shownReviewSessions` is empty. Hand off is
+  hidden while the active file is in one of the shown reviews, whose own send
+  actions replace it; on a file in none of them it stays, in
+  `[data-header-actions]` after the review row.
+- Hand off, when enabled, is the header's filled crimson primary (`bg-primary
+text-on-primary`, 13px, both split segments), like a review's Send N comments.
+  Disabled, it stays the quiet icon button.
 - Load errors, "Loading..." and the lost-access notice with its compact Allow
   button (`toolbar-allow-access`) render in the row either way, in
-  `[data-header-notices]` after the status: `shrink-0` and capped at 40% of the
-  header, each text truncating with its full text in `title`. So a long error
-  never squeezes the review row, and a long file name or folder gives way
-  before the notice does. The lost-access pair shows exactly when
+  `[data-header-notices]` after the status, capped at 40% of the header, each
+  text truncating with its full text in `title`. Beside the file name the
+  notice is `shrink-0`, so a long name or folder gives way first. Beside a
+  review row it gives way instead, down to 96px, and only after the row has
+  folded (see the compact rule below). The lost-access pair shows exactly when
   `errorKind === 'access-denied' && !accessRequestShown`, alongside a review row
   too.
 - Then a 1px hairline and the command palette chip (`aria-label="Command
-  palette"`, showing `⌘K`, or `Ctrl+K` off Apple platforms). The chip calls
+palette"`, showing `⌘K`, or `Ctrl+K` off Apple platforms). The chip calls
   App's `openCommandPalette()`, the same function the `Cmd+K` shortcut runs, so
   it reads the selection for "Copy selection as markdown" first. It carries
   `data-preserve-selection`: without it, the mouseup of the click dropped a
@@ -913,8 +944,19 @@ the old toolbar status row, so there is one chrome row instead of two.
   (`data-focus-file-name`) when a review row has taken the status. The file
   name hides while any notice shows, so the notice and the review row both fit.
 
-The header measures its own width (`useElementWidth`); under 900px (0, not yet
-measured, counts as wide) the review row renders compact (see Review banner).
+Whether the review row renders compact (see Review banner) is measured, not a
+breakpoint (`src/lib/header-fit.ts`). After every render, on a resize and on any
+change inside the header, `measureHeader` adds up what the wide row needs: the
+row's trailing group (`[data-row-end]`: +N and the actions) in full, its status
+(`[data-row-status]`) at 160px or its own width if shorter, a notice in full up to
+its cap, and every other item (palette chip, Exit focus, Hand off) at its width.
+`nextHeaderFit` folds the row when that is wider than the header, remembers how
+much folding saved, and unfolds only once the wide row would fit with 24px to
+spare, so it never flip-flops; another review taking a folded row is tried wide
+again. The slot's `min-width` is set to the row's least width, so the row never
+runs under the notice: the notice gives way first, and only when even a 96px
+notice leaves no room does the row give up the difference, so the palette chip
+and Exit focus always stay in the header. Unmeasured (no layout) counts as wide.
 There is no More menu of the header's own: keyboard shortcuts stay on `?` and
 the palette.
 
@@ -925,6 +967,7 @@ browser build never sets it. It applies in every sidebar state (open, the
 collapsed rail, focus mode), and `e2e/app-chrome.spec.ts` pins that.
 
 ### Folder permission requests
+
 Opening a file outside the allowed roots is a consent moment, not a failure, and
 `AccessRequest.tsx` is the only place that says so. The document area renders it
 over the sheet (`variant="page"`), the explorer renders the quieter
@@ -945,6 +988,7 @@ kept the previous document's count over a card with no text. Both are pinned by
 the resize assertion in `e2e/error-states.spec.ts`.
 
 Two conditions gate it, and they are not the same one:
+
 - `showAccessRequest` (App) is `errorKind === 'access-denied' && !rawMarkdown`.
   The `!rawMarkdown` term is load-bearing: `reloadFile` keeps the loaded content
   on failure, so a directory that rotates out from under an open file 403s a tab
@@ -974,6 +1018,7 @@ to allow more at once.
 
 `handleTrustFolder` owns that call for every surface, and three things follow
 from the fact that two cards can be on screen at once:
+
 - It resolves `true` only on an actual grant. Callers refetch on `true` alone,
   so a cancelled dialog does not spend a retry on a folder that is still
   refused, and the re-entrancy guard reports `false` rather than a phantom
@@ -996,13 +1041,15 @@ dot cannot. Background tabs opened by session restore never render the card at
 all, so that dot is their only signal.
 
 ### Review banner
+
 When a review session is active, the app header's row becomes the review's
 status and actions (`ReviewBanner layout="header"`). Each row puts its status on
 the left (truncating in the header) and its actions on the right in the order
 pending-question chip, quiet, secondary, primary, so the jump to a waiting
 question comes first and the primary is always last. A reviewer-origin row's
 status dot is amber (`bg-warning`).
-Crimson fill (`bg-primary`) is only on **Send N comments**; **End review** and
+Crimson fill (`bg-primary`) is only on **Send N comments** (and Hand off, when
+no review covers the active file); **End review** and
 **Cancel review** are quiet (no fill), and the question chip is the crimson tint
 (`bg-primary-bg`).
 
@@ -1011,27 +1058,33 @@ question awaiting a reply first, then a reviewer-origin review that is ready to
 send (every file's count loaded, not `waitingForAgent`, and at least one unsent
 comment), then the first in the list; ties keep list order. That pick is redone
 on every render unless the row is **held**: the pointer is over the row
-(including its More menu and the Other reviews popover), or a send, send &
-finish, finish, cancel or end of the shown review is in flight. A held review
+(including its More menu and the Other reviews popover), the Other reviews
+popover or the More review actions menu is open, keyboard focus is inside the
+row (focus a click leaves behind does not count once the pointer is gone), or a
+send, send & finish, finish, cancel or end of the shown review is in flight. A held review
 keeps the row, so a click never lands on another review's button that just
 took its place. If the held review ends while the pointer is on the row, the
 next review by priority takes it with its actions inert (`[data-row-actions]`
 gets `aria-disabled` and `pointer-events-none`, and clicks are swallowed) until
-the pointer leaves. The rest sit behind a **+N** button
+the pointer leaves. Only that review's own actions go inert: the +N button sits
+outside `[data-row-actions]` and it and its popover stay usable. The popover's
+open state lives in `ReviewBanner`, so it stays open when another review takes
+the row. The rest sit behind a **+N** button
 (`aria-label="Other reviews"`) that opens a popover (`[data-review-popover]`)
 listing their rows with their full actions, in list order. When any of them has
-an agent question waiting, the button carries a crimson dot
-(`[data-questions-marker]`) and its name says so (`Other reviews, N with
+an agent question waiting, the button carries an amber dot (`bg-warning`, the
+app's colour for waiting on you; `[data-questions-marker]`) and its name says so (`Other reviews, N with
 questions`). The popover hangs from the row's right edge and is nudged back
 inside the window when that edge is too far left, again on a window resize or
 when the banner changes size while it is open (a ResizeObserver). An outside
 press, focus moving outside it (a palette opened by keyboard) or Escape closes
-it and the More menu; Escape is left alone while another dialog is open above
-them. App's Escape guard treats the popover as
-owning the key.
+it and the More menu; Escape is left alone while another overlay is open above
+them (a dialog, or the command palette, which carries `data-overlay`). The tab
+strip's View menu uses the same `useDismiss` hook (`src/hooks/useDismiss.ts`).
+App's Escape guard treats the popover as owning the key.
 
-Under 900px of header width the row is **compact**: its quiet and secondary
-actions move into a menu button (`aria-label="More review actions"`, a
+When the wide row does not fit the header (measured, see App header) the row is
+**compact**: its quiet and secondary actions move into a menu button (`aria-label="More review actions"`, a
 `role="menu"` of `menuitem`s with the same labels). The primary action and the
 pending-question chip stay in the row, on agent and reviewer rows alike.
 
@@ -1082,6 +1135,7 @@ file.md") with a **View** action that jumps to the card, and the tab title gains
 "(N questions)" prefix until all questions are answered.
 
 ### Selection pill
+
 Selecting text in the rendered view shows a compact pill near the selection instead
 of the full comment form. The pill has a **Comment** button, one button per each of
 the first two templates from Settings for one-tap prefill, and a **More templates**
@@ -1191,11 +1245,11 @@ upward through `onDraftChange`. The store only holds a draft while its form
 cannot show.
 
 - **Set aside** when the file's rendered view goes away: a tab switch, closing
-  the tab, or the raw view by either route (the toolbar button and the palette
-  command). `App` passes the hook `surfaceFile`, which is the active file while
+  the tab, or the raw view by either route (the tab strip's rendered/raw control,
+  or its View menu when the strip is narrow, and the palette command). `App` passes the hook `surfaceFile`, which is the active file while
   it is loaded and in the rendered view, and the hook acts when that changes.
   It also clears the selection there, which the tab-switch effect and the
-  toolbar's raw button used to do themselves, because the draft has to be read
+  raw view control used to do themselves, because the draft has to be read
   before the selection goes. Do not clear the selection in the same handler
   that switches tab or view, or the hook finds nothing to keep.
 - **Handed back** when that file is on screen in the rendered view again. The
@@ -1208,7 +1262,7 @@ cannot show.
   waits for its first load to finish. The rendered view counts with the diff
   overlay on, as it does for any open form: the form comes back over the diff,
   which paints no selection highlight. That is the usual way back from the
-  toolbar's raw button, which turns the overlay on when there are changes.
+  raw view, which turns the overlay on when there are changes.
   Unchanged, the draft is postable there as before; changed, it is not (below).
 - **If the file changed meanwhile**, the draft comes back in the failed-submit
   state above, with its text, and the reader selects again. A draft is
@@ -1499,6 +1553,7 @@ browser's live range with it, and the mouseup of a click on the item dropped a
 committed selection, so the item left the list before the click landed.
 
 ### Copying a document selection
+
 The rendered view paints the pending selection as `mark.selection-highlight`
 (`MarkdownViewer.tsx`), which replaces the selected text nodes and collapses the
 browser's own range, so a plain Cmd/Ctrl+C would copy nothing. The document-level
@@ -1529,7 +1584,7 @@ browser's own range, so a plain Cmd/Ctrl+C would copy nothing. The document-leve
   from matching item text). Modelling this as a fixed outer/inner pair looks
   sufficient and is not: nesting is arbitrarily deep, and any list between the
   two ends up silently renumbered from 1. Separately, `owningList` picks the
-  list whose items are the fragment's *top-level* nodes, which is the one
+  list whose items are the fragment's _top-level_ nodes, which is the one
   `wrapLooseListItems` may have to rebuild because the list element itself was
   never inside the range.
 
@@ -1564,7 +1619,9 @@ own `text/html` would carry every block's offsets. Text selected in a field,
 the raw view, and anything that touches no `.prose` keep the native copy. If
 serializing fails, the app still owns the copy and writes only the plain text,
 so the offsets never leak by fallback.
+
 #### Touch and pen selections
+
 Selections made by touch or pen route through a pending flow instead of the
 mouseup path (`useSelection.ts`): touch selection never fires `mouseup`, and
 native selection-handle drags emit no pointer events the page can see, so
@@ -1618,8 +1675,8 @@ that jumped into the page margin in one step (a fast flick, which the browser
 can coalesce into a single move) moved the anchor nowhere, and even a slow drag
 stopped at its last in-text sample. It now clamps the point into the part of
 the container actually on screen (its box, intersected with its scrolling pane
-and the window, since a long document runs past the pane and the toolbar covers
-the top of the window) and looks up the caret again: beside a line means that
+and the window, since a long document runs past the pane and the app header
+and tab strip cover the top of the window) and looks up the caret again: beside a line means that
 line's start or end, past the top or bottom of the pane the first or last
 visible line.
 
@@ -1669,6 +1726,7 @@ anchor handles: real CDP touch input, a cancelled drag, and a mouse regression
 check.
 
 ### Comments rail
+
 The single comment surface for the rendered view: a fixed-width column at the
 right edge of the document page, inside the same width-managed page unit as
 the prose column (`src/lib/page-geometry.ts`, `CommentsRail.tsx`). Two
@@ -1891,6 +1949,7 @@ accent:
   Geometry comes from `useMarginLayout`; card and connector position changes
   animate over 150ms via `.margin-note-pos`, disabled under
   `prefers-reduced-motion`.
+
 - **List**: a pinned instance of `CommentListSurface`, with full search, status
   filter (All / Open / Resolved; with the resolve workflow off, only while the
   file has a resolved comment), sort, and bulk actions. Filters and search
@@ -1971,6 +2030,7 @@ one is hiding it, so the newly active comment's card is visible. Implemented
 once in `CommentListSurface`, shared by both surfaces.
 
 #### Needs re-anchoring
+
 When a comment's anchor text can no longer be found in the document (e.g. after an
 agent rewrites the surrounding paragraph), the comment becomes an **orphan**. In
 List density and the drawer, orphans appear in a dedicated "Needs re-anchoring (N)"
@@ -1983,6 +2043,7 @@ new position. When comments first become orphaned, a debounced toast fires after
 500 ms: `"N comment(s) lost their anchor. See "Needs re-anchoring" in Comments."`
 
 #### Anchor recovery after a rewrite
+
 A comment only reaches "Needs re-anchoring" once **recovery** has failed. A
 marker is written immediately before the text it anchors to, so when an edit
 rewrites that text but leaves the marker in place, the marker's own position
@@ -2067,6 +2128,7 @@ selection crossing a table would otherwise be flagged as an orphan the instant
 it was saved, even though the viewer highlighted it correctly.
 
 #### Anchor matching tiers
+
 `findMatchRange` (`MarkdownViewer.tsx`) locates an anchor in the concatenated
 visible text nodes, in order:
 
@@ -2092,6 +2154,7 @@ variant first either anchors to "Current Strategy" and silently drops the number
 from the highlight, or fails outright and reports the anchor as lost.
 
 #### Agent questions
+
 When the agent calls `mdr_ask`, the questions render as standard comment cards
 (agent name in the author field) in whichever surface is currently active. Reply
 on the card like any other comment: the reply is stored in the marker, and as
@@ -2104,6 +2167,7 @@ them back to the agent as unanswered and keeps the markers as a record with
 `expectsReply` cleared.
 
 ### Density strip
+
 A thin overview ruler (`data-density-strip`) pinned to the document panel's right
 edge, with one tick (`data-tick-id`) per anchored comment at its proportional
 scroll position. Ticks are 4px tall (`h-1`) and scale up on hover. Tick color
@@ -2119,6 +2183,7 @@ card. Hidden when there are no anchored comments, in raw view, or while the
 diff overlay is showing.
 
 ### Section breadcrumb
+
 A breadcrumb pill (`data-section-breadcrumb`) floating centered at the top of
 the rendered document body, outside the scroll container and no wider than the
 prose column, shown once the reader scrolls past the document's first heading. It names the current section
@@ -2131,6 +2196,7 @@ Heading jumps (outline, breadcrumb, palette) scroll their heading to
 pill's 28px and an 8px gap), so the heading lands below the pill, not under it.
 
 ### Reading position
+
 The reader's place is kept as a block, not a pixel offset
 (`src/lib/viewport-anchor.ts`): the topmost top-level block still in view,
 identified by content (tag, text length, text prefix) and, for identical
@@ -2149,6 +2215,7 @@ scrolls it back afterwards, so an edit above the reader (an agent's change, a
 diagram landing, an image that refetches as the rebuild re-inserts it) leaves
 them on the same text. App passes the viewer a `documentKey` (the file path),
 and the viewer compares each pass with the last one that showed content:
+
 - A document arriving (a fresh mount, a switch to another file, or the first
   pass with content after a first load) is not corrected and reads no layout
   before it is filled: App's restore owns its position, and measuring an empty
@@ -2164,12 +2231,12 @@ and the viewer compares each pass with the last one that showed content:
   no query is not a search move.
 - Every other pass corrects, including a repaint of only the selection or the
   sent marks.
-The search pass scrolls to the active match only on a search move or an
-arrival, so an agent edit with the find bar open leaves the reader where they
-are rather than sending them back to the match. A pass that lands while a jump
-is still in flight (diagrams finishing, an agent edit) still cuts it short.
-App renders the same viewer element for every document, with or without
-diagrams, so a document's first Mermaid fence edits it rather than remounting.
+  The search pass scrolls to the active match only on a search move or an
+  arrival, so an agent edit with the find bar open leaves the reader where they
+  are rather than sending them back to the match. A pass that lands while a jump
+  is still in flight (diagrams finishing, an agent edit) still cuts it short.
+  App renders the same viewer element for every document, with or without
+  diagrams, so a document's first Mermaid fence edits it rather than remounting.
 
 `useScrollMemory` saves one position per file visited and per view, for the
 life of the browser tab, in sessionStorage: rendered positions under
@@ -2230,6 +2297,7 @@ once (`overlayOpen`) for both this reveal and the Escape guard that keeps a
 selection when Escape closes an overlay (#100).
 
 ### Handoff button
+
 `src/components/HandOffButton.tsx` (right-aligned in the app header, hidden while a
 review is open) is md-redline's
 "submit review": it copies the agent prompt for the review comments so they
@@ -2241,6 +2309,7 @@ stranded: comments live in the file markers and every tab carries its own
 count badge (`tabCommentCounts`), so pending work is surfaced by the tab.
 
 States, driven by the active file's sendable-comment count:
+
 - **Active tab has no sendable comments**: quiet disabled icon with an
   explanatory tooltip, even if other tabs do have comments.
 - **Active tab has comments, no other tab does**: labeled CTA; clicking hands
@@ -2252,6 +2321,7 @@ States, driven by the active file's sendable-comment count:
   this review. The active row is tagged "· this file".
 
 What a click does (`src/hooks/useHandoff.ts`):
+
 - **Waits for saves.** The agent reads the files on disk, not the tabs, so the
   handoff waits for any write still out on a selected file (`whenSaved` in
   `useTabs`), then refuses with a toast if a file's last write failed (a
@@ -2304,6 +2374,7 @@ What a click does (`src/hooks/useHandoff.ts`):
   was open drops out of it.
 
 ### Diff overlay
+
 After a review handoff, or after an agent saves a before copy with `mdr_baseline`,
 a diff overlay shows what changed since that reference,
 available in both rendered and raw views via the tab strip's Diff toggle. The handoff
@@ -2369,6 +2440,7 @@ Reference store + migration live in `src/hooks/useDiffSnapshot.ts`; the pure
 advance decision and label formatter in `src/lib/review-frontier.ts`.
 
 ### Raw view comment markers
+
 Comment markers in raw view fold to a one-line pill by default: author plus
 the first words of the comment (`.raw-marker-pill`). The full marker JSON
 (`.raw-marker-json`) stays hidden until the marker is clicked, then renders
@@ -2380,6 +2452,7 @@ the scroll-to jump flash still target the marker span itself, so both keep
 working regardless of fold state.
 
 ### Frontmatter
+
 YAML and TOML frontmatter renders as document content above the first heading
 (`.doc-frontmatter`), not hidden the way most renderers treat it. In a review
 tool it is content: a skill file's `description` is the text an agent reads to
@@ -2425,6 +2498,7 @@ plain space and are absent from the DOM, and the creation path resolves
 correctly either way.
 
 ### HTML comments
+
 Ordinary (non-`@comment`) HTML comments render in the rendered view as muted
 content (`.doc-html-comment`) instead of being dropped: in a review tool a
 comment is often the thing a reviewer needs to answer. `rehypeSanitize` drops
@@ -2496,12 +2570,14 @@ comments, next to the other display settings. Expanded, it is one grid:
 a checkbox per tool, the tool's words beside it, and a final "Your own" row.
 
 ### Mermaid fullscreen view
+
 Click the expand button (top-right of any Mermaid diagram on hover) to open the
 diagram in a fullscreen modal with pan/zoom and a docked comment panel. The modal
 preserves full commenting parity (read, create, reply, resolve).
 
 ### Inline editing
-A per-document Edit toggle on the content-area toolbar (`E`, or the pencil
+
+A per-document Edit toggle in the document panel's tab strip (`E`, or the pencil
 button, rendered view only; default off). When on, clicking a block opens it in
 place in a CodeMirror 6 live-preview editor: markdown syntax is hidden off the
 active line, `<!-- @comment -->` markers render as atomic read-only chips, and
@@ -2519,7 +2595,7 @@ in `livePreview.ts`, marker chips in `markerChips.ts`). `MarkdownViewer` suspend
 its imperative DOM rebuild while a block is open and portals the editor into an
 in-flow host beside the hidden block(s). Code fences, tables, and Mermaid
 diagrams edit as source text (the rendered Mermaid block carries the source
-offsets, so clicking the diagram opens its ```mermaid``` source; the fullscreen
+offsets, so clicking the diagram opens its `mermaid` source; the fullscreen
 button still works in edit mode). Frontmatter renders (see Frontmatter above) but is not an
 inline edit target; edit it via the raw view.
 
@@ -2539,6 +2615,7 @@ instead of reloading. The pending edit's save keeps the un-bumped mtime, so a re
 conflict still 409s; Reload discards the open edit and loads the disk content.
 
 ### Left sidebar (full height)
+
 The sidebar owns the window's full left edge, top to bottom; the main column
 (the app header, then the document panel with its tab strip) starts to its right. Two states:
 
@@ -2550,11 +2627,12 @@ The sidebar owns the window's full left edge, top to bottom; the main column
   Explorer and Show Outline icon buttons, spacer, settings gear at the
   bottom. Clicking an icon expands the panel to that view.
 
-There is no explorer toggle in the toolbar anymore; `Cmd+B` still toggles
+There is no explorer toggle in the app header or the tab strip; `Cmd+B` still toggles
 (rail <-> panel), and the whole sidebar (rail included) hides in focus mode.
 The app logo and the settings gear live only in the sidebar.
 
 ### File explorer
+
 Sidebar view (`Cmd+B`) for browsing and opening markdown files. The panel sizes
 itself `flex-1 min-h-0` so a long listing scrolls inside the panel instead of
 pushing the settings button out of the sidebar's bottom corner.
@@ -2588,9 +2666,11 @@ good. A row that is both the reveal target and the active file claims both refs,
 so the active-file scroll keeps working after the reveal is spent.
 
 ### Document outline
+
 Sidebar view (`Cmd+Shift+O`) showing heading structure for quick navigation.
 
 ### Focus mode
+
 `Cmd+.` toggles focus mode: the file explorer and the comments rail both hide
 (their prior visibility is snapshotted first), leaving just the document. An
 **Exit focus** button (`data-focus-chip`, title "Exit focus mode") appears at the
@@ -2611,6 +2691,7 @@ with no Exit focus button present to explain why or restore them. Toggle the exp
 (`Cmd+B`) and rail (`Cmd+\`) back on individually to recover.
 
 ### Desktop shell hooks
+
 The desktop shell (a separate private shell around this app) styles the window
 chrome from outside, so these hooks are a contract. Keep them when restyling:
 
@@ -2630,31 +2711,31 @@ app header's command chip, and `?` still opens the shortcuts panel.
 
 ### Keyboard shortcuts
 
-| Keys | Action |
-|------|--------|
-| `E` | Toggle inline edit mode (rendered view) |
-| `N` / `J` | Next comment |
-| `P` / `K` | Previous comment |
-| `Cmd+Enter` | Start commenting on selection (or commit the open block when editing) |
-| `Cmd+Shift+M` | Lock selection for commenting |
-| `D` | Delete active comment (undo from the toast or `Cmd+Z` while the file is unchanged) |
-| `Cmd+Z` | Undo what the last Undo toast offered: a delete or a diff reset (outside text fields) |
-| `A` / `X` | Resolve active comment |
-| `U` | Reopen active comment |
-| `Cmd+F` | Find in document |
-| `Cmd+K` | Command palette |
-| `Cmd+\` | Toggle comments rail (drawer when the rail can't fit) |
-| `Cmd+B` | Toggle file explorer |
-| `Cmd+Shift+O` | Toggle document outline |
-| `Cmd+.` | Toggle focus mode |
-| `Cmd+O` | Open file |
-| `Cmd+,` | Open settings |
-| `Cmd+Shift+[` / `]` | Previous / next tab (outside text fields, and from the comment form's field) |
-| `?` | Keyboard shortcuts help |
-| `Esc` | Close fullscreen modal (Mermaid diagrams) |
-| `+` / `-` | Zoom in / out (Mermaid fullscreen) |
-| `0` | Fit to screen (Mermaid fullscreen) |
-| Arrow keys | Pan diagram (Mermaid fullscreen) |
+| Keys                | Action                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `E`                 | Toggle inline edit mode (rendered view)                                               |
+| `N` / `J`           | Next comment                                                                          |
+| `P` / `K`           | Previous comment                                                                      |
+| `Cmd+Enter`         | Start commenting on selection (or commit the open block when editing)                 |
+| `Cmd+Shift+M`       | Lock selection for commenting                                                         |
+| `D`                 | Delete active comment (undo from the toast or `Cmd+Z` while the file is unchanged)    |
+| `Cmd+Z`             | Undo what the last Undo toast offered: a delete or a diff reset (outside text fields) |
+| `A` / `X`           | Resolve active comment                                                                |
+| `U`                 | Reopen active comment                                                                 |
+| `Cmd+F`             | Find in document                                                                      |
+| `Cmd+K`             | Command palette                                                                       |
+| `Cmd+\`             | Toggle comments rail (drawer when the rail can't fit)                                 |
+| `Cmd+B`             | Toggle file explorer                                                                  |
+| `Cmd+Shift+O`       | Toggle document outline                                                               |
+| `Cmd+.`             | Toggle focus mode                                                                     |
+| `Cmd+O`             | Open file                                                                             |
+| `Cmd+,`             | Open settings                                                                         |
+| `Cmd+Shift+[` / `]` | Previous / next tab (outside text fields, and from the comment form's field)          |
+| `?`                 | Keyboard shortcuts help                                                               |
+| `Esc`               | Close fullscreen modal (Mermaid diagrams)                                             |
+| `+` / `-`           | Zoom in / out (Mermaid fullscreen)                                                    |
+| `0`                 | Fit to screen (Mermaid fullscreen)                                                    |
+| Arrow keys          | Pan diagram (Mermaid fullscreen)                                                      |
 
 ### Settings panel
 
@@ -2705,12 +2786,12 @@ than in the sans-set readers that ship weight-only emphasis, since a serif at 60
 its stems but leaves hairlines thin. Dark themes therefore split the difference across both
 channels rather than pushing either hard, via four tokens set in each theme's own block:
 
-| Token | Default when unset | Dark themes |
-| --- | --- | --- |
-| `--theme-prose-bold` | `--theme-text` | one step brighter than `--theme-text` |
-| `--theme-prose-body-weight` | 400 | 350 |
-| `--theme-prose-bold-weight` | 600 | 780 |
-| `--theme-raw-bold-weight` | 600 | 700 |
+| Token                       | Default when unset | Dark themes                           |
+| --------------------------- | ------------------ | ------------------------------------- |
+| `--theme-prose-bold`        | `--theme-text`     | one step brighter than `--theme-text` |
+| `--theme-prose-body-weight` | 400                | 350                                   |
+| `--theme-prose-bold-weight` | 600                | 780                                   |
+| `--theme-raw-bold-weight`   | 600                | 700                                   |
 
 Measured ink coverage is 1.68x body against 1.19x for stock. Source Serif 4 is a variable
 face, so the off-scale weights cost no extra file. Adding a theme therefore needs no changes
@@ -2733,13 +2814,13 @@ italic phrases heavier than the roman text around them.
 Headings are the only block with a `strong` ladder of its own in the plugin (h1 900 down
 through h4 700), so `strong` inside `h1`–`h4` is excluded from the body bold weight and
 keeps that ladder; applied flat, the rule drags `# Title **bold**` down to 600 inside a 700
-heading and renders emphasis *lighter* than the text around it. Blockquotes and `thead th`
+heading and renders emphasis _lighter_ than the text around it. Blockquotes and `thead th`
 are deliberately **not** excluded even though the plugin has `strong` rules for them: those
 rules set `color: inherit` only, with no weight, so there is no ladder to defer to and
 excluding them leaves bold in a quote or a table header identical to its surroundings.
 
 Comment and selection highlights pin their text to `--theme-text` so it stays legible on the
-amber fill. Because bold now sits a step *above* full ink on the dark themes, that pin is
+amber fill. Because bold now sits a step _above_ full ink on the dark themes, that pin is
 scoped back off `strong`: an anchor covering exactly a bold run nests the `mark` inside the
 `<strong>` where the pin would win, while an anchor spilling past it nests the other way, so
 without the exception the same phrase renders two different colors depending on how far the
@@ -2757,12 +2838,20 @@ Document links in rendered prose are ink-colored with a quiet accent-colored und
 links (`.raw-link`) match. Inline code and code blocks stay neutral in both views,
 never the crimson accent.
 
-The default dark theme's canvas is darker (`--theme-bg-secondary: #0f0e0d`), its comment
-highlight fill is a richer amber (`rgba(245, 158, 11, 0.32)`, hover `0.42`, opaque
-`#624514`), and its sheet shadow is stronger than the other dark palettes.
+The default dark theme's surfaces are cool neutral greys (`--theme-bg: #1f1f22`,
+`--theme-bg-secondary: #1a1a1d`), its comment highlight fill is a richer amber
+(`rgba(245, 158, 11, 0.32)`, hover `0.42`, opaque `#64481b`), and like the default light
+theme it sets no sheet shadow (`--theme-sheet-shadow: none`).
 
-Both theme pickers, the Settings panel's Theme tab and the toolbar's `ThemeSelector`
-dropdown, show a miniature live page preview per theme (`ThemePreview.tsx`: sheet
+Every theme also defines `--theme-frame`, the window frame the inset panels sit on, which
+Tailwind exposes as `bg-frame` (`--color-frame`). `[data-app-root]` paints it and pads it by
+8px (`bg-frame p-2`), and the sidebar, the main column's document panel and the rail sit on
+it as rounded panels. It is a step darker than the panels in light themes (default light
+`#ebebee`) and a step darker than the canvas in dark ones (default dark `#141416`). A new
+theme must set it: `server/theme-contrast.test.ts` (`inset frame`) checks every theme.
+
+The Settings panel's Theme tab shows a miniature live page preview per theme
+(`ThemeSelector.tsx`, a dropdown built on the same previews, is not mounted anywhere) (`ThemePreview.tsx`: sheet
 background, fake text lines, a highlighter stroke, an accent stroke) instead of a
 plain color dot.
 
@@ -2843,6 +2932,7 @@ for a file whose comments are all resolved. Delete-all opens the same
 firing immediately.
 
 ### Update notice
+
 A quiet, persistent pill (`UpdateNotice.tsx`, `data-update-notice`) sits
 bottom-right, stacked above the toast slot, when `GET /api/version` reports a
 `latest` the user has not already dismissed (`useUpdateNotice.ts`). It shows
@@ -2981,6 +3071,7 @@ which bans constructor parameter properties, enums, and namespaces even in
 test files.
 
 Key E2E specs in `e2e/`:
+
 - `orphan-comments.spec.ts` — orphan detection surface + Re-anchor to selection recovery flow
 
 To exercise the diff/handoff workflow without spinning up a real agent,
