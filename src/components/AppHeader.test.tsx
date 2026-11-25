@@ -97,6 +97,47 @@ describe('AppHeader', () => {
     expect(screen.getByText('Lost access to this file’s folder')).toBeTruthy();
   });
 
+  it('notices are capped, keep their full text in a title, and sit outside the shrinking status', () => {
+    const long = 'File was modified externally. Reload to see changes. '.repeat(3).trim();
+    const { rerender } = renderHeader({
+      fileName: 'a-very-long-file-name-that-goes-on-and-on.md',
+      error: long,
+      errorKind: 'generic',
+      renderBanner: () => <div data-testid="review-banner">Agent is waiting</div>,
+      handOff: null,
+    });
+    let notices = header().querySelector('[data-header-notices]') as HTMLElement;
+    // Never wider than its cap, and never squeezed by the row beside it.
+    expect(notices.className).toMatch(/\bmax-w-\[40%\]/);
+    expect(notices.className).toMatch(/\bshrink-0\b/);
+    expect(screen.getByText(long).getAttribute('title')).toBe(long);
+
+    rerender(
+      <AppHeader
+        fileName="a-very-long-file-name-that-goes-on-and-on.md"
+        folderPath="~/a/deep/folder/that/goes/on/and/on"
+        error="Access denied: cannot resolve path"
+        errorKind="access-denied"
+        accessRequestShown={false}
+        onTrustFolder={vi.fn()}
+        isLoading={false}
+        renderBanner={null}
+        handOff={null}
+        focusMode={false}
+        onExitFocus={vi.fn()}
+        onOpenPalette={vi.fn()}
+      />,
+    );
+    notices = header().querySelector('[data-header-notices]') as HTMLElement;
+    // The file name and folder give way first: the notice is not inside the
+    // status block they shrink in.
+    const status = header().querySelector('[data-header-status]') as HTMLElement;
+    expect(status.contains(notices)).toBe(false);
+    expect(notices.className).toMatch(/\bshrink-0\b/);
+    const lost = screen.getByText('Lost access to this file’s folder');
+    expect(lost.getAttribute('title')).toBe('Lost access to this file’s folder');
+  });
+
   it('generic error and loading text render as Toolbar did', () => {
     renderHeader({ error: 'File not found', errorKind: 'generic', isLoading: true });
     expect(screen.getByText('File not found')).toBeTruthy();
@@ -143,10 +184,10 @@ describe('AppHeader', () => {
     expect(onExitFocus).toHaveBeenCalledTimes(1);
   });
 
-  it('root carries data-app-header and reads padding-left from --window-inset-left', () => {
+  it('root carries data-app-header and adds --window-inset-left to its own left padding', () => {
     renderHeader();
     expect(header()).toBeTruthy();
-    expect(header().style.paddingLeft).toBe('var(--window-inset-left, 0px)');
+    expect(header().style.paddingLeft).toBe('calc(var(--window-inset-left, 0px) + 0.25rem)');
   });
 
   it('long file name: status has min-w-0 and truncate; actions container has shrink-0', () => {

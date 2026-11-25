@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useMemo, useState } from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { ReviewBanner } from './ReviewBanner';
 import type { ReviewSession } from '../hooks/useReviewSession';
 
@@ -1649,5 +1649,160 @@ describe('ReviewBanner: header layout', () => {
     // The ready review's Send is the one in the row.
     expect(screen.getByRole('button', { name: 'Send 1 comment' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /waiting for agent/i })).toBeNull();
+  });
+
+  describe('the shown review holds the row', () => {
+    const sessionA: ReviewSession = { ...userSession, id: 'rev_a', filePaths: ['/tmp/a.md'] };
+    const sessionB: ReviewSession = { ...userSession, id: 'rev_b', filePaths: ['/tmp/b.md'] };
+    const agentB: ReviewSession = { ...agentSession, id: 'rev_agent_b' };
+
+    // Plays App's part: records what the banner reports as sent and hands it
+    // back as optimisticSent.
+    function StableHarness({
+      sessions,
+      asks,
+    }: {
+      sessions: ReviewSession[];
+      asks?: Map<string, number>;
+    }) {
+      const [sentIds, setSentIds] = useState<string[]>([]);
+      const optimisticSent = useMemo(
+        () => ({ commentIds: new Set(sentIds), replyKeys: new Set<string>() }),
+        [sentIds],
+      );
+      return (
+        <ReviewBanner
+          layout="header"
+          sessions={sessions}
+          commentCounts={
+            new Map([
+              ['/tmp/a.md', 2],
+              ['/tmp/b.md', 1],
+              ['/tmp/agent.md', 0],
+            ])
+          }
+          onResolved={() => {}}
+          onBatchSent={(sent) => setSentIds((prev) => [...prev, ...sent])}
+          optimisticSent={optimisticSent}
+          commentIdsByFile={
+            new Map([
+              ['/tmp/a.md', ['a1', 'a2']],
+              ['/tmp/b.md', ['b1']],
+              ['/tmp/agent.md', []],
+            ])
+          }
+          pendingAskCountsBySession={asks}
+        />
+      );
+    }
+
+    const rowText = () => screen.getByTestId('review-banner').textContent ?? '';
+
+    it("a send on A keeps A's row, so B's Send never lands under the pointer", async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+      const { rerender } = render(<StableHarness sessions={[sessionA, sessionB]} />);
+      expect(rowText()).toContain('a.md');
+      fireEvent.click(screen.getByRole('button', { name: 'Send 2 comments' }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      // A's batch is out: it has nothing left to send, while B still does.
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Send 2 comments' })).toBeNull(),
+      );
+      expect(rowText()).toContain('a.md');
+      expect(screen.queryByRole('button', { name: 'Send 1 comment' })).toBeNull();
+      // The poll reports A waiting on the agent: A still holds the row.
+      rerender(
+        <StableHarness
+          sessions={[
+            { ...sessionA, waitingForAgent: true, sentCommentIds: ['a1', 'a2'] },
+            sessionB,
+          ]}
+        />,
+      );
+      expect(rowText()).toContain('a.md');
+      expect(screen.getByRole('button', { name: /waiting for agent/i })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Send 1 comment' })).toBeNull();
+    });
+
+    it('hands the row to a review with a question once the shown one needs nothing, but not under the pointer', () => {
+      const waitingA = { ...sessionA, waitingForAgent: true };
+      const { rerender } = render(<StableHarness sessions={[waitingA, agentB]} />);
+      expect(rowText()).toContain('a.md');
+      const banner = screen.getByTestId('review-banner');
+      fireEvent.pointerEnter(banner);
+      rerender(
+        <StableHarness sessions={[waitingA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('a.md');
+      fireEvent.pointerLeave(banner);
+      expect(rowText()).toContain('Claude is waiting on your reply.');
+    });
+
+    it('a question elsewhere does not take the row from a review ready to send', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(screen.getByRole('button', { name: 'Send 2 comments' })).toBeTruthy();
+      expect(rowText()).not.toContain('Claude is waiting on your reply.');
+    });
+  });
+
+  it('the questions chip comes before the quiet End review on an agent row', () => {
+    renderHeaderBanner({
+      sessions: [agentSession],
+      pendingAskCountsBySession: new Map([['rev_agent', 1]]),
+      onJumpToAsk: () => {},
+    });
+    const labels = Array.from(screen.getByTestId('review-banner').querySelectorAll('button')).map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent,
+    );
+    expect(labels).toEqual([
+      '1 question awaiting your reply. Jump to the first question.',
+      'End review with Claude',
+    ]);
+  });
+
+  it("a user review's status dot is amber", () => {
+    renderHeaderBanner({ sessions: [userSession] });
+    const dot = screen.getByTestId('review-banner').querySelector('.rounded-full');
+    expect(dot?.className).toMatch(/\bbg-warning\b/);
+  });
+
+  it('the Other reviews popover gives up Escape to a dialog opened above it', () => {
+    renderHeaderBanner();
+    const others = screen.getByRole('button', { name: 'Other reviews' });
+    fireEvent.click(others);
+    const overlay = document.createElement('div');
+    overlay.setAttribute('role', 'dialog');
+    document.body.appendChild(overlay);
+    try {
+      const escape = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(false);
+      expect(others.getAttribute('aria-expanded')).toBe('true');
+    } finally {
+      overlay.remove();
+    }
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(others.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('the Other reviews popover closes when focus moves outside it (a palette opened by keyboard)', () => {
+    renderHeaderBanner();
+    const others = screen.getByRole('button', { name: 'Other reviews' });
+    fireEvent.click(others);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    try {
+      act(() => input.focus());
+      expect(others.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      input.remove();
+    }
   });
 });

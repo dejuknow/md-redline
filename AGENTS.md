@@ -78,6 +78,8 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/RenderedDiffView.tsx`: rendered prose view of the diff overlay
 - `src/components/AppHeader.tsx`: the main column's top row: the review row or the active file's name and folder with Hand off, the command palette chip, and Exit focus
 - `src/components/ReviewBanner.tsx`: review session rows (send batch, finish, cancel, end review); `layout="header"` is the app header's one-row form
+- `src/components/ReviewRow.tsx`: the shared review row shape (`SessionRow`), the agent row and the pending-question chip
+- `src/components/ReviewHeaderMenus.tsx`: the header's Other reviews popover, the More review actions menu, and `useDismiss`
 - `src/lib/header-session.ts`: `pickHeaderSessions`, which review takes the header row and which wait behind "+N"
 - `src/components/DocStrip.tsx`: the document panel's top row: tabs on the left, document controls (view mode, diff, search, copy, comments toggle) on the right
 - `src/components/DiffBar.tsx`: row under the tab strip with the change count, diff reference label, prev/next change and Mark reviewed
@@ -893,9 +895,13 @@ the old toolbar status row, so there is one chrome row instead of two.
   brings its own send actions. App passes the banner as
   `renderBanner(compact)`, null when `shownReviewSessions` is empty.
 - Load errors, "Loading..." and the lost-access notice with its compact Allow
-  button (`toolbar-allow-access`) render in the row either way. The lost-access
-  pair shows exactly when `errorKind === 'access-denied' && !accessRequestShown`,
-  alongside a review row too.
+  button (`toolbar-allow-access`) render in the row either way, in
+  `[data-header-notices]` after the status: `shrink-0` and capped at 40% of the
+  header, each text truncating with its full text in `title`. So a long error
+  never squeezes the review row, and a long file name or folder gives way
+  before the notice does. The lost-access pair shows exactly when
+  `errorKind === 'access-denied' && !accessRequestShown`, alongside a review row
+  too.
 - Then a 1px hairline and the command palette chip (`aria-label="Command
   palette"`, showing `⌘K`, or `Ctrl+K` off Apple platforms). The chip calls
   App's `openCommandPalette()`, the same function the `Cmd+K` shortcut runs, so
@@ -911,7 +917,8 @@ measured, counts as wide) the review row renders compact (see Review banner).
 There is no More menu of the header's own: keyboard shortcuts stay on `?` and
 the palette.
 
-Its left padding is `var(--window-inset-left, 0px)`. A desktop shell sets
+Its left padding is `calc(var(--window-inset-left, 0px) + 0.25rem)`: the inset
+adds to its own 4px. A desktop shell sets
 `--window-inset-left` on `[data-app-header]` to clear its window controls; the
 browser build never sets it. It applies in every sidebar state (open, the
 collapsed rail, focus mode), and `e2e/app-chrome.spec.ts` pins that.
@@ -991,7 +998,9 @@ all, so that dot is their only signal.
 When a review session is active, the app header's row becomes the review's
 status and actions (`ReviewBanner layout="header"`). Each row puts its status on
 the left (truncating in the header) and its actions on the right in the order
-quiet, pending-question chip, secondary, primary, so the primary is always last.
+pending-question chip, quiet, secondary, primary, so the jump to a waiting
+question comes first and the primary is always last. A reviewer-origin row's
+status dot is amber (`bg-warning`).
 Crimson fill (`bg-primary`) is only on **Send N comments**; **End review** and
 **Cancel review** are quiet (no fill), and the question chip is the crimson tint
 (`bg-primary-bg`).
@@ -999,10 +1008,19 @@ Crimson fill (`bg-primary`) is only on **Send N comments**; **End review** and
 The header shows one review. `pickHeaderSessions` picks it: a review with an agent
 question awaiting a reply first, then a reviewer-origin review that is ready to
 send (every file's count loaded, not `waitingForAgent`, and at least one unsent
-comment), then the first in the list. The rest sit behind a **+N** button
+comment), then the first in the list. Once shown, a review keeps the row while
+it exists, so a click never lands on another review's button that just took its
+place (a send turns its own Send off in the same render that another review's
+could turn on). It gives the row up only when it needs nothing from the reviewer
+and another review now has a question waiting, and not while the pointer is over
+the row or its send is in flight. The rest sit behind a **+N** button
 (`aria-label="Other reviews"`) that opens a popover (`[data-review-popover]`)
-listing their rows with their full actions, in list order. Outside click or
-Escape closes it, and App's Escape guard treats it as owning the key.
+listing their rows with their full actions, in list order. The popover hangs
+from the row's right edge and is nudged back inside the window when that edge
+is too far left. An outside press, focus moving outside it (a palette opened by
+keyboard) or Escape closes it and the More menu; Escape is left alone while
+another dialog is open above them. App's Escape guard treats the popover as
+owning the key.
 
 Under 900px of header width the row is **compact**: its quiet and secondary
 actions move into a menu button (`aria-label="More review actions"`, a

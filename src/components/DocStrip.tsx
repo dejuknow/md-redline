@@ -28,8 +28,6 @@ export interface DocStripProps {
   commentsSurfaceVisible: boolean;
   openCommentCount: number;
   onToggleComments: () => void;
-  /** Rendered last in the controls group (Hand off, for now). */
-  trailing?: React.ReactNode;
 }
 
 /** Under this strip width, view, diff and copy fold into the View menu. */
@@ -124,7 +122,7 @@ function CopyIcon({ done }: { done: boolean }) {
 /**
  * The document panel's top row: the open tabs on the left, attached to the
  * page below like folder tabs, and the document's controls on the right
- * (view mode, diff, search, copy, the comments toggle, then `trailing`).
+ * (view mode, diff, search, copy, then the comments toggle).
  * The tabs scroll in their own region, so the controls never cover a tab.
  *
  * Every control keeps the title, aria-label and test id it had in the old
@@ -149,7 +147,6 @@ export function DocStrip({
   commentsSurfaceVisible,
   openCommentCount,
   onToggleComments,
-  trailing,
 }: DocStripProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const width = useElementWidth(rootRef);
@@ -462,7 +459,6 @@ export function DocStrip({
 
         {narrow && searchButton}
         {commentsButton}
-        {trailing}
       </div>
     </div>
   );

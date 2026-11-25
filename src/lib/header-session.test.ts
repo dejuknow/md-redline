@@ -71,4 +71,68 @@ describe('pickHeaderSessions', () => {
     expect(primary?.id).toBe('b');
     expect(others.map((s) => s.id)).toEqual(['a', 'c']);
   });
+
+  describe('keeps the shown review steady', () => {
+    it('a send on A leaves A shown while it waits on the agent, even with B ready', () => {
+      const a = session('a', { origin: 'user', waitingForAgent: true });
+      const b = session('b', { origin: 'user' });
+      // A was shown and ready; its send went out, so only B is ready now.
+      const { primary, others } = pickHeaderSessions([a, b], new Map(), (s) => s.id === 'b', {
+        id: 'a',
+      });
+      expect(primary?.id).toBe('a');
+      expect(others.map((s) => s.id)).toEqual(['b']);
+    });
+
+    it('keeps a shown review that still needs action when another gets a question', () => {
+      const a = session('a', { origin: 'user' });
+      const b = session('b');
+      const { primary } = pickHeaderSessions([a, b], new Map([['b', 1]]), (s) => s.id === 'a', {
+        id: 'a',
+      });
+      expect(primary?.id).toBe('a');
+    });
+
+    it('keeps a shown review with its own question when another gets one', () => {
+      const a = session('a');
+      const b = session('b');
+      const { primary } = pickHeaderSessions(
+        [a, b],
+        new Map([
+          ['a', 1],
+          ['b', 1],
+        ]),
+        never,
+        { id: 'b' },
+      );
+      expect(primary?.id).toBe('b');
+    });
+
+    it('hands the row to a review with a question once the shown one needs nothing', () => {
+      const a = session('a', { origin: 'user', waitingForAgent: true });
+      const b = session('b');
+      const { primary } = pickHeaderSessions([a, b], new Map([['b', 2]]), never, { id: 'a' });
+      expect(primary?.id).toBe('b');
+    });
+
+    it('does not hand it over while the row is held', () => {
+      const a = session('a', { origin: 'user', waitingForAgent: true });
+      const b = session('b', { origin: 'user' });
+      const { primary } = pickHeaderSessions([a, b], new Map([['b', 2]]), never, {
+        id: 'a',
+        hold: true,
+      });
+      expect(primary?.id).toBe('a');
+    });
+
+    it('picks afresh once the shown review ends', () => {
+      const b = session('b', { origin: 'user' });
+      const c = session('c', { origin: 'user' });
+      const { primary } = pickHeaderSessions([b, c], new Map(), (s) => s.id === 'c', {
+        id: 'a',
+        hold: true,
+      });
+      expect(primary?.id).toBe('c');
+    });
+  });
 });

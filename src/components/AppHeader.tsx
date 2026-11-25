@@ -63,14 +63,22 @@ export function AppHeader({
   const focusKeys = isMac ? '⌘.' : 'Ctrl+.';
 
   const showLostAccess = errorKind === 'access-denied' && !accessRequestShown;
-  const notices = (
-    <>
-      {error && errorKind !== 'access-denied' && (
-        <span className="min-w-0 truncate text-[13px] text-danger font-medium">{error}</span>
+  const genericError = errorKind !== 'access-denied' ? error : null;
+  // Capped and kept from shrinking, so a long error never squeezes the review
+  // row or the file name pushes the notice down to an ellipsis: the notice
+  // truncates at its cap (full text in its title) and the name gives way.
+  const notices = (showLostAccess || genericError || isLoading) && (
+    <div data-header-notices className="shrink-0 max-w-[40%] min-w-0 flex items-center gap-2">
+      {genericError && (
+        <span className="min-w-0 truncate text-[13px] text-danger font-medium" title={genericError}>
+          {genericError}
+        </span>
       )}
       {showLostAccess && (
         <span className="min-w-0 flex items-center gap-2 text-[13px] text-content-secondary">
-          <span className="truncate">Lost access to this file&rsquo;s folder</span>
+          <span className="min-w-0 truncate" title="Lost access to this file’s folder">
+            Lost access to this file&rsquo;s folder
+          </span>
           <button
             type="button"
             onClick={onTrustFolder}
@@ -82,7 +90,7 @@ export function AppHeader({
         </span>
       )}
       {isLoading && <span className="shrink-0 text-[13px] text-content-muted">Loading...</span>}
-    </>
+    </div>
   );
 
   return (
@@ -90,14 +98,13 @@ export function AppHeader({
       ref={rootRef}
       data-app-header
       className="h-11 shrink-0 min-w-0 flex items-center gap-2 px-1 text-content"
-      style={{ paddingLeft: 'var(--window-inset-left, 0px)' }}
+      // Adds to px-1 rather than replacing it.
+      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.25rem)' }}
     >
       {banner ? (
         <>
           {banner}
-          {(showLostAccess || error || isLoading) && (
-            <div className="min-w-0 flex items-center gap-2">{notices}</div>
-          )}
+          {notices}
         </>
       ) : (
         <>
@@ -108,8 +115,8 @@ export function AppHeader({
                 {folderPath}
               </span>
             )}
-            {notices}
           </div>
+          {notices}
           <div data-header-actions className="ml-auto shrink-0 flex items-center gap-2">
             {handOff}
           </div>

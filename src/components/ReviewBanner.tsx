@@ -5,6 +5,8 @@ import { isCommentSent } from '../lib/answered-comments';
 import { pickHeaderSessions } from '../lib/header-session';
 import type { ReviewSession } from '../hooks/useReviewSession';
 import type { ShowToast } from '../hooks/useToast';
+import { OtherReviews } from './ReviewHeaderMenus';
+import { AgentSessionRow, PendingAskChip, SessionRow } from './ReviewRow';
 
 /**
  * What this tab has just sent, before a session refresh reports it: comment
@@ -154,17 +156,12 @@ export function ReviewBanner({
   compact = false,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
-  // The header's Other reviews popover.
-  const [othersOpen, setOthersOpen] = useState(false);
-  const othersRef = useRef<HTMLDivElement>(null);
-  const closeOthers = useCallback(() => setOthersOpen(false), []);
-  useDismiss(othersOpen, othersRef, closeOthers);
-  // With one review left there is nothing behind the button: close the
-  // popover so a later second review does not arrive with it already open.
-  const hasOthers = sessions.length > 1;
-  useEffect(() => {
-    if (!hasOthers) setOthersOpen(false);
-  }, [hasOthers]);
+  // The review the header shows in its row. It stays there while it lasts
+  // (see `pickHeaderSessions`), so a click never lands on another review's
+  // button that took its place.
+  const [shownId, setShownId] = useState<string | null>(null);
+  // While the pointer is over the header's row, the row holds still.
+  const [rowHovered, setRowHovered] = useState(false);
   // Sessions with a send in flight, claimed synchronously at the click,
   // before any await: a second click landing while the first waits on a save
   // must not post the same batch. Keyed by session, so another review's
@@ -411,7 +408,12 @@ export function ReviewBanner({
     [onResolved, showToast],
   );
 
-  if (sessions.length === 0) return null;
+  if (sessions.length === 0) {
+    // The row unmounts without a pointerleave, so the next review's row must
+    // not start out held.
+    if (rowHovered) setRowHovered(false);
+    return null;
+  }
 
   // One review's row. `inline` is the header's single line, whose status
   // truncates; elsewhere (the standalone banner, the Other reviews popover)
@@ -457,7 +459,7 @@ export function ReviewBanner({
         compact={opts.compact}
         inline={opts.inline}
         leading={opts.leading}
-        indicator={<span className="inline-block h-2 w-2 rounded-full bg-success" aria-hidden />}
+        indicator={<span className="inline-block h-2 w-2 rounded-full bg-warning" aria-hidden />}
         status={
           <>
             <strong>Agent is waiting on your review</strong> of{' '}
@@ -521,42 +523,22 @@ export function ReviewBanner({
         sessionIsReady(s, commentCounts) &&
         !s.waitingForAgent &&
         unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent).length > 0,
+      { id: shownId, hold: rowHovered || (busyId !== null && busyId === shownId) },
     );
-    // The popover hangs from the banner's right edge, not the button's, so
-    // it has the row's width to open into rather than overflowing the left.
+    const primaryId = primary?.id ?? null;
+    // Remember what the row shows, so the next render keeps it.
+    if (primaryId !== shownId) setShownId(primaryId);
     const othersButton = others.length > 0 && (
-      <div ref={othersRef} className="shrink-0">
-        <button
-          type="button"
-          className={`h-7 px-2 rounded-md text-[13px] font-medium tabular-nums transition-colors ${
-            othersOpen
-              ? 'bg-tint text-content'
-              : 'text-content-secondary hover:text-content hover:bg-tint'
-          }`}
-          onClick={() => setOthersOpen((open) => !open)}
-          aria-label="Other reviews"
-          aria-haspopup="dialog"
-          aria-expanded={othersOpen}
-          title={`${others.length} other review${others.length === 1 ? '' : 's'}`}
-        >
-          +{others.length}
-        </button>
-        {othersOpen && (
-          <div
-            role="dialog"
-            aria-label="Other reviews"
-            data-review-popover
-            className="absolute right-0 top-full z-50 mt-1 w-[min(560px,calc(100vw-96px))] rounded-lg border border-border bg-surface shadow-lg px-3 py-1.5 divide-y divide-border-subtle"
-          >
-            {others.map((s) => renderRow(s, { compact: false, inline: false }))}
-          </div>
-        )}
-      </div>
+      <OtherReviews count={others.length}>
+        {others.map((s) => renderRow(s, { compact: false, inline: false }))}
+      </OtherReviews>
     );
     return (
       <div
         data-testid="review-banner"
         className="relative min-w-0 flex-1 flex items-center text-content"
+        onPointerEnter={() => setRowHovered(true)}
+        onPointerLeave={() => setRowHovered(false)}
       >
         {primary && renderRow(primary, { compact, inline: true, leading: othersButton })}
       </div>
@@ -570,326 +552,5 @@ export function ReviewBanner({
     >
       {sessions.map((s) => renderRow(s, { compact, inline: false }))}
     </div>
-  );
-}
-
-/** One action of a review row, as a button or a More menu item. */
-interface RowAction {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  ariaLabel?: string;
-}
-
-const actionBase =
-  'h-7 shrink-0 whitespace-nowrap rounded-md text-[13px] font-medium transition-colors disabled:opacity-40';
-const QUIET_ACTION = `${actionBase} px-2 text-content-secondary hover:text-content hover:bg-tint`;
-const SECONDARY_ACTION = `${actionBase} px-[11px] border border-border bg-surface text-content hover:bg-tint`;
-const PRIMARY_ACTION = `${actionBase} px-3 bg-primary text-on-primary hover:bg-primary-hover`;
-const MENU_ITEM =
-  'w-full flex items-center px-3 py-1.5 text-left text-[13px] text-content whitespace-nowrap transition-colors hover:bg-tint disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent';
-
-function ActionButton({ action, className }: { action: RowAction; className: string }) {
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={action.onClick}
-      disabled={action.disabled}
-      title={action.title}
-      aria-label={action.ariaLabel}
-    >
-      {action.label}
-    </button>
-  );
-}
-
-/**
- * Closes a popup on a press outside `ref` or on Escape. Escape is caught on
- * the way down and stopped there, so App's own Escape handling never sees it.
- */
-function useDismiss(
-  open: boolean,
-  ref: React.RefObject<HTMLElement | null>,
-  close: () => void,
-): void {
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [open, ref, close]);
-}
-
-/** The compact row's overflow: its quiet and secondary actions, in that order. */
-function MoreReviewActions({ items }: { items: RowAction[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismiss(open, ref, close);
-  return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        className={`h-7 w-8 flex items-center justify-center rounded-md transition-colors ${
-          open ? 'bg-tint text-content' : 'text-content-secondary hover:text-content hover:bg-tint'
-        }`}
-        onClick={() => setOpen((o) => !o)}
-        aria-label="More review actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="More review actions"
-      >
-        <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-          <circle cx="3.5" cy="8" r="1.3" />
-          <circle cx="8" cy="8" r="1.3" />
-          <circle cx="12.5" cy="8" r="1.3" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="More review actions"
-          className="absolute right-0 top-full z-50 mt-1 min-w-48 rounded-lg border border-border bg-surface shadow-lg py-1"
-        >
-          {items.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              role="menuitem"
-              className={MENU_ITEM}
-              disabled={a.disabled}
-              title={a.title}
-              aria-label={a.ariaLabel}
-              onClick={() => {
-                setOpen(false);
-                a.onClick();
-              }}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface SessionRowProps {
-  indicator: React.ReactNode;
-  status: React.ReactNode;
-  /** The pending-question jump. Stays out of the More menu when compact. */
-  chip?: React.ReactNode;
-  quiet?: RowAction;
-  secondary?: RowAction;
-  primary?: RowAction;
-  /** Moves the quiet and secondary actions into a More menu. */
-  compact: boolean;
-  /** The header's single line: the status truncates instead of wrapping. */
-  inline: boolean;
-  /** Rendered first in the actions group (the header's Other reviews button). */
-  leading?: React.ReactNode;
-}
-
-/**
- * The shared shape of every review row: status on the left, actions on the
- * right in the order quiet, chip, secondary, primary, so the primary is last.
- */
-function SessionRow({
-  indicator,
-  status,
-  chip,
-  quiet,
-  secondary,
-  primary,
-  compact,
-  inline,
-  leading,
-}: SessionRowProps) {
-  const overflow = [quiet, secondary].filter((a): a is RowAction => a !== undefined);
-  return (
-    <div
-      className={
-        inline
-          ? 'min-w-0 flex-1 flex items-center gap-2'
-          : 'flex flex-wrap items-center justify-between gap-2 py-1'
-      }
-    >
-      <div className="min-w-0 flex items-center gap-2 text-[13px]">
-        <span className="shrink-0 flex items-center">{indicator}</span>
-        <span className={inline ? 'min-w-0 truncate' : 'min-w-0'}>{status}</span>
-      </div>
-      <div className="ml-auto shrink-0 flex items-center gap-2">
-        {leading}
-        {compact
-          ? overflow.length > 0 && <MoreReviewActions items={overflow} />
-          : quiet && <ActionButton action={quiet} className={QUIET_ACTION} />}
-        {chip}
-        {!compact && secondary && <ActionButton action={secondary} className={SECONDARY_ACTION} />}
-        {primary && <ActionButton action={primary} className={PRIMARY_ACTION} />}
-      </div>
-    </div>
-  );
-}
-
-interface AgentSessionRowProps {
-  session: ReviewSession;
-  agentName: string;
-  agentCommentCount: number;
-  pendingAskCount: number;
-  busy: boolean;
-  onDone: (s: ReviewSession) => void;
-  onJumpToAsk?: (sessionId: string) => void;
-  compact: boolean;
-  inline: boolean;
-  leading?: React.ReactNode;
-}
-
-const AGENT_ACTIVE_WINDOW_MS = 30_000;
-const AGENT_TICK_MS = 5_000;
-
-/**
- * Crimson-tinted chip surfacing "the agent is blocked on your answer." It sits
- * with the row's actions in every row variant and never folds into the More
- * menu; this is the persistent cue that outlives the toast.
- */
-function PendingAskChip({ count, onJump }: { count: number; onJump?: () => void }) {
-  const label = `${count} question${count === 1 ? '' : 's'} awaiting your reply`;
-  const chipClass =
-    'h-7 shrink-0 whitespace-nowrap inline-flex items-center rounded-md bg-primary-bg px-2.5 text-[13px] font-medium text-primary-text';
-  if (!onJump) {
-    return <span className={chipClass}>{label}</span>;
-  }
-  return (
-    <button
-      type="button"
-      className={`${chipClass} hover:bg-primary-bg-strong transition-colors`}
-      onClick={onJump}
-      aria-label={`${label}. Jump to the first question.`}
-    >
-      {label} &rarr;
-    </button>
-  );
-}
-
-/**
- * Agent-origin row. Owns its own 5s ticking timer so the spinner-vs-dot
- * transition stays correct without forcing a re-render of every other row.
- * Mounting this component is the gate that creates the timer: when no
- * agent-origin sessions are open, no timer runs.
- */
-function AgentSessionRow({
-  session,
-  agentName,
-  agentCommentCount,
-  pendingAskCount,
-  busy,
-  onDone,
-  onJumpToAsk,
-  compact,
-  inline,
-  leading,
-}: AgentSessionRowProps) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), AGENT_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  // A session with no agent activity yet is one the agent just opened and is
-  // about to post into: show the spinner, not the idle dot. The idle dot
-  // means "the agent posted a while ago and has gone quiet."
-  const isAgentActive = session.lastAgentActivityAt
-    ? now - new Date(session.lastAgentActivityAt).getTime() < AGENT_ACTIVE_WINDOW_MS
-    : true;
-  const awaitingReply = pendingAskCount > 0;
-
-  const handleEndReview = () => {
-    if (awaitingReply) {
-      const confirmed = window.confirm(
-        `${agentName} has ${pendingAskCount} unanswered question${pendingAskCount === 1 ? '' : 's'}. ` +
-          'End the review anyway? Unanswered questions will be reported back as unanswered.',
-      );
-      if (!confirmed) return;
-    }
-    onDone(session);
-  };
-
-  const fileList = (
-    <>
-      {session.filePaths.map((p, i) => (
-        <span key={p}>
-          {i > 0 && ', '}
-          <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
-        </span>
-      ))}
-    </>
-  );
-
-  return (
-    <SessionRow
-      compact={compact}
-      inline={inline}
-      leading={leading}
-      indicator={
-        awaitingReply ? (
-          <span
-            className="inline-block h-2 w-2 animate-pulse rounded-full bg-warning"
-            aria-hidden
-          />
-        ) : isAgentActive ? (
-          <span
-            role="status"
-            className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent"
-            aria-label="Agent is active"
-          />
-        ) : (
-          <span className="inline-block h-2 w-2 rounded-full bg-content-muted" aria-hidden />
-        )
-      }
-      status={
-        <>
-          {awaitingReply ? (
-            <strong>{agentName} is waiting on your reply.</strong>
-          ) : (
-            <strong>
-              {agentName} is reviewing {fileList}.
-            </strong>
-          )}
-          {!awaitingReply && agentCommentCount > 0 && (
-            <span className="ml-2 text-content-secondary">
-              ({agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'})
-            </span>
-          )}
-        </>
-      }
-      chip={
-        awaitingReply && (
-          <PendingAskChip
-            count={pendingAskCount}
-            onJump={onJumpToAsk ? () => onJumpToAsk(session.id) : undefined}
-          />
-        )
-      }
-      quiet={{
-        label: 'End review',
-        onClick: handleEndReview,
-        disabled: busy,
-        ariaLabel: `End review with ${agentName}`,
-      }}
-    />
   );
 }

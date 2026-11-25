@@ -135,11 +135,12 @@ describe('DocStrip', () => {
   });
 
   it('the controls group carries data-testid "panel-toolbar"', () => {
-    renderStrip({ trailing: <button type="button">Hand off</button> });
+    renderStrip();
     const group = screen.getByTestId('panel-toolbar');
     expect(within(group).getByTitle('View raw markdown')).toBeTruthy();
     expect(within(group).getByTestId('copy-button')).toBeTruthy();
-    expect(within(group).getByText('Hand off')).toBeTruthy();
+    // Hand off lives in the app header now.
+    expect(within(group).queryByText('Hand off')).toBeNull();
   });
 
   it('when its measured width is under 600px, view, diff and copy move into a "View" menu button (aria-label "View options") and search plus comments stay visible', () => {
