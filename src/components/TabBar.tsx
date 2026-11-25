@@ -100,6 +100,28 @@ export function TabBar({
 }: Props) {
   const tabControlButtonClass = tabControlButtonClassStrip;
   const badgeTextClass = 'text-[12px] px-1.5';
+  const renderClose = (tab: Tab, position: string) => (
+    <span
+      role="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCloseTab(tab.filePath);
+      }}
+      className={`${position} rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:text-content`}
+      aria-label={`Close ${getPathBasename(tab.filePath)}`}
+      tabIndex={-1}
+    >
+      <svg
+        className="w-3 h-3"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </span>
+  );
   const tabsViewportRef = useRef<HTMLDivElement>(null);
   const tabsContentRef = useRef<HTMLDivElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -272,6 +294,7 @@ export function TabBar({
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
               const count = commentCounts.get(tab.filePath) ?? 0;
               const resolvedCount = resolvedCommentCounts?.get(tab.filePath) ?? 0;
+              const hasMarks = count > 0 || resolvedCount > 0 || !!tab.error;
               return (
                 <button
                   key={tab.filePath}
@@ -315,50 +338,46 @@ export function TabBar({
                   >
                     <span className="truncate">{fileName}</span>
                   </span>
-                  {count > 0 && (
-                    <span
-                      className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
-                        isActive
-                          ? 'bg-primary-bg-strong text-primary-text'
-                          : 'bg-surface-inset text-content-secondary'
-                      }`}
-                    >
-                      {count}
+                  {hasMarks ? (
+                    // A tab with marks swaps them for its close button on
+                    // hover, so the x never lands on half a badge.
+                    <span className="relative shrink-0 flex items-center">
+                      <span className="flex items-center gap-1.5 group-hover:invisible">
+                        {count > 0 && (
+                          <span
+                            className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
+                              isActive
+                                ? 'bg-primary-bg-strong text-primary-text'
+                                : 'bg-surface-inset text-content-secondary'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        )}
+                        {resolvedCount > 0 && <ResolvedMark count={resolvedCount} />}
+                        {tab.error && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`}
+                          />
+                        )}
+                      </span>
+                      {renderClose(tab, 'absolute inset-0 flex items-center justify-center')}
                     </span>
-                  )}
-                  {resolvedCount > 0 && <ResolvedMark count={resolvedCount} />}
-                  {tab.error && (
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`} />
-                  )}
-                  <span
-                    role="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseTab(tab.filePath);
-                    }}
+                  ) : (
                     // No tab keeps room for its close button: on hover it
                     // appears over the name's end, on a patch of the tab's own
                     // fill that fades into the text. Active or not, a tab is
                     // then the width of its name, so switching tabs never
                     // resizes one or moves its neighbours.
-                    className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity ${
-                      isActive
-                        ? 'bg-surface shadow-[-10px_0_8px_-2px_var(--color-surface)] hover:text-content'
-                        : 'bg-frame shadow-[-10px_0_8px_-2px_var(--color-frame)] hover:text-content'
-                    }`}
-                    aria-label={`Close ${getPathBasename(tab.filePath)}`}
-                    tabIndex={-1}
-                  >
-                    <svg
-                      className="w-3 h-3"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </span>
+                    renderClose(
+                      tab,
+                      `absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 ${
+                        isActive
+                          ? 'bg-surface shadow-[-10px_0_8px_-2px_var(--color-surface)]'
+                          : 'bg-frame shadow-[-10px_0_8px_-2px_var(--color-frame)]'
+                      }`,
+                    )
+                  )}
                 </button>
               );
             })}
