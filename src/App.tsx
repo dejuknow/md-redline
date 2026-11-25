@@ -3342,7 +3342,7 @@ export default function App() {
       {!focusMode && (
         <>
           <div
-            className={`relative rounded-[10px] border border-border bg-surface-secondary shrink-0 overflow-hidden ${
+            className={`relative rounded-[10px] outline outline-1 outline-border -outline-offset-1 bg-surface-secondary shrink-0 overflow-hidden ${
               explorerVisible ? '' : 'mr-2'
             } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
             style={{ width: explorerVisible ? explorerWidth : 40 }}

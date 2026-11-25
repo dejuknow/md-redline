@@ -1523,6 +1523,9 @@ body {
   border-bottom: 1px solid var(--theme-border-subtle);
   background-color: var(--theme-bg);
   flex-shrink: 0;
+  /* Match the panel's rounded top corners (10px radius minus its 1px border) */
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
 }
 
 .raw-toolbar-left,
