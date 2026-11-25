@@ -2610,6 +2610,24 @@ while focus mode is active leaves both panes hidden the next time the app opens,
 with no Exit focus button present to explain why or restore them. Toggle the explorer
 (`Cmd+B`) and rail (`Cmd+\`) back on individually to recover.
 
+### Desktop shell hooks
+The desktop shell (a separate private shell around this app) styles the window
+chrome from outside, so these hooks are a contract. Keep them when restyling:
+
+- `data-app-root`: the root element that holds the frame background and padding.
+- `data-app-header`: the main column's top row (see App header above).
+- `data-sidebar-logo`: the logo container pinned to the top left of the sidebar,
+  the same element in the expanded panel and the icon rail.
+- `[data-sidebar-panel]`: the expanded sidebar panel.
+- `--window-inset-left`: a CSS variable the shell sets on `[data-app-header]` to
+  clear native window controls. The header's left padding adds it, whatever the
+  sidebar state.
+
+The main column (`data-main-column`), the document panel (`data-doc-panel`) and
+its tab strip (`data-doc-strip`) are also stable. There is no status bar: the
+window's bottom edge is the document panel's. `Cmd+K` is reachable from the
+app header's command chip, and `?` still opens the shortcuts panel.
+
 ### Keyboard shortcuts
 
 | Keys | Action |

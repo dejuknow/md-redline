@@ -371,3 +371,32 @@ test.describe('App header', () => {
     expect(await firstChildOffset()).toBeGreaterThanOrEqual(72);
   });
 });
+
+test.describe('No status bar and desktop shell hooks', () => {
+  test('there is no status bar', async ({ page }) => {
+    await openFixture(page);
+    const stray = page.locator('div', { hasText: 'Commands' }).filter({ hasText: 'Shortcuts' });
+    await expect(stray.filter({ hasNot: page.locator('div') })).toHaveCount(0);
+    await expect(page.getByText('Commands', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Shortcuts', { exact: true })).toHaveCount(0);
+
+    const panelBottom = await page
+      .locator('[data-doc-panel]')
+      .evaluate((el) => el.getBoundingClientRect().bottom);
+    const viewport = page.viewportSize()!;
+    expect(viewport.height - panelBottom).toBeLessThanOrEqual(8);
+  });
+
+  test('the sidebar logo carries data-sidebar-logo', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('[data-sidebar-logo]')).toHaveCount(1);
+    await expect(page.locator('[data-sidebar-logo]')).toBeVisible();
+  });
+
+  test('? still opens the keyboard shortcuts panel', async ({ page }) => {
+    await openFixture(page);
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('?');
+    await expect(page.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeVisible();
+  });
+});

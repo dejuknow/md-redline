@@ -3377,7 +3377,10 @@ export default function App() {
           >
             {/* Logo pinned to one spot so it never shifts between the
                   expanded and collapsed states. */}
-            <div className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none">
+            <div
+              data-sidebar-logo
+              className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none"
+            >
               <AppLogo />
             </div>
 
@@ -3601,7 +3604,7 @@ export default function App() {
         </>
       )}
 
-      {/* Main column: chrome row, document, status bar */}
+      {/* Main column: app header, document panel */}
       <div
         data-main-column
         className="flex-1 min-w-0 flex flex-col"
@@ -4184,22 +4187,6 @@ export default function App() {
           }}
           onCancel={() => setConfirmDeleteAll(false)}
         />
-
-        {/* Keyboard shortcuts hint */}
-        <div className="h-6 bg-surface-secondary border-t border-border flex items-center px-4 gap-4 text-[10px] text-content-secondary shrink-0">
-          <span>
-            <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
-              {modKey}+K
-            </kbd>{' '}
-            Commands
-          </span>
-          <span className="ml-auto">
-            <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
-              ?
-            </kbd>{' '}
-            Shortcuts
-          </span>
-        </div>
       </div>
     </div>
   );
