@@ -877,7 +877,12 @@ its own card (`[data-doc-page-surface]`, `bg-surface`, a 1px border, 10px
 radius), holding the diff bar and the document body. Tabs come first, via
 `TabBar`'s `variant="strip"`, as folder tabs: the active tab takes the page's
 fill and border and joins the page's top edge, and inactive tabs are muted text
-on the frame. The active tab's top lines up with the sidebar's. The strip is
+on the frame, with a short hairline between neighbours (and before the open-file
+button) wherever neither side is the active tab. A tab is the same width active
+or not: every tab has a transparent or real 1px border, the name reserves its
+medium-weight width (an invisible `::after` copy), and no tab keeps room for its
+close button, which appears on hover (or keyboard focus) over the name's end on
+a patch of the tab's own fill that fades into the text. The active tab's top lines up with the sidebar's. The strip is
 not inside an `overflow-clip` ancestor (only the page card below it clips),
 which is what lets the "Show all open tabs" menu (`tab-list-menu`) hang below it
 unclipped.

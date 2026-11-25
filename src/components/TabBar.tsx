@@ -78,6 +78,13 @@ const tabControlButtonClassStrip =
 // tabs' scrollport rather than inside it, so a tab can never scroll under it.
 // The button stops 1px short of the bottom so the strip's rule keeps running
 // under it; the hover fill is on an inner chip.
+// A short hairline at a tab's left edge. Inactive tabs have no fill, so
+// these mark where each one ends, and the open-file button reads as the cell
+// after the last tab rather than a control floating on the frame. None touches
+// the active tab, whose border already draws its edges.
+const tabSeparatorClass =
+  'before:absolute before:-left-px before:top-1/2 before:-translate-y-1/2 before:h-4 before:w-px before:bg-content-muted/35';
+
 const tabActionButtonClassStrip =
   'group/open flex self-stretch mb-px w-9 items-center justify-center shrink-0 text-content-muted transition-colors hover:text-content';
 
@@ -285,17 +292,29 @@ export function TabBar({
                       onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
                     }
                   }}
-                  className={`group flex items-center gap-1.5 px-3 leading-none max-w-[200px] text-[13px] rounded-t-lg transition-colors ${
+                  className={`group relative flex items-center gap-1.5 px-3 leading-none max-w-[200px] text-[13px] rounded-t-lg transition-colors ${
+                    index > 0 && !isActive && tabs[index - 1].filePath !== activeFilePath
+                      ? tabSeparatorClass
+                      : ''
+                  } ${
                     isActive
-                      ? 'h-[35px] shrink-0 min-w-[120px] bg-surface border border-border border-b-0 text-content font-medium'
-                      : 'h-[34px] shrink min-w-[112px] text-content-muted hover:text-content'
+                      ? 'h-[35px] shrink-0 min-w-[112px] bg-surface border border-border border-b-0 text-content font-medium'
+                      : 'h-[34px] shrink min-w-[112px] border border-transparent border-b-0 text-content-muted hover:text-content'
                   }`}
                   title={tabTitle(tab)}
                   // The active first tab stands on the page's left edge, so the
                   // page squares that corner (index.css) and the two read as one.
                   data-tab-flush={isActive && index === 0 && !isOverflowing ? '' : undefined}
                 >
-                  <span className="min-w-0 truncate">{fileName}</span>
+                  {/* The name always takes its medium-weight width (an invisible
+                      copy drawn by ::after), so a tab is the same size active
+                      or not. */}
+                  <span
+                    data-label={fileName}
+                    className="min-w-0 flex flex-col after:content-[attr(data-label)] after:h-0 after:overflow-hidden after:invisible after:font-medium after:whitespace-nowrap"
+                  >
+                    <span className="truncate">{fileName}</span>
+                  </span>
                   {count > 0 && (
                     <span
                       className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
@@ -317,8 +336,15 @@ export function TabBar({
                       e.stopPropagation();
                       onCloseTab(tab.filePath);
                     }}
-                    className={`ml-1 p-0.5 rounded hover:bg-tint shrink-0 transition-opacity ${
-                      isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    // No tab keeps room for its close button: on hover it
+                    // appears over the name's end, on a patch of the tab's own
+                    // fill that fades into the text. Active or not, a tab is
+                    // then the width of its name, so switching tabs never
+                    // resizes one or moves its neighbours.
+                    className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity ${
+                      isActive
+                        ? 'bg-surface shadow-[-10px_0_8px_-2px_var(--color-surface)] hover:text-content'
+                        : 'bg-frame shadow-[-10px_0_8px_-2px_var(--color-frame)] hover:text-content'
                     }`}
                     aria-label={`Close ${getPathBasename(tab.filePath)}`}
                     tabIndex={-1}
@@ -342,7 +368,11 @@ export function TabBar({
         <button
           type="button"
           onClick={onOpenFile}
-          className={tabActionButtonClassStrip}
+          className={`${tabActionButtonClassStrip} relative ${
+            tabs.length > 0 && tabs[tabs.length - 1].filePath !== activeFilePath
+              ? tabSeparatorClass
+              : ''
+          }`}
           title="Open file"
           aria-label="Open file"
         >
