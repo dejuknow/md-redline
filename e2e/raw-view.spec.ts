@@ -307,7 +307,7 @@ test.describe('Toolbar pinning', () => {
     await openFixture(page);
     await switchToRaw(page);
 
-    const toolbar = page.locator('.raw-toolbar');
+    const toolbar = page.locator('[data-doc-strip]');
     await expect(toolbar).toBeVisible();
 
     const initialBox = await toolbar.boundingBox();

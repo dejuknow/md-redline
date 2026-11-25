@@ -13,8 +13,6 @@ function renderToolbar(overrides: Partial<React.ComponentProps<typeof Toolbar>> 
       accessRequestShown={false}
       onTrustFolder={vi.fn()}
       isLoading={false}
-      commentsSurfaceVisible={false}
-      onToggleSidebar={vi.fn()}
       {...overrides}
     />,
   );

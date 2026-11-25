@@ -7,15 +7,25 @@ interface Props {
   onJump: (id: string) => void;
   /** Test hook: start visible without scrolling (jsdom cannot scroll). */
   initialVisible?: boolean;
+  /** Placement classes from the host (App floats it over the document). */
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 /**
  * Breadcrumb naming the current section once the reader scrolls past the
- * first heading. Renders inline in the panel toolbar's middle slot. Content
- * comes from headingChain; this component only owns the scrolled visibility
- * check and rendering.
+ * first heading. Drawn as a pill floating over the top of the document; the
+ * host places it. Content comes from headingChain; this component only owns
+ * the scrolled visibility check and rendering.
  */
-export function SectionBreadcrumb({ chain, containerRef, onJump, initialVisible = false }: Props) {
+export function SectionBreadcrumb({
+  chain,
+  containerRef,
+  onJump,
+  initialVisible = false,
+  className = '',
+  style,
+}: Props) {
   const [scrolled, setScrolled] = useState(initialVisible);
 
   useEffect(() => {
@@ -48,16 +58,17 @@ export function SectionBreadcrumb({ chain, containerRef, onJump, initialVisible 
   return (
     <div
       data-section-breadcrumb
-      className="breadcrumb-enter flex items-center gap-1 min-w-0 max-w-full"
+      className={`breadcrumb-enter flex items-center gap-1 min-w-0 max-w-full h-7 px-3 rounded-full border border-border bg-surface shadow-sm ${className}`}
+      style={style}
     >
       {chain.map((h, i) => (
         <span key={h.id} className="flex items-center gap-1 min-w-0">
-          {i > 0 && <span className="text-content-faint text-xs shrink-0">&rsaquo;</span>}
+          {i > 0 && <span className="text-content-faint text-[13px] shrink-0">&rsaquo;</span>}
           <button
             type="button"
             onClick={() => onJump(h.id)}
             title={h.text}
-            className="text-xs text-content-secondary hover:text-content truncate max-w-[28ch] cursor-pointer transition-colors"
+            className="text-[13px] text-content-secondary hover:text-content truncate max-w-[28ch] cursor-pointer transition-colors"
           >
             {h.text}
           </button>

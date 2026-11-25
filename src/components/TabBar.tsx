@@ -68,17 +68,30 @@ interface Props {
   onCloseTab: (path: string) => void;
   onOpenFile: () => void;
   onTabContextMenu?: (info: TabContextMenuInfo) => void;
-  embedded?: boolean;
+  /**
+   * 'strip': drawn inside the document panel's top row. The active tab is a
+   * folder tab joined to the page below; the row background and its bottom
+   * rule belong to the strip, not to this component.
+   */
+  variant?: 'strip';
 }
 
-const tabControlButtonClass =
+const tabControlButtonClassBar =
   'flex h-full w-8 items-center justify-center shrink-0 border-l border-border text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
+
+const tabControlButtonClassStrip =
+  'self-center flex h-[26px] w-[26px] items-center justify-center shrink-0 rounded-md text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
 
 // w-9 (36px) is load-bearing: it has to stay in step with the scrollport's
 // scroll-pr-10 below, which is what keeps a tab from scrolling under this
 // button.
-const tabActionButtonClass =
+const tabActionButtonClassBar =
   'sticky right-0 z-10 flex h-full w-9 items-center justify-center bg-surface-secondary shrink-0 rounded-t-md text-content-muted transition-colors hover:bg-tint hover:text-content';
+
+// In the strip the button stops 1px short of the bottom so the strip's rule
+// keeps running under it; the hover fill is on an inner chip.
+const tabActionButtonClassStrip =
+  'group/open sticky right-0 z-10 flex self-stretch mb-px w-9 items-center justify-center bg-surface-secondary shrink-0 text-content-muted transition-colors hover:text-content';
 
 export function TabBar({
   tabs,
@@ -89,8 +102,11 @@ export function TabBar({
   onCloseTab,
   onOpenFile,
   onTabContextMenu,
-  embedded = false,
+  variant,
 }: Props) {
+  const strip = variant === 'strip';
+  const tabControlButtonClass = strip ? tabControlButtonClassStrip : tabControlButtonClassBar;
+  const badgeTextClass = strip ? 'text-[12px] px-1.5' : 'text-[10px] px-1';
   const tabsViewportRef = useRef<HTMLDivElement>(null);
   const tabsContentRef = useRef<HTMLDivElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -228,8 +244,10 @@ export function TabBar({
   return (
     <div
       className={
-        embedded
-          ? 'h-full flex items-stretch min-w-0'
+        strip
+          ? // -mb-px lays the row over the strip's bottom rule, so the active
+            // tab can cover it and join the page below.
+            'flex-1 self-stretch -mb-px flex items-stretch min-w-0'
           : 'h-9 bg-surface-secondary border-b border-border flex items-stretch shrink-0'
       }
     >
@@ -239,7 +257,9 @@ export function TabBar({
             type="button"
             onClick={() => scrollTabsBy('left')}
             disabled={!canScrollLeft}
-            className={`${tabControlButtonClass} border-r border-l-0`}
+            className={
+              strip ? tabControlButtonClass : `${tabControlButtonClass} border-r border-l-0`
+            }
             title="Scroll tabs left"
             aria-label="Scroll tabs left"
           >
@@ -262,7 +282,10 @@ export function TabBar({
           ref={tabsViewportRef}
           className="min-w-0 flex-1 h-full overflow-x-auto no-scrollbar scroll-pr-10"
         >
-          <div ref={tabsContentRef} className="flex h-full items-stretch min-w-max gap-1">
+          <div
+            ref={tabsContentRef}
+            className={`flex h-full min-w-max ${strip ? 'items-end gap-0.5' : 'items-stretch gap-1'}`}
+          >
             {tabs.map((tab) => {
               const isActive = tab.filePath === activeFilePath;
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
@@ -288,19 +311,25 @@ export function TabBar({
                       onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
                     }
                   }}
-                  className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-b-2 rounded-t-md shrink-0 max-w-[200px] transition-colors ${
-                    isActive
-                      ? embedded
-                        ? 'bg-surface text-content font-medium border-b-transparent'
-                        : 'bg-surface text-content font-medium border-b-primary'
-                      : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
+                  className={`group flex items-center gap-1.5 px-3 leading-none shrink-0 max-w-[200px] transition-colors ${
+                    strip
+                      ? `text-[13px] rounded-t-lg ${
+                          isActive
+                            ? 'h-[35px] bg-surface border border-border border-b-0 text-content font-medium'
+                            : 'h-[34px] text-content-muted hover:text-content'
+                        }`
+                      : `h-full text-xs border-b-2 rounded-t-md ${
+                          isActive
+                            ? 'bg-surface text-content font-medium border-b-primary'
+                            : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
+                        }`
                   }`}
                   title={tabTitle(tab)}
                 >
                   <span className="truncate">{fileName}</span>
                   {count > 0 && (
                     <span
-                      className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
+                      className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
                         isActive
                           ? 'bg-primary-bg-strong text-primary-text'
                           : 'bg-surface-inset text-content-secondary'
@@ -342,19 +371,27 @@ export function TabBar({
             <button
               type="button"
               onClick={onOpenFile}
-              className={tabActionButtonClass}
+              className={strip ? tabActionButtonClassStrip : tabActionButtonClassBar}
               title="Open file"
               aria-label="Open file"
             >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
+              <span
+                className={
+                  strip
+                    ? 'flex h-[26px] w-[26px] items-center justify-center rounded-md transition-colors group-hover/open:bg-tint'
+                    : 'contents'
+                }
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
+                <svg
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </span>
             </button>
           </div>
         </div>
@@ -441,7 +478,7 @@ export function TabBar({
                         </span>
                         {count > 0 && (
                           <span
-                            className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
+                            className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
                               isActive
                                 ? 'bg-primary-bg-strong text-primary-text'
                                 : 'bg-surface-inset text-content-secondary'

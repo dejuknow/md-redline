@@ -44,7 +44,9 @@ import { DragHandles } from './components/DragHandles';
 import { RawView, type RawViewHandle } from './components/RawView';
 import { RenderedDiffView, type RenderedDiffViewHandle } from './components/RenderedDiffView';
 import { useDiffLines } from './hooks/useDiffLines';
-import { PanelToolbar } from './components/PanelToolbar';
+import { DocStrip } from './components/DocStrip';
+import { DiffBar } from './components/DiffBar';
+import { HandOffButton } from './components/HandOffButton';
 import { Toast } from './components/Toast';
 import { UpdateNotice } from './components/UpdateNotice';
 
@@ -134,6 +136,10 @@ const BACKFILL_WRITE_DELAY_MS = 2000;
 // start-up inputs, the explorer waiting for its folder, and the
 // reading-position restore waiting for settings.
 const STARTUP_REVEAL_MS = 1000;
+// Where a heading jump leaves its heading, from the top of the scroll
+// container: the headings' own 16px scroll margin, plus the floating section
+// breadcrumb (28px tall) and an 8px gap below it.
+const HEADING_JUMP_OFFSET = 16 + 28 + 8;
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
@@ -1820,8 +1826,16 @@ export default function App() {
         return;
       }
 
-      const el = containerRef.current?.querySelector(`#${CSS.escape(id)}`);
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const container = containerRef.current;
+      const el = container?.querySelector(`#${CSS.escape(id)}`);
+      if (!container || !el) return;
+      // Land the heading below the floating section breadcrumb rather than
+      // under it: the pill covers the top of the document once scrolled.
+      const top =
+        el.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop;
+      container.scrollTo({ top: Math.max(0, top - HEADING_JUMP_OFFSET), behavior: 'smooth' });
     },
     [setActiveHeadingId, viewMode, scrollSpyRafRef, spyDisabledRef],
   );
@@ -3599,21 +3613,6 @@ export default function App() {
           accessRequestShown={showAccessRequest}
           onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
           isLoading={isLoading}
-          commentsSurfaceVisible={railShown || drawerOpen}
-          onToggleSidebar={toggleCommentsSurface}
-          tabs={
-            <TabBar
-              embedded
-              tabs={tabs}
-              activeFilePath={activeFilePath}
-              commentCounts={tabCommentCounts}
-              resolvedCommentCounts={resolvedCommentCounts}
-              onSwitchTab={switchTab}
-              onCloseTab={closeTab}
-              onOpenFile={openFilePicker}
-              onTabContextMenu={handleTabContextMenu}
-            />
-          }
         />
 
         <>
@@ -3625,6 +3624,101 @@ export default function App() {
               data-prose-font={settings.proseFont}
               data-prose-size={settings.proseSize}
             >
+              <DocStrip
+                tabs={
+                  <TabBar
+                    variant="strip"
+                    tabs={tabs}
+                    activeFilePath={activeFilePath}
+                    commentCounts={tabCommentCounts}
+                    resolvedCommentCounts={resolvedCommentCounts}
+                    onSwitchTab={switchTab}
+                    onCloseTab={closeTab}
+                    onOpenFile={openFilePicker}
+                    onTabContextMenu={handleTabContextMenu}
+                  />
+                }
+                railControls={
+                  railShown ? (
+                    <RailDensityControl
+                      density={railDensity}
+                      onDensityChange={setRailDensity}
+                      openCount={commentCount}
+                      resolvedCount={resolvedCommentCount}
+                      totalCount={comments.length}
+                      resolveEnabled={settings.enableResolve}
+                      onJumpPrev={handleJumpToPrev}
+                      onJumpNext={handleJumpToNext}
+                      onBulkResolve={handleBulkResolve}
+                      onBulkDeleteResolved={handleBulkDeleteResolved}
+                      onBulkDelete={handleBulkDelete}
+                    />
+                  ) : undefined
+                }
+                viewMode={viewMode}
+                onViewModeChange={(mode) => {
+                  setViewMode(mode);
+                  if (mode === 'raw') {
+                    if (diffChunkCount > 0) {
+                      setDiffEnabled(true);
+                      setDiffPending(false);
+                    }
+                  }
+                }}
+                hasDiffSnapshot={currentSnapshot != null}
+                diffEnabled={diffEnabled}
+                diffPending={diffPending}
+                diffChunkCount={diffChunkCount}
+                onDiffToggle={handleDiffToggle}
+                searchActive={showSearch}
+                onSearch={() => {
+                  if (showSearch) {
+                    handleSearchClose();
+                  } else {
+                    setActiveModal('search');
+                    setSearchFocusTrigger((t) => t + 1);
+                  }
+                }}
+                onCopyDocument={handleCopyDocument}
+                copyFeedback={copyFeedback}
+                commentsSurfaceVisible={railShown || drawerOpen}
+                openCommentCount={commentCount}
+                onToggleComments={toggleCommentsSurface}
+                trailing={
+                  // Hand off anchors the far right, behind a hairline so it
+                  // reads as the terminal action rather than another utility.
+                  // Disabled until the active tab has a sendable comment (the
+                  // button owns that logic).
+                  activeFilePath ? (
+                    <>
+                      <div className="w-px h-4 bg-border" aria-hidden="true" />
+                      <HandOffButton
+                        activeFilePath={activeFilePath}
+                        commentCounts={handoffCounts}
+                        onCopyAgentPrompt={handleHandoff}
+                      />
+                    </>
+                  ) : undefined
+                }
+              />
+              <DiffBar
+                diffEnabled={diffEnabled}
+                referenceLabel={
+                  diffEnabled && currentReference && diffChunkCount > 0
+                    ? formatReferenceLabel(currentReference)
+                    : undefined
+                }
+                diffChunkCount={diffChunkCount}
+                onDiffPrev={() => {
+                  if (viewMode === 'raw') rawViewRef.current?.diffPrev();
+                  else renderedDiffRef.current?.prev();
+                }}
+                onDiffNext={() => {
+                  if (viewMode === 'raw') rawViewRef.current?.diffNext();
+                  else renderedDiffRef.current?.next();
+                }}
+                onMarkReviewed={handleMarkReviewed}
+              />
               {showSearch && (
                 <SearchBar
                   query={searchQuery}
@@ -3638,77 +3732,6 @@ export default function App() {
                 />
               )}
               <div className="flex-1 min-h-0 flex flex-col">
-                <PanelToolbar
-                  viewMode={viewMode}
-                  onViewModeChange={(mode) => {
-                    setViewMode(mode);
-                    if (mode === 'raw') {
-                      if (diffChunkCount > 0) {
-                        setDiffEnabled(true);
-                        setDiffPending(false);
-                      }
-                    }
-                  }}
-                  searchActive={showSearch}
-                  onSearch={() => {
-                    if (showSearch) {
-                      handleSearchClose();
-                    } else {
-                      setActiveModal('search');
-                      setSearchFocusTrigger((t) => t + 1);
-                    }
-                  }}
-                  commentCounts={handoffCounts}
-                  activeFilePath={activeFilePath}
-                  onCopyAgentPrompt={handleHandoff}
-                  hasDiffSnapshot={currentSnapshot != null}
-                  diffEnabled={diffEnabled}
-                  diffPending={diffPending}
-                  diffChunkCount={diffChunkCount}
-                  referenceLabel={
-                    diffEnabled && currentReference && diffChunkCount > 0
-                      ? formatReferenceLabel(currentReference)
-                      : undefined
-                  }
-                  onDiffToggle={handleDiffToggle}
-                  onDiffPrev={() => {
-                    if (viewMode === 'raw') rawViewRef.current?.diffPrev();
-                    else renderedDiffRef.current?.prev();
-                  }}
-                  onDiffNext={() => {
-                    if (viewMode === 'raw') rawViewRef.current?.diffNext();
-                    else renderedDiffRef.current?.next();
-                  }}
-                  onMarkReviewed={handleMarkReviewed}
-                  onCopyDocument={handleCopyDocument}
-                  copyFeedback={copyFeedback}
-                  breadcrumb={
-                    railCapable ? (
-                      <SectionBreadcrumb
-                        chain={breadcrumbChain}
-                        containerRef={containerRef}
-                        onJump={handleHeadingNavigate}
-                      />
-                    ) : undefined
-                  }
-                  railControls={
-                    railShown ? (
-                      <RailDensityControl
-                        density={railDensity}
-                        onDensityChange={setRailDensity}
-                        openCount={commentCount}
-                        resolvedCount={resolvedCommentCount}
-                        totalCount={comments.length}
-                        resolveEnabled={settings.enableResolve}
-                        onJumpPrev={handleJumpToPrev}
-                        onJumpNext={handleJumpToNext}
-                        onBulkResolve={handleBulkResolve}
-                        onBulkDeleteResolved={handleBulkDeleteResolved}
-                        onBulkDelete={handleBulkDelete}
-                      />
-                    ) : undefined
-                  }
-                />
                 {/* A refused folder covers the document rather than leaving a
                     blank sheet behind an error strip: the ask belongs on the
                     surface the user is looking at. It covers rather than
@@ -3745,6 +3768,21 @@ export default function App() {
                     />
                   ) : (
                     <div className="relative flex-1 min-h-0">
+                      {railCapable && (
+                        <SectionBreadcrumb
+                          chain={breadcrumbChain}
+                          containerRef={containerRef}
+                          onJump={handleHeadingNavigate}
+                          className="absolute top-2 -translate-x-1/2 z-20"
+                          // Centered over the prose column, not the body: the
+                          // page is centered and the column sits PAD_L into it,
+                          // so a body-centered pill would ride over the rail.
+                          style={{
+                            left: `calc(50% - ${geometry.pageWidth / 2}px + ${PAD_L + geometry.colWidth / 2}px)`,
+                            maxWidth: geometry.colWidth,
+                          }}
+                        />
+                      )}
                       <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
                         <div
                           ref={pageRef}

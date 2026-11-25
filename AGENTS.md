@@ -77,7 +77,8 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/RawView.tsx`: raw markdown view with syntax highlighting and diff overlay
 - `src/components/RenderedDiffView.tsx`: rendered prose view of the diff overlay
 - `src/components/ReviewBanner.tsx`: review session banner (send batch, finish, cancel)
-- `src/components/PanelToolbar.tsx`: shared per-panel toolbar (search, view-mode, copy, handoff, diff controls)
+- `src/components/DocStrip.tsx`: the document panel's top row: tabs on the left, document controls (view mode, diff, search, copy, comments toggle, handoff) on the right
+- `src/components/DiffBar.tsx`: row under the tab strip with the change count, diff reference label, prev/next change and Mark reviewed
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
@@ -844,19 +845,38 @@ the server waits 60s before clearing `waitingForAgent`.
 
 ## UI features
 
-### Title row
-The toolbar and the tab bar share one 44px row (`h-11`) instead of stacking as two
-separate rows. The app icon still anchors the left side, but the "md-redline"
-wordmark text next to it was dropped to make room; tabs render inline via
-`TabBar`'s `embedded` mode in the row's flexible middle section, with the settings
-button and the rest of the toolbar controls on the same baseline. Below it, the
-per-panel toolbar (`PanelToolbar.tsx`: search, view-mode, diff controls) is a
-slimmer 2rem strip.
+### Tab strip
+The tabs are attached to the top of the document panel (`[data-doc-panel]`) in
+one 42px row, `DocStrip.tsx` (`[data-doc-strip]`). Tabs come first, via
+`TabBar`'s `variant="strip"`: the active tab is a folder tab (`bg-surface`,
+border on top and sides, none on the bottom) whose row is laid 1px over the
+strip's bottom rule so the tab joins the page below; inactive tabs are muted text
+with no background. The tabs scroll in their own region, so the controls never
+cover a tab. The strip is not inside an `overflow-clip` ancestor (only the panel
+body below it clips), which is what lets the "Show all open tabs" menu
+(`tab-list-menu`) hang below it unclipped.
+
+The controls group on the right (`data-testid="panel-toolbar"`) holds, in order:
+the rail controls (`RailDensityControl`, only while the rail is shown), the
+rendered/raw segmented control ("View raw markdown" / "Switch to rendered view"
+on the segment that changes the view), the Diff toggle ("Show diff" / "Hide
+diff", disabled with an explanatory title until a reference exists, with the
+change count and the pending pulse), search ("Find in document (Cmd+F)"), copy
+(`copy-button`), the comments toggle ("Toggle comments rail (Cmd+\)",
+`aria-pressed` while the rail or drawer is shown, carrying the open count only
+while the rail is hidden, since the rail controls already say "N open"), then
+Hand off behind a hairline. Pressed toggles use a neutral `bg-tint`, not crimson.
+Under 600px of strip width (`useElementWidth`), view, diff and copy fold into a
+**View** menu button (`aria-label="View options"`) whose items keep the same
+titles and test id; search and the comments toggle stay out.
 
 The open-file button is sticky at the right edge of the tab strip, so it overlays
 whichever tab ends there. The strip carries a `scroll-pr-10` that must stay at or
 above that button's `w-9`, otherwise the browser parks the active tab underneath
 it when scrolling the tab into view.
+
+Above the panel, the main column still has the `Toolbar` status row (load
+errors, "Loading...", the lost-access notice) until the app header replaces it.
 
 ### Folder permission requests
 Opening a file outside the allowed roots is a consent moment, not a failure, and
@@ -1565,8 +1585,8 @@ The single comment surface for the rendered view: a fixed-width column at the
 right edge of the document page, inside the same width-managed page unit as
 the prose column (`src/lib/page-geometry.ts`, `CommentsRail.tsx`). Two
 densities, switched via the segmented control (`RailDensityControl`,
-`[data-rail-header]`) that renders in the panel toolbar's right group while
-the rail is shown (a header inside the rail occluded the anchored cards), and
+`[data-rail-header]`) that renders at the start of the tab strip's controls
+group while the rail is shown (a header inside the rail occluded the anchored cards), and
 persisted per-user (see below). Each density segment shows a crimson
 focus-visible ring on keyboard focus.
 
@@ -1806,12 +1826,12 @@ key alongside the rest of the pane layout state.
 **When the rail can't show**, meaning raw view, an active diff overlay, a
 rendered view narrower than the 888px threshold, the user has hidden it, or
 focus mode is active, two fallback surfaces take over (there is deliberately
-ONE entry point for comments: the toolbar comments button / `Cmd+\`, which
+ONE entry point for comments: the tab strip's comments toggle / `Cmd+\`, which
 opens the rail where it fits and the drawer everywhere else):
 
 - **Comments drawer** (`CommentsDrawer.tsx`, `data-comments-drawer`): a
-  right-side overlay hosting `CommentListSurface`, opened by the toolbar
-  comments button or `Cmd+\` when the rail can't fit. Closes automatically
+  right-side overlay hosting `CommentListSurface`, opened by the tab strip's
+  comments toggle or `Cmd+\` when the rail can't fit. Closes automatically
   once the rail becomes available again, so the two surfaces never show at
   once. (An earlier bottom-right FAB duplicated this entry point and was
   removed.)
@@ -2011,13 +2031,16 @@ card. Hidden when there are no anchored comments, in raw view, or while the
 diff overlay is showing.
 
 ### Section breadcrumb
-An inline breadcrumb (`data-section-breadcrumb`) rendered in the panel
-toolbar's middle slot (the `breadcrumb` prop on `PanelToolbar`) once the
-reader scrolls past the document's first heading. It names the current section
+A breadcrumb pill (`data-section-breadcrumb`) floating centered at the top of
+the rendered document body, outside the scroll container and no wider than the
+prose column, shown once the reader scrolls past the document's first heading. It names the current section
 by its full heading chain (e.g. "Requirements > Functional Requirements"),
 truncating each segment past 28 characters. Each segment is a button that
 jumps to that heading. Hidden in raw view and while the diff overlay is
 showing, and disappears again once scrolled back above the first heading.
+Heading jumps (outline, breadcrumb, palette) scroll their heading to
+`HEADING_JUMP_OFFSET` in `App.tsx` (the 16px heading scroll margin plus the
+pill's 28px and an 8px gap), so the heading lands below the pill, not under it.
 
 ### Reading position
 The reader's place is kept as a block, not a pixel offset
@@ -2119,7 +2142,7 @@ once (`overlayOpen`) for both this reveal and the Escape guard that keeps a
 selection when Escape closes an overlay (#100).
 
 ### Handoff button
-`src/components/HandOffButton.tsx` (in the panel toolbar) is md-redline's
+`src/components/HandOffButton.tsx` (at the right end of the tab strip) is md-redline's
 "submit review": it copies the agent prompt for the review comments so they
 can be handed back to the agent. Its scope follows the **active tab**, never
 the whole set of open tabs, because reviewers keep unrelated docs from
@@ -2194,7 +2217,7 @@ What a click does (`src/hooks/useHandoff.ts`):
 ### Diff overlay
 After a review handoff, or after an agent saves a before copy with `mdr_baseline`,
 a diff overlay shows what changed since that reference,
-available in both rendered and raw views via the panel toolbar. The handoff
+available in both rendered and raw views via the tab strip's Diff toggle. The handoff
 captures a **diff reference** per file (`{ content, capturedAt, origin, agentName? }`,
 persisted in `localStorage` under `md-redline-snapshots`; legacy bare-string
 values are migrated on load). The change set is computed by `useDiffLines`
@@ -2211,6 +2234,10 @@ auto-managed as a "review frontier":
 - The diff toggle is quiet (no active styling, no count badge) when
   `diffChunkCount` is 0, and switching to raw view auto-opens the overlay only
   when there are changes to show.
+- A diff bar (`DiffBar.tsx`, `[data-diff-bar]`) sits under the tab strip
+  whenever the overlay is on or there are changed chunks: the change count and
+  Mark reviewed (with changes) always, the reference label and prev/next change
+  only while the overlay is on.
 - While the overlay is open on a non-empty diff, a label states what is being
   compared, e.g. "Since last handoff, 3:14 PM" or "Since last review, ..."
   (from the reference `origin` + `capturedAt`, via `formatReferenceLabel`).
@@ -2228,7 +2255,7 @@ auto-managed as a "review frontier":
   Guarded against spurious advances on tab switch, Undo, and `enableResolve`
   toggles (`shouldAdvanceFrontier` plus the `prevOpenCount` /
   `advancedForEpisode` / `frontierFile` / `prevResolveEnabled` refs in `App.tsx`).
-- **Mark reviewed** (panel toolbar text button + command palette, shown only
+- **Mark reviewed** (diff bar text button + command palette, shown only
   when `diffChunkCount > 0`) manually advances the reference to the current
   content, also with an Undo toast ("Diff reset.").
 - Both resets go through `resetDiffWithUndo` in `App.tsx`, which also offers the
@@ -2423,8 +2450,8 @@ instead of reloading. The pending edit's save keeps the un-bumped mtime, so a re
 conflict still 409s; Reload discards the open edit and loads the disk content.
 
 ### Left sidebar (full height)
-The sidebar owns the window's full left edge, top to bottom; the chrome row
-(tabs, comments toggle) starts to its right. Two states:
+The sidebar owns the window's full left edge, top to bottom; the main column
+(status row, then the document panel with its tab strip) starts to its right. Two states:
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): logo + close X in an
   h-11 identity row (aligns with the chrome row), Explorer/Outline view tabs
@@ -2482,7 +2509,7 @@ it, or press `Cmd+.` again, to exit and restore the panes to their snapshotted
 state. The density strip and section breadcrumb both stay available in focus
 mode. Toggling
 the explorer or the rail individually while focus mode is active (`Cmd+B`,
-`Cmd+\`, the comments toolbar button, or the command palette) exits focus mode and
+`Cmd+\`, the tab strip's comments toggle, or the command palette) exits focus mode and
 restores the snapshot instead of performing their normal toggle, with one
 exception: on a window too narrow for the rail to fit at all, `Cmd+\` opens
 the comments drawer instead of exiting focus mode, since that check only

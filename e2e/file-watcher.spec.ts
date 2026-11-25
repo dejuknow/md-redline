@@ -462,12 +462,12 @@ test.describe('File watcher - external changes', () => {
     // explorer entry, the tab, the X), so a name-based `.first()` reaches the
     // explorer and closes nothing, which is how this test first passed for the
     // wrong reason. The tab strip emptying is the signal that it really closed.
-    await page.locator('button.group.rounded-t-md').first().hover();
+    await page.locator('[data-doc-strip] button.group').first().hover();
     await page
       .getByRole('button', { name: /test-doc\.md/ })
       .nth(2)
       .click();
-    await expect(page.locator('button.group.rounded-t-md')).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator('[data-doc-strip] button.group')).toHaveCount(0, { timeout: 5_000 });
 
     // Well past the debounce: nothing may reach disk for a closed tab.
     await page.waitForTimeout(3500);

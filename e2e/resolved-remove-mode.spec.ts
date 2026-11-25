@@ -70,7 +70,7 @@ async function openFixture(page: Page) {
 // The open count is the rounded badge with a number and no title.
 function openBadge(page: Page) {
   return page
-    .locator('.h-11')
+    .locator('[data-doc-strip]')
     .locator('button', { hasText: 'test-doc.md' })
     .first()
     .locator('span.rounded-full:not([title])', { hasText: /\d/ });

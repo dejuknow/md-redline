@@ -45,22 +45,25 @@ async function switchToRaw(page: Page) {
 
 /** Locate a toolbar toggle by its title attribute. */
 function toggleBtn(page: Page, titlePattern: string): Locator {
-  return page.locator(`.raw-toolbar button[title*="${titlePattern}"]`);
+  return page.locator(`[data-doc-strip] button[title*="${titlePattern}"]`);
 }
 
 /** Locate a toolbar text button by its label. */
 function toolbarBtn(page: Page, label: string): Locator {
-  return page.locator('.raw-toolbar button', { hasText: label });
+  return page.locator('[data-diff-bar] button', { hasText: label });
 }
+
+// The pressed fill is a bare bg-tint class; hover:bg-tint is not it.
+const PRESSED_FILL = /(^|\s)bg-tint(\s|$)/;
 
 /** Assert that a toolbar toggle button is in its active state. */
 async function expectActive(btn: Locator) {
-  await expect(btn).toHaveClass(/bg-primary-bg/);
+  await expect(btn).toHaveClass(PRESSED_FILL);
 }
 
 /** Assert that a toolbar toggle button is NOT in its active state. */
 async function expectInactive(btn: Locator) {
-  await expect(btn).not.toHaveClass(/bg-primary-bg/);
+  await expect(btn).not.toHaveClass(PRESSED_FILL);
 }
 
 // ---------------------------------------------------------------------------
@@ -483,7 +486,9 @@ test.describe('Diff overlay', () => {
 /** Diff toggle button inside the rendered view's secondary toolbar. */
 function renderedDiffBtn(page: Page): Locator {
   return page
-    .locator('.raw-toolbar button[title="Show diff"], .raw-toolbar button[title="Hide diff"]')
+    .locator(
+      '[data-doc-strip] button[title="Show diff"], [data-doc-strip] button[title="Hide diff"]',
+    )
     .first();
 }
 
@@ -676,7 +681,9 @@ test.describe('Rendered diff overlay', () => {
     writeFileSync(FIXTURE, modified);
     await expect(page.getByText(/stops scraping bots/)).toBeVisible({ timeout: 15_000 });
 
-    await page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' }).first().click();
-    await expect(page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' })).toHaveCount(0);
+    await page.locator('[data-diff-bar] button', { hasText: 'Mark reviewed' }).first().click();
+    await expect(page.locator('[data-diff-bar] button', { hasText: 'Mark reviewed' })).toHaveCount(
+      0,
+    );
   });
 });

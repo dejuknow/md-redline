@@ -126,7 +126,7 @@ test.describe('Multi-tab support', () => {
     await openSecondFile(page);
 
     // Both tabs should be visible in the tab bar
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     const tab1 = tabBar.locator('button', { hasText: 'test-doc.md' }).first();
     const tab2 = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     await expect(tab1).toBeVisible();
@@ -161,7 +161,9 @@ test.describe('Multi-tab support', () => {
     await fileInput.press('Enter');
 
     await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
-    await expect(page.locator('.h-11 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    await expect(
+      page.locator('[data-doc-strip] button', { hasText: 'test-doc.md' }).first(),
+    ).toBeVisible();
   });
 
   test('closing a tab switches to an adjacent tab', async ({ page }) => {
@@ -169,7 +171,7 @@ test.describe('Multi-tab support', () => {
     await openSecondFile(page);
 
     // Close the active (second) tab — the X is a span with an SVG inside
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     const tab2 = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     // Click the close span (the one with the SVG X icon)
     await tab2.locator('svg').click();
@@ -193,7 +195,7 @@ test.describe('Multi-tab support', () => {
 
     await openSecondFile(page);
 
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     const loadingTab = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     await expect(loadingTab).toBeVisible();
     await loadingTab.click({ button: 'middle' });
@@ -215,7 +217,7 @@ test.describe('Multi-tab support', () => {
 
     await addComment(page, 'valid credentials', 'Tab badge test comment');
 
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     const tab1 = tabBar.locator('button', { hasText: 'test-doc.md' }).first();
     const badge = tab1.locator('span.rounded-full');
     await expect(badge).toHaveText('1');
@@ -279,7 +281,7 @@ test.describe('Multi-tab support', () => {
       tabButton(scope, fileName).locator('span.rounded-full:not([title])', { hasText: /\d/ });
     const resolvedBadge = (scope: Locator, fileName: string) =>
       tabButton(scope, fileName).locator('[data-resolved-mark]');
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
 
     // Active tab.
     await expect(openBadge(tabBar, 'test-doc.md')).toHaveCount(0);
@@ -361,9 +363,9 @@ test.describe('Multi-tab support', () => {
     });
     await expect(page.locator('button[title="Scroll tabs right"]')).toBeVisible();
 
-    const activeTab = page.locator(`.h-11 button[title="${FIXTURE_1}"]`);
+    const activeTab = page.locator(`[data-doc-strip] button[title="${FIXTURE_1}"]`);
     const openFileButton = page.locator('button[title="Open file"]');
-    const tabStrip = page.locator('.h-11 .overflow-x-auto');
+    const tabStrip = page.locator('[data-doc-strip] .overflow-x-auto');
 
     // Both edges matter: clearing the sticky button is satisfied by any tab
     // left of it, including one scrolled off the start of the strip entirely.
@@ -488,7 +490,7 @@ test.describe('Session persistence', () => {
     await page.reload();
 
     // Both tabs should still be open
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
       timeout: 10_000,
     });
@@ -507,8 +509,7 @@ test.describe('Session persistence', () => {
     // Use the toolbar button instead of keyboard shortcut (unreliable in headless)
     const toggleBtn = page.locator('button[title*="Toggle comments rail"]');
     await toggleBtn.click();
-    let cls = (await toggleBtn.getAttribute('class')) ?? '';
-    expect(cls).not.toContain('bg-primary-bg');
+    await expect(toggleBtn).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('[data-comments-rail]')).not.toBeVisible();
 
     await page.waitForTimeout(1000);
@@ -516,8 +517,10 @@ test.describe('Session persistence', () => {
     await page.locator('.prose').waitFor({ timeout: 10_000 });
 
     // Rail should still be hidden after reload (toggle not active)
-    cls = (await page.locator('button[title*="Toggle comments rail"]').getAttribute('class')) ?? '';
-    expect(cls).not.toContain('bg-primary-bg');
+    await expect(page.locator('button[title*="Toggle comments rail"]')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
     await expect(page.locator('[data-comments-rail]')).not.toBeVisible();
   });
 
@@ -552,7 +555,7 @@ test.describe('Session persistence', () => {
 
     await page.goto(`/?file=${FIXTURE_1}`);
 
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     // The URL file is the active tab...
     await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
       timeout: 10_000,
@@ -580,7 +583,7 @@ test.describe('Session persistence', () => {
     await page.goto(`/?dir=${fixtureDir}`);
 
     // The saved session is restored, with its saved active tab still active.
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible({
       timeout: 10_000,
     });
@@ -611,7 +614,7 @@ test.describe('Session persistence', () => {
     // navigation does. It must activate in place, not jump to the end.
     await page.goto(`/?file=${FIXTURE_2}`);
 
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     await expect(tabBar.locator('button', { hasText: 'overflow-tab-1.md' })).toBeVisible({
       timeout: 10_000,
     });
@@ -643,7 +646,7 @@ test.describe('Session persistence', () => {
 
     await page.goto('/');
 
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     await expect(tabBar.locator('button', { hasText: 'overflow-tab-1.md' })).toBeVisible({
       timeout: 10_000,
     });

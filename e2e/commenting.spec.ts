@@ -137,7 +137,9 @@ test.describe('File opening', () => {
   test('opens a file via URL query param', async ({ page }) => {
     await openFixture(page);
     // Tab shows filename
-    await expect(page.locator('.h-11 button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    await expect(
+      page.locator('[data-doc-strip] button', { hasText: 'test-doc.md' }).first(),
+    ).toBeVisible();
     // Rendered content visible
     await expect(page.getByRole('heading', { name: 'Section One' })).toBeVisible();
   });
@@ -704,20 +706,17 @@ test.describe('Sidebar toggle', () => {
 
     // Rail is shown by default at a viewport wide enough to fit it.
     await expect(rail).toBeVisible();
-    let cls = (await toggleBtn.getAttribute('class')) ?? '';
-    expect(cls).toContain('bg-primary-bg');
+    await expect(toggleBtn).toHaveAttribute('aria-pressed', 'true');
 
     // Toggle off
     await toggleBtn.click();
     await expect(rail).not.toBeVisible();
-    cls = (await toggleBtn.getAttribute('class')) ?? '';
-    expect(cls).not.toContain('bg-primary-bg');
+    await expect(toggleBtn).toHaveAttribute('aria-pressed', 'false');
 
     // Toggle on
     await toggleBtn.click();
     await expect(rail).toBeVisible();
-    cls = (await toggleBtn.getAttribute('class')) ?? '';
-    expect(cls).toContain('bg-primary-bg');
+    await expect(toggleBtn).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
