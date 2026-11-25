@@ -17,12 +17,15 @@ export interface ReviewBandProps {
  * shown. Down here a review starting or ending moves nothing above it: the
  * tabs and the text stay put and the page's scroll area gets shorter instead.
  * It slides up as it mounts so a review that starts mid-read is noticed, and
- * while it is mounted toasts and the update notice sit above it (index.css,
- * `--review-dock-offset`).
+ * while it is mounted toasts and the update notice sit above it: it sets
+ * `--review-dock-offset` on the root, which their bottom offsets add.
  *
  * The row folds its secondary actions into a menu by measured fit (see
  * header-fit.ts), not by a breakpoint; its menus open upward.
  */
+/** The docked row's height (its h-11), which toasts clear while it shows. */
+const REVIEW_DOCK_HEIGHT = 44;
+
 export function ReviewBand({ renderBanner }: ReviewBandProps) {
   const rootRef = useRef<HTMLElement>(null);
   const slotRef = useRef<HTMLDivElement>(null);
@@ -44,6 +47,15 @@ export function ReviewBand({ renderBanner }: ReviewBandProps) {
       fitRef.current = next;
       setFit(next);
     }
+  }, []);
+  // Set from here rather than a :root:has() rule, which would make the browser
+  // re-check the whole page on every DOM change.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--review-dock-offset', `${REVIEW_DOCK_HEIGHT}px`);
+    return () => {
+      root.style.removeProperty('--review-dock-offset');
+    };
   }, []);
   // After every render, before paint, so a fold lands in the same frame.
   useLayoutEffect(measure);

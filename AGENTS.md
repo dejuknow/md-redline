@@ -946,8 +946,8 @@ along the bottom edge of the page card: a 44px row across the full page width
 radius. A review starting or ending moves nothing above it; the page's scroll
 area gets shorter instead. It slides up as it mounts (`review-dock-in`, skipped
 under reduced motion) so a review that starts mid-read is noticed. Its two
-menus (More review actions, Other reviews) open upward. While it is mounted,
-`:root:has([data-review-band])` sets `--review-dock-offset` to 44px, and the
+menus (More review actions, Other reviews) open upward. While it is mounted it
+sets `--review-dock-offset` to 44px on the root element, and the
 toast (`bottom: calc(3rem + offset)`) and the update notice (`6rem + offset`)
 sit above it, so neither covers Send. It is the review (`ReviewBanner layout="header"`, its wrapper keeps
 `data-testid="review-banner"`, inside the band's `[data-header-banner]` slot);
