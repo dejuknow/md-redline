@@ -871,10 +871,13 @@ the server waits 60s before clearing `waitingForAgent`.
 ### Tab strip
 
 The tabs sit on the frame above the page, in one 34px row, `DocStrip.tsx`
-(`[data-doc-strip]`), the first row of the document panel (`[data-doc-panel]`)
-when no review is shown. The panel itself has no border or fill: the page is
-its own card (`[data-doc-page-surface]`, `bg-surface`, a 1px border, 10px
-radius), holding the diff bar and the document body. Tabs come first, via
+(`[data-doc-strip]`), the first row of the document panel (`[data-doc-panel]`).
+The panel itself has no border or fill: the page is its own card
+(`[data-doc-page-surface]`, `bg-surface`, a 1px border, 10px radius), holding
+the diff bar and the document body (inside an inner wrapper that does the
+clipping, with `rounded-[inherit]`, so the card itself does not clip and the
+docked review row's menus can hang past its edges), then the review row while a
+review is shown. Tabs come first, via
 `TabBar`'s `variant="strip"`, as folder tabs: the active tab takes the page's
 fill and border and joins the page's top edge, and inactive tabs are muted text
 on the frame, with a short hairline between neighbours (and before the open-file
@@ -937,12 +940,18 @@ toggle where it matters: it comes up the moment there is something to review.
 
 ### Review band
 
-While a review is shown, `ReviewBand.tsx` (`[data-review-band]`) is the
-document panel's first row, a 44px row on the frame above the tabs, with no
-fill or border of its own. It is the review (`ReviewBanner layout="header"`, its wrapper keeps
+While a review is shown, `ReviewBand.tsx` (`[data-review-band]`) is docked
+along the bottom edge of the page card: a 44px row across the full page width
+(document and comments column), with a hairline above it and the card's bottom
+radius. A review starting or ending moves nothing above it; the page's scroll
+area gets shorter instead. It slides up as it mounts (`review-dock-in`, skipped
+under reduced motion) so a review that starts mid-read is noticed. Its two
+menus (More review actions, Other reviews) open upward. While it is mounted,
+`:root:has([data-review-band])` sets `--review-dock-offset` to 44px, and the
+toast (`bottom: calc(3rem + offset)`) and the update notice (`6rem + offset`)
+sit above it, so neither covers Send. It is the review (`ReviewBanner layout="header"`, its wrapper keeps
 `data-testid="review-banner"`, inside the band's `[data-header-banner]` slot);
-App mounts it only when `shownReviewSessions` is non-empty, so with no review
-the panel's top lines up with the sidebar's. Hand off is hidden while the active
+App mounts it only when `shownReviewSessions` is non-empty. Hand off is hidden while the active
 file is in one of the shown reviews, whose own send actions replace it; on a
 file in none of them it stays in the strip.
 
@@ -956,9 +965,6 @@ much folding saved, and unfolds only once the wide row would fit with 24px to
 spare, so it never flip-flops; another review taking a folded row is tried wide
 again. The slot's `min-width` is set to the row's least width. Unmeasured (no
 layout) counts as wide.
-
-Its left padding is `calc(var(--window-inset-left, 0px) + 0.25rem)`, for the same
-desktop shell inset as the strip.
 
 ### Status bar
 
@@ -1689,8 +1695,8 @@ that jumped into the page margin in one step (a fast flick, which the browser
 can coalesce into a single move) moved the anchor nowhere, and even a slow drag
 stopped at its last in-text sample. It now clamps the point into the part of
 the container actually on screen (its box, intersected with its scrolling pane
-and the window, since a long document runs past the pane and the review band
-and tab strip cover the top of the panel) and looks up the caret again: beside a line means that
+and the window, since a long document runs past the pane, the tab strip sits
+above it and the review band below it) and looks up the caret again: beside a line means that
 line's start or end, past the top or bottom of the pane the first or last
 visible line.
 
@@ -2641,7 +2647,7 @@ conflict still 409s; Reload discards the open edit and loads the disk content.
 ### Left sidebar (full height)
 
 The sidebar owns the window's full left edge, top to bottom; the main column
-(the document panel, with the review band while a review is shown, then its tab strip) starts to its right; the status bar runs under both. Two states:
+(the document panel: its tab strip, then the page, with the review band docked at its bottom while a review is shown) starts to its right; the status bar runs under both. Two states:
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): the Explorer/Outline
   view tabs and close X share the 34px top row (`[data-sidebar-top]`, the tab
@@ -2721,7 +2727,7 @@ chrome from outside, so these hooks are a contract. Keep them when restyling:
 
 - `data-app-root`: the root element that holds the frame background; its first
   child is the padded row of panels, its last the status bar.
-- `data-review-band`: the review row at the top of the document panel, present only
+- `data-review-band`: the review row docked at the bottom of the page card, present only
   while a review is shown (see Review band above).
 - `data-status-bar`: the bottom line on the frame (see Status bar above).
 - `data-sidebar-logo`: the logo container pinned to the top left of the collapsed
@@ -2730,12 +2736,13 @@ chrome from outside, so these hooks are a contract. Keep them when restyling:
   top row (Explorer/Outline and close).
 - `--window-inset-left`: a CSS variable the shell sets to clear native window
   controls, on whichever row sits under them: `[data-sidebar-top]` while the
-  panel is open, `[data-doc-strip]` and `[data-review-band]` when no sidebar
-  covers them. Each of those rows' left padding adds it.
+  panel is open, `[data-doc-strip]` when no sidebar covers them. Each of those
+  rows' left padding adds it. The review band no longer takes it: it is docked
+  at the bottom of the page, away from the window controls.
 
 The main column (`data-main-column`), the document panel (`data-doc-panel`) and
 its tab strip (`data-doc-strip`) and the page card (`data-doc-page-surface`) are also
-stable. With no review shown, the active tab's top lines up with the sidebar's.
+stable. The active tab's top lines up with the sidebar's, with or without a review.
 
 ### Keyboard shortcuts
 
@@ -2874,7 +2881,7 @@ theme it sets no sheet shadow (`--theme-sheet-shadow: none`).
 Every theme also defines `--theme-frame`, the window frame the inset panels sit on, which
 Tailwind exposes as `bg-frame` (`--color-frame`). `[data-app-root]` paints it and pads it by
 8px (`bg-frame p-2`), and the sidebar and the page (`[data-doc-page-surface]`) sit on it
-as rounded panels, with the tab strip, the review band and the status bar on the frame itself. It is a step darker than the panels in light themes (default light
+as rounded panels, with the tab strip and the status bar on the frame itself. It is a step darker than the panels in light themes (default light
 `#ebebee`) and a step darker than the canvas in dark ones (default dark `#141416`). A new
 theme must set it: `server/theme-contrast.test.ts` (`inset frame`) checks every theme.
 

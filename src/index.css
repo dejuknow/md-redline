@@ -1674,3 +1674,22 @@ body {
 [data-doc-panel]:has([data-tab-flush]) [data-doc-page-surface] {
   border-top-left-radius: 0;
 }
+
+/* While the review row is docked along the page's bottom edge, toasts and the
+   update notice sit above it, so they never cover its Send button. */
+:root:has([data-review-band]) {
+  --review-dock-offset: 44px;
+}
+
+/* The docked review row slides up as it mounts, so a review that starts while
+   the reader is mid-document is noticed. */
+@keyframes review-dock-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}

@@ -3674,28 +3674,6 @@ export default function App() {
                 data-prose-font={settings.proseFont}
                 data-prose-size={settings.proseSize}
               >
-                {shownReviewSessions.length > 0 && (
-                  <ReviewBand
-                    renderBanner={(compact) => (
-                      <ReviewBanner
-                        layout="header"
-                        compact={compact}
-                        sessions={shownReviewSessions}
-                        commentCounts={commentCounts}
-                        agentCommentCounts={agentCommentCounts}
-                        prepareSend={prepareBannerSend}
-                        onResolved={handleReviewResolved}
-                        onBatchSent={handleBatchSent}
-                        optimisticSent={optimisticSent}
-                        showToast={showToast}
-                        commentIdsByFile={commentIdsByFile}
-                        userRepliedLast={userRepliedLast}
-                        pendingAskCountsBySession={pendingAskCountsBySession}
-                        onJumpToAsk={handleJumpToAsk}
-                      />
-                    )}
-                  />
-                )}
                 <DocStrip
                   tabs={
                     <TabBar
@@ -3773,29 +3751,33 @@ export default function App() {
                     edge, like a folder tab. */}
                 <div
                   data-doc-page-surface
-                  className="flex-1 min-h-0 flex flex-col bg-surface border border-border rounded-[10px] overflow-clip"
+                  className="flex-1 min-h-0 flex flex-col bg-surface border border-border rounded-[10px]"
                 >
-                  <DiffBar
-                    diffEnabled={diffEnabled}
-                    referenceLabel={
-                      diffEnabled && currentReference && diffChunkCount > 0
-                        ? formatReferenceLabel(currentReference)
-                        : undefined
-                    }
-                    diffChunkCount={diffChunkCount}
-                    onDiffPrev={() => {
-                      if (viewMode === 'raw') rawViewRef.current?.diffPrev();
-                      else renderedDiffRef.current?.prev();
-                    }}
-                    onDiffNext={() => {
-                      if (viewMode === 'raw') rawViewRef.current?.diffNext();
-                      else renderedDiffRef.current?.next();
-                    }}
-                    onMarkReviewed={handleMarkReviewed}
-                    onDiffToggle={handleDiffToggle}
-                  />
-                  <div className="flex-1 min-h-0 flex flex-col">
-                    {/* A refused folder covers the document rather than leaving a
+                  {/* The page clips here rather than on the card, so the docked
+                      review row's menus can hang past the card's edges. The
+                      radius follows the card's (squared when a tab is flush). */}
+                  <div className="flex-1 min-h-0 flex flex-col overflow-clip rounded-[inherit]">
+                    <DiffBar
+                      diffEnabled={diffEnabled}
+                      referenceLabel={
+                        diffEnabled && currentReference && diffChunkCount > 0
+                          ? formatReferenceLabel(currentReference)
+                          : undefined
+                      }
+                      diffChunkCount={diffChunkCount}
+                      onDiffPrev={() => {
+                        if (viewMode === 'raw') rawViewRef.current?.diffPrev();
+                        else renderedDiffRef.current?.prev();
+                      }}
+                      onDiffNext={() => {
+                        if (viewMode === 'raw') rawViewRef.current?.diffNext();
+                        else renderedDiffRef.current?.next();
+                      }}
+                      onMarkReviewed={handleMarkReviewed}
+                      onDiffToggle={handleDiffToggle}
+                    />
+                    <div className="flex-1 min-h-0 flex flex-col">
+                      {/* A refused folder covers the document rather than leaving a
                     blank sheet behind an error strip: the ask belongs on the
                     surface the user is looking at. It covers rather than
                     replaces because the viewer and the scroll container carry
@@ -3804,91 +3786,94 @@ export default function App() {
                     the search match count — so unmounting them here left the
                     document rail-less and the search count stale once the
                     grant landed. */}
-                    <div className="relative flex-1 min-h-0 flex flex-col overflow-clip">
-                      {showAccessRequest && (
-                        <AccessRequest
-                          dir={accessDeniedDir}
-                          homeDir={homeDir}
-                          pending={trustFolderPending}
-                          grantMissed={sawGrant}
-                          onAllow={() => handleTrustFolder(accessDeniedDir)}
-                        />
-                      )}
-                      {viewMode === 'raw' ? (
-                        <RawView
-                          ref={rawViewRef}
-                          scrollContainerRef={containerRef}
-                          rawMarkdown={rawMarkdown}
-                          searchQuery={showSearch ? searchQuery : undefined}
-                          searchActiveIndex={activeSearchIndex}
-                          onSearchCount={handleSearchCount}
-                          activeCommentId={activeCommentId}
-                          diffSnapshot={currentSnapshot}
-                          diffEnabled={diffEnabled}
-                          diffLines={diffLines}
-                          oldCleanToRawLine={oldCleanToRawLine}
-                          newCleanToRawLine={newCleanToRawLine}
-                        />
-                      ) : (
-                        <div className="relative flex-1 min-h-0">
-                          {railCapable && (
-                            <SectionBreadcrumb
-                              chain={breadcrumbChain}
-                              containerRef={containerRef}
-                              onJump={handleHeadingNavigate}
-                              className="absolute top-2 -translate-x-1/2 z-20"
-                              // Centered over the prose column, not the body: the
-                              // page is centered and the column sits PAD_L into it,
-                              // so a body-centered pill would ride over the rail.
-                              style={{
-                                left: `calc(50% - ${geometry.pageWidth / 2}px + ${PAD_L + geometry.colWidth / 2}px)`,
-                                maxWidth: geometry.colWidth,
-                              }}
-                            />
-                          )}
-                          <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
+                      <div className="relative flex-1 min-h-0 flex flex-col overflow-clip">
+                        {showAccessRequest && (
+                          <AccessRequest
+                            dir={accessDeniedDir}
+                            homeDir={homeDir}
+                            pending={trustFolderPending}
+                            grantMissed={sawGrant}
+                            onAllow={() => handleTrustFolder(accessDeniedDir)}
+                          />
+                        )}
+                        {viewMode === 'raw' ? (
+                          <RawView
+                            ref={rawViewRef}
+                            scrollContainerRef={containerRef}
+                            rawMarkdown={rawMarkdown}
+                            searchQuery={showSearch ? searchQuery : undefined}
+                            searchActiveIndex={activeSearchIndex}
+                            onSearchCount={handleSearchCount}
+                            activeCommentId={activeCommentId}
+                            diffSnapshot={currentSnapshot}
+                            diffEnabled={diffEnabled}
+                            diffLines={diffLines}
+                            oldCleanToRawLine={oldCleanToRawLine}
+                            newCleanToRawLine={newCleanToRawLine}
+                          />
+                        ) : (
+                          <div className="relative flex-1 min-h-0">
+                            {railCapable && (
+                              <SectionBreadcrumb
+                                chain={breadcrumbChain}
+                                containerRef={containerRef}
+                                onJump={handleHeadingNavigate}
+                                className="absolute top-2 -translate-x-1/2 z-20"
+                                // Centered over the prose column, not the body: the
+                                // page is centered and the column sits PAD_L into it,
+                                // so a body-centered pill would ride over the rail.
+                                style={{
+                                  left: `calc(50% - ${geometry.pageWidth / 2}px + ${PAD_L + geometry.colWidth / 2}px)`,
+                                  maxWidth: geometry.colWidth,
+                                }}
+                              />
+                            )}
                             <div
-                              ref={pageRef}
-                              data-doc-page
-                              className={`doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] ${pageWidthTransition}`}
-                              style={{
-                                width: geometry.pageWidth,
-                                maxWidth: 'calc(100% - 24px)',
-                                // A tab still on its first load has an empty sheet sized
-                                // for a document with no comments; the loaded one may
-                                // reserve the rail's gutter and jump wider and left in
-                                // one frame. Show only the loaded sheet.
-                                visibility: firstLoadInProgress ? 'hidden' : undefined,
-                                minHeight: railShown
-                                  ? `max(100%, ${marginLayout.layerHeight + 120}px)`
-                                  : '100%',
-                              }}
+                              ref={containerRef}
+                              className="h-full overflow-y-auto pt-3 relative"
                             >
                               <div
-                                ref={proseRef}
-                                data-prose-column
-                                className={pageWidthTransition}
-                                style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                                ref={pageRef}
+                                data-doc-page
+                                className={`doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] ${pageWidthTransition}`}
+                                style={{
+                                  width: geometry.pageWidth,
+                                  maxWidth: 'calc(100% - 24px)',
+                                  // A tab still on its first load has an empty sheet sized
+                                  // for a document with no comments; the loaded one may
+                                  // reserve the rail's gutter and jump wider and left in
+                                  // one frame. Show only the loaded sheet.
+                                  visibility: firstLoadInProgress ? 'hidden' : undefined,
+                                  minHeight: railShown
+                                    ? `max(100%, ${marginLayout.layerHeight + 120}px)`
+                                    : '100%',
+                                }}
                               >
-                                {diffEnabled && currentSnapshot != null && diffLines ? (
-                                  // key on activeFilePath forces a remount when the user
-                                  // switches files while the diff overlay is on, so the
-                                  // mount-time auto-scroll-to-first-chunk fires for each
-                                  // file's diff. Without this, the [] effect in
-                                  // RenderedDiffView only runs for the first file viewed.
-                                  <RenderedDiffView
-                                    key={activeFilePath ?? ''}
-                                    ref={renderedDiffRef}
-                                    rawMarkdown={rawMarkdown}
-                                    diffSnapshot={currentSnapshot}
-                                    diffLines={diffLines}
-                                    keepLineBreaks={settings.keepLineBreaks}
-                                    renderHtmlComments={settings.renderHtmlComments}
-                                    hiddenCommentPrefixes={enabledHiddenCommentPrefixes}
-                                  />
-                                ) : (
-                                  <>
-                                    {/* One element for every document, with or
+                                <div
+                                  ref={proseRef}
+                                  data-prose-column
+                                  className={pageWidthTransition}
+                                  style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                                >
+                                  {diffEnabled && currentSnapshot != null && diffLines ? (
+                                    // key on activeFilePath forces a remount when the user
+                                    // switches files while the diff overlay is on, so the
+                                    // mount-time auto-scroll-to-first-chunk fires for each
+                                    // file's diff. Without this, the [] effect in
+                                    // RenderedDiffView only runs for the first file viewed.
+                                    <RenderedDiffView
+                                      key={activeFilePath ?? ''}
+                                      ref={renderedDiffRef}
+                                      rawMarkdown={rawMarkdown}
+                                      diffSnapshot={currentSnapshot}
+                                      diffLines={diffLines}
+                                      keepLineBreaks={settings.keepLineBreaks}
+                                      renderHtmlComments={settings.renderHtmlComments}
+                                      hiddenCommentPrefixes={enabledHiddenCommentPrefixes}
+                                    />
+                                  ) : (
+                                    <>
+                                      {/* One element for every document, with or
                                     without diagrams. Swapping the element type
                                     when a document gained or lost its first
                                     Mermaid fence remounted the viewer, which
@@ -3897,118 +3882,144 @@ export default function App() {
                                     reader pushed them down. The theme only
                                     feeds the viewer's own fallback renderer,
                                     unused while mermaidSvgMap is passed. */}
-                                    <MarkdownViewer
-                                      ref={viewerRef}
-                                      html={html}
-                                      cleanMarkdown={cleanMarkdown}
-                                      documentKey={activeFilePath}
-                                      comments={comments}
-                                      activeCommentId={activeCommentId}
-                                      selectionText={paintedSelection?.text ?? null}
-                                      selectionOffset={paintedSelection?.offset ?? null}
-                                      onHighlightClick={handleHighlightClickWithPopover}
-                                      // Fragment arg is intentionally ignored in v1; openTab
-                                      // takes only the path. See spec §3 non-goals.
-                                      onLocalLinkClick={openTab}
-                                      onContextMenu={handleViewerContextMenuUnlessOverlay}
-                                      searchQuery={showSearch ? searchQuery : undefined}
-                                      searchActiveIndex={activeSearchIndex}
-                                      onSearchCount={handleSearchCount}
-                                      sentCommentIds={sentCommentIds}
-                                      theme={persistedTheme}
-                                      mermaidSvgMap={mermaidSvgMap}
-                                      onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                      onHighlightsPainted={handleHighlightsPainted}
-                                    />
-                                    <DragHandles
-                                      startPos={handlePositions?.start ?? null}
-                                      endPos={handlePositions?.end ?? null}
-                                      onPointerDown={onHandlePointerDown}
-                                    />
-                                  </>
+                                      <MarkdownViewer
+                                        ref={viewerRef}
+                                        html={html}
+                                        cleanMarkdown={cleanMarkdown}
+                                        documentKey={activeFilePath}
+                                        comments={comments}
+                                        activeCommentId={activeCommentId}
+                                        selectionText={paintedSelection?.text ?? null}
+                                        selectionOffset={paintedSelection?.offset ?? null}
+                                        onHighlightClick={handleHighlightClickWithPopover}
+                                        // Fragment arg is intentionally ignored in v1; openTab
+                                        // takes only the path. See spec §3 non-goals.
+                                        onLocalLinkClick={openTab}
+                                        onContextMenu={handleViewerContextMenuUnlessOverlay}
+                                        searchQuery={showSearch ? searchQuery : undefined}
+                                        searchActiveIndex={activeSearchIndex}
+                                        onSearchCount={handleSearchCount}
+                                        sentCommentIds={sentCommentIds}
+                                        theme={persistedTheme}
+                                        mermaidSvgMap={mermaidSvgMap}
+                                        onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                        onHighlightsPainted={handleHighlightsPainted}
+                                      />
+                                      <DragHandles
+                                        startPos={handlePositions?.start ?? null}
+                                        endPos={handlePositions?.end ?? null}
+                                        onPointerDown={onHandlePointerDown}
+                                      />
+                                    </>
+                                  )}
+                                </div>
+                                {railShown && (
+                                  <CommentsRail
+                                    density={railDensity}
+                                    showEmptyState={emptyRailRequested}
+                                    scrollRef={containerRef as RefObject<HTMLElement | null>}
+                                    layout={marginLayout}
+                                    anchoredComments={marginComments}
+                                    allComments={comments}
+                                    activeCommentId={activeCommentId}
+                                    missingAnchors={missingAnchors}
+                                    unpaintedAnchors={
+                                      renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS
+                                    }
+                                    sentCommentIds={sentCommentIds}
+                                    answeredCommentIds={answeredCommentIds}
+                                    onActivate={handleSidebarActivate}
+                                    onReply={handleReply}
+                                    onResolve={settings.enableResolve ? handleResolve : undefined}
+                                    onUnresolve={handleUnresolve}
+                                    onDelete={handleDelete}
+                                    onEdit={handleEdit}
+                                    onEditReply={handleEditReply}
+                                    onDeleteReply={handleDeleteReply}
+                                    onBulkDelete={handleBulkDelete}
+                                    onBulkResolve={handleBulkResolve}
+                                    onBulkDeleteResolved={handleBulkDeleteResolved}
+                                    onContextMenu={handleSidebarContextMenu}
+                                    selectionText={paintedSelection?.text ?? null}
+                                    selectionOffset={paintedSelection?.offset ?? null}
+                                    onReanchorToSelection={handleReanchorToSelection}
+                                    requestedEditor={requestedEditor}
+                                    requestedFocus={requestedCommentFocus}
+                                    onFocusHandled={() => setRequestedCommentFocus(null)}
+                                    unreadReplyIds={unreadReplyIds}
+                                  />
                                 )}
+                                {popoverCommentId &&
+                                  !railCanShowThread(popoverCommentId) &&
+                                  (() => {
+                                    const c = comments.find((x) => x.id === popoverCommentId);
+                                    if (!c) return null;
+                                    return (
+                                      <CommentPopover
+                                        comment={c}
+                                        pageRef={pageRef as RefObject<HTMLElement | null>}
+                                        onClose={() => setPopoverCommentId(null)}
+                                        sent={sentCommentIds.includes(c.id)}
+                                        answered={answeredCommentIds.has(c.id)}
+                                        anchorMissing={missingAnchors.has(c.id)}
+                                        onReply={handleReply}
+                                        onResolve={
+                                          settings.enableResolve ? handleResolve : undefined
+                                        }
+                                        onUnresolve={handleUnresolve}
+                                        onDelete={handleDelete}
+                                        onEdit={handleEdit}
+                                        onEditReply={handleEditReply}
+                                        onDeleteReply={handleDeleteReply}
+                                      />
+                                    );
+                                  })()}
                               </div>
-                              {railShown && (
-                                <CommentsRail
-                                  density={railDensity}
-                                  showEmptyState={emptyRailRequested}
-                                  scrollRef={containerRef as RefObject<HTMLElement | null>}
-                                  layout={marginLayout}
-                                  anchoredComments={marginComments}
-                                  allComments={comments}
-                                  activeCommentId={activeCommentId}
-                                  missingAnchors={missingAnchors}
-                                  unpaintedAnchors={
-                                    renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS
-                                  }
-                                  sentCommentIds={sentCommentIds}
-                                  answeredCommentIds={answeredCommentIds}
-                                  onActivate={handleSidebarActivate}
-                                  onReply={handleReply}
-                                  onResolve={settings.enableResolve ? handleResolve : undefined}
-                                  onUnresolve={handleUnresolve}
-                                  onDelete={handleDelete}
-                                  onEdit={handleEdit}
-                                  onEditReply={handleEditReply}
-                                  onDeleteReply={handleDeleteReply}
-                                  onBulkDelete={handleBulkDelete}
-                                  onBulkResolve={handleBulkResolve}
-                                  onBulkDeleteResolved={handleBulkDeleteResolved}
-                                  onContextMenu={handleSidebarContextMenu}
-                                  selectionText={paintedSelection?.text ?? null}
-                                  selectionOffset={paintedSelection?.offset ?? null}
-                                  onReanchorToSelection={handleReanchorToSelection}
-                                  requestedEditor={requestedEditor}
-                                  requestedFocus={requestedCommentFocus}
-                                  onFocusHandled={() => setRequestedCommentFocus(null)}
-                                  unreadReplyIds={unreadReplyIds}
-                                />
-                              )}
-                              {popoverCommentId &&
-                                !railCanShowThread(popoverCommentId) &&
-                                (() => {
-                                  const c = comments.find((x) => x.id === popoverCommentId);
-                                  if (!c) return null;
-                                  return (
-                                    <CommentPopover
-                                      comment={c}
-                                      pageRef={pageRef as RefObject<HTMLElement | null>}
-                                      onClose={() => setPopoverCommentId(null)}
-                                      sent={sentCommentIds.includes(c.id)}
-                                      answered={answeredCommentIds.has(c.id)}
-                                      anchorMissing={missingAnchors.has(c.id)}
-                                      onReply={handleReply}
-                                      onResolve={settings.enableResolve ? handleResolve : undefined}
-                                      onUnresolve={handleUnresolve}
-                                      onDelete={handleDelete}
-                                      onEdit={handleEdit}
-                                      onEditReply={handleEditReply}
-                                      onDeleteReply={handleDeleteReply}
-                                    />
-                                  );
-                                })()}
                             </div>
+                            <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
                           </div>
-                          <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
-                        </div>
-                      )}
-                      {/* Inside the body, so it floats below the diff bar when
+                        )}
+                        {/* Inside the body, so it floats below the diff bar when
                       that shows and never covers its controls. Last, so it
                       paints over the section breadcrumb at the same z. */}
-                      {showSearch && (
-                        <SearchBar
-                          query={searchQuery}
-                          onQueryChange={handleSearchQueryChange}
-                          matchCount={searchMatchCount}
-                          activeIndex={activeSearchIndex}
-                          onNext={handleSearchNext}
-                          onPrev={handleSearchPrev}
-                          onClose={handleSearchClose}
-                          focusTrigger={searchFocusTrigger}
-                        />
-                      )}
+                        {showSearch && (
+                          <SearchBar
+                            query={searchQuery}
+                            onQueryChange={handleSearchQueryChange}
+                            matchCount={searchMatchCount}
+                            activeIndex={activeSearchIndex}
+                            onNext={handleSearchNext}
+                            onPrev={handleSearchPrev}
+                            onClose={handleSearchClose}
+                            focusTrigger={searchFocusTrigger}
+                          />
+                        )}
+                      </div>
                     </div>
                   </div>
+                  {/* The review row, docked along the page's bottom edge (see ReviewBand). */}
+                  {shownReviewSessions.length > 0 && (
+                    <ReviewBand
+                      renderBanner={(compact) => (
+                        <ReviewBanner
+                          layout="header"
+                          compact={compact}
+                          sessions={shownReviewSessions}
+                          commentCounts={commentCounts}
+                          agentCommentCounts={agentCommentCounts}
+                          prepareSend={prepareBannerSend}
+                          onResolved={handleReviewResolved}
+                          onBatchSent={handleBatchSent}
+                          optimisticSent={optimisticSent}
+                          showToast={showToast}
+                          commentIdsByFile={commentIdsByFile}
+                          userRepliedLast={userRepliedLast}
+                          pendingAskCountsBySession={pendingAskCountsBySession}
+                          onJumpToAsk={handleJumpToAsk}
+                        />
+                      )}
+                    />
+                  )}
                 </div>
               </div>
             </div>

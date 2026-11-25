@@ -283,7 +283,7 @@ test.describe('Review band and status bar', () => {
     expect(await path.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   });
 
-  test('with no review the document panel lines up with the sidebar; a review adds its band inside the panel', async ({
+  test('with no review the document panel lines up with the sidebar; a review docks its band along the bottom of the page', async ({
     page,
     request,
     baseURL,
@@ -295,15 +295,25 @@ test.describe('Review band and status bar', () => {
         .first()
         .evaluate((el) => Math.round(el.getBoundingClientRect().top));
     expect(await top('[data-doc-panel]')).toBe(await top('[data-sidebar-panel]'));
+    const stripTop = await top('[data-doc-strip]');
 
     const sessionId = await createUserSession(request, baseURL!, FIXTURE);
     try {
       await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
       await expect(band(page).getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
       expect(await top('[data-doc-panel]')).toBe(await top('[data-sidebar-panel]'));
-      // The band is the panel's first row, above the tabs.
-      expect(await top('[data-review-band]')).toBeLessThan(await top('[data-doc-strip]'));
-      await expect(page.locator('[data-doc-panel] > [data-review-band]')).toHaveCount(1);
+      // The band is docked along the page's bottom edge, inside the page card,
+      // so the tabs do not move when a review starts.
+      expect(await top('[data-doc-strip]')).toBe(stripTop);
+      await expect(page.locator('[data-doc-page-surface] > [data-review-band]')).toHaveCount(1);
+      const bottom = (sel: string) =>
+        page
+          .locator(sel)
+          .first()
+          .evaluate((el) => Math.round(el.getBoundingClientRect().bottom));
+      // Polled: the band slides up as it mounts.
+      const surfaceBottom = await bottom('[data-doc-page-surface]');
+      await expect.poll(() => bottom('[data-review-band]')).toBe(surfaceBottom - 1);
     } finally {
       await abortSession(request, baseURL!, sessionId);
     }

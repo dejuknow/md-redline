@@ -12,14 +12,16 @@ export interface ReviewBandProps {
 }
 
 /**
- * The review row, as a band across the top of the document panel above the
- * tabs. Mounted only while a review is shown, so with no review the panel's
- * top lines up with the sidebar's.
+ * The review row, docked along the bottom edge of the page card, full width
+ * under the document and the comments column. Mounted only while a review is
+ * shown. Down here a review starting or ending moves nothing above it: the
+ * tabs and the text stay put and the page's scroll area gets shorter instead.
+ * It slides up as it mounts so a review that starts mid-read is noticed, and
+ * while it is mounted toasts and the update notice sit above it (index.css,
+ * `--review-dock-offset`).
  *
  * The row folds its secondary actions into a menu by measured fit (see
- * header-fit.ts), not by a breakpoint. Its left padding reads
- * `--window-inset-left`, which a desktop shell sets to clear its window
- * controls when the sidebar no longer covers them.
+ * header-fit.ts), not by a breakpoint; its menus open upward.
  */
 export function ReviewBand({ renderBanner }: ReviewBandProps) {
   const rootRef = useRef<HTMLElement>(null);
@@ -64,9 +66,7 @@ export function ReviewBand({ renderBanner }: ReviewBandProps) {
     <header
       ref={rootRef}
       data-review-band
-      className="h-11 shrink-0 min-w-0 flex items-center gap-2 pr-0.5 text-content"
-      // Adds to the band's own inset rather than replacing it.
-      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.25rem)' }}
+      className="h-11 shrink-0 min-w-0 flex items-center gap-2 pl-4 pr-2 border-t border-border bg-surface rounded-b-[9px] text-content motion-safe:animate-[review-dock-in_180ms_ease-out]"
     >
       {/* Its min-width is set from measurements (see measure above). */}
       <div ref={slotRef} data-header-banner className="min-w-0 flex-1 flex">

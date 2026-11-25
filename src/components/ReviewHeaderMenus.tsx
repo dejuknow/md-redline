@@ -59,7 +59,7 @@ export function MoreReviewActions({
         <div
           role="menu"
           aria-label="More review actions"
-          className="absolute right-0 top-full z-50 mt-1 min-w-48 rounded-lg border border-border bg-surface shadow-lg py-1"
+          className="absolute right-0 bottom-full z-50 mb-1 min-w-48 rounded-lg border border-border bg-surface shadow-lg py-1"
         >
           {items.map((a) => (
             <button
@@ -187,7 +187,7 @@ export function OtherReviews({
           role="dialog"
           aria-label="Other reviews"
           data-review-popover
-          className="absolute right-0 top-full z-50 mt-1 w-[min(560px,calc(100vw-16px))] rounded-lg border border-border bg-surface shadow-lg px-3 py-1.5 divide-y divide-border-subtle"
+          className="absolute right-0 bottom-full z-50 mb-1 w-[min(560px,calc(100vw-16px))] rounded-lg border border-border bg-surface shadow-lg px-3 py-1.5 divide-y divide-border-subtle"
         >
           {children}
         </div>

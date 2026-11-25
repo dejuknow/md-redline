@@ -39,11 +39,13 @@ const measured = (m: Partial<HeaderMeasure>): HeaderMeasure => ({
 });
 
 describe('ReviewBand', () => {
-  it('renders the review row and adds --window-inset-left to its own left padding', () => {
+  it('renders the review row as a docked bar with no window inset of its own', () => {
     render(<ReviewBand renderBanner={() => <div data-testid="review-banner" />} />);
     expect(band()).toBeTruthy();
     expect(screen.getByTestId('review-banner')).toBeTruthy();
-    expect(band().style.paddingLeft).toBe('calc(var(--window-inset-left, 0px) + 0.25rem)');
+    // Docked along the page's bottom edge, it never sits under window controls.
+    expect(band().style.paddingLeft).toBe('');
+    expect(band().className).toContain('border-t');
   });
 
   it('folds the review row when its content does not fit, and unfolds only past the hysteresis', () => {
