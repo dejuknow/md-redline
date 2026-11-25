@@ -998,6 +998,12 @@ export default function App() {
   );
   // An agent can add files to a review this tab is showing (#117): open them.
   useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
+  // Files in a shown review, which the tab strip marks so the review's scope
+  // is visible up where the reader is looking, not only in the docked row.
+  const reviewFilePaths = useMemo(
+    () => new Set(shownReviewSessions.flatMap((session) => session.filePaths)),
+    [shownReviewSessions],
+  );
   // An agent thread in a review that is still open belongs to the live agent
   // there: an mdr_ask answer already went back through mdr_ask. Hand off
   // leaves those threads out (handoffComments).
@@ -3682,6 +3688,7 @@ export default function App() {
                       activeFilePath={activeFilePath}
                       commentCounts={tabCommentCounts}
                       resolvedCommentCounts={resolvedCommentCounts}
+                      reviewFilePaths={reviewFilePaths}
                       onSwitchTab={switchTab}
                       onCloseTab={closeTab}
                       onOpenFile={openFilePicker}

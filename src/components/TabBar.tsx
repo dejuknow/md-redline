@@ -64,6 +64,8 @@ interface Props {
   activeFilePath: string | null;
   commentCounts: Map<string, number>;
   resolvedCommentCounts?: Map<string, number>;
+  /** Files in a shown review; their tabs carry a crimson line along the top. */
+  reviewFilePaths?: Set<string>;
   onSwitchTab: (path: string) => void;
   onCloseTab: (path: string) => void;
   onOpenFile: () => void;
@@ -85,6 +87,11 @@ const tabControlButtonClassStrip =
 const tabSeparatorClass =
   'before:absolute before:-left-px before:top-1/2 before:-translate-y-1/2 before:h-4 before:w-px before:bg-content-muted/35';
 
+// A review's tabs: a short crimson line inside the tab's top edge, inset from
+// its rounded corners so it reads as a straight mark, not a bent rail.
+const tabInReviewClass =
+  'after:absolute after:top-0 after:left-2.5 after:right-2.5 after:h-0.5 after:rounded-b-full after:bg-primary';
+
 const tabActionButtonClassStrip =
   'group/open flex self-stretch mb-px w-9 items-center justify-center shrink-0 text-content-muted transition-colors hover:text-content';
 
@@ -93,6 +100,7 @@ export function TabBar({
   activeFilePath,
   commentCounts,
   resolvedCommentCounts,
+  reviewFilePaths,
   onSwitchTab,
   onCloseTab,
   onOpenFile,
@@ -295,6 +303,7 @@ export function TabBar({
               const count = commentCounts.get(tab.filePath) ?? 0;
               const resolvedCount = resolvedCommentCounts?.get(tab.filePath) ?? 0;
               const hasMarks = count > 0 || resolvedCount > 0 || !!tab.error;
+              const inReview = reviewFilePaths?.has(tab.filePath) ?? false;
               return (
                 <button
                   key={tab.filePath}
@@ -319,12 +328,13 @@ export function TabBar({
                     index > 0 && !isActive && tabs[index - 1].filePath !== activeFilePath
                       ? tabSeparatorClass
                       : ''
-                  } ${
+                  } ${inReview ? tabInReviewClass : ''} ${
                     isActive
                       ? 'h-[35px] shrink-0 min-w-[112px] bg-surface border border-border border-b-0 text-content font-medium'
                       : 'h-[34px] shrink min-w-[112px] border border-transparent border-b-0 text-content-muted hover:text-content'
                   }`}
                   title={tabTitle(tab)}
+                  data-tab-in-review={inReview ? '' : undefined}
                   // The active first tab stands on the page's left edge, so the
                   // page squares that corner (index.css) and the two read as one.
                   data-tab-flush={isActive && index === 0 && !isOverflowing ? '' : undefined}

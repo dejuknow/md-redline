@@ -945,8 +945,12 @@ toggle where it matters: it comes up the moment there is something to review.
 
 While a review is shown, `ReviewBand.tsx` (`[data-review-band]`) is docked
 along the bottom edge of the page card: a 44px row across the full page width
-(document and comments column), with a hairline above it and the card's bottom
-radius. A review starting or ending moves nothing above it; the page's scroll
+(document and comments column), tinted crimson (`bg-primary-bg`) under a 2px
+crimson top line, with the card's bottom radius, so it reads as work waiting on
+the reader rather than a status footer. The tabs of every file in a shown review
+carry a matching short crimson line inset inside their top edge
+(`[data-tab-in-review]`, `TabBar`'s `reviewFilePaths`), so the review and its
+scope also show at the top of the window. A review starting or ending moves nothing above it; the page's scroll
 area gets shorter instead. It slides up as it mounts (`review-dock-in`, skipped
 under reduced motion) so a review that starts mid-read is noticed. Its two
 menus (More review actions, Other reviews) open upward. While it is mounted it

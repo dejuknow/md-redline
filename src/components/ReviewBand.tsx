@@ -20,6 +20,10 @@ export interface ReviewBandProps {
  * while it is mounted toasts and the update notice sit above it: it sets
  * `--review-dock-offset` on the root, which their bottom offsets add.
  *
+ * It is tinted crimson with a crimson top line so it reads as work waiting on
+ * the reader, not a status footer, and the review's tabs carry a matching
+ * line (TabBar), so the cue also shows up top where the reader is looking.
+ *
  * The row folds its secondary actions into a menu by measured fit (see
  * header-fit.ts), not by a breakpoint; its menus open upward.
  */
@@ -78,7 +82,7 @@ export function ReviewBand({ renderBanner }: ReviewBandProps) {
     <header
       ref={rootRef}
       data-review-band
-      className="h-11 shrink-0 min-w-0 flex items-center gap-2 pl-4 pr-2 border-t border-border bg-surface rounded-b-[9px] text-content motion-safe:animate-[review-dock-in_180ms_ease-out]"
+      className="h-11 shrink-0 min-w-0 flex items-center gap-2 pl-4 pr-2 border-t-2 border-primary bg-primary-bg rounded-b-[9px] text-content motion-safe:animate-[review-dock-in_180ms_ease-out]"
     >
       {/* Its min-width is set from measurements (see measure above). */}
       <div ref={slotRef} data-header-banner className="min-w-0 flex-1 flex">
