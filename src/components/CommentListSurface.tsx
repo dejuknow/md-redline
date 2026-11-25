@@ -118,6 +118,14 @@ export function CommentListSurface({
   const [filter, setFilter] = useState<FilterMode>('all');
   const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  // The comments the delete-all confirmation was opened for. If none of them
+  // is still listed (the reader switched files by keyboard with the dialog
+  // up), the dialog closes rather than delete another file's comments.
+  const confirmIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!confirmDeleteAll) return;
+    if (!comments.some((c) => confirmIdsRef.current.has(c.id))) setConfirmDeleteAll(false);
+  }, [comments, confirmDeleteAll]);
   const { settings } = useSettings();
   const resolveEnabled = settings.enableResolve;
   const resolvedCount = comments.filter((c) => getEffectiveStatus(c) === 'resolved').length;
@@ -574,6 +582,7 @@ export function CommentListSurface({
             className={`${footerButtonClass} hover:text-danger`}
             onClick={(e) => {
               e.stopPropagation();
+              confirmIdsRef.current = new Set(comments.map((c) => c.id));
               setConfirmDeleteAll(true);
             }}
             title="Delete all comments"

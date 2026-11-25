@@ -21,6 +21,12 @@ export interface CommentsButtonProps {
   onBulkResolve?: () => void;
   onBulkDeleteResolved?: () => void;
   onBulkDelete: () => void;
+  /**
+   * The file the comments belong to. A switch to another file closes the
+   * delete-all confirmation, which would otherwise delete the new file's
+   * comments on confirm (a tab switch by keyboard leaves it open).
+   */
+  filePath?: string | null;
 }
 
 const menuItemClass =
@@ -48,6 +54,7 @@ export function CommentsButton({
   onBulkResolve,
   onBulkDeleteResolved,
   onBulkDelete,
+  filePath,
 }: CommentsButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
@@ -61,6 +68,9 @@ export function CommentsButton({
   useEffect(() => {
     if (totalCount === 0) setConfirmDeleteAll(false);
   }, [totalCount]);
+  useEffect(() => {
+    setConfirmDeleteAll(false);
+  }, [filePath]);
 
   const pick = (action: () => void) => () => {
     setMenuOpen(false);

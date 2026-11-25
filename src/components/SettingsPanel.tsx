@@ -322,6 +322,9 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
       {/* Panel */}
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
         className="relative w-full max-w-3xl max-h-[85vh] bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col overlay-panel-enter"
         onClick={(e) => e.stopPropagation()}
       >

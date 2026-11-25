@@ -233,6 +233,35 @@ describe('CommentListSurface - answered count', () => {
     expect(footer.textContent).toMatch(/1 answered/);
   });
 
+  it('drops an open delete-all dialog when the list now shows another file', async () => {
+    const onBulkDelete = vi.fn();
+    const { rerender } = renderRemoveMode({ comments: [OPEN_COMMENT, SECOND_OPEN], onBulkDelete });
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete All' }));
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    const otherFile: MdComment[] = [
+      { ...OPEN_COMMENT, id: 'b-1' },
+      { ...SECOND_OPEN, id: 'b-2' },
+    ];
+    rerender(
+      <SettingsProvider>
+        <CommentListSurface
+          comments={otherFile}
+          activeCommentId={null}
+          missingAnchors={new Set<string>()}
+          onActivate={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+          onReply={vi.fn()}
+          onEditReply={vi.fn()}
+          onDeleteReply={vi.fn()}
+          onBulkDelete={onBulkDelete}
+        />
+      </SettingsProvider>,
+    );
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(onBulkDelete).not.toHaveBeenCalled();
+  });
+
   it('says nothing when none are answered', async () => {
     renderRemoveMode({
       comments: [OPEN_COMMENT, SECOND_OPEN],

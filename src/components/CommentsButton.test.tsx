@@ -129,6 +129,17 @@ describe('CommentsButton', () => {
     expect(screen.queryByRole('button', { name: 'Delete All' })).toBeNull();
   });
 
+  it('drops an open delete dialog when the file changes underneath it', () => {
+    const { props, rerender } = renderButton({ filePath: '/tmp/a.md' });
+    openMenu();
+    fireEvent.click(screen.getByText('Delete all comments…'));
+    expect(screen.getByRole('button', { name: 'Delete All' })).toBeTruthy();
+    // Same count, another file: confirming here would delete the wrong file's comments.
+    rerender(<CommentsButton {...props} filePath="/tmp/b.md" />);
+    expect(screen.queryByRole('button', { name: 'Delete All' })).toBeNull();
+    expect(props.onBulkDelete).not.toHaveBeenCalled();
+  });
+
   it('closes its menu on Escape', () => {
     renderButton();
     openMenu();

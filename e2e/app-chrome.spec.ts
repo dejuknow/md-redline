@@ -453,6 +453,32 @@ test.describe('Review band and status bar', () => {
     await expect(page.locator('[data-margin-notes]')).toHaveCount(0);
   });
 
+  test('with the shell inset on the sidebar row, the Explorer and Outline switches drop to icons and fit', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    const top = page.locator('[data-sidebar-top]');
+    await expect(top).toBeVisible();
+    await top.evaluate((el) =>
+      (el as HTMLElement).style.setProperty('--window-inset-left', '72px'),
+    );
+    const fits = await top.evaluate((el) => {
+      const row = el.getBoundingClientRect();
+      const close = el.querySelector('[aria-label="Close panel"]')!.getBoundingClientRect();
+      const switches = [...el.querySelectorAll('button[title]')].filter(
+        (b) => b.getAttribute('aria-label') !== 'Close panel',
+      );
+      return switches.every((b) => {
+        const r = b.getBoundingClientRect();
+        return r.left >= row.left && r.right <= close.left;
+      });
+    });
+    expect(fits).toBe(true);
+    // The labels stay as the buttons' accessible names.
+    await expect(top.getByRole('button', { name: 'Explorer' })).toBeVisible();
+    await expect(top.getByRole('button', { name: 'Outline' })).toBeVisible();
+  });
+
   test('shell inset shifts the strip in every sidebar state', async ({ page }) => {
     await openFixture(page);
     const firstChildOffset = () =>
@@ -571,6 +597,17 @@ test.describe('Menus, Escape and copy', () => {
     await strip(page).getByRole('button', { name: 'View options' }).click();
     await copy();
     await expect(page.getByText("Couldn't copy the document.")).toBeVisible();
+  });
+
+  test('Escape closes Settings first when it opened over the View menu', async ({ page }) => {
+    await openFixture(page);
+    await strip(page).getByRole('button', { name: 'View options' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press(withMod(','));
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await expect(settings).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(settings).toHaveCount(0);
   });
 });
 

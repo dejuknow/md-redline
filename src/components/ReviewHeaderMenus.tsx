@@ -187,7 +187,7 @@ export function OtherReviews({
           role="dialog"
           aria-label="Other reviews"
           data-review-popover
-          className="absolute right-0 bottom-full z-50 mb-1 w-[min(560px,calc(100vw-16px))] rounded-lg border border-border bg-surface shadow-lg px-3 py-1.5 divide-y divide-border-subtle"
+          className="absolute right-0 bottom-full z-50 mb-1 w-[min(560px,calc(100vw-16px))] max-h-[calc(100vh-7rem)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface shadow-lg px-3 py-1.5 divide-y divide-border-subtle"
         >
           {children}
         </div>

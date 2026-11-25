@@ -1077,6 +1077,17 @@ export default function App() {
     undoSlot,
     liveSessionIds,
   });
+  // Hand off's file picker leaves out files a user review owns, whose
+  // comments that review's Send delivers.
+  const handoffCountsOutsideReviews = useMemo(() => {
+    const owned = new Set(
+      shownReviewSessions
+        .filter((session) => session.origin === 'user')
+        .flatMap((session) => session.filePaths),
+    );
+    if (owned.size === 0) return handoffCounts;
+    return new Map([...handoffCounts].filter(([path]) => !owned.has(path)));
+  }, [handoffCounts, shownReviewSessions]);
 
   // `commentCount` is the OPEN count, so the resolved tail is whatever the
   // total has beyond it. Counted in both modes: a file can carry resolved
@@ -3467,10 +3478,11 @@ export default function App() {
                     34px matches the tab strip, so the two rows share a center
                     line. Its left padding reads
                     --window-inset-left, which a desktop shell sets here to clear
-                    its window controls. */}
+                    its window controls; when that leaves the row too narrow,
+                    the two switches drop to icons (a container query). */}
                   <div
                     data-sidebar-top
-                    className="h-[34px] flex items-center gap-1 pr-2 shrink-0"
+                    className="@container h-[34px] flex items-center gap-1 pr-2 shrink-0"
                     style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.25rem)' }}
                   >
                     <div className="min-w-0 flex items-center gap-0.5">
@@ -3484,7 +3496,7 @@ export default function App() {
                         title="File explorer"
                       >
                         <svg
-                          className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
+                          className="w-3.5 h-3.5 inline-block mr-1 @max-[200px]:mr-0 -mt-0.5"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -3496,7 +3508,7 @@ export default function App() {
                             d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
                           />
                         </svg>
-                        Explorer
+                        <span className="@max-[200px]:sr-only">Explorer</span>
                       </button>
                       <button
                         onClick={() => setLeftPanelView('outline')}
@@ -3508,7 +3520,7 @@ export default function App() {
                         title="Document outline"
                       >
                         <svg
-                          className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5"
+                          className="w-3.5 h-3.5 inline-block mr-1 @max-[200px]:mr-0 -mt-0.5"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -3520,7 +3532,7 @@ export default function App() {
                             d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
                           />
                         </svg>
-                        Outline
+                        <span className="@max-[200px]:sr-only">Outline</span>
                       </button>
                     </div>
                     <button
@@ -3754,6 +3766,7 @@ export default function App() {
                       onBulkResolve={handleBulkResolve}
                       onBulkDeleteResolved={handleBulkDeleteResolved}
                       onBulkDelete={handleBulkDelete}
+                      filePath={activeFilePath}
                     />
                   }
                   handOff={
@@ -3761,7 +3774,7 @@ export default function App() {
                     activeFilePath && !reviewOwnsSending ? (
                       <HandOffButton
                         activeFilePath={activeFilePath}
-                        commentCounts={handoffCounts}
+                        commentCounts={handoffCountsOutsideReviews}
                         onCopyAgentPrompt={handleHandoff}
                       />
                     ) : null
