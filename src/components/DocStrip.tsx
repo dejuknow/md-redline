@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tooltip } from './Tooltip';
-import { useElementWidth } from '../hooks/useElementWidth';
+import { useElementNarrowerThan } from '../hooks/useElementNarrowerThan';
 import { useDismiss } from '../hooks/useDismiss';
 import { getPrimaryModifierLabel } from '../lib/platform';
 import type { ViewMode } from '../lib/view-mode';
 
 export interface DocStripProps {
-  /** The tab bar, rendered with variant="strip". */
+  /** The tab bar, rendered in its strip look. */
   tabs: React.ReactNode;
   /** Rail controls (prev/next, density, "N open", bulk actions). App passes
    * them only while the rail is shown, so their presence is also what tells
@@ -150,9 +150,8 @@ export function DocStrip({
   onToggleComments,
 }: DocStripProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const width = useElementWidth(rootRef);
-  // 0 means "not measured yet": render the wide layout until we know better.
-  const narrow = width > 0 && width < NARROW_STRIP_WIDTH;
+  // Not measured yet counts as wide: render the wide layout until we know better.
+  const narrow = useElementNarrowerThan(rootRef, NARROW_STRIP_WIDTH);
 
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);

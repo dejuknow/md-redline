@@ -255,14 +255,13 @@ describe('TabBar: comment count badges', () => {
   });
 });
 
-describe('TabBar: the strip variant', () => {
+describe('TabBar: the strip look', () => {
   function renderStrip() {
     const onSwitchTab = vi.fn();
     const onCloseTab = vi.fn();
     const onOpenFile = vi.fn();
     const result = render(
       <TabBar
-        variant="strip"
         tabs={TABS}
         activeFilePath="/docs/two.md"
         commentCounts={new Map([['/docs/two.md', 2]])}

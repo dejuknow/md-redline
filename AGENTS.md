@@ -889,7 +889,7 @@ change count and the pending pulse), search ("Find in document (Cmd+F)"), copy
 while the rail is hidden, since the rail controls already say "N open"). Hand off
 is not here: it lives in the app header. Pressed toggles use a neutral `bg-tint`,
 not crimson.
-Under 600px of strip width (`useElementWidth`), view, diff and copy fold into a
+Under 600px of strip width (`useElementNarrowerThan`), view, diff and copy fold into a
 **View** menu button (`aria-label="View options"`) whose items keep the same
 titles and test id; search and the comments toggle stay out. The menu closes on
 an outside press, on focus moving outside it (the command palette or find bar

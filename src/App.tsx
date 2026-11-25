@@ -3671,7 +3671,6 @@ export default function App() {
               <DocStrip
                 tabs={
                   <TabBar
-                    variant="strip"
                     tabs={tabs}
                     activeFilePath={activeFilePath}
                     commentCounts={tabCommentCounts}

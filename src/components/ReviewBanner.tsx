@@ -554,7 +554,6 @@ export function ReviewBanner({
       sessions,
       asks,
       (s) =>
-        s.origin === 'user' &&
         sessionIsReady(s, commentCounts) &&
         !s.waitingForAgent &&
         unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent).length > 0,

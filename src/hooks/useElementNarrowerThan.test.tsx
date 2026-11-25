@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useRef } from 'react';
 import { render, cleanup, act } from '@testing-library/react';
-import { useElementWidth } from './useElementWidth';
+import { useElementNarrowerThan } from './useElementNarrowerThan';
 
 // jsdom has neither layout nor ResizeObserver. The stub records each observer
 // so a test can fire a resize and check that unmount disconnects it.
@@ -28,15 +28,15 @@ class ResizeObserverStub {
 }
 
 let rectWidth = 0;
-let seen: number[] = [];
+let seen: boolean[] = [];
 
 function Probe({ attach = true }: { attach?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const width = useElementWidth(ref);
-  seen.push(width);
+  const narrow = useElementNarrowerThan(ref, 600);
+  seen.push(narrow);
   return (
     <div ref={attach ? ref : undefined} data-testid="probe">
-      {width}
+      {String(narrow)}
     </div>
   );
 }
@@ -57,27 +57,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('useElementWidth', () => {
-  it('reads 0 on the first render, before any measurement', () => {
+describe('useElementNarrowerThan', () => {
+  it('reads false on the first render, before any measurement', () => {
     rectWidth = 480;
     render(<Probe />);
-    expect(seen[0]).toBe(0);
+    expect(seen[0]).toBe(false);
   });
 
   it('measures the element on mount and observes it', () => {
     rectWidth = 480;
     const { getByTestId } = render(<Probe />);
-    expect(getByTestId('probe').textContent).toBe('480');
+    expect(getByTestId('probe').textContent).toBe('true');
     expect(observers).toHaveLength(1);
     expect(observers[0].observed).toEqual([getByTestId('probe')]);
   });
 
-  it('updates when the observer reports a resize', () => {
+  it('treats the threshold itself as wide', () => {
+    rectWidth = 600;
+    const { getByTestId } = render(<Probe />);
+    expect(getByTestId('probe').textContent).toBe('false');
+  });
+
+  it('updates when the observer reports a resize across the threshold', () => {
     rectWidth = 480;
     const { getByTestId } = render(<Probe />);
     rectWidth = 720;
     act(() => observers[0].fire());
-    expect(getByTestId('probe').textContent).toBe('720');
+    expect(getByTestId('probe').textContent).toBe('false');
   });
 
   it('disconnects the observer on unmount', () => {
@@ -87,17 +93,23 @@ describe('useElementWidth', () => {
     expect(observers[0].connected).toBe(false);
   });
 
-  it('stays 0 when the ref is never attached', () => {
+  it('stays false when the ref is never attached', () => {
     rectWidth = 480;
     const { getByTestId } = render(<Probe attach={false} />);
-    expect(getByTestId('probe').textContent).toBe('0');
+    expect(getByTestId('probe').textContent).toBe('false');
     expect(observers).toHaveLength(0);
   });
 
-  it('stays 0 where ResizeObserver is missing', () => {
+  it('stays false where ResizeObserver is missing', () => {
     vi.stubGlobal('ResizeObserver', undefined);
     rectWidth = 480;
     const { getByTestId } = render(<Probe />);
-    expect(getByTestId('probe').textContent).toBe('0');
+    expect(getByTestId('probe').textContent).toBe('false');
+  });
+
+  it('treats a width of 0 as not measured, not narrow', () => {
+    rectWidth = 0;
+    const { getByTestId } = render(<Probe />);
+    expect(getByTestId('probe').textContent).toBe('false');
   });
 });

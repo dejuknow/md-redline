@@ -6,8 +6,8 @@ import { getPrimaryModifierLabel } from '../lib/platform';
 
 // jsdom has no layout, so the strip's measured width is driven directly.
 let measuredWidth = 1000;
-vi.mock('../hooks/useElementWidth', () => ({
-  useElementWidth: () => measuredWidth,
+vi.mock('../hooks/useElementNarrowerThan', () => ({
+  useElementNarrowerThan: (_ref: unknown, px: number) => measuredWidth > 0 && measuredWidth < px,
 }));
 
 const mod = getPrimaryModifierLabel();
