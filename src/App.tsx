@@ -35,7 +35,7 @@ import { TableOfContents } from './components/TableOfContents';
 import { CommentPopover } from './components/CommentPopover';
 import { computeAnsweredCommentIds, effectiveSentCommentIds } from './lib/answered-comments';
 import { CommentForm } from './components/CommentForm';
-import { Toolbar } from './components/Toolbar';
+import { AppHeader } from './components/AppHeader';
 import { TabBar } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
@@ -95,7 +95,7 @@ import {
   rangeFromPaintedSelection,
   resolveSelectionMarkdown,
 } from './lib/copy-as-markdown';
-import { getParentDir } from './lib/path-utils';
+import { getParentDir, getPathBasename, tildeShortenPath } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { useOpenAddedReviewFiles } from './hooks/useOpenAddedReviewFiles';
 import { ReviewBanner } from './components/ReviewBanner';
@@ -972,6 +972,12 @@ export default function App() {
   // mouseup of a click on the item drops a committed selection before the
   // click lands, which took the item out of the list from under the pointer.
   const [paletteSelectionMarkdown, setPaletteSelectionMarkdown] = useState<string | null>(null);
+  // Every way of opening the palette (the shortcut, the header's chip) goes
+  // through here, so each reads the selection the same way first.
+  const openCommandPalette = useCallback(() => {
+    setPaletteSelectionMarkdown(selectionAsMarkdown());
+    setActiveModal('commandPalette');
+  }, [selectionAsMarkdown, setActiveModal]);
   const requestCommentFocus = useCallback(
     (commentId: string, origin: CommentFocusOrigin = 'jump') =>
       setRequestedCommentFocus({ commentId, token: Date.now(), origin }),
@@ -2507,8 +2513,8 @@ export default function App() {
       // Cmd+K : Open command palette (works even in inputs)
       if (mod && e.key === 'k') {
         e.preventDefault();
-        if (activeModal !== 'commandPalette') setPaletteSelectionMarkdown(selectionAsMarkdown());
-        toggleModal('commandPalette');
+        if (activeModal === 'commandPalette') setActiveModal(null);
+        else openCommandPalette();
         return;
       }
 
@@ -2708,7 +2714,7 @@ export default function App() {
     return () => document.removeEventListener('keydown', handler);
   }, [
     lockSelection,
-    selectionAsMarkdown,
+    openCommandPalette,
     handleJumpToNext,
     handleJumpToPrev,
     handleAddComment,
@@ -3328,7 +3334,7 @@ export default function App() {
     // A confirm dialog of the rail's or the list's own, or a menu of the
     // strip's (the narrow View menu), whose open state this component cannot
     // see.
-    document.querySelector('[role="alertdialog"], [role="menu"]') !== null;
+    document.querySelector('[role="alertdialog"], [role="menu"], [data-review-popover]') !== null;
   // And one opened during start-up (Cmd+K, Cmd+O, Cmd+F, a dialog, a menu) is
   // the reader asking for the page now. None of them are portaled: they render
   // inside the main column, where visibility: hidden would leave them
@@ -3597,29 +3603,56 @@ export default function App() {
 
       {/* Main column: chrome row, document, status bar */}
       <div
+        data-main-column
         className="flex-1 min-w-0 flex flex-col"
         style={{ visibility: startupLaidOut ? undefined : 'hidden' }}
       >
-        <ReviewBanner
-          sessions={shownReviewSessions}
-          commentCounts={commentCounts}
-          agentCommentCounts={agentCommentCounts}
-          prepareSend={prepareBannerSend}
-          onResolved={handleReviewResolved}
-          onBatchSent={handleBatchSent}
-          optimisticSent={optimisticSent}
-          showToast={showToast}
-          commentIdsByFile={commentIdsByFile}
-          userRepliedLast={userRepliedLast}
-          pendingAskCountsBySession={pendingAskCountsBySession}
-          onJumpToAsk={handleJumpToAsk}
-        />
-        <Toolbar
+        <AppHeader
+          fileName={activeFilePath ? getPathBasename(activeFilePath) : null}
+          folderPath={
+            activeFilePath ? tildeShortenPath(getParentDir(activeFilePath), homeDir) || null : null
+          }
           error={error}
           errorKind={errorKind}
           accessRequestShown={showAccessRequest}
           onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
           isLoading={isLoading}
+          renderBanner={
+            shownReviewSessions.length > 0
+              ? (compact) => (
+                  <ReviewBanner
+                    layout="header"
+                    compact={compact}
+                    sessions={shownReviewSessions}
+                    commentCounts={commentCounts}
+                    agentCommentCounts={agentCommentCounts}
+                    prepareSend={prepareBannerSend}
+                    onResolved={handleReviewResolved}
+                    onBatchSent={handleBatchSent}
+                    optimisticSent={optimisticSent}
+                    showToast={showToast}
+                    commentIdsByFile={commentIdsByFile}
+                    userRepliedLast={userRepliedLast}
+                    pendingAskCountsBySession={pendingAskCountsBySession}
+                    onJumpToAsk={handleJumpToAsk}
+                  />
+                )
+              : null
+          }
+          handOff={
+            // Hand off is the header's action while no review is open; a
+            // review brings its own send actions and takes the row.
+            activeFilePath && shownReviewSessions.length === 0 ? (
+              <HandOffButton
+                activeFilePath={activeFilePath}
+                commentCounts={handoffCounts}
+                onCopyAgentPrompt={handleHandoff}
+              />
+            ) : null
+          }
+          focusMode={focusMode}
+          onExitFocus={exitFocusMode}
+          onOpenPalette={openCommandPalette}
         />
 
         <>
@@ -3691,22 +3724,6 @@ export default function App() {
                 commentsSurfaceVisible={railShown || drawerOpen}
                 openCommentCount={commentCount}
                 onToggleComments={toggleCommentsSurface}
-                trailing={
-                  // Hand off anchors the far right, behind a hairline so it
-                  // reads as the terminal action rather than another utility.
-                  // Disabled until the active tab has a sendable comment (the
-                  // button owns that logic).
-                  activeFilePath ? (
-                    <>
-                      <div className="w-px h-4 bg-border" aria-hidden="true" />
-                      <HandOffButton
-                        activeFilePath={activeFilePath}
-                        commentCounts={handoffCounts}
-                        onCopyAgentPrompt={handleHandoff}
-                      />
-                    </>
-                  ) : undefined
-                }
               />
               <DiffBar
                 diffEnabled={diffEnabled}
@@ -4176,17 +4193,6 @@ export default function App() {
             </kbd>{' '}
             Commands
           </span>
-          {focusMode && (
-            <button
-              type="button"
-              data-focus-chip
-              onClick={exitFocusMode}
-              title="Exit focus mode"
-              className="px-2 py-0.5 rounded-full bg-primary-bg text-primary-text text-[10px] font-medium hover:bg-primary-bg-strong transition-colors cursor-pointer"
-            >
-              Focus
-            </button>
-          )}
           <span className="ml-auto">
             <kbd className="px-1 py-0.5 bg-surface rounded border border-border-subtle text-content-secondary font-mono">
               ?

@@ -1452,3 +1452,202 @@ describe('ReviewBanner: a reviewer reply on a sent thread', () => {
     expect(onBatchSent).toHaveBeenCalledWith(['c1'], ['r2~a']);
   });
 });
+
+describe('ReviewBanner: header layout', () => {
+  const userSession: ReviewSession = {
+    id: 'rev_user',
+    filePaths: ['/tmp/user.md'],
+    enableResolve: false,
+    status: 'open',
+    sentCommentIds: [],
+    waitingForAgent: false,
+    origin: 'user',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const agentSession: ReviewSession = {
+    id: 'rev_agent',
+    filePaths: ['/tmp/agent.md'],
+    enableResolve: false,
+    status: 'open',
+    sentCommentIds: [],
+    waitingForAgent: false,
+    origin: 'agent',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    lastAgentActivityAt: null,
+    author: 'Claude',
+  };
+
+  function renderHeaderBanner(overrides: Partial<Parameters<typeof ReviewBanner>[0]> = {}) {
+    const props: Parameters<typeof ReviewBanner>[0] = {
+      layout: 'header',
+      sessions: [userSession, agentSession],
+      commentCounts: new Map([
+        ['/tmp/user.md', 2],
+        ['/tmp/agent.md', 0],
+      ]),
+      agentCommentCounts: new Map([['/tmp/agent.md', 0]]),
+      onResolved: () => {},
+      commentIdsByFile: new Map([
+        ['/tmp/user.md', ['u1', 'u2']],
+        ['/tmp/agent.md', []],
+      ]),
+      ...overrides,
+    };
+    return render(<ReviewBanner {...props} />);
+  }
+
+  it('header layout shows one row and a "+1" Other reviews button when two sessions are present', () => {
+    renderHeaderBanner();
+    const banner = screen.getByTestId('review-banner');
+    // The user review is ready to send, so it takes the row.
+    expect(banner.textContent).toContain('Agent is waiting on your review');
+    expect(banner.textContent).not.toContain('Claude is reviewing');
+    const others = screen.getByRole('button', { name: 'Other reviews' });
+    expect(others.textContent).toBe('+1');
+    expect(others.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(others);
+    expect(others.getAttribute('aria-expanded')).toBe('true');
+    expect(banner.textContent).toContain('Claude is reviewing');
+  });
+
+  it('shows no Other reviews button for a single session', () => {
+    renderHeaderBanner({ sessions: [userSession] });
+    expect(screen.queryByRole('button', { name: 'Other reviews' })).toBeNull();
+  });
+
+  it('actions inside the popover act on their own session id', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const onResolved = vi.fn();
+    renderHeaderBanner({ onResolved });
+    fireEvent.click(screen.getByRole('button', { name: 'Other reviews' }));
+    const popover = screen.getByRole('dialog', { name: 'Other reviews' });
+    fireEvent.click(
+      Array.from(popover.querySelectorAll('button')).find((b) =>
+        /end review/i.test(b.getAttribute('aria-label') ?? b.textContent ?? ''),
+      )!,
+    );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/review-sessions/rev_agent/agent-done',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('End review renders without bg-primary', () => {
+    renderHeaderBanner({ sessions: [agentSession] });
+    const end = screen.getByRole('button', { name: /end review/i });
+    expect(end.className).not.toMatch(/\bbg-primary\b/);
+  });
+
+  it('End review renders without bg-primary in the banner layout too', () => {
+    renderHeaderBanner({ sessions: [agentSession], layout: 'banner' });
+    const end = screen.getByRole('button', { name: /end review/i });
+    expect(end.className).not.toMatch(/\bbg-primary\b/);
+  });
+
+  it('row actions render quiet, secondary, primary, with the primary last', () => {
+    renderHeaderBanner({ sessions: [userSession] });
+    const banner = screen.getByTestId('review-banner');
+    const labels = Array.from(banner.querySelectorAll('button')).map((b) => b.textContent);
+    expect(labels).toEqual(['Cancel review', 'Send 2 & finish', 'Send 2 comments']);
+    const send = screen.getByRole('button', { name: 'Send 2 comments' });
+    expect(send.className).toMatch(/\bbg-primary\b/);
+  });
+
+  it('compact: Send N & finish and Cancel review live in the "More review actions" menu and still act on the row\'s session', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    const onResolved = vi.fn();
+    renderHeaderBanner({ sessions: [userSession], compact: true, onResolved });
+    // The primary stays out; the rest are behind the menu.
+    expect(screen.getByRole('button', { name: 'Send 2 comments' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send 2 & finish' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel review' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More review actions' }));
+    const menu = screen.getByRole('menu', { name: 'More review actions' });
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent);
+    expect(items).toEqual(['Cancel review', 'Send 2 & finish']);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send 2 & finish' }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/review-sessions/rev_user/finish',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    // Choosing an item closes the menu.
+    expect(screen.queryByRole('menu', { name: 'More review actions' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More review actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel review' }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/review-sessions/rev_user/abort',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+  });
+
+  it('compact: End review moves into the menu on an agent row', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    renderHeaderBanner({ sessions: [agentSession], compact: true });
+    expect(screen.queryByRole('button', { name: /end review/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More review actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /end review/i }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/review-sessions/rev_agent/agent-done',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+  });
+
+  it('compact: the pending-question jump stays visible on a user-origin row', () => {
+    const onJumpToAsk = vi.fn();
+    renderHeaderBanner({
+      sessions: [userSession],
+      compact: true,
+      pendingAskCountsBySession: new Map([['rev_user', 1]]),
+      onJumpToAsk,
+    });
+    const jump = screen.getByRole('button', { name: /1 question awaiting your reply/i });
+    fireEvent.click(jump);
+    expect(onJumpToAsk).toHaveBeenCalledWith('rev_user');
+  });
+
+  it('compact: the pending-question jump stays visible on an agent row', () => {
+    renderHeaderBanner({
+      sessions: [agentSession],
+      compact: true,
+      pendingAskCountsBySession: new Map([['rev_agent', 2]]),
+      onJumpToAsk: () => {},
+    });
+    expect(screen.getByRole('button', { name: /2 questions awaiting your reply/i })).toBeTruthy();
+  });
+
+  it('a user session waiting for the agent does not rank as ready', () => {
+    const waiting: ReviewSession = { ...userSession, id: 'rev_waiting', waitingForAgent: true };
+    const ready: ReviewSession = {
+      ...userSession,
+      id: 'rev_ready',
+      filePaths: ['/tmp/ready.md'],
+    };
+    renderHeaderBanner({
+      sessions: [waiting, ready],
+      commentCounts: new Map([
+        ['/tmp/user.md', 2],
+        ['/tmp/ready.md', 1],
+      ]),
+      commentIdsByFile: new Map([
+        ['/tmp/user.md', ['u1', 'u2']],
+        ['/tmp/ready.md', ['r1']],
+      ]),
+    });
+    // The ready review's Send is the one in the row.
+    expect(screen.getByRole('button', { name: 'Send 1 comment' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /waiting for agent/i })).toBeNull();
+  });
+});

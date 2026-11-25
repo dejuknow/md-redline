@@ -76,8 +76,10 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/MarkdownViewer.tsx`: rendered markdown, selection handling, highlight painting
 - `src/components/RawView.tsx`: raw markdown view with syntax highlighting and diff overlay
 - `src/components/RenderedDiffView.tsx`: rendered prose view of the diff overlay
-- `src/components/ReviewBanner.tsx`: review session banner (send batch, finish, cancel)
-- `src/components/DocStrip.tsx`: the document panel's top row: tabs on the left, document controls (view mode, diff, search, copy, comments toggle, handoff) on the right
+- `src/components/AppHeader.tsx`: the main column's top row: the review row or the active file's name and folder with Hand off, the command palette chip, and Exit focus
+- `src/components/ReviewBanner.tsx`: review session rows (send batch, finish, cancel, end review); `layout="header"` is the app header's one-row form
+- `src/lib/header-session.ts`: `pickHeaderSessions`, which review takes the header row and which wait behind "+N"
+- `src/components/DocStrip.tsx`: the document panel's top row: tabs on the left, document controls (view mode, diff, search, copy, comments toggle) on the right
 - `src/components/DiffBar.tsx`: row under the tab strip with the change count, diff reference label, prev/next change and Mark reviewed
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
@@ -864,8 +866,9 @@ diff", disabled with an explanatory title until a reference exists, with the
 change count and the pending pulse), search ("Find in document (Cmd+F)"), copy
 (`copy-button`), the comments toggle ("Toggle comments rail (Cmd+\)",
 `aria-pressed` while the rail or drawer is shown, carrying the open count only
-while the rail is hidden, since the rail controls already say "N open"), then
-Hand off behind a hairline. Pressed toggles use a neutral `bg-tint`, not crimson.
+while the rail is hidden, since the rail controls already say "N open"). Hand off
+is not here: it lives in the app header. Pressed toggles use a neutral `bg-tint`,
+not crimson.
 Under 600px of strip width (`useElementWidth`), view, diff and copy fold into a
 **View** menu button (`aria-label="View options"`) whose items keep the same
 titles and test id; search and the comments toggle stay out.
@@ -875,14 +878,49 @@ whichever tab ends there. The strip carries a `scroll-pr-10` that must stay at o
 above that button's `w-9`, otherwise the browser parks the active tab underneath
 it when scrolling the tab into view.
 
-Above the panel, the main column still has the `Toolbar` status row (load
-errors, "Loading...", the lost-access notice) until the app header replaces it.
+### App header
+Above the panel, the main column (`[data-main-column]`) starts with one 44px
+row, `AppHeader.tsx` (`[data-app-header]`). It merged the old review banner and
+the old toolbar status row, so there is one chrome row instead of two.
+
+- **No review open:** the active file's name (semibold) and its folder (muted,
+  home shortened to `~`) on the left, inside `[data-header-status]`, which is
+  `min-w-0` with each part `truncate`, so a long name gives way before the
+  actions do. Hand off (`HandOffButton`) sits right-aligned in
+  `[data-header-actions]` (`shrink-0`).
+- **A review open:** the row is the review (`ReviewBanner layout="header"`, its
+  wrapper keeps `data-testid="review-banner"`) and Hand off is hidden: a review
+  brings its own send actions. App passes the banner as
+  `renderBanner(compact)`, null when `shownReviewSessions` is empty.
+- Load errors, "Loading..." and the lost-access notice with its compact Allow
+  button (`toolbar-allow-access`) render in the row either way. The lost-access
+  pair shows exactly when `errorKind === 'access-denied' && !accessRequestShown`,
+  alongside a review row too.
+- Then a 1px hairline and the command palette chip (`aria-label="Command
+  palette"`, showing `⌘K`, or `Ctrl+K` off Apple platforms). The chip calls
+  App's `openCommandPalette()`, the same function the `Cmd+K` shortcut runs, so
+  it reads the selection for "Copy selection as markdown" first. It carries
+  `data-preserve-selection`: without it, the mouseup of the click dropped a
+  painted selection before the palette could read it.
+- In focus mode, an **Exit focus** button (`data-focus-chip`, title "Exit focus
+  mode", with the `⌘.` hint) ends the row, after the file name when a review
+  row has taken the status.
+
+The header measures its own width (`useElementWidth`); under 900px (0, not yet
+measured, counts as wide) the review row renders compact (see Review banner).
+There is no More menu of the header's own: keyboard shortcuts stay on `?` and
+the palette.
+
+Its left padding is `var(--window-inset-left, 0px)`. A desktop shell sets
+`--window-inset-left` on `[data-app-header]` to clear its window controls; the
+browser build never sets it. It applies in every sidebar state (open, the
+collapsed rail, focus mode), and `e2e/app-chrome.spec.ts` pins that.
 
 ### Folder permission requests
 Opening a file outside the allowed roots is a consent moment, not a failure, and
 `AccessRequest.tsx` is the only place that says so. The document area renders it
 over the sheet (`variant="page"`), the explorer renders the quieter
-`variant="panel"` when a browse is refused, and the toolbar stays out of it
+`variant="panel"` when a browse is refused, and the app header stays out of it
 whenever the card is up. Three surfaces shouting the same absolute path in
 `text-danger` was the state this replaced; if a fourth surface ever needs to
 report a refused folder, give it a variant here rather than its own copy.
@@ -903,7 +941,7 @@ Two conditions gate it, and they are not the same one:
   The `!rawMarkdown` term is load-bearing: `reloadFile` keeps the loaded content
   on failure, so a directory that rotates out from under an open file 403s a tab
   the user is still reading. The card must not cover a document it cannot give
-  back. Those tabs keep their content and the toolbar reports the refusal with
+  back. Those tabs keep their content and the app header reports the refusal with
   its own compact Allow button, so exactly one surface ever owns the ask.
 - `accessDeniedDir` may be null (`?file=~`, a Windows drive-relative path, both
   of which `getParentDir` answers with `''`). Null names no folder but still
@@ -950,15 +988,38 @@ dot cannot. Background tabs opened by session restore never render the card at
 all, so that dot is their only signal.
 
 ### Review banner
-When a review session is active, a sticky banner appears at the top with one row
-per session:
+When a review session is active, the app header's row becomes the review's
+status and actions (`ReviewBanner layout="header"`). Each row puts its status on
+the left (truncating in the header) and its actions on the right in the order
+quiet, pending-question chip, secondary, primary, so the primary is always last.
+Crimson fill (`bg-primary`) is only on **Send N comments**; **End review** and
+**Cancel review** are quiet (no fill), and the question chip is the crimson tint
+(`bg-primary-bg`).
+
+The header shows one review. `pickHeaderSessions` picks it: a review with an agent
+question awaiting a reply first, then a reviewer-origin review that is ready to
+send (every file's count loaded, not `waitingForAgent`, and at least one unsent
+comment), then the first in the list. The rest sit behind a **+N** button
+(`aria-label="Other reviews"`) that opens a popover (`[data-review-popover]`)
+listing their rows with their full actions, in list order. Outside click or
+Escape closes it, and App's Escape guard treats it as owning the key.
+
+Under 900px of header width the row is **compact**: its quiet and secondary
+actions move into a menu button (`aria-label="More review actions"`, a
+`role="menu"` of `menuitem`s with the same labels). The primary action and the
+pending-question chip stay in the row, on agent and reviewer rows alike.
+
+The default `layout="banner"` (a bar of its own, one row per session) is what
+the component tests render; the app always uses the header layout.
+
+Row states:
 
 - **User-initiated** (`origin='user'`): "Agent is waiting on your review of file.md".
   Three actions: **Send N comments** (send current batch, keep session open), **Send N &
   finish** / **Finish review** (send and close), **Cancel review** (link style). Sent
   comments get a dimmed "Sent" badge on their card. If an agent asks a question
-  mid-handoff, a warning-palette chip appears: "N questions awaiting your reply",
-  clickable to jump to the first question card.
+  mid-handoff, a crimson-tinted chip appears with the actions: "N questions
+  awaiting your reply", clickable to jump to the first question card.
   A comment counts as unsent until it is sent; a sent one counts as unsent again only
   when the reviewer's last reply on it is not recorded in `sentReplyIds` (a resolved
   thread is skipped in either mode). A reply is recorded by its id plus
@@ -974,14 +1035,14 @@ per session:
   file.md" with a spinner while the agent is active (including just-started sessions
   with no posts yet) and a static dot once the agent has been quiet for 30s. Shows
   the comment count in parentheses (resolved agent comments are left out). Single
-  action: **End review**.
+  action: **End review** (quiet).
 - **Awaiting your reply** (`origin='agent'`, pending `mdr_ask` questions): the row
   switches to "{Agent} is waiting on your reply." with a pulsing warning dot and the
   question-count chip (click to jump). **End review** stays available but asks for
   confirmation: unanswered questions are reported back to the agent as unanswered.
 
 **End review** posts to `/agent-done`: inline replies in the markers are delivered
-to the agent, the session closes, and the banner clears. The agent's name is
+to the agent, the session closes, and the row clears. The agent's name is
 the session's `author`: the server stores the first name any batch supplies,
 comments or replies (`recordAgentComments`), ignoring the "Agent" fallback the
 markers get. The banner shows "Agent" until then. It used to be read back out of
@@ -1403,8 +1464,9 @@ Two details are load-bearing:
 
 The palette entry is called `Copy selection as markdown`, spelling out its
 subject because nothing sits under the cursor there. Like the menu, it resolves
-the markdown when the palette opens (`paletteSelectionMarkdown`, read by the
-Cmd+K handler before the palette focuses its input) and copies that text, so it
+the markdown when the palette opens (`paletteSelectionMarkdown`, read by
+`openCommandPalette()`, behind both Cmd+K and the header chip, before the palette
+focuses its input) and copies that text, so it
 covers a committed selection and a pending touch or pen one alike (#163).
 Reading at run time failed both ways: focusing the palette's input takes the
 browser's live range with it, and the mouseup of a click on the item dropped a
@@ -2142,7 +2204,8 @@ once (`overlayOpen`) for both this reveal and the Escape guard that keeps a
 selection when Escape closes an overlay (#100).
 
 ### Handoff button
-`src/components/HandOffButton.tsx` (at the right end of the tab strip) is md-redline's
+`src/components/HandOffButton.tsx` (right-aligned in the app header, hidden while a
+review is open) is md-redline's
 "submit review": it copies the agent prompt for the review comments so they
 can be handed back to the agent. Its scope follows the **active tab**, never
 the whole set of open tabs, because reviewers keep unrelated docs from
@@ -2451,7 +2514,7 @@ conflict still 409s; Reload discards the open edit and loads the disk content.
 
 ### Left sidebar (full height)
 The sidebar owns the window's full left edge, top to bottom; the main column
-(status row, then the document panel with its tab strip) starts to its right. Two states:
+(the app header, then the document panel with its tab strip) starts to its right. Two states:
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): logo + close X in an
   h-11 identity row (aligns with the chrome row), Explorer/Outline view tabs
@@ -2503,10 +2566,10 @@ Sidebar view (`Cmd+Shift+O`) showing heading structure for quick navigation.
 
 ### Focus mode
 `Cmd+.` toggles focus mode: the file explorer and the comments rail both hide
-(their prior visibility is snapshotted first), leaving just the document. A
-"Focus" status chip (`data-focus-chip`) appears in the bottom hint bar; click
-it, or press `Cmd+.` again, to exit and restore the panes to their snapshotted
-state. The density strip and section breadcrumb both stay available in focus
+(their prior visibility is snapshotted first), leaving just the document. An
+**Exit focus** button (`data-focus-chip`, title "Exit focus mode") appears at the
+right end of the app header; click it, or press `Cmd+.` again, to exit and
+restore the panes to their snapshotted state, whatever mix they were in. The density strip and section breadcrumb both stay available in focus
 mode. Toggling
 the explorer or the rail individually while focus mode is active (`Cmd+B`,
 `Cmd+\`, the tab strip's comments toggle, or the command palette) exits focus mode and
@@ -2518,7 +2581,7 @@ looks at width and doesn't know about focus mode (see Comments rail above).
 Known edge: focus mode itself is session-only state and isn't persisted, but the
 pane visibility it changes is (via the pane layout `localStorage` key). Quitting
 while focus mode is active leaves both panes hidden the next time the app opens,
-with no focus chip present to explain why or restore them. Toggle the explorer
+with no Exit focus button present to explain why or restore them. Toggle the explorer
 (`Cmd+B`) and rail (`Cmd+\`) back on individually to recover.
 
 ### Keyboard shortcuts
@@ -2715,7 +2778,8 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 
 ### Command palette
 
-`Cmd+K` opens the palette. Commands include: navigation (next/prev comment, find),
+`Cmd+K`, or the app header's `⌘K` chip, opens the palette; both run App's
+`openCommandPalette()`. Commands include: navigation (next/prev comment, find),
 tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
 file ops (reload, open, mark reviewed), settings, keyboard help, undo (Undo delete /
