@@ -64,9 +64,9 @@ export function ReviewBand({ renderBanner }: ReviewBandProps) {
     <header
       ref={rootRef}
       data-review-band
-      className="h-11 shrink-0 min-w-0 flex items-center gap-2 pr-2 bg-surface-secondary border-b border-border-subtle rounded-t-[9px] text-content"
+      className="h-11 shrink-0 min-w-0 flex items-center gap-2 pr-0.5 text-content"
       // Adds to the band's own inset rather than replacing it.
-      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.5rem)' }}
+      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.25rem)' }}
     >
       {/* Its min-width is set from measurements (see measure above). */}
       <div ref={slotRef} data-header-banner className="min-w-0 flex-1 flex">

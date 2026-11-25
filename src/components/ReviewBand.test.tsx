@@ -43,7 +43,7 @@ describe('ReviewBand', () => {
     render(<ReviewBand renderBanner={() => <div data-testid="review-banner" />} />);
     expect(band()).toBeTruthy();
     expect(screen.getByTestId('review-banner')).toBeTruthy();
-    expect(band().style.paddingLeft).toBe('calc(var(--window-inset-left, 0px) + 0.5rem)');
+    expect(band().style.paddingLeft).toBe('calc(var(--window-inset-left, 0px) + 0.25rem)');
   });
 
   it('folds the review row when its content does not fit, and unfolds only past the hysteresis', () => {

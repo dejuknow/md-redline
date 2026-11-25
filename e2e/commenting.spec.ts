@@ -634,8 +634,8 @@ test.describe('Comment form click-outside dismiss', () => {
     const textarea = page.getByPlaceholder('Add your comment...');
     await expect(textarea).toBeVisible();
 
-    // Click outside the form on the toolbar logo (not prose, not form)
-    await page.locator('span[title="md-redline"]').click({ force: true });
+    // Click outside the form on the status bar's path (not prose, not form)
+    await page.locator('[data-status-path]').click({ force: true });
 
     // Form should be dismissed
     await expect(textarea).not.toBeVisible();
@@ -671,8 +671,8 @@ test.describe('Comment form click-outside dismiss', () => {
     await expect(textarea).toBeVisible();
     await textarea.fill('Some draft text');
 
-    // Click outside the form on the toolbar logo
-    await page.locator('span[title="md-redline"]').click({ force: true });
+    // Click outside the form on the status bar's path
+    await page.locator('[data-status-path]').click({ force: true });
 
     // Form should still be visible because it has text
     await expect(textarea).toBeVisible();

@@ -117,8 +117,9 @@ function CopyIcon({ done }: { done: boolean }) {
 }
 
 /**
- * The document panel's top row: the open tabs on the left, attached to the
- * page below like folder tabs, and the document's controls on the right:
+ * The document panel's top row, on the frame: the open tabs on the left, the
+ * active one attached to the page below like a folder tab (it is drawn over
+ * the page's top edge, hence z-10), and the document's controls on the right:
  * the view switch, find, a menu with diff and copy, the comments split
  * button, then Hand off. The controls stay few so the tabs keep the width;
  * the tabs scroll in their own region, so the controls never cover a tab.
@@ -338,9 +339,9 @@ export function DocStrip({
     <div
       ref={rootRef}
       data-doc-strip
-      className="h-[42px] flex items-end gap-0.5 pr-1.5 bg-surface-secondary border-b border-border rounded-t-[9px] [[data-review-band]+&]:rounded-t-none shrink-0"
+      className="relative z-10 h-[34px] flex items-end gap-0.5 pr-0.5 shrink-0"
       // Adds to the strip's own inset rather than replacing it.
-      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.375rem)' }}
+      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.5rem)' }}
     >
       <div className="min-w-0 flex-1 self-stretch flex items-end">{tabs}</div>
 

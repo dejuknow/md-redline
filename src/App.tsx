@@ -3420,14 +3420,16 @@ export default function App() {
               } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
               style={{ width: explorerVisible ? explorerWidth : 40 }}
             >
-              {/* Logo pinned to one spot so it never shifts between the
-                  expanded and collapsed states. */}
-              <div
-                data-sidebar-logo
-                className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none"
-              >
-                <AppLogo />
-              </div>
+              {/* The collapsed rail's logo. The expanded panel has none: its top
+                  row holds the Explorer and Outline switch instead. */}
+              {!explorerVisible && (
+                <div
+                  data-sidebar-logo
+                  className="absolute top-0 left-0 w-10 h-11 flex items-center justify-center z-10 pointer-events-none"
+                >
+                  <AppLogo />
+                </div>
+              )}
 
               {/* Expanded panel. Fixed width so its content clips during the
                   width animation instead of reflowing. Mounted only while
@@ -3438,34 +3440,17 @@ export default function App() {
                   style={{ width: explorerWidth }}
                   data-sidebar-panel
                 >
-                  {/* Identity row: the pinned logo sits at its left; close at the
-                  right. h-11 matches the chrome row so the hairline under
-                  both aligns across the window. */}
-                  <div className="h-11 border-b border-transparent flex items-center justify-end pr-2 shrink-0">
-                    <button
-                      onClick={() => setExplorerVisible(false)}
-                      className="shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      title="Close panel"
-                      aria-label="Close panel"
-                    >
-                      <svg
-                        className="w-3.5 h-3.5"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                  {/* View tabs */}
-                  <div className="h-10 flex items-center pl-1 pr-2 shrink-0">
-                    <div className="flex items-center gap-0.5">
+                  {/* Top row: the Explorer and Outline switch, and close. Its
+                    34px matches the tab strip, so the two rows share a center
+                    line. Its left padding reads
+                    --window-inset-left, which a desktop shell sets here to clear
+                    its window controls. */}
+                  <div
+                    data-sidebar-top
+                    className="h-[34px] flex items-center gap-1 pr-2 shrink-0"
+                    style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.25rem)' }}
+                  >
+                    <div className="min-w-0 flex items-center gap-0.5">
                       <button
                         onClick={() => setLeftPanelView('explorer')}
                         className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
@@ -3515,6 +3500,26 @@ export default function App() {
                         Outline
                       </button>
                     </div>
+                    <button
+                      onClick={() => setExplorerVisible(false)}
+                      className="ml-auto shrink-0 p-1 rounded-md text-content-muted hover:text-content-secondary hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      title="Close panel"
+                      aria-label="Close panel"
+                    >
+                      <svg
+                        className="w-3.5 h-3.5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
                   </div>
                   {/* Panel content. Hidden with the main column until start-up
                     has laid out, so the explorer's first listing is not
@@ -3664,7 +3669,7 @@ export default function App() {
             <div className="flex-1 flex min-h-0 relative">
               {/* Markdown viewer */}
               <div
-                className="flex-1 min-h-0 min-w-0 relative panel-center rounded-[10px] border border-border bg-surface flex flex-col"
+                className="flex-1 min-h-0 min-w-0 relative panel-center flex flex-col"
                 data-doc-panel
                 data-prose-font={settings.proseFont}
                 data-prose-size={settings.proseSize}
@@ -3763,27 +3768,34 @@ export default function App() {
                     ) : null
                   }
                 />
-                <DiffBar
-                  diffEnabled={diffEnabled}
-                  referenceLabel={
-                    diffEnabled && currentReference && diffChunkCount > 0
-                      ? formatReferenceLabel(currentReference)
-                      : undefined
-                  }
-                  diffChunkCount={diffChunkCount}
-                  onDiffPrev={() => {
-                    if (viewMode === 'raw') rawViewRef.current?.diffPrev();
-                    else renderedDiffRef.current?.prev();
-                  }}
-                  onDiffNext={() => {
-                    if (viewMode === 'raw') rawViewRef.current?.diffNext();
-                    else renderedDiffRef.current?.next();
-                  }}
-                  onMarkReviewed={handleMarkReviewed}
-                  onDiffToggle={handleDiffToggle}
-                />
-                <div className="flex-1 min-h-0 flex flex-col">
-                  {/* A refused folder covers the document rather than leaving a
+                {/* The page: the only white surface in the main column. The
+                    tabs above sit on the frame and the active one joins this
+                    edge, like a folder tab. */}
+                <div
+                  data-doc-page-surface
+                  className="flex-1 min-h-0 flex flex-col bg-surface border border-border rounded-[10px] overflow-clip"
+                >
+                  <DiffBar
+                    diffEnabled={diffEnabled}
+                    referenceLabel={
+                      diffEnabled && currentReference && diffChunkCount > 0
+                        ? formatReferenceLabel(currentReference)
+                        : undefined
+                    }
+                    diffChunkCount={diffChunkCount}
+                    onDiffPrev={() => {
+                      if (viewMode === 'raw') rawViewRef.current?.diffPrev();
+                      else renderedDiffRef.current?.prev();
+                    }}
+                    onDiffNext={() => {
+                      if (viewMode === 'raw') rawViewRef.current?.diffNext();
+                      else renderedDiffRef.current?.next();
+                    }}
+                    onMarkReviewed={handleMarkReviewed}
+                    onDiffToggle={handleDiffToggle}
+                  />
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    {/* A refused folder covers the document rather than leaving a
                     blank sheet behind an error strip: the ask belongs on the
                     surface the user is looking at. It covers rather than
                     replaces because the viewer and the scroll container carry
@@ -3792,91 +3804,91 @@ export default function App() {
                     the search match count — so unmounting them here left the
                     document rail-less and the search count stale once the
                     grant landed. */}
-                  <div className="relative flex-1 min-h-0 flex flex-col overflow-clip">
-                    {showAccessRequest && (
-                      <AccessRequest
-                        dir={accessDeniedDir}
-                        homeDir={homeDir}
-                        pending={trustFolderPending}
-                        grantMissed={sawGrant}
-                        onAllow={() => handleTrustFolder(accessDeniedDir)}
-                      />
-                    )}
-                    {viewMode === 'raw' ? (
-                      <RawView
-                        ref={rawViewRef}
-                        scrollContainerRef={containerRef}
-                        rawMarkdown={rawMarkdown}
-                        searchQuery={showSearch ? searchQuery : undefined}
-                        searchActiveIndex={activeSearchIndex}
-                        onSearchCount={handleSearchCount}
-                        activeCommentId={activeCommentId}
-                        diffSnapshot={currentSnapshot}
-                        diffEnabled={diffEnabled}
-                        diffLines={diffLines}
-                        oldCleanToRawLine={oldCleanToRawLine}
-                        newCleanToRawLine={newCleanToRawLine}
-                      />
-                    ) : (
-                      <div className="relative flex-1 min-h-0">
-                        {railCapable && (
-                          <SectionBreadcrumb
-                            chain={breadcrumbChain}
-                            containerRef={containerRef}
-                            onJump={handleHeadingNavigate}
-                            className="absolute top-2 -translate-x-1/2 z-20"
-                            // Centered over the prose column, not the body: the
-                            // page is centered and the column sits PAD_L into it,
-                            // so a body-centered pill would ride over the rail.
-                            style={{
-                              left: `calc(50% - ${geometry.pageWidth / 2}px + ${PAD_L + geometry.colWidth / 2}px)`,
-                              maxWidth: geometry.colWidth,
-                            }}
-                          />
-                        )}
-                        <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
-                          <div
-                            ref={pageRef}
-                            data-doc-page
-                            className={`doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] ${pageWidthTransition}`}
-                            style={{
-                              width: geometry.pageWidth,
-                              maxWidth: 'calc(100% - 24px)',
-                              // A tab still on its first load has an empty sheet sized
-                              // for a document with no comments; the loaded one may
-                              // reserve the rail's gutter and jump wider and left in
-                              // one frame. Show only the loaded sheet.
-                              visibility: firstLoadInProgress ? 'hidden' : undefined,
-                              minHeight: railShown
-                                ? `max(100%, ${marginLayout.layerHeight + 120}px)`
-                                : '100%',
-                            }}
-                          >
+                    <div className="relative flex-1 min-h-0 flex flex-col overflow-clip">
+                      {showAccessRequest && (
+                        <AccessRequest
+                          dir={accessDeniedDir}
+                          homeDir={homeDir}
+                          pending={trustFolderPending}
+                          grantMissed={sawGrant}
+                          onAllow={() => handleTrustFolder(accessDeniedDir)}
+                        />
+                      )}
+                      {viewMode === 'raw' ? (
+                        <RawView
+                          ref={rawViewRef}
+                          scrollContainerRef={containerRef}
+                          rawMarkdown={rawMarkdown}
+                          searchQuery={showSearch ? searchQuery : undefined}
+                          searchActiveIndex={activeSearchIndex}
+                          onSearchCount={handleSearchCount}
+                          activeCommentId={activeCommentId}
+                          diffSnapshot={currentSnapshot}
+                          diffEnabled={diffEnabled}
+                          diffLines={diffLines}
+                          oldCleanToRawLine={oldCleanToRawLine}
+                          newCleanToRawLine={newCleanToRawLine}
+                        />
+                      ) : (
+                        <div className="relative flex-1 min-h-0">
+                          {railCapable && (
+                            <SectionBreadcrumb
+                              chain={breadcrumbChain}
+                              containerRef={containerRef}
+                              onJump={handleHeadingNavigate}
+                              className="absolute top-2 -translate-x-1/2 z-20"
+                              // Centered over the prose column, not the body: the
+                              // page is centered and the column sits PAD_L into it,
+                              // so a body-centered pill would ride over the rail.
+                              style={{
+                                left: `calc(50% - ${geometry.pageWidth / 2}px + ${PAD_L + geometry.colWidth / 2}px)`,
+                                maxWidth: geometry.colWidth,
+                              }}
+                            />
+                          )}
+                          <div ref={containerRef} className="h-full overflow-y-auto pt-3 relative">
                             <div
-                              ref={proseRef}
-                              data-prose-column
-                              className={pageWidthTransition}
-                              style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                              ref={pageRef}
+                              data-doc-page
+                              className={`doc-sheet bg-surface mx-auto relative pt-6 pb-[50vh] ${pageWidthTransition}`}
+                              style={{
+                                width: geometry.pageWidth,
+                                maxWidth: 'calc(100% - 24px)',
+                                // A tab still on its first load has an empty sheet sized
+                                // for a document with no comments; the loaded one may
+                                // reserve the rail's gutter and jump wider and left in
+                                // one frame. Show only the loaded sheet.
+                                visibility: firstLoadInProgress ? 'hidden' : undefined,
+                                minHeight: railShown
+                                  ? `max(100%, ${marginLayout.layerHeight + 120}px)`
+                                  : '100%',
+                              }}
                             >
-                              {diffEnabled && currentSnapshot != null && diffLines ? (
-                                // key on activeFilePath forces a remount when the user
-                                // switches files while the diff overlay is on, so the
-                                // mount-time auto-scroll-to-first-chunk fires for each
-                                // file's diff. Without this, the [] effect in
-                                // RenderedDiffView only runs for the first file viewed.
-                                <RenderedDiffView
-                                  key={activeFilePath ?? ''}
-                                  ref={renderedDiffRef}
-                                  rawMarkdown={rawMarkdown}
-                                  diffSnapshot={currentSnapshot}
-                                  diffLines={diffLines}
-                                  keepLineBreaks={settings.keepLineBreaks}
-                                  renderHtmlComments={settings.renderHtmlComments}
-                                  hiddenCommentPrefixes={enabledHiddenCommentPrefixes}
-                                />
-                              ) : (
-                                <>
-                                  {/* One element for every document, with or
+                              <div
+                                ref={proseRef}
+                                data-prose-column
+                                className={pageWidthTransition}
+                                style={{ marginLeft: PAD_L, width: geometry.colWidth }}
+                              >
+                                {diffEnabled && currentSnapshot != null && diffLines ? (
+                                  // key on activeFilePath forces a remount when the user
+                                  // switches files while the diff overlay is on, so the
+                                  // mount-time auto-scroll-to-first-chunk fires for each
+                                  // file's diff. Without this, the [] effect in
+                                  // RenderedDiffView only runs for the first file viewed.
+                                  <RenderedDiffView
+                                    key={activeFilePath ?? ''}
+                                    ref={renderedDiffRef}
+                                    rawMarkdown={rawMarkdown}
+                                    diffSnapshot={currentSnapshot}
+                                    diffLines={diffLines}
+                                    keepLineBreaks={settings.keepLineBreaks}
+                                    renderHtmlComments={settings.renderHtmlComments}
+                                    hiddenCommentPrefixes={enabledHiddenCommentPrefixes}
+                                  />
+                                ) : (
+                                  <>
+                                    {/* One element for every document, with or
                                     without diagrams. Swapping the element type
                                     when a document gained or lost its first
                                     Mermaid fence remounted the viewer, which
@@ -3885,116 +3897,117 @@ export default function App() {
                                     reader pushed them down. The theme only
                                     feeds the viewer's own fallback renderer,
                                     unused while mermaidSvgMap is passed. */}
-                                  <MarkdownViewer
-                                    ref={viewerRef}
-                                    html={html}
-                                    cleanMarkdown={cleanMarkdown}
-                                    documentKey={activeFilePath}
-                                    comments={comments}
-                                    activeCommentId={activeCommentId}
-                                    selectionText={paintedSelection?.text ?? null}
-                                    selectionOffset={paintedSelection?.offset ?? null}
-                                    onHighlightClick={handleHighlightClickWithPopover}
-                                    // Fragment arg is intentionally ignored in v1; openTab
-                                    // takes only the path. See spec §3 non-goals.
-                                    onLocalLinkClick={openTab}
-                                    onContextMenu={handleViewerContextMenuUnlessOverlay}
-                                    searchQuery={showSearch ? searchQuery : undefined}
-                                    searchActiveIndex={activeSearchIndex}
-                                    onSearchCount={handleSearchCount}
-                                    sentCommentIds={sentCommentIds}
-                                    theme={persistedTheme}
-                                    mermaidSvgMap={mermaidSvgMap}
-                                    onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
-                                    onHighlightsPainted={handleHighlightsPainted}
-                                  />
-                                  <DragHandles
-                                    startPos={handlePositions?.start ?? null}
-                                    endPos={handlePositions?.end ?? null}
-                                    onPointerDown={onHandlePointerDown}
-                                  />
-                                </>
+                                    <MarkdownViewer
+                                      ref={viewerRef}
+                                      html={html}
+                                      cleanMarkdown={cleanMarkdown}
+                                      documentKey={activeFilePath}
+                                      comments={comments}
+                                      activeCommentId={activeCommentId}
+                                      selectionText={paintedSelection?.text ?? null}
+                                      selectionOffset={paintedSelection?.offset ?? null}
+                                      onHighlightClick={handleHighlightClickWithPopover}
+                                      // Fragment arg is intentionally ignored in v1; openTab
+                                      // takes only the path. See spec §3 non-goals.
+                                      onLocalLinkClick={openTab}
+                                      onContextMenu={handleViewerContextMenuUnlessOverlay}
+                                      searchQuery={showSearch ? searchQuery : undefined}
+                                      searchActiveIndex={activeSearchIndex}
+                                      onSearchCount={handleSearchCount}
+                                      sentCommentIds={sentCommentIds}
+                                      theme={persistedTheme}
+                                      mermaidSvgMap={mermaidSvgMap}
+                                      onOpenMermaidFullscreen={handleOpenMermaidFullscreen}
+                                      onHighlightsPainted={handleHighlightsPainted}
+                                    />
+                                    <DragHandles
+                                      startPos={handlePositions?.start ?? null}
+                                      endPos={handlePositions?.end ?? null}
+                                      onPointerDown={onHandlePointerDown}
+                                    />
+                                  </>
+                                )}
+                              </div>
+                              {railShown && (
+                                <CommentsRail
+                                  density={railDensity}
+                                  showEmptyState={emptyRailRequested}
+                                  scrollRef={containerRef as RefObject<HTMLElement | null>}
+                                  layout={marginLayout}
+                                  anchoredComments={marginComments}
+                                  allComments={comments}
+                                  activeCommentId={activeCommentId}
+                                  missingAnchors={missingAnchors}
+                                  unpaintedAnchors={
+                                    renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS
+                                  }
+                                  sentCommentIds={sentCommentIds}
+                                  answeredCommentIds={answeredCommentIds}
+                                  onActivate={handleSidebarActivate}
+                                  onReply={handleReply}
+                                  onResolve={settings.enableResolve ? handleResolve : undefined}
+                                  onUnresolve={handleUnresolve}
+                                  onDelete={handleDelete}
+                                  onEdit={handleEdit}
+                                  onEditReply={handleEditReply}
+                                  onDeleteReply={handleDeleteReply}
+                                  onBulkDelete={handleBulkDelete}
+                                  onBulkResolve={handleBulkResolve}
+                                  onBulkDeleteResolved={handleBulkDeleteResolved}
+                                  onContextMenu={handleSidebarContextMenu}
+                                  selectionText={paintedSelection?.text ?? null}
+                                  selectionOffset={paintedSelection?.offset ?? null}
+                                  onReanchorToSelection={handleReanchorToSelection}
+                                  requestedEditor={requestedEditor}
+                                  requestedFocus={requestedCommentFocus}
+                                  onFocusHandled={() => setRequestedCommentFocus(null)}
+                                  unreadReplyIds={unreadReplyIds}
+                                />
                               )}
+                              {popoverCommentId &&
+                                !railCanShowThread(popoverCommentId) &&
+                                (() => {
+                                  const c = comments.find((x) => x.id === popoverCommentId);
+                                  if (!c) return null;
+                                  return (
+                                    <CommentPopover
+                                      comment={c}
+                                      pageRef={pageRef as RefObject<HTMLElement | null>}
+                                      onClose={() => setPopoverCommentId(null)}
+                                      sent={sentCommentIds.includes(c.id)}
+                                      answered={answeredCommentIds.has(c.id)}
+                                      anchorMissing={missingAnchors.has(c.id)}
+                                      onReply={handleReply}
+                                      onResolve={settings.enableResolve ? handleResolve : undefined}
+                                      onUnresolve={handleUnresolve}
+                                      onDelete={handleDelete}
+                                      onEdit={handleEdit}
+                                      onEditReply={handleEditReply}
+                                      onDeleteReply={handleDeleteReply}
+                                    />
+                                  );
+                                })()}
                             </div>
-                            {railShown && (
-                              <CommentsRail
-                                density={railDensity}
-                                showEmptyState={emptyRailRequested}
-                                scrollRef={containerRef as RefObject<HTMLElement | null>}
-                                layout={marginLayout}
-                                anchoredComments={marginComments}
-                                allComments={comments}
-                                activeCommentId={activeCommentId}
-                                missingAnchors={missingAnchors}
-                                unpaintedAnchors={
-                                  renderedViewerActive ? unpaintedAnchors : NO_UNPAINTED_ANCHORS
-                                }
-                                sentCommentIds={sentCommentIds}
-                                answeredCommentIds={answeredCommentIds}
-                                onActivate={handleSidebarActivate}
-                                onReply={handleReply}
-                                onResolve={settings.enableResolve ? handleResolve : undefined}
-                                onUnresolve={handleUnresolve}
-                                onDelete={handleDelete}
-                                onEdit={handleEdit}
-                                onEditReply={handleEditReply}
-                                onDeleteReply={handleDeleteReply}
-                                onBulkDelete={handleBulkDelete}
-                                onBulkResolve={handleBulkResolve}
-                                onBulkDeleteResolved={handleBulkDeleteResolved}
-                                onContextMenu={handleSidebarContextMenu}
-                                selectionText={paintedSelection?.text ?? null}
-                                selectionOffset={paintedSelection?.offset ?? null}
-                                onReanchorToSelection={handleReanchorToSelection}
-                                requestedEditor={requestedEditor}
-                                requestedFocus={requestedCommentFocus}
-                                onFocusHandled={() => setRequestedCommentFocus(null)}
-                                unreadReplyIds={unreadReplyIds}
-                              />
-                            )}
-                            {popoverCommentId &&
-                              !railCanShowThread(popoverCommentId) &&
-                              (() => {
-                                const c = comments.find((x) => x.id === popoverCommentId);
-                                if (!c) return null;
-                                return (
-                                  <CommentPopover
-                                    comment={c}
-                                    pageRef={pageRef as RefObject<HTMLElement | null>}
-                                    onClose={() => setPopoverCommentId(null)}
-                                    sent={sentCommentIds.includes(c.id)}
-                                    answered={answeredCommentIds.has(c.id)}
-                                    anchorMissing={missingAnchors.has(c.id)}
-                                    onReply={handleReply}
-                                    onResolve={settings.enableResolve ? handleResolve : undefined}
-                                    onUnresolve={handleUnresolve}
-                                    onDelete={handleDelete}
-                                    onEdit={handleEdit}
-                                    onEditReply={handleEditReply}
-                                    onDeleteReply={handleDeleteReply}
-                                  />
-                                );
-                              })()}
                           </div>
+                          <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
                         </div>
-                        <DensityStrip ticks={commentTicks} onJump={handleDensityJump} />
-                      </div>
-                    )}
-                    {/* Inside the body, so it floats below the diff bar when
+                      )}
+                      {/* Inside the body, so it floats below the diff bar when
                       that shows and never covers its controls. Last, so it
                       paints over the section breadcrumb at the same z. */}
-                    {showSearch && (
-                      <SearchBar
-                        query={searchQuery}
-                        onQueryChange={handleSearchQueryChange}
-                        matchCount={searchMatchCount}
-                        activeIndex={activeSearchIndex}
-                        onNext={handleSearchNext}
-                        onPrev={handleSearchPrev}
-                        onClose={handleSearchClose}
-                        focusTrigger={searchFocusTrigger}
-                      />
-                    )}
+                      {showSearch && (
+                        <SearchBar
+                          query={searchQuery}
+                          onQueryChange={handleSearchQueryChange}
+                          matchCount={searchMatchCount}
+                          activeIndex={activeSearchIndex}
+                          onNext={handleSearchNext}
+                          onPrev={handleSearchPrev}
+                          onClose={handleSearchClose}
+                          focusTrigger={searchFocusTrigger}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

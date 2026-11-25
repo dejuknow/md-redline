@@ -5,7 +5,6 @@ import { anchorSearchText, getEffectiveStatus } from '../types';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { ThreadCard } from './ThreadCard';
 import { useSettings } from '../contexts/SettingsContext';
-import { ActionButton } from './ActionButton';
 import { ConfirmDialog } from './ConfirmDialog';
 
 export interface SidebarContextMenuInfo {
@@ -83,6 +82,9 @@ function widenedFilter(filter: FilterMode, status: CommentStatus): FilterMode | 
   if (filter === 'all' || filter === status) return null;
   return status === 'open' ? 'open' : 'all';
 }
+
+const footerButtonClass =
+  'h-6 px-1.5 rounded-md text-xs font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors whitespace-nowrap';
 
 export function CommentListSurface({
   comments,
@@ -520,69 +522,64 @@ export function CommentListSurface({
         )}
       </div>
 
-      {/* Footer: summary + bulk actions */}
-      <div className="border-t border-border px-4 py-2 bg-surface-secondary flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-content-secondary whitespace-nowrap">
-            {showStatus ? (
-              <>
-                {openCount} open
-                {answeredCount > 0 && <> ({answeredCount} answered)</>}
-                {' \u00b7 '}
-                {resolvedCount} resolved
-              </>
-            ) : (
-              <>
-                {comments.length} comment{comments.length !== 1 ? 's' : ''}
-                {answeredCount > 0 && <> ({answeredCount} answered)</>}
-              </>
-            )}
-          </span>
-          {!resolveEnabled && comments.length > 0 && (
-            <ActionButton
-              intent="danger"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmDeleteAll(true);
-              }}
-              title="Delete all comments"
-            >
-              Delete All
-            </ActionButton>
+      {/* Footer: the summary, then the bulk actions as quiet text buttons on
+          one line, so it reads as part of the panel rather than a box. */}
+      <div className="border-t border-border-subtle pl-3 pr-1.5 h-9 shrink-0 flex items-center gap-0.5">
+        <span className="mr-auto text-xs text-content-muted whitespace-nowrap">
+          {showStatus ? (
+            <>
+              {openCount} open
+              {answeredCount > 0 && <> ({answeredCount} answered)</>}
+              {' \u00b7 '}
+              {resolvedCount} resolved
+            </>
+          ) : (
+            <>
+              {comments.length} comment{comments.length !== 1 ? 's' : ''}
+              {answeredCount > 0 && <> ({answeredCount} answered)</>}
+            </>
           )}
-        </div>
+        </span>
+        {resolveEnabled && openCount > 0 && onBulkResolve && (
+          <button
+            type="button"
+            className={footerButtonClass}
+            onClick={(e) => {
+              e.stopPropagation();
+              onBulkResolve();
+            }}
+            title="Resolve all open comments"
+          >
+            Resolve All
+          </button>
+        )}
         {/* Clear Resolved in either mode: with the workflow off it shows
             once the file carries a resolved marker (#159). */}
-        {comments.length > 0 && (resolveEnabled || resolvedCount > 0) && (
-          <div className="flex gap-1.5 justify-end">
-            {resolveEnabled && openCount > 0 && onBulkResolve && (
-              <ActionButton
-                intent="success"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBulkResolve();
-                }}
-                title="Resolve all open comments"
-              >
-                Resolve All
-              </ActionButton>
-            )}
-            {resolvedCount > 0 && onBulkDeleteResolved && (
-              <ActionButton
-                intent="danger"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBulkDeleteResolved();
-                }}
-                title="Delete all resolved comments"
-              >
-                Clear Resolved
-              </ActionButton>
-            )}
-          </div>
+        {resolvedCount > 0 && onBulkDeleteResolved && (
+          <button
+            type="button"
+            className={footerButtonClass}
+            onClick={(e) => {
+              e.stopPropagation();
+              onBulkDeleteResolved();
+            }}
+            title="Delete all resolved comments"
+          >
+            Clear Resolved
+          </button>
+        )}
+        {!resolveEnabled && comments.length > 0 && (
+          <button
+            type="button"
+            className={`${footerButtonClass} hover:text-danger`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmDeleteAll(true);
+            }}
+            title="Delete all comments"
+          >
+            Delete All
+          </button>
         )}
       </div>
 

@@ -261,11 +261,11 @@ test.describe('Quick comment mode', () => {
     await selectText(page, 'valid credentials');
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
 
-    // Click on an area outside the form and outside the prose (the toolbar logo).
+    // Click on an area outside the form and outside the prose (the status bar's path).
     // The logo is pointer-events-none and sits over the sidebar panel header, so
     // force the click past the actionability check (the app dismisses on the
     // document-level mousedown regardless of the exact target).
-    await page.locator('span[title="md-redline"]').click({ force: true });
+    await page.locator('[data-status-path]').click({ force: true });
 
     // Form should be dismissed
     await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
@@ -282,7 +282,7 @@ test.describe('Quick comment mode', () => {
     await textarea.fill('Important feedback');
 
     // Click outside (see note above: force past the pointer-events-none logo).
-    await page.locator('span[title="md-redline"]').click({ force: true });
+    await page.locator('[data-status-path]').click({ force: true });
 
     // Form should still be visible since it has text
     await expect(textarea).toBeVisible();

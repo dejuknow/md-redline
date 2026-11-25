@@ -870,15 +870,17 @@ the server waits 60s before clearing `waitingForAgent`.
 
 ### Tab strip
 
-The tabs are attached to the top of the document panel (`[data-doc-panel]`) in
-one 42px row, `DocStrip.tsx` (`[data-doc-strip]`). With no review shown it is
-the panel's first row, so the panel's top lines up with the sidebar's. Tabs
-come first, via `TabBar`'s `variant="strip"`: the active tab is a folder tab
-(`bg-surface`, border on top and sides, none on the bottom) whose row is laid
-1px over the strip's bottom rule so the tab joins the page below; inactive tabs
-are muted text with no background. The strip is not inside an `overflow-clip`
-ancestor (only the panel body below it clips), which is what lets the "Show all
-open tabs" menu (`tab-list-menu`) hang below it unclipped.
+The tabs sit on the frame above the page, in one 34px row, `DocStrip.tsx`
+(`[data-doc-strip]`), the first row of the document panel (`[data-doc-panel]`)
+when no review is shown. The panel itself has no border or fill: the page is
+its own card (`[data-doc-page-surface]`, `bg-surface`, a 1px border, 10px
+radius), holding the diff bar and the document body. Tabs come first, via
+`TabBar`'s `variant="strip"`, as folder tabs: the active tab takes the page's
+fill and border and joins the page's top edge, and inactive tabs are muted text
+on the frame. The active tab's top lines up with the sidebar's. The strip is
+not inside an `overflow-clip` ancestor (only the page card below it clips),
+which is what lets the "Show all open tabs" menu (`tab-list-menu`) hang below it
+unclipped.
 
 Tabs shrink before they scroll. The tabs' scrollport is sized to their natural
 widths (flex-basis auto, no `flex-1`) and may shrink; inactive tabs shrink down
@@ -910,7 +912,7 @@ items keep the same titles and test id. The menu closes on an outside press, on
 focus moving outside it (the command palette or find bar taking focus) and on
 Escape, which it leaves to the palette while that is open (`useDismiss`).
 
-Its left padding is `calc(var(--window-inset-left, 0px) + 0.375rem)`: a desktop
+Its left padding is `calc(var(--window-inset-left, 0px) + 0.5rem)`: a desktop
 shell sets `--window-inset-left` to clear its window controls when no sidebar
 covers them (focus mode). The browser build never sets it.
 
@@ -927,8 +929,8 @@ toggle where it matters: it comes up the moment there is something to review.
 ### Review band
 
 While a review is shown, `ReviewBand.tsx` (`[data-review-band]`) is the
-document panel's first row, above the tabs (the strip then drops its top
-corners). It is the review (`ReviewBanner layout="header"`, its wrapper keeps
+document panel's first row, a 44px row on the frame above the tabs, with no
+fill or border of its own. It is the review (`ReviewBanner layout="header"`, its wrapper keeps
 `data-testid="review-banner"`, inside the band's `[data-header-banner]` slot);
 App mounts it only when `shownReviewSessions` is non-empty, so with no review
 the panel's top lines up with the sidebar's. Hand off is hidden while the active
@@ -946,7 +948,7 @@ spare, so it never flip-flops; another review taking a folded row is tried wide
 again. The slot's `min-width` is set to the row's least width. Unmeasured (no
 layout) counts as wide.
 
-Its left padding is `calc(var(--window-inset-left, 0px) + 0.5rem)`, for the same
+Its left padding is `calc(var(--window-inset-left, 0px) + 0.25rem)`, for the same
 desktop shell inset as the strip.
 
 ### Status bar
@@ -1961,7 +1963,9 @@ accent:
   animate over 150ms via `.margin-note-pos`, disabled under
   `prefers-reduced-motion`.
 
-- **List**: a pinned instance of `CommentListSurface`, with full search, status
+- **List**: a pinned instance of `CommentListSurface`, a column inside the page
+  that runs to the page's right edge behind a single left divider (no card of
+  its own) and covers the scroller's visible height, with full search, status
   filter (All / Open / Resolved; with the resolve workflow off, only while the
   file has a resolved comment), sort, and bulk actions. Filters and search
   share a single header row (search input placeholder is "Search"). The same
@@ -2630,9 +2634,9 @@ conflict still 409s; Reload discards the open edit and loads the disk content.
 The sidebar owns the window's full left edge, top to bottom; the main column
 (the document panel, with the review band while a review is shown, then its tab strip) starts to its right; the status bar runs under both. Two states:
 
-- **Expanded panel** (`[data-sidebar-panel]`, resizable): logo + close X in an
-  h-11 identity row (aligns with the chrome row), Explorer/Outline view tabs
-  below it, panel content, and the settings gear pinned in a bottom row, with the author name button
+- **Expanded panel** (`[data-sidebar-panel]`, resizable): the Explorer/Outline
+  view tabs and close X share the 34px top row (`[data-sidebar-top]`, the tab
+  strip's height, so the two rows share a center line; no logo), then the panel content, and the settings gear pinned in a bottom row, with the author name button
   (`AuthorButton`, click to edit in place) to the right of the gear.
 - **Collapsed icon rail** (`[data-sidebar-rail]`, 40px): logo on top, Show
   Explorer and Show Outline icon buttons, spacer, settings gear at the
@@ -2711,16 +2715,18 @@ chrome from outside, so these hooks are a contract. Keep them when restyling:
 - `data-review-band`: the review row at the top of the document panel, present only
   while a review is shown (see Review band above).
 - `data-status-bar`: the bottom line on the frame (see Status bar above).
-- `data-sidebar-logo`: the logo container pinned to the top left of the sidebar,
-  the same element in the expanded panel and the icon rail.
-- `[data-sidebar-panel]`: the expanded sidebar panel.
-- `--window-inset-left`: a CSS variable the shell sets (on `[data-doc-strip]` and
-  `[data-review-band]`, or any ancestor) to clear native window controls when no
-  sidebar covers them. Both rows' left padding adds it, whatever the sidebar state.
+- `data-sidebar-logo`: the logo container pinned to the top left of the collapsed
+  icon rail. The expanded panel has no logo.
+- `[data-sidebar-panel]`: the expanded sidebar panel; `[data-sidebar-top]` is its
+  top row (Explorer/Outline and close).
+- `--window-inset-left`: a CSS variable the shell sets to clear native window
+  controls, on whichever row sits under them: `[data-sidebar-top]` while the
+  panel is open, `[data-doc-strip]` and `[data-review-band]` when no sidebar
+  covers them. Each of those rows' left padding adds it.
 
 The main column (`data-main-column`), the document panel (`data-doc-panel`) and
-its tab strip (`data-doc-strip`) are also stable. With no review shown, the
-document panel's top lines up with the sidebar's.
+its tab strip (`data-doc-strip`) and the page card (`data-doc-page-surface`) are also
+stable. With no review shown, the active tab's top lines up with the sidebar's.
 
 ### Keyboard shortcuts
 
@@ -2858,8 +2864,8 @@ theme it sets no sheet shadow (`--theme-sheet-shadow: none`).
 
 Every theme also defines `--theme-frame`, the window frame the inset panels sit on, which
 Tailwind exposes as `bg-frame` (`--color-frame`). `[data-app-root]` paints it and pads it by
-8px (`bg-frame p-2`), and the sidebar, the main column's document panel and the rail sit on
-it as rounded panels. It is a step darker than the panels in light themes (default light
+8px (`bg-frame p-2`), and the sidebar and the page (`[data-doc-page-surface]`) sit on it
+as rounded panels, with the tab strip, the review band and the status bar on the frame itself. It is a step darker than the panels in light themes (default light
 `#ebebee`) and a step darker than the canvas in dark ones (default dark `#141416`). A new
 theme must set it: `server/theme-contrast.test.ts` (`inset frame`) checks every theme.
 

@@ -86,6 +86,12 @@ export function CommentsRail(props: CommentsRailProps) {
     const panel = listPanelRef.current;
     if (!el || !panel) return;
     const measure = () => {
+      // The container's top padding would push the panel down by as much and
+      // its bottom past the page's edge. Pulling it up by that padding (in
+      // flow and when stuck) makes it cover the container's visible height.
+      const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+      panel.style.marginTop = `${-padTop}px`;
+      panel.style.top = `${-padTop}px`;
       panel.style.height = `${el.clientHeight}px`;
     };
     const ro = new ResizeObserver(measure);
@@ -98,11 +104,16 @@ export function CommentsRail(props: CommentsRailProps) {
     <div
       data-comments-rail
       className={`absolute inset-y-0${anchoredEmpty ? ' pointer-events-none' : ''}`}
-      style={{ right: PAD_R, width: RAIL }}
+      // List runs to the page's right edge as a column behind one divider,
+      // rather than a card inside the page.
+      style={density === 'list' ? { right: 0, width: RAIL + PAD_R } : { right: PAD_R, width: RAIL }}
     >
       {density === 'list' ? (
-        <div ref={listPanelRef} className="sticky top-0 flex flex-col py-2">
-          <div className="flex-1 min-h-0 bg-surface-raised border border-border rounded-lg overflow-hidden">
+        <div
+          ref={listPanelRef}
+          className="sticky top-0 flex flex-col border-l border-border-subtle"
+        >
+          <div className="flex-1 min-h-0 overflow-hidden">
             <CommentListSurface
               comments={props.allComments}
               activeCommentId={props.activeCommentId}

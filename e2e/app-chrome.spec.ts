@@ -309,12 +309,12 @@ test.describe('Review band and status bar', () => {
     }
   });
 
-  test("at an 800px window a user review's Send N & finish is reachable through More review actions", async ({
+  test("at a 760px window a user review's Send N & finish is reachable through More review actions", async ({
     page,
     request,
     baseURL,
   }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 760, height: 800 });
     writeFileSync(FIXTURE, COMMENTED_DOC);
     const sessionId = await createUserSession(request, baseURL!, FIXTURE);
     try {
@@ -503,7 +503,7 @@ test.describe('Menus, Escape and copy', () => {
     request,
     baseURL,
   }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 760, height: 800 });
     writeFileSync(FIXTURE, COMMENTED_DOC);
     const sessionId = await createUserSession(request, baseURL!, FIXTURE);
     try {
@@ -642,8 +642,19 @@ test.describe('Status bar, empty rail and desktop shell hooks', () => {
     for (const w of widths) expect(w).toBeGreaterThanOrEqual(112);
   });
 
-  test('the sidebar logo carries data-sidebar-logo', async ({ page }) => {
+  test('the open sidebar has no logo; the collapsed rail keeps it as data-sidebar-logo', async ({
+    page,
+  }) => {
     await openFixture(page);
+    await expect(page.locator('[data-sidebar-panel]')).toBeVisible();
+    await expect(page.locator('[data-sidebar-logo]')).toHaveCount(0);
+    // Explorer and Outline sit in the panel's top row, beside close.
+    const top = page.locator('[data-sidebar-top]');
+    await expect(top.getByRole('button', { name: /Explorer/ })).toBeVisible();
+    await expect(top.getByRole('button', { name: 'Close panel' })).toBeVisible();
+
+    await page.keyboard.press(withMod('b'));
+    await expect(page.locator('[data-sidebar-rail]')).toBeVisible();
     await expect(page.locator('[data-sidebar-logo]')).toHaveCount(1);
     await expect(page.locator('[data-sidebar-logo]')).toBeVisible();
   });
