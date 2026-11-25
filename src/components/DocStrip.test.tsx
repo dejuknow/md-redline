@@ -44,6 +44,12 @@ describe('DocStrip', () => {
     expect(within(root).getByTestId('tabs-slot')).toBeTruthy();
   });
 
+  it('shows no document controls with no file open, only the tabs slot', () => {
+    renderStrip({ hasDocument: false });
+    expect(document.querySelector('[data-doc-strip]')).toBeTruthy();
+    expect(screen.queryByTestId('panel-toolbar')).toBeNull();
+  });
+
   it('renders the view toggle titled "View raw markdown" in rendered mode and "Switch to rendered view" in raw mode', () => {
     const onViewModeChange = vi.fn();
     const { rerender, props } = renderStrip({ onViewModeChange });

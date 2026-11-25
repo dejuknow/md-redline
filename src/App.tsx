@@ -3681,6 +3681,7 @@ export default function App() {
                 data-prose-size={settings.proseSize}
               >
                 <DocStrip
+                  hasDocument={!!activeFilePath}
                   tabs={
                     <TabBar
                       tabs={tabs}

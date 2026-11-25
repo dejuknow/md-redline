@@ -25,6 +25,12 @@ export interface DocStripProps {
   comments: React.ReactNode;
   /** Hand off, last in the row; null while a review owns sending. */
   handOff?: React.ReactNode;
+  /**
+   * False with no file open: the controls all act on a document, so the strip
+   * shows only the tabs' row (its open-file button) and the page shows how to
+   * open one (NoFileOpen).
+   */
+  hasDocument?: boolean;
 }
 
 /** Under this strip width, the view switch folds into the menu with diff and copy. */
@@ -144,6 +150,7 @@ export function DocStrip({
   copyFeedback,
   comments,
   handOff,
+  hasDocument = true,
 }: DocStripProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   // Not measured yet counts as wide: render the wide layout until we know better.
@@ -346,54 +353,56 @@ export function DocStrip({
     >
       <div className="min-w-0 flex-1 self-stretch flex items-end">{tabs}</div>
 
-      <div
-        className="self-center flex items-center gap-1 shrink-0 pl-2"
-        data-testid="panel-toolbar"
-      >
-        {!narrow && (
-          <div role="group" aria-label="View" className="flex bg-surface-inset rounded-md p-0.5">
-            <Tooltip text={renderedLabel}>
-              <button
-                type="button"
-                className={segmentClass(!isRaw)}
-                onClick={() => setView('rendered')}
-                aria-label={renderedLabel}
-                aria-pressed={!isRaw}
-                title={renderedLabel}
-              >
-                <RenderedIcon />
-              </button>
-            </Tooltip>
-            <Tooltip text={rawLabel}>
-              <button
-                type="button"
-                className={segmentClass(isRaw)}
-                onClick={() => setView('raw')}
-                aria-label={rawLabel}
-                aria-pressed={isRaw}
-                title={rawLabel}
-              >
-                <RawIcon />
-              </button>
-            </Tooltip>
-          </div>
-        )}
-        {narrow ? (
-          <>
-            {viewMenu}
-            {searchButton}
-          </>
-        ) : (
-          <>
-            {searchButton}
-            {viewMenu}
-          </>
-        )}
+      {hasDocument && (
+        <div
+          className="self-center flex items-center gap-1 shrink-0 pl-2"
+          data-testid="panel-toolbar"
+        >
+          {!narrow && (
+            <div role="group" aria-label="View" className="flex bg-surface-inset rounded-md p-0.5">
+              <Tooltip text={renderedLabel}>
+                <button
+                  type="button"
+                  className={segmentClass(!isRaw)}
+                  onClick={() => setView('rendered')}
+                  aria-label={renderedLabel}
+                  aria-pressed={!isRaw}
+                  title={renderedLabel}
+                >
+                  <RenderedIcon />
+                </button>
+              </Tooltip>
+              <Tooltip text={rawLabel}>
+                <button
+                  type="button"
+                  className={segmentClass(isRaw)}
+                  onClick={() => setView('raw')}
+                  aria-label={rawLabel}
+                  aria-pressed={isRaw}
+                  title={rawLabel}
+                >
+                  <RawIcon />
+                </button>
+              </Tooltip>
+            </div>
+          )}
+          {narrow ? (
+            <>
+              {viewMenu}
+              {searchButton}
+            </>
+          ) : (
+            <>
+              {searchButton}
+              {viewMenu}
+            </>
+          )}
 
-        <div className="w-px h-[18px] mx-1 bg-border" aria-hidden="true" />
-        {comments}
-        {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
-      </div>
+          <div className="w-px h-[18px] mx-1 bg-border" aria-hidden="true" />
+          {comments}
+          {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
+        </div>
+      )}
     </div>
   );
 }
