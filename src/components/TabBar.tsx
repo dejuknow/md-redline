@@ -108,8 +108,10 @@ export function TabBar({
 }: Props) {
   const tabControlButtonClass = tabControlButtonClassStrip;
   const badgeTextClass = 'text-[12px] px-1.5';
-  // Takes clicks only while shown: unseen, it sits over the badge or the
-  // name's end, and a tap there (touch has no hover) must switch, not close.
+  // Unseen, it sits over the badge or the name's end. With a mouse the
+  // pointer hovers it into view on the way; on a touch screen there is no
+  // hover, so it takes no taps there and a tap on the badge switches tabs
+  // (close by middle-click or the tab's menu instead).
   const renderClose = (tab: Tab, position: string) => (
     <span
       role="button"
@@ -117,7 +119,7 @@ export function TabBar({
         e.stopPropagation();
         onCloseTab(tab.filePath);
       }}
-      className={`${position} rounded opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 transition-opacity hover:text-content`}
+      className={`${position} rounded opacity-0 [@media(hover:none)]:pointer-events-none group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:text-content`}
       aria-label={`Close ${getPathBasename(tab.filePath)}`}
       tabIndex={-1}
     >
