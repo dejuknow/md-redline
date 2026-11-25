@@ -45,13 +45,18 @@ interface SessionRowProps {
   compact: boolean;
   /** The header's single line: the status truncates instead of wrapping. */
   inline: boolean;
-  /** Rendered first in the actions group (the header's Other reviews button). */
+  /**
+   * Rendered before the actions (the header's Other reviews button). Not one
+   * of this review's actions, so `actionsInert` leaves it working.
+   */
   leading?: React.ReactNode;
   /**
    * The actions take no clicks and read as disabled: the header row this
    * review took over while the pointer still rests where the last one was.
    */
   actionsInert?: boolean;
+  /** Told when the compact row's More review actions menu opens or closes. */
+  onMenuOpenChange?: (open: boolean) => void;
 }
 
 // Swallows a click (a press, or Enter or Space on a focused button) before it
@@ -79,6 +84,7 @@ export function SessionRow({
   inline,
   leading,
   actionsInert = false,
+  onMenuOpenChange,
 }: SessionRowProps) {
   const overflow = [quiet, secondary].filter((a): a is RowAction => a !== undefined);
   return (
@@ -91,26 +97,34 @@ export function SessionRow({
     >
       <div className="min-w-0 flex items-center gap-2 text-[13px]">
         <span className="shrink-0 flex items-center">{indicator}</span>
-        <span className={inline ? 'min-w-0 truncate' : 'min-w-0'}>{status}</span>
+        <span data-row-status className={inline ? 'min-w-0 truncate' : 'min-w-0'}>
+          {status}
+        </span>
       </div>
-      <div
-        data-row-actions
-        className={`ml-auto shrink-0 flex items-center gap-2${actionsInert ? ' pointer-events-none' : ''}`}
-        aria-disabled={actionsInert || undefined}
-        onClickCapture={actionsInert ? swallowClick : undefined}
-        onMouseDownCapture={actionsInert ? preventFocus : undefined}
-      >
+      <div data-row-end className="ml-auto shrink-0 flex items-center gap-2">
         {leading}
-        {chip}
-        {compact
-          ? overflow.length > 0 && <MoreReviewActions items={overflow} />
-          : quiet && <ActionButton action={quiet} className={QUIET_ACTION} inert={actionsInert} />}
-        {!compact && secondary && (
-          <ActionButton action={secondary} className={SECONDARY_ACTION} inert={actionsInert} />
-        )}
-        {primary && (
-          <ActionButton action={primary} className={PRIMARY_ACTION} inert={actionsInert} />
-        )}
+        <div
+          data-row-actions
+          className={`flex items-center gap-2${actionsInert ? ' pointer-events-none' : ''}`}
+          aria-disabled={actionsInert || undefined}
+          onClickCapture={actionsInert ? swallowClick : undefined}
+          onMouseDownCapture={actionsInert ? preventFocus : undefined}
+        >
+          {chip}
+          {compact
+            ? overflow.length > 0 && (
+                <MoreReviewActions items={overflow} onOpenChange={onMenuOpenChange} />
+              )
+            : quiet && (
+                <ActionButton action={quiet} className={QUIET_ACTION} inert={actionsInert} />
+              )}
+          {!compact && secondary && (
+            <ActionButton action={secondary} className={SECONDARY_ACTION} inert={actionsInert} />
+          )}
+          {primary && (
+            <ActionButton action={primary} className={PRIMARY_ACTION} inert={actionsInert} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -128,6 +142,7 @@ interface AgentSessionRowProps {
   inline: boolean;
   leading?: React.ReactNode;
   actionsInert?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
 }
 
 const AGENT_ACTIVE_WINDOW_MS = 30_000;
@@ -175,6 +190,7 @@ export function AgentSessionRow({
   inline,
   leading,
   actionsInert,
+  onMenuOpenChange,
 }: AgentSessionRowProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -218,6 +234,7 @@ export function AgentSessionRow({
       inline={inline}
       leading={leading}
       actionsInert={actionsInert}
+      onMenuOpenChange={onMenuOpenChange}
       indicator={
         awaitingReply ? (
           <span

@@ -3643,9 +3643,10 @@ export default function App() {
               : null
           }
           handOff={
-            // Hand off is the header's action while no review is open; a
-            // review brings its own send actions and takes the row.
-            activeFilePath && shownReviewSessions.length === 0 ? (
+            // A review brings its own send actions for its files, so Hand off
+            // goes only while the active file is in a review shown here.
+            activeFilePath &&
+            !shownReviewSessions.some((session) => session.filePaths.includes(activeFilePath)) ? (
               <HandOffButton
                 activeFilePath={activeFilePath}
                 commentCounts={handoffCounts}

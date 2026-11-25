@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useDismiss } from '../hooks/useDismiss';
 
 /** One action of a review row, as a button or a More menu item. */
 export interface RowAction {
@@ -15,55 +16,26 @@ const MENU_ITEM =
 /** Keeps a popup this far from the window's edges. */
 const VIEWPORT_MARGIN = 8;
 
-/**
- * Closes a popup on a press outside `ref`, on focus moving outside it (a
- * palette or find bar opened by keyboard takes the focus), or on Escape.
- * Escape is caught on the way down and stopped there, so App's own Escape
- * handling never sees it, unless another overlay is open: that Escape is the
- * overlay's.
- */
-export function useDismiss(
-  open: boolean,
-  ref: React.RefObject<HTMLElement | null>,
-  close: () => void,
-): void {
-  useEffect(() => {
-    if (!open) return;
-    const outside = (target: EventTarget | null) =>
-      ref.current !== null && !ref.current.contains(target as Node);
-    const onPointerDown = (e: MouseEvent) => {
-      if (outside(e.target)) close();
-    };
-    const onFocusIn = (e: FocusEvent) => {
-      if (outside(e.target)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const otherOverlay = Array.from(
-        document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"]'),
-      ).some((el) => outside(el));
-      if (otherOverlay) return;
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('focusin', onFocusIn);
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('focusin', onFocusIn);
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [open, ref, close]);
-}
-
 /** The compact row's overflow: its quiet and secondary actions, in that order. */
-export function MoreReviewActions({ items }: { items: RowAction[] }) {
+export function MoreReviewActions({
+  items,
+  onOpenChange,
+}: {
+  items: RowAction[];
+  /** Told when the menu opens or closes, and that it closed if it unmounts open. */
+  onOpenChange?: (open: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, ref, close);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  useEffect(() => {
+    if (!open) return;
+    onOpenChangeRef.current?.(true);
+    return () => onOpenChangeRef.current?.(false);
+  }, [open]);
   return (
     <div ref={ref} className="relative shrink-0">
       <button
@@ -120,21 +92,37 @@ export function MoreReviewActions({ items }: { items: RowAction[] }) {
  * whenever the window or the banner changes size while it is open.
  *
  * `withQuestions` counts the other reviews with an agent question waiting; any
- * puts a dot on the button and says so in its name.
+ * puts an amber dot on the button and says so in its name.
  */
 export function OtherReviews({
   count,
   withQuestions = 0,
+  open: openProp,
+  onOpenChange,
   children,
 }: {
   count: number;
   withQuestions?: number;
+  /**
+   * Controls the popover when given, so its owner can keep it open across a
+   * remount (another review taking the row) and knows while it is open.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   const ref = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => setOpen(false), [setOpen]);
   useDismiss(open, ref, close);
 
   useLayoutEffect(() => {
@@ -177,7 +165,7 @@ export function OtherReviews({
         className={`h-7 px-2 flex items-center gap-1.5 rounded-md text-[13px] font-medium tabular-nums transition-colors ${
           open ? 'bg-tint text-content' : 'text-content-secondary hover:text-content hover:bg-tint'
         }`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
         aria-label={questionsLabel ? `Other reviews, ${questionsLabel}` : 'Other reviews'}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -185,9 +173,10 @@ export function OtherReviews({
       >
         +{count}
         {questionsLabel && (
+          // Amber, the app's colour for "waiting on you", like the waiting row's dot.
           <span
             data-questions-marker
-            className="inline-block h-2 w-2 rounded-full bg-primary"
+            className="inline-block h-2 w-2 rounded-full bg-warning"
             aria-hidden
           />
         )}

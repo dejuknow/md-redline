@@ -1,9 +1,11 @@
-import { useRef } from 'react';
-import { useElementWidth } from '../hooks/useElementWidth';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import {
+  INITIAL_HEADER_FIT,
+  measureHeader,
+  nextHeaderFit,
+  rowSlotMinWidth,
+} from '../lib/header-fit';
 import { isApplePlatform } from '../lib/platform';
-
-/** Under this header width the review row folds its secondary actions into a menu. */
-const COMPACT_HEADER_WIDTH = 900;
 
 export interface AppHeaderProps {
   fileName: string | null;
@@ -25,6 +27,7 @@ export interface AppHeaderProps {
    * review to show; the file name, folder and Hand off take the row instead.
    */
   renderBanner: ((compact: boolean) => React.ReactNode) | null;
+  /** Shown after the review row too, when the active file is in none of the reviews. */
   handOff: React.ReactNode | null;
   focusMode: boolean;
   onExitFocus(): void;
@@ -54,9 +57,43 @@ export function AppHeader({
   onOpenPalette,
 }: AppHeaderProps) {
   const rootRef = useRef<HTMLElement>(null);
-  const width = useElementWidth(rootRef);
-  // 0 means "not measured yet": render the wide layout until we know better.
-  const compact = width > 0 && width < COMPACT_HEADER_WIDTH;
+  const slotRef = useRef<HTMLDivElement>(null);
+  // Wide until a measurement says the row does not fit (see header-fit.ts).
+  const [fit, setFit] = useState(INITIAL_HEADER_FIT);
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+  const measure = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const m = measureHeader(root);
+    if (!m) {
+      if (fitRef.current !== INITIAL_HEADER_FIT) setFit(INITIAL_HEADER_FIT);
+      return;
+    }
+    if (slotRef.current) slotRef.current.style.minWidth = `${rowSlotMinWidth(m)}px`;
+    const next = nextHeaderFit(fitRef.current, m);
+    if (next !== fitRef.current) {
+      fitRef.current = next;
+      setFit(next);
+    }
+  }, []);
+  // After every render, before paint, so a fold lands in the same frame.
+  useLayoutEffect(measure);
+  // And on what changes without a render here: the window's width, and the
+  // review row's own state (another review taking it, a label changing).
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    resize?.observe(root);
+    const mutation = new MutationObserver(measure);
+    mutation.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => {
+      resize?.disconnect();
+      mutation.disconnect();
+    };
+  }, [measure]);
+  const compact = renderBanner !== null && fit.compact;
   const banner = renderBanner ? renderBanner(compact) : null;
   const isMac = isApplePlatform();
   const paletteKeys = isMac ? '⌘K' : 'Ctrl+K';
@@ -64,11 +101,14 @@ export function AppHeader({
 
   const showLostAccess = errorKind === 'access-denied' && !accessRequestShown;
   const genericError = errorKind !== 'access-denied' ? error : null;
-  // Capped and kept from shrinking, so a long error never squeezes the review
-  // row or the file name pushes the notice down to an ellipsis: the notice
-  // truncates at its cap (full text in its title) and the name gives way.
+  // Capped, and truncating at its cap (full text in its title). Beside the
+  // file name it keeps from shrinking, so the name gives way. Beside a review
+  // row it gives way instead, down to MIN_NOTICE_WIDTH, before the row folds.
   const notices = (showLostAccess || genericError || isLoading) && (
-    <div data-header-notices className="shrink-0 max-w-[40%] min-w-0 flex items-center gap-2">
+    <div
+      data-header-notices
+      className={`${banner ? '' : 'shrink-0 '}max-w-[40%] min-w-0 flex items-center gap-2`}
+    >
       {genericError && (
         <span className="min-w-0 truncate text-[13px] text-danger font-medium" title={genericError}>
           {genericError}
@@ -103,8 +143,16 @@ export function AppHeader({
     >
       {banner ? (
         <>
-          {banner}
+          {/* Its min-width is set from measurements (see measure above). */}
+          <div ref={slotRef} data-header-banner className="min-w-0 flex-1 flex">
+            {banner}
+          </div>
           {notices}
+          {handOff && (
+            <div data-header-actions className="shrink-0 flex items-center gap-2">
+              {handOff}
+            </div>
+          )}
         </>
       ) : (
         <>

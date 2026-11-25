@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tooltip } from './Tooltip';
 import { useElementWidth } from '../hooks/useElementWidth';
+import { useDismiss } from '../hooks/useDismiss';
 import { getPrimaryModifierLabel } from '../lib/platform';
 import type { ViewMode } from '../lib/view-mode';
 
@@ -160,30 +161,12 @@ export function DocStrip({
     if (!narrow) setViewMenuOpen(false);
   }, [narrow]);
 
-  useEffect(() => {
-    if (!viewMenuOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
-        setViewMenuOpen(false);
-      }
-    };
-    // The menu owns Escape while open. Caught on the way down and stopped
-    // there, so App's own Escape (closing the find bar) never sees it; the
-    // selection's Escape, which runs first, already counts an open menu as
-    // owning the key and leaves the selection and any draft alone.
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setViewMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [viewMenuOpen]);
+  // Closes on a press or focus outside, and on Escape unless another overlay
+  // (the command palette, a dialog) is open and owns it. The selection's
+  // Escape, which runs first, already counts an open menu as owning the key
+  // and leaves the selection and any draft alone.
+  const closeViewMenu = useCallback(() => setViewMenuOpen(false), []);
+  useDismiss(viewMenuOpen, viewMenuRef, closeViewMenu);
 
   const modLabel = getPrimaryModifierLabel();
   const isRaw = viewMode === 'raw';

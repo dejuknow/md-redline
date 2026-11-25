@@ -165,6 +165,25 @@ export function ReviewBanner({
   // The held review ended under the pointer, so the row now shows another
   // review whose actions take no clicks until the pointer leaves.
   const [rowInert, setRowInert] = useState(false);
+  // The row also holds while the Other reviews popover or the More review
+  // actions menu is open, or keyboard focus is inside it: a re-rank would
+  // unmount the open menu or the focused button.
+  const [othersOpen, setOthersOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [rowFocused, setRowFocused] = useState(false);
+  const headerRowRef = useRef<HTMLDivElement>(null);
+  // Set between a press in the row and its release: focus that arrives then
+  // came from the mouse, which the pointer hold already covers. Holding for
+  // it too would keep a clicked button's row from ever re-ranking.
+  const pressingRef = useRef(false);
+  // A focused button removed from the page takes focus with it without a
+  // blur, so check after each render that focus is still in the row.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs every render by design; the guarded set ends the chain
+  useEffect(() => {
+    if (rowFocused && !headerRowRef.current?.contains(document.activeElement)) {
+      setRowFocused(false);
+    }
+  });
   // Sessions with a send in flight, claimed synchronously at the click,
   // before any await: a second click landing while the first waits on a save
   // must not post the same batch. Keyed by session, so another review's
@@ -416,6 +435,7 @@ export function ReviewBanner({
     // not start out held.
     if (rowHovered) setRowHovered(false);
     if (rowInert) setRowInert(false);
+    if (othersOpen) setOthersOpen(false);
     return null;
   }
 
@@ -429,6 +449,7 @@ export function ReviewBanner({
       inline: boolean;
       leading?: React.ReactNode;
       actionsInert?: boolean;
+      onMenuOpenChange?: (open: boolean) => void;
     },
   ) => {
     // Unified agent-reviewing row: covers both wait-mode (pending ask) and
@@ -455,6 +476,7 @@ export function ReviewBanner({
           inline={opts.inline}
           leading={opts.leading}
           actionsInert={opts.actionsInert}
+          onMenuOpenChange={opts.onMenuOpenChange}
         />
       );
     }
@@ -470,6 +492,7 @@ export function ReviewBanner({
         inline={opts.inline}
         leading={opts.leading}
         actionsInert={opts.actionsInert}
+        onMenuOpenChange={opts.onMenuOpenChange}
         indicator={<span className="inline-block h-2 w-2 rounded-full bg-warning" aria-hidden />}
         status={
           <>
@@ -535,7 +558,15 @@ export function ReviewBanner({
         sessionIsReady(s, commentCounts) &&
         !s.waitingForAgent &&
         unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent).length > 0,
-      { id: shownId, hold: rowHovered || (busyId !== null && busyId === shownId) },
+      {
+        id: shownId,
+        hold:
+          rowHovered ||
+          othersOpen ||
+          menuOpen ||
+          rowFocused ||
+          (busyId !== null && busyId === shownId),
+      },
     );
     const primaryId = primary?.id ?? null;
     // Remember what the row shows, so the next render can hold it.
@@ -544,19 +575,34 @@ export function ReviewBanner({
     // place must not take the click meant for it.
     if (heldEnded && rowHovered && !rowInert) setRowInert(true);
     const othersWithQuestions = others.filter((s) => (asks.get(s.id) ?? 0) > 0).length;
+    // The popover went with the last other review.
+    if (others.length === 0 && othersOpen) setOthersOpen(false);
     const othersButton = others.length > 0 && (
-      <OtherReviews count={others.length} withQuestions={othersWithQuestions}>
+      <OtherReviews
+        count={others.length}
+        withQuestions={othersWithQuestions}
+        open={othersOpen}
+        onOpenChange={setOthersOpen}
+      >
         {others.map((s) => renderRow(s, { compact: false, inline: false }))}
       </OtherReviews>
     );
     return (
       <div
+        ref={headerRowRef}
         data-testid="review-banner"
         className="relative min-w-0 flex-1 flex items-center text-content"
         onPointerEnter={() => setRowHovered(true)}
         onPointerLeave={() => {
           setRowHovered(false);
           setRowInert(false);
+          pressingRef.current = false;
+        }}
+        onPointerDownCapture={() => (pressingRef.current = true)}
+        onPointerUpCapture={() => (pressingRef.current = false)}
+        onFocus={() => setRowFocused(!pressingRef.current)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setRowFocused(false);
         }}
       >
         {primary &&
@@ -565,6 +611,7 @@ export function ReviewBanner({
             inline: true,
             leading: othersButton,
             actionsInert: rowInert || (heldEnded && rowHovered),
+            onMenuOpenChange: setMenuOpen,
           })}
       </div>
     );
