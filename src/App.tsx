@@ -56,6 +56,7 @@ import { ConfirmDialog } from './components/ConfirmDialog';
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
 import { useDragHandles } from './hooks/useDragHandles';
 import { useAuthor } from './hooks/useAuthor';
+import { AuthorButton } from './components/AuthorButton';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useSettings } from './contexts/SettingsContext';
 import { usePersistedTheme, useSetPersistedTheme } from './hooks/useThemePersistence';
@@ -3490,6 +3491,9 @@ export default function App() {
                       />
                     </svg>
                   </IconButton>
+                  <div className="ml-auto min-w-0">
+                    <AuthorButton author={author} onAuthorChange={setAuthor} />
+                  </div>
                 </div>
               </div>
             )}
@@ -3596,8 +3600,6 @@ export default function App() {
           onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
           isLoading={isLoading}
           commentsSurfaceVisible={railShown || drawerOpen}
-          author={author}
-          onAuthorChange={setAuthor}
           onToggleSidebar={toggleCommentsSurface}
           tabs={
             <TabBar

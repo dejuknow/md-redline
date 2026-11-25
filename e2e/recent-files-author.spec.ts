@@ -192,10 +192,10 @@ test.describe('Author management', () => {
     await expect(authorInput(page)).toHaveValue('PersistentUser');
   });
 
-  test('author badge in toolbar shows current author', async ({ page }) => {
+  test('author button in the sidebar footer shows current author', async ({ page }) => {
     await openFixture(page);
 
-    // The default author "User" should be shown in the toolbar
-    await expect(page.locator('button', { hasText: 'User' }).first()).toBeVisible();
+    // The default author "User" should be shown in the sidebar footer
+    await expect(page.getByTitle('Click to change author name')).toBeVisible();
   });
 });

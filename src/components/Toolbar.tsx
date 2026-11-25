@@ -1,4 +1,3 @@
-import { useState, useRef, useEffect } from 'react';
 import { getPrimaryModifierLabel } from '../lib/platform';
 import { IconButton } from './IconButton';
 
@@ -22,8 +21,6 @@ interface Props {
    * sidebarVisible intent flag: at a width too narrow for the rail the toggle
    * drives the drawer instead, so the button must track the drawer too. */
   commentsSurfaceVisible: boolean;
-  author: string;
-  onAuthorChange: (name: string) => void;
   onToggleSidebar: () => void;
   tabs?: React.ReactNode;
 }
@@ -35,32 +32,10 @@ export function Toolbar({
   onTrustFolder,
   isLoading,
   commentsSurfaceVisible,
-  author,
-  onAuthorChange,
   onToggleSidebar,
   tabs,
 }: Props) {
-  const [editingAuthor, setEditingAuthor] = useState(false);
-  const [authorDraft, setAuthorDraft] = useState(author);
-  const authorInputRef = useRef<HTMLInputElement>(null);
   const modLabel = getPrimaryModifierLabel();
-
-  // Sync draft when author changes externally (e.g. from Settings panel)
-  useEffect(() => {
-    if (!editingAuthor) setAuthorDraft(author);
-  }, [author, editingAuthor]);
-
-  useEffect(() => {
-    if (editingAuthor && authorInputRef.current) {
-      authorInputRef.current.focus();
-      authorInputRef.current.select();
-    }
-  }, [editingAuthor]);
-
-  const commitAuthor = () => {
-    onAuthorChange(authorDraft);
-    setEditingAuthor(false);
-  };
 
   return (
     <div className="h-11 border-b border-border bg-surface-secondary flex items-center px-4 gap-3 shrink-0">
@@ -88,36 +63,6 @@ export function Toolbar({
         )}
         {isLoading && <span className="text-xs text-content-muted">Loading...</span>}
       </div>
-
-      {/* Author name */}
-      {editingAuthor ? (
-        <input
-          ref={authorInputRef}
-          value={authorDraft}
-          onChange={(e) => setAuthorDraft(e.target.value)}
-          onBlur={commitAuthor}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commitAuthor();
-            if (e.key === 'Escape') {
-              setAuthorDraft(author);
-              setEditingAuthor(false);
-            }
-          }}
-          className="text-xs w-24 px-1.5 py-0.5 rounded border border-primary bg-surface text-content focus:outline-none focus:ring-1 focus:ring-primary"
-          placeholder="Your name"
-        />
-      ) : (
-        <button
-          onClick={() => {
-            setAuthorDraft(author);
-            setEditingAuthor(true);
-          }}
-          className="flex items-center gap-1.5 text-xs text-content-secondary hover:text-content transition-colors px-1.5 py-0.5 rounded hover:bg-tint"
-          title="Click to change author name"
-        >
-          {author}
-        </button>
-      )}
 
       {/* Comments rail toggle (far right; settings lives at the sidebar's bottom) */}
       <IconButton

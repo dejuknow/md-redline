@@ -14,8 +14,6 @@ function renderToolbar(overrides: Partial<React.ComponentProps<typeof Toolbar>> 
       onTrustFolder={vi.fn()}
       isLoading={false}
       commentsSurfaceVisible={false}
-      author="Dennis"
-      onAuthorChange={vi.fn()}
       onToggleSidebar={vi.fn()}
       {...overrides}
     />,
