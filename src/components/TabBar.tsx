@@ -260,7 +260,7 @@ export function TabBar({
             scrolls, and overflow past the floors is what scrolls. */}
         <div ref={tabsViewportRef} className="min-w-0 h-full overflow-x-auto no-scrollbar">
           <div ref={tabsContentRef} className="flex h-full items-end gap-0.5">
-            {tabs.map((tab) => {
+            {tabs.map((tab, index) => {
               const isActive = tab.filePath === activeFilePath;
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
               const count = commentCounts.get(tab.filePath) ?? 0;
@@ -291,6 +291,9 @@ export function TabBar({
                       : 'h-[34px] shrink min-w-[112px] text-content-muted hover:text-content'
                   }`}
                   title={tabTitle(tab)}
+                  // The active first tab stands on the page's left edge, so the
+                  // page squares that corner (index.css) and the two read as one.
+                  data-tab-flush={isActive && index === 0 && !isOverflowing ? '' : undefined}
                 >
                   <span className="min-w-0 truncate">{fileName}</span>
                   {count > 0 && (

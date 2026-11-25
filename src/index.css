@@ -1667,3 +1667,10 @@ body {
   background: var(--theme-bg-inset);
   color: var(--theme-text-muted);
 }
+
+/* The active first tab stands flush on the page's left edge (TabBar's
+   data-tab-flush), so the page squares that corner and the tab's left side
+   runs straight down into the page's. */
+[data-doc-panel]:has([data-tab-flush]) [data-doc-page-surface] {
+  border-top-left-radius: 0;
+}

@@ -912,7 +912,11 @@ items keep the same titles and test id. The menu closes on an outside press, on
 focus moving outside it (the command palette or find bar taking focus) and on
 Escape, which it leaves to the palette while that is open (`useDismiss`).
 
-Its left padding is `calc(var(--window-inset-left, 0px) + 0.5rem)`: a desktop
+The strip has no left inset of its own, so the first tab sits flush with the
+page's left edge; while that tab is active (and the tabs do not overflow) it
+carries `data-tab-flush` and the page squares its top-left corner (`index.css`),
+so the tab's side runs straight down into the page's. Its left padding is
+`var(--window-inset-left, 0px)`: a desktop
 shell sets `--window-inset-left` to clear its window controls when no sidebar
 covers them (focus mode). The browser build never sets it.
 

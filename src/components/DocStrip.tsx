@@ -340,8 +340,9 @@ export function DocStrip({
       ref={rootRef}
       data-doc-strip
       className="relative z-10 h-[34px] flex items-end gap-0.5 pr-0.5 shrink-0"
-      // Adds to the strip's own inset rather than replacing it.
-      style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.5rem)' }}
+      // No inset of its own: the first tab sits flush with the page's left
+      // edge. A desktop shell's window inset still applies.
+      style={{ paddingLeft: 'var(--window-inset-left, 0px)' }}
     >
       <div className="min-w-0 flex-1 self-stretch flex items-end">{tabs}</div>
 

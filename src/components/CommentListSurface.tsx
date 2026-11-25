@@ -524,7 +524,7 @@ export function CommentListSurface({
 
       {/* Footer: the summary, then the bulk actions as quiet text buttons on
           one line, so it reads as part of the panel rather than a box. */}
-      <div className="border-t border-border-subtle pl-3 pr-1.5 h-9 shrink-0 flex items-center gap-0.5">
+      <div className="mx-3 border-t border-border-subtle h-9 shrink-0 flex items-center gap-0.5 [&>button:last-child]:-mr-1.5">
         <span className="mr-auto text-xs text-content-muted whitespace-nowrap">
           {showStatus ? (
             <>
