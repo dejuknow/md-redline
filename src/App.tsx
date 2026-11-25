@@ -101,7 +101,7 @@ import {
 import { getParentDir, tildeShortenPath } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { useOpenAddedReviewFiles } from './hooks/useOpenAddedReviewFiles';
-import { ReviewBanner } from './components/ReviewBanner';
+import { ReviewBanner, type ShownReview } from './components/ReviewBanner';
 import { stripReviewParamFromUrl } from './lib/review-url';
 import { loadActiveTab, pickActiveTab, saveActiveTab } from './lib/active-tab';
 import { selectAgentAsks } from './lib/agent-asks';
@@ -998,12 +998,11 @@ export default function App() {
   );
   // An agent can add files to a review this tab is showing (#117): open them.
   useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
-  // Files in a shown review, which the tab strip marks so the review's scope
-  // is visible up where the reader is looking, not only in the docked row.
-  const reviewFilePaths = useMemo(
-    () => new Set(shownReviewSessions.flatMap((session) => session.filePaths)),
-    [shownReviewSessions],
-  );
+  // The review the docked row shows. Its files are what the tab strip marks,
+  // so the marks match what the row's Send covers even with other reviews
+  // open, and whether it needs the reader sets the row's emphasis.
+  const [shownReview, setShownReview] = useState<ShownReview | null>(null);
+  const reviewFilePaths = useMemo(() => new Set(shownReview?.filePaths ?? []), [shownReview]);
   // An agent thread in a review that is still open belongs to the live agent
   // there: an mdr_ask answer already went back through mdr_ask. Hand off
   // leaves those threads out (handoffComments).
@@ -4017,6 +4016,7 @@ export default function App() {
                   {/* The review row, docked along the page's bottom edge (see ReviewBand). */}
                   {shownReviewSessions.length > 0 && (
                     <ReviewBand
+                      emphasis={shownReview?.needsReader ?? false}
                       renderBanner={(compact) => (
                         <ReviewBanner
                           layout="header"
@@ -4033,6 +4033,7 @@ export default function App() {
                           userRepliedLast={userRepliedLast}
                           pendingAskCountsBySession={pendingAskCountsBySession}
                           onJumpToAsk={handleJumpToAsk}
+                          onShownChange={setShownReview}
                         />
                       )}
                     />

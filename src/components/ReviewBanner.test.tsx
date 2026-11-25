@@ -1496,6 +1496,50 @@ describe('ReviewBanner: header layout', () => {
     return render(<ReviewBanner {...props} />);
   }
 
+  it('reports the shown review: its files only, needing the reader while it waits on comments', () => {
+    const onShownChange = vi.fn();
+    const { unmount } = renderHeaderBanner({ onShownChange });
+    expect(onShownChange).toHaveBeenLastCalledWith({
+      filePaths: ['/tmp/user.md'],
+      needsReader: true,
+    });
+    unmount();
+    expect(onShownChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('reports a working agent review as not needing the reader, and a question as needing them', () => {
+    const onShownChange = vi.fn();
+    const { rerender } = renderHeaderBanner({ sessions: [agentSession], onShownChange });
+    expect(onShownChange).toHaveBeenLastCalledWith({
+      filePaths: ['/tmp/agent.md'],
+      needsReader: false,
+    });
+    rerender(
+      <ReviewBanner
+        layout="header"
+        sessions={[agentSession]}
+        commentCounts={new Map([['/tmp/agent.md', 0]])}
+        onResolved={() => {}}
+        commentIdsByFile={new Map([['/tmp/agent.md', []]])}
+        pendingAskCountsBySession={new Map([[agentSession.id, 1]])}
+        onShownChange={onShownChange}
+      />,
+    );
+    expect(onShownChange).toHaveBeenLastCalledWith({
+      filePaths: ['/tmp/agent.md'],
+      needsReader: true,
+    });
+  });
+
+  it('reports a review waiting on the agent as not needing the reader', () => {
+    const onShownChange = vi.fn();
+    renderHeaderBanner({ sessions: [{ ...userSession, waitingForAgent: true }], onShownChange });
+    expect(onShownChange).toHaveBeenLastCalledWith({
+      filePaths: ['/tmp/user.md'],
+      needsReader: false,
+    });
+  });
+
   it('header layout shows one row and a "+1" Other reviews button when two sessions are present', () => {
     renderHeaderBanner();
     const banner = screen.getByTestId('review-banner');

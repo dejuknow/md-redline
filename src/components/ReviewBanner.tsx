@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import { isCommentSent } from '../lib/answered-comments';
@@ -67,6 +67,18 @@ interface ReviewBannerProps {
    * actions" menu. The primary action and the pending-question jump stay out.
    */
   compact?: boolean;
+  /**
+   * Header layout only: told which review the row shows, and whether it needs
+   * the reader now (an agent question, or a review waiting on their comments)
+   * rather than waiting on the agent. Null once no review is shown.
+   */
+  onShownChange?: (shown: ShownReview | null) => void;
+}
+
+/** The review the header row shows (see `onShownChange`). */
+export interface ShownReview {
+  filePaths: string[];
+  needsReader: boolean;
 }
 
 const NO_REPLIES: ReadonlyMap<string, string> = new Map();
@@ -154,6 +166,7 @@ export function ReviewBanner({
   onJumpToAsk,
   layout = 'banner',
   compact = false,
+  onShownChange,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   // The review the header shows in its row. While the row is held (see
@@ -183,6 +196,28 @@ export function ReviewBanner({
     if (rowFocused && !headerRowRef.current?.contains(document.activeElement)) {
       setRowFocused(false);
     }
+  });
+  // What the header row shows, set while rendering it and reported once it
+  // changes, before paint so the dock and the tab marks never lag a frame.
+  const shownReviewRef = useRef<ShownReview | null>(null);
+  const reportedShownRef = useRef<string | undefined>(undefined);
+  // Clear the report on unmount, and forget it, so a remount (StrictMode
+  // replays mounts in development) reports afresh. Declared before the report
+  // so a mount runs this no-op first.
+  useLayoutEffect(
+    () => () => {
+      reportedShownRef.current = undefined;
+      onShownChange?.(null);
+    },
+    [onShownChange],
+  );
+  useLayoutEffect(() => {
+    if (!onShownChange) return;
+    const shown = shownReviewRef.current;
+    const key = shown ? `${shown.needsReader}|${shown.filePaths.join('\n')}` : '';
+    if (key === reportedShownRef.current) return;
+    reportedShownRef.current = key;
+    onShownChange(shown);
   });
   // Sessions with a send in flight, claimed synchronously at the click,
   // before any await: a second click landing while the first waits on a save
@@ -568,6 +603,14 @@ export function ReviewBanner({
       },
     );
     const primaryId = primary?.id ?? null;
+    shownReviewRef.current = primary
+      ? {
+          filePaths: primary.filePaths,
+          needsReader:
+            (asks.get(primary.id) ?? 0) > 0 ||
+            (primary.origin !== 'agent' && !primary.waitingForAgent),
+        }
+      : null;
     // Remember what the row shows, so the next render can hold it.
     if (primaryId !== shownId) setShownId(primaryId);
     // The held review ended with the pointer on its row: whatever took its

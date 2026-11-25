@@ -314,6 +314,10 @@ test.describe('Review band and status bar', () => {
       // Polled: the band slides up as it mounts.
       const surfaceBottom = await bottom('[data-doc-page-surface]');
       await expect.poll(() => bottom('[data-review-band]')).toBe(surfaceBottom - 1);
+      // A user review waits on the reader, so the band is emphasized, and the
+      // review's tab is marked up top.
+      await expect(band(page)).toHaveAttribute('data-review-band-emphasis');
+      await expect(page.locator('[data-tab-in-review]')).toHaveCount(1);
     } finally {
       await abortSession(request, baseURL!, sessionId);
     }

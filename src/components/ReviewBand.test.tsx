@@ -48,6 +48,17 @@ describe('ReviewBand', () => {
     expect(band().className).toContain('border-t');
   });
 
+  it('is tinted crimson under a crimson line only while the review needs the reader', () => {
+    const { rerender } = render(<ReviewBand renderBanner={() => <div />} />);
+    expect(band().hasAttribute('data-review-band-emphasis')).toBe(false);
+    expect(band().className).toContain('bg-surface');
+    expect(band().className).not.toContain('bg-primary-bg');
+    rerender(<ReviewBand emphasis renderBanner={() => <div />} />);
+    expect(band().hasAttribute('data-review-band-emphasis')).toBe(true);
+    expect(band().className).toContain('bg-primary-bg');
+    expect(band().className).toContain('border-primary');
+  });
+
   it('folds the review row when its content does not fit, and unfolds only past the hysteresis', () => {
     const renderBanner = vi.fn((compact: boolean) => (
       <div data-testid="review-banner" data-compact={String(compact)} />
