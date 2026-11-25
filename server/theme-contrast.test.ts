@@ -227,3 +227,13 @@ describe('resolved tab mark contrast', () => {
     },
   );
 });
+
+describe('inset frame', () => {
+  it.each(themeBlocks().map((t) => [t.name, t] as const))(
+    '%s defines a frame distinct from its sidebar',
+    (_n, t) => {
+      expect(t.vars['frame']).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(t.vars['frame'].toLowerCase()).not.toBe(t.vars['bg-secondary'].toLowerCase());
+    },
+  );
+});

@@ -9,6 +9,7 @@
   --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Surfaces */
+  --color-frame: var(--theme-frame);
   --color-surface: var(--theme-bg);
   --color-surface-secondary: var(--theme-bg-secondary);
   --color-surface-raised: var(--theme-bg-raised);
@@ -98,6 +99,7 @@ body {
 /* ========== Light Theme (default) ========== */
 :root, [data-theme="light"] {
   color-scheme: light;
+  --theme-frame: #ebebee;
   --theme-bg: #ffffff;
   --theme-bg-secondary: #f7f7f8;
   --theme-bg-raised: #ffffff;
@@ -167,6 +169,7 @@ body {
 /* ========== Dark Theme ========== */
 [data-theme="dark"] {
   color-scheme: dark;
+  --theme-frame: #141416;
   --theme-bg: #1f1f22;
   --theme-bg-secondary: #1a1a1d;
   --theme-bg-raised: #27272b;
@@ -239,6 +242,7 @@ body {
 /* ========== Sepia Theme ========== */
 [data-theme="sepia"] {
   color-scheme: light;
+  --theme-frame: #e8dfd0;
   --theme-bg: #faf6f1;
   --theme-bg-secondary: #f5efe6;
   --theme-bg-raised: #faf6f1;
@@ -305,6 +309,7 @@ body {
 /* ========== Nord Theme ========== */
 [data-theme="nord"] {
   color-scheme: dark;
+  --theme-frame: #2b303b;
   --theme-bg: #2e3440;
   --theme-bg-secondary: #3b4252;
   --theme-bg-raised: #3b4252;
@@ -376,6 +381,7 @@ body {
 /* ========== Rosé Pine Theme ========== */
 [data-theme="rose-pine"] {
   color-scheme: dark;
+  --theme-frame: #16141f;
   --theme-bg: #191724;
   --theme-bg-secondary: #1f1d2e;
   --theme-bg-raised: #26233a;
@@ -446,6 +452,7 @@ body {
 /* ========== Solarized Light Theme ========== */
 [data-theme="solarized"] {
   color-scheme: light;
+  --theme-frame: #e1dbc5;
   --theme-bg: #fdf6e3;
   --theme-bg-secondary: #eee8d5;
   --theme-bg-raised: #fdf6e3;
@@ -512,6 +519,7 @@ body {
 /* ========== GitHub Theme ========== */
 [data-theme="github"] {
   color-scheme: light;
+  --theme-frame: #e6e9ed;
   --theme-bg: #ffffff;
   --theme-bg-secondary: #f6f8fa;
   --theme-bg-raised: #ffffff;
@@ -578,6 +586,7 @@ body {
 /* ========== Catppuccin Mocha Theme ========== */
 [data-theme="catppuccin"] {
   color-scheme: dark;
+  --theme-frame: #262637;
   --theme-bg: #1e1e2e;
   --theme-bg-secondary: #313244;
   --theme-bg-raised: #313244;
@@ -1345,6 +1354,11 @@ body {
      descendants (the rail header) so they never pin against the real
      scroller. clip clips without creating a scrollport. */
   overflow: clip;
+}
+
+[data-doc-panel] .doc-sheet {
+  border: 0;
+  border-radius: 0;
 }
 
 /* ========== Overlay Enter Motion ========== */

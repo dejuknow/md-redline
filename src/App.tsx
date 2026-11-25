@@ -3330,7 +3330,7 @@ export default function App() {
   const explorerDirKnown = startupTargetKnown || startupCapElapsed;
 
   return (
-    <div className="h-screen flex bg-surface-secondary">
+    <div data-app-root className="h-screen flex bg-frame p-2">
       <ReadingPositionCapture
         path={activeFilePath}
         view={readingView}
@@ -3342,9 +3342,9 @@ export default function App() {
       {!focusMode && (
         <>
           <div
-            className={`relative border-r border-border bg-surface-secondary shrink-0 overflow-hidden ${
-              isDragging ? '' : 'transition-[width] duration-200 ease-in-out'
-            }`}
+            className={`relative rounded-[10px] border border-border bg-surface-secondary shrink-0 overflow-hidden ${
+              explorerVisible ? '' : 'mr-2'
+            } ${isDragging ? '' : 'transition-[width] duration-200 ease-in-out'}`}
             style={{ width: explorerVisible ? explorerWidth : 40 }}
           >
             {/* Logo pinned to one spot so it never shifts between the
@@ -3556,13 +3556,15 @@ export default function App() {
             )}
           </div>
           {explorerVisible && (
-            <div
-              className="w-px shrink-0 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group resize-divider"
-              onPointerDown={onResizeStart('explorer')}
-            >
-              {/* The hit target, not the 1px line you can see; see
+            <div className="w-2 shrink-0 flex justify-center">
+              <div
+                className="w-px cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors relative group resize-divider"
+                onPointerDown={onResizeStart('explorer')}
+              >
+                {/* The hit target, not the 1px line you can see; see
                   .resize-hit in index.css for why it widens only for touch. */}
-              <div className="resize-hit" />
+                <div className="resize-hit" />
+              </div>
             </div>
           )}
         </>
@@ -3616,7 +3618,8 @@ export default function App() {
           <div className="flex-1 flex min-h-0 relative">
             {/* Markdown viewer */}
             <div
-              className="flex-1 min-h-0 min-w-0 relative panel-center bg-surface-secondary"
+              className="flex-1 min-h-0 min-w-0 relative panel-center rounded-[10px] border border-border bg-surface flex flex-col"
+              data-doc-panel
               data-prose-font={settings.proseFont}
               data-prose-size={settings.proseSize}
             >
@@ -3632,7 +3635,7 @@ export default function App() {
                   focusTrigger={searchFocusTrigger}
                 />
               )}
-              <div className="h-full flex flex-col">
+              <div className="flex-1 min-h-0 flex flex-col">
                 <PanelToolbar
                   viewMode={viewMode}
                   onViewModeChange={(mode) => {
@@ -3713,7 +3716,7 @@ export default function App() {
                     the search match count — so unmounting them here left the
                     document rail-less and the search count stale once the
                     grant landed. */}
-                <div className="relative flex-1 min-h-0 flex flex-col">
+                <div className="relative flex-1 min-h-0 flex flex-col overflow-clip">
                   {showAccessRequest && (
                     <AccessRequest
                       dir={accessDeniedDir}
