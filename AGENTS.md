@@ -915,7 +915,7 @@ so the tabs keep the width. In order:
   document."), since the menu closes and takes the copy item's checkmark with it;
 - a hairline, then the comments split button (`CommentsButton.tsx`, see
   Comments rail);
-- Hand off (`HandOffButton`), last, while the active file is in no shown review.
+- Hand off (`HandOffButton`), last, unless the active file is in a shown user review, whose own Send delivers its comments (`reviewOwnsSending`; the ⌘K Hand off command uses the same gate). An agent's review has no send of its own, so Hand off stays beside it. Its other-files picker leaves out files a shown user review owns.
 
 Under 600px of strip width (`useElementNarrowerThan`), the rendered/raw choice
 folds into the same menu too, and its button reads **View** with a chevron; the
@@ -2749,7 +2749,9 @@ chrome from outside, so these hooks are a contract. Keep them when restyling:
   controls, on whichever row sits under them: `[data-sidebar-top]` while the
   panel is open, `[data-doc-strip]` when no sidebar covers them. Each of those
   rows' left padding adds it. The review band no longer takes it: it is docked
-  at the bottom of the page, away from the window controls.
+  at the bottom of the page, away from the window controls. `[data-sidebar-top]`
+  is a size container: when the inset leaves it under 200px, the Explorer and
+  Outline switches drop to icons (their labels stay as accessible names).
 
 The main column (`data-main-column`), the document panel (`data-doc-panel`) and
 its tab strip (`data-doc-strip`) and the page card (`data-doc-page-surface`) are also
