@@ -602,6 +602,27 @@ test.describe('Hand off beside a review', () => {
       await abortSession(request, baseURL!, sessionId);
     }
   });
+
+  test("stays during an agent's review, which has no send of its own", async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    writeFileSync(FIXTURE, COMMENTED_DOC);
+    const res = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [FIXTURE], enableResolve: false, origin: 'agent' },
+    });
+    expect(res.status()).toBe(201);
+    const { sessionId } = (await res.json()) as { sessionId: string };
+    try {
+      await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
+      await expect(band(page).getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
+      await page.locator('.prose').waitFor({ timeout: 10_000 });
+      await expect(strip(page).getByTestId('handoff-button')).toBeVisible();
+    } finally {
+      await abortSession(request, baseURL!, sessionId);
+    }
+  });
 });
 
 test.describe('Status bar, empty rail and desktop shell hooks', () => {

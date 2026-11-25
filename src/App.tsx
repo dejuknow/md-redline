@@ -1001,6 +1001,18 @@ export default function App() {
   // The review the docked row shows. Its files are what the tab strip marks,
   // so the marks match what the row's Send covers even with other reviews
   // open, and whether it needs the reader sets the row's emphasis.
+  // A user review brings its own Send for its files, so Hand off (the strip
+  // button and the palette command alike) steps aside while the active file
+  // is in one. An agent's review has no send of its own, only End review, so
+  // the reader's own comments can still be handed off there.
+  const reviewOwnsSending = useMemo(
+    () =>
+      !!activeFilePath &&
+      shownReviewSessions.some(
+        (session) => session.origin === 'user' && session.filePaths.includes(activeFilePath),
+      ),
+    [activeFilePath, shownReviewSessions],
+  );
   const [shownReview, setShownReview] = useState<ShownReview | null>(null);
   const reviewFilePaths = useMemo(() => new Set(shownReview?.filePaths ?? []), [shownReview]);
   // An agent thread in a review that is still open belongs to the live agent
@@ -1897,9 +1909,12 @@ export default function App() {
         el.getBoundingClientRect().top -
         container.getBoundingClientRect().top +
         container.scrollTop;
-      container.scrollTo({ top: Math.max(0, top - HEADING_JUMP_OFFSET), behavior: 'smooth' });
+      // The breadcrumb only floats over a rail-capable view; elsewhere only
+      // the headings' own 16px margin applies.
+      const offset = railCapable ? HEADING_JUMP_OFFSET : 16;
+      container.scrollTo({ top: Math.max(0, top - offset), behavior: 'smooth' });
     },
-    [setActiveHeadingId, viewMode, scrollSpyRafRef, spyDisabledRef],
+    [setActiveHeadingId, viewMode, railCapable, scrollSpyRafRef, spyDisabledRef],
   );
 
   const breadcrumbChain = useMemo(
@@ -3128,9 +3143,10 @@ export default function App() {
         onExecute: () => void navigator.clipboard.writeText(markdown).catch(() => {}),
       });
     }
-    // Same gate as the Hand off button (handoffCounts), not the open count,
-    // which also includes agent questions the reviewer has not answered.
-    if (activeFilePath && (handoffCounts.get(activeFilePath) ?? 0) > 0) {
+    // Same gate as the Hand off button (handoffCounts and reviewOwnsSending),
+    // not the open count, which also includes agent questions the reviewer
+    // has not answered.
+    if (activeFilePath && !reviewOwnsSending && (handoffCounts.get(activeFilePath) ?? 0) > 0) {
       cmds.push({
         id: 'copy-agent-prompt',
         label: 'Hand off to agent (copy instructions)',
@@ -3174,6 +3190,7 @@ export default function App() {
   }, [
     commentCount,
     handoffCounts,
+    reviewOwnsSending,
     paletteSelectionMarkdown,
     resolvedCommentCount,
     settings.enableResolve,
@@ -3740,12 +3757,8 @@ export default function App() {
                     />
                   }
                   handOff={
-                    // A review brings its own send actions for its files, so Hand
-                    // off goes only while the active file is in no shown review.
-                    activeFilePath &&
-                    !shownReviewSessions.some((session) =>
-                      session.filePaths.includes(activeFilePath),
-                    ) ? (
+                    // Steps aside while a user review owns sending (reviewOwnsSending).
+                    activeFilePath && !reviewOwnsSending ? (
                       <HandOffButton
                         activeFilePath={activeFilePath}
                         commentCounts={handoffCounts}
@@ -3756,10 +3769,12 @@ export default function App() {
                 />
                 {/* The page: the only white surface in the main column. The
                     tabs above sit on the frame and the active one joins this
-                    edge, like a folder tab. */}
+                    edge, like a folder tab. Isolated, so its overlays (find
+                    bar, breadcrumb, access and empty-state cards, all z-20)
+                    stay under the strip's menus. */}
                 <div
                   data-doc-page-surface
-                  className="flex-1 min-h-0 flex flex-col bg-surface border border-border rounded-[10px]"
+                  className="isolate flex-1 min-h-0 flex flex-col bg-surface border border-border rounded-[10px]"
                 >
                   {/* The page clips here rather than on the card, so the docked
                       review row's menus can hang past the card's edges. The

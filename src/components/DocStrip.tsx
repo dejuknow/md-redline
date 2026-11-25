@@ -159,9 +159,11 @@ export function DocStrip({
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
+  // A layout change, or the controls leaving with the last file, closes the
+  // menu; left open, it would come back with the next file.
   useEffect(() => {
     setViewMenuOpen(false);
-  }, [narrow]);
+  }, [narrow, hasDocument]);
 
   // Closes on a press or focus outside, and on Escape unless another overlay
   // (the command palette, a dialog) is open and owns it. The selection's

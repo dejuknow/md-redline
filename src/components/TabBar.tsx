@@ -108,6 +108,8 @@ export function TabBar({
 }: Props) {
   const tabControlButtonClass = tabControlButtonClassStrip;
   const badgeTextClass = 'text-[12px] px-1.5';
+  // Takes clicks only while shown: unseen, it sits over the badge or the
+  // name's end, and a tap there (touch has no hover) must switch, not close.
   const renderClose = (tab: Tab, position: string) => (
     <span
       role="button"
@@ -115,7 +117,7 @@ export function TabBar({
         e.stopPropagation();
         onCloseTab(tab.filePath);
       }}
-      className={`${position} rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:text-content`}
+      className={`${position} rounded opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 transition-opacity hover:text-content`}
       aria-label={`Close ${getPathBasename(tab.filePath)}`}
       tabIndex={-1}
     >
@@ -154,9 +156,9 @@ export function TabBar({
     setCanScrollRight(viewport.scrollLeft < maxScrollLeft - 1);
   }, []);
 
-  // Bring the active tab into view. The scrollport's scroll-padding is what
-  // holds it clear of the sticky open-file button pinned to the right edge;
-  // without that padding the browser parks the tab's tail underneath it.
+  // Bring the active tab into view. The open-file button sits after the
+  // scrollport, not inside it, so nothing in the scrollport can cover a tab
+  // and it needs no scroll-padding.
   // Reports whether there was a tab to align, so a caller that tracks state
   // across calls can tell an alignment from a no-op.
   const scrollActiveTabIntoView = useCallback(() => {
