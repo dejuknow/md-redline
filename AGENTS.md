@@ -85,6 +85,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/DocStrip.tsx`: the document panel's tab row: tabs on the left; on the right the view switch, find, the View options menu (diff, copy), the comments button and Hand off
 - `src/components/DiffBar.tsx`: row under the tab strip with the change count, Show/Hide diff, diff reference label, prev/next change and Mark reviewed
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
+- `src/components/NoFileOpen.tsx`: what the page shows with no file open (Open file button with its shortcut, a hint toward the Explorer, the five most recent files)
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
@@ -885,7 +886,9 @@ button) wherever neither side is the active tab. A tab is the same width active
 or not: every tab has a transparent or real 1px border, the name reserves its
 medium-weight width (an invisible `::after` copy), and no tab keeps room for its
 close button, which appears on hover (or keyboard focus) over the name's end on
-a patch of the tab's own fill that fades into the text. The active tab's top lines up with the sidebar's. The strip is
+a patch of the tab's own fill that fades into the text. A tab with marks (comment
+badge, resolved mark, error dot) instead hides them on hover and shows the close
+button in their place. The active tab's top lines up with the sidebar's. The strip is
 not inside an `overflow-clip` ancestor (only the page card below it clips),
 which is what lets the "Show all open tabs" menu (`tab-list-menu`) hang below it
 unclipped.

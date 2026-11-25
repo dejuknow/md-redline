@@ -42,6 +42,7 @@ import { TabBar } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
 import { FileOpener } from './components/FileOpener';
 import { AccessRequest } from './components/AccessRequest';
+import { NoFileOpen } from './components/NoFileOpen';
 import { DragHandles } from './components/DragHandles';
 import { RawView, type RawViewHandle } from './components/RawView';
 import { RenderedDiffView, type RenderedDiffViewHandle } from './components/RenderedDiffView';
@@ -3787,6 +3788,15 @@ export default function App() {
                     document rail-less and the search count stale once the
                     grant landed. */}
                       <div className="relative flex-1 min-h-0 flex flex-col overflow-clip">
+                        {!activeFilePath && startupTargetKnown && (
+                          <NoFileOpen
+                            recentFiles={recentFiles}
+                            homeDir={homeDir}
+                            explorerShown={explorerVisible}
+                            onOpenPicker={openFilePicker}
+                            onOpenRecent={handleOpenFile}
+                          />
+                        )}
                         {showAccessRequest && (
                           <AccessRequest
                             dir={accessDeniedDir}
