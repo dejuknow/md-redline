@@ -1698,53 +1698,133 @@ describe('ReviewBanner: header layout', () => {
 
     const rowText = () => screen.getByTestId('review-banner').textContent ?? '';
 
-    it("a send on A keeps A's row, so B's Send never lands under the pointer", async () => {
+    it('picks by priority when the row is not held: a send on A hands the row to B', async () => {
       fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
-      const { rerender } = render(<StableHarness sessions={[sessionA, sessionB]} />);
+      render(<StableHarness sessions={[sessionA, sessionB]} />);
       expect(rowText()).toContain('a.md');
       fireEvent.click(screen.getByRole('button', { name: 'Send 2 comments' }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      // A's batch is out: it has nothing left to send, while B still does.
+      // A has nothing left to send and B does, and nothing holds the row.
+      await waitFor(() => expect(rowText()).toContain('b.md'));
+      expect(screen.getByRole('button', { name: 'Send 1 comment' })).toBeTruthy();
+    });
+
+    it('a question elsewhere takes the row from a review ready to send when not held', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      expect(rowText()).toContain('a.md');
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('Claude is waiting on your reply.');
+    });
+
+    it('holds the shown review while the pointer is over the row, and lets go when it leaves', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+      const { rerender } = render(<StableHarness sessions={[sessionA, sessionB]} />);
+      const banner = screen.getByTestId('review-banner');
+      fireEvent.pointerEnter(banner);
+      fireEvent.click(screen.getByRole('button', { name: 'Send 2 comments' }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await waitFor(() =>
         expect(screen.queryByRole('button', { name: 'Send 2 comments' })).toBeNull(),
       );
+      // A's batch is out and B is ready, but A keeps the row under the pointer.
       expect(rowText()).toContain('a.md');
       expect(screen.queryByRole('button', { name: 'Send 1 comment' })).toBeNull();
-      // The poll reports A waiting on the agent: A still holds the row.
       rerender(
         <StableHarness
           sessions={[
             { ...sessionA, waitingForAgent: true, sentCommentIds: ['a1', 'a2'] },
             sessionB,
           ]}
+          asks={new Map([['rev_agent_b', 1]])}
         />,
       );
       expect(rowText()).toContain('a.md');
       expect(screen.getByRole('button', { name: /waiting for agent/i })).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Send 1 comment' })).toBeNull();
-    });
-
-    it('hands the row to a review with a question once the shown one needs nothing, but not under the pointer', () => {
-      const waitingA = { ...sessionA, waitingForAgent: true };
-      const { rerender } = render(<StableHarness sessions={[waitingA, agentB]} />);
-      expect(rowText()).toContain('a.md');
-      const banner = screen.getByTestId('review-banner');
-      fireEvent.pointerEnter(banner);
-      rerender(
-        <StableHarness sessions={[waitingA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
-      );
-      expect(rowText()).toContain('a.md');
       fireEvent.pointerLeave(banner);
-      expect(rowText()).toContain('Claude is waiting on your reply.');
+      expect(rowText()).toContain('b.md');
+      expect(screen.getByRole('button', { name: 'Send 1 comment' })).toBeTruthy();
     });
 
-    it('a question elsewhere does not take the row from a review ready to send', () => {
+    it('holds the shown review while one of its sends is in flight, pointer or not', async () => {
+      let resolveFetch: (r: Response) => void = () => {};
+      fetchMock.mockImplementation(
+        () => new Promise<Response>((resolve) => (resolveFetch = resolve)),
+      );
       const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Send 2 comments' }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      // A question on B outranks A, but A's send is still out.
       rerender(
         <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
       );
-      expect(screen.getByRole('button', { name: 'Send 2 comments' })).toBeTruthy();
-      expect(rowText()).not.toContain('Claude is waiting on your reply.');
+      expect(rowText()).toContain('a.md');
+      await act(async () => {
+        resolveFetch({ ok: true, json: async () => ({ ok: true }) } as Response);
+      });
+      await waitFor(() => expect(rowText()).toContain('Claude is waiting on your reply.'));
+    });
+
+    it("a held review that ends shows the next one's row inert until the pointer leaves", async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+      const { rerender } = render(<StableHarness sessions={[sessionA, sessionB]} />);
+      const banner = screen.getByTestId('review-banner');
+      fireEvent.pointerEnter(banner);
+      // A finishes (say by Send & finish) and leaves the list.
+      rerender(<StableHarness sessions={[sessionB]} />);
+      expect(rowText()).toContain('b.md');
+      const actions = banner.querySelector('[data-row-actions]') as HTMLElement;
+      expect(actions.getAttribute('aria-disabled')).toBe('true');
+      expect(actions.className).toMatch(/\bpointer-events-none\b/);
+      const finish = screen.getByRole('button', { name: 'Send 1 & finish' });
+      expect(finish.getAttribute('aria-disabled')).toBe('true');
+      // The second click of a double click lands here and does nothing.
+      fireEvent.click(finish);
+      fireEvent.click(screen.getByRole('button', { name: 'Send 1 comment' }));
+      await act(async () => {});
+      expect(fetchMock).not.toHaveBeenCalled();
+      // Still inert after another poll while the pointer stays.
+      rerender(<StableHarness sessions={[{ ...sessionB }]} />);
+      expect(actions.getAttribute('aria-disabled')).toBe('true');
+
+      fireEvent.pointerLeave(banner);
+      const live = banner.querySelector('[data-row-actions]') as HTMLElement;
+      expect(live.hasAttribute('aria-disabled')).toBe(false);
+      expect(live.className).not.toMatch(/\bpointer-events-none\b/);
+      expect(
+        screen.getByRole('button', { name: 'Send 1 comment' }).hasAttribute('aria-disabled'),
+      ).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'Send 1 comment' }));
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/api/review-sessions/rev_b/batch',
+          expect.objectContaining({ method: 'POST' }),
+        ),
+      );
+    });
+
+    it('a shown review that ends with no hold leaves the next row live', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, sessionB]} />);
+      rerender(<StableHarness sessions={[sessionB]} />);
+      const actions = screen.getByTestId('review-banner').querySelector('[data-row-actions]');
+      expect(actions?.hasAttribute('aria-disabled')).toBe(false);
+    });
+
+    it('the +N button marks and names other reviews with questions waiting', () => {
+      const { rerender } = render(<StableHarness sessions={[sessionA, agentB]} />);
+      const plain = screen.getByRole('button', { name: 'Other reviews' });
+      expect(plain.querySelector('[data-questions-marker]')).toBeNull();
+      // Held under the pointer, A keeps the row while B gets a question.
+      fireEvent.pointerEnter(screen.getByTestId('review-banner'));
+      rerender(
+        <StableHarness sessions={[sessionA, agentB]} asks={new Map([['rev_agent_b', 1]])} />,
+      );
+      expect(rowText()).toContain('a.md');
+      const marked = screen.getByRole('button', { name: 'Other reviews, 1 with questions' });
+      expect(marked.querySelector('[data-questions-marker]')).toBeTruthy();
+      expect(marked.textContent).toBe('+1');
+      expect(marked.getAttribute('title')).toBe('1 other review, 1 with questions');
     });
   });
 

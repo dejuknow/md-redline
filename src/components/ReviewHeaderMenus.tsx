@@ -116,9 +116,21 @@ export function MoreReviewActions({ items }: { items: RowAction[] }) {
  * The header's "+N" button and the popover listing the other reviews. The
  * popover hangs from the nearest positioned ancestor's right edge (the
  * banner's), so it has the row's width to open into, and is nudged back
- * inside the window when that edge sits too far left or right.
+ * inside the window when that edge sits too far left or right, again
+ * whenever the window or the banner changes size while it is open.
+ *
+ * `withQuestions` counts the other reviews with an agent question waiting; any
+ * puts a dot on the button and says so in its name.
  */
-export function OtherReviews({ count, children }: { count: number; children: React.ReactNode }) {
+export function OtherReviews({
+  count,
+  withQuestions = 0,
+  children,
+}: {
+  count: number;
+  withQuestions?: number;
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -142,23 +154,43 @@ export function OtherReviews({ count, children }: { count: number; children: Rea
     };
     place();
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    // The banner moves under an open popover when the header's other items
+    // change width (a notice appearing, say), with no window resize.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    if (observer) {
+      if (el.offsetParent) observer.observe(el.offsetParent);
+      if (ref.current) observer.observe(ref.current);
+    }
+    return () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+    };
   }, [open]);
+
+  const othersLabel = `${count} other review${count === 1 ? '' : 's'}`;
+  const questionsLabel = withQuestions > 0 ? `${withQuestions} with questions` : null;
 
   return (
     <div ref={ref} className="shrink-0">
       <button
         type="button"
-        className={`h-7 px-2 rounded-md text-[13px] font-medium tabular-nums transition-colors ${
+        className={`h-7 px-2 flex items-center gap-1.5 rounded-md text-[13px] font-medium tabular-nums transition-colors ${
           open ? 'bg-tint text-content' : 'text-content-secondary hover:text-content hover:bg-tint'
         }`}
         onClick={() => setOpen((o) => !o)}
-        aria-label="Other reviews"
+        aria-label={questionsLabel ? `Other reviews, ${questionsLabel}` : 'Other reviews'}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={`${count} other review${count === 1 ? '' : 's'}`}
+        title={questionsLabel ? `${othersLabel}, ${questionsLabel}` : othersLabel}
       >
         +{count}
+        {questionsLabel && (
+          <span
+            data-questions-marker
+            className="inline-block h-2 w-2 rounded-full bg-primary"
+            aria-hidden
+          />
+        )}
       </button>
       {open && (
         <div

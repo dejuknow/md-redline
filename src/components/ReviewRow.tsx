@@ -9,13 +9,22 @@ const QUIET_ACTION = `${actionBase} px-2 text-content-secondary hover:text-conte
 const SECONDARY_ACTION = `${actionBase} px-[11px] border border-border bg-surface text-content hover:bg-tint`;
 const PRIMARY_ACTION = `${actionBase} px-3 bg-primary text-on-primary hover:bg-primary-hover`;
 
-function ActionButton({ action, className }: { action: RowAction; className: string }) {
+function ActionButton({
+  action,
+  className,
+  inert,
+}: {
+  action: RowAction;
+  className: string;
+  inert: boolean;
+}) {
   return (
     <button
       type="button"
       className={className}
       onClick={action.onClick}
       disabled={action.disabled}
+      aria-disabled={inert || undefined}
       title={action.title}
       aria-label={action.ariaLabel}
     >
@@ -38,7 +47,21 @@ interface SessionRowProps {
   inline: boolean;
   /** Rendered first in the actions group (the header's Other reviews button). */
   leading?: React.ReactNode;
+  /**
+   * The actions take no clicks and read as disabled: the header row this
+   * review took over while the pointer still rests where the last one was.
+   */
+  actionsInert?: boolean;
 }
+
+// Swallows a click (a press, or Enter or Space on a focused button) before it
+// reaches an inert row's actions.
+const swallowClick = (e: React.MouseEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+};
+// Keeps a press from focusing an inert action.
+const preventFocus = (e: React.MouseEvent) => e.preventDefault();
 
 /**
  * The shared shape of every review row: status on the left, actions on the
@@ -55,6 +78,7 @@ export function SessionRow({
   compact,
   inline,
   leading,
+  actionsInert = false,
 }: SessionRowProps) {
   const overflow = [quiet, secondary].filter((a): a is RowAction => a !== undefined);
   return (
@@ -69,14 +93,24 @@ export function SessionRow({
         <span className="shrink-0 flex items-center">{indicator}</span>
         <span className={inline ? 'min-w-0 truncate' : 'min-w-0'}>{status}</span>
       </div>
-      <div className="ml-auto shrink-0 flex items-center gap-2">
+      <div
+        data-row-actions
+        className={`ml-auto shrink-0 flex items-center gap-2${actionsInert ? ' pointer-events-none' : ''}`}
+        aria-disabled={actionsInert || undefined}
+        onClickCapture={actionsInert ? swallowClick : undefined}
+        onMouseDownCapture={actionsInert ? preventFocus : undefined}
+      >
         {leading}
         {chip}
         {compact
           ? overflow.length > 0 && <MoreReviewActions items={overflow} />
-          : quiet && <ActionButton action={quiet} className={QUIET_ACTION} />}
-        {!compact && secondary && <ActionButton action={secondary} className={SECONDARY_ACTION} />}
-        {primary && <ActionButton action={primary} className={PRIMARY_ACTION} />}
+          : quiet && <ActionButton action={quiet} className={QUIET_ACTION} inert={actionsInert} />}
+        {!compact && secondary && (
+          <ActionButton action={secondary} className={SECONDARY_ACTION} inert={actionsInert} />
+        )}
+        {primary && (
+          <ActionButton action={primary} className={PRIMARY_ACTION} inert={actionsInert} />
+        )}
       </div>
     </div>
   );
@@ -93,6 +127,7 @@ interface AgentSessionRowProps {
   compact: boolean;
   inline: boolean;
   leading?: React.ReactNode;
+  actionsInert?: boolean;
 }
 
 const AGENT_ACTIVE_WINDOW_MS = 30_000;
@@ -139,6 +174,7 @@ export function AgentSessionRow({
   compact,
   inline,
   leading,
+  actionsInert,
 }: AgentSessionRowProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -181,6 +217,7 @@ export function AgentSessionRow({
       compact={compact}
       inline={inline}
       leading={leading}
+      actionsInert={actionsInert}
       indicator={
         awaitingReply ? (
           <span

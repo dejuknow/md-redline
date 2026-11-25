@@ -184,6 +184,44 @@ describe('AppHeader', () => {
     expect(onExitFocus).toHaveBeenCalledTimes(1);
   });
 
+  it('focus mode with a review: the file name gives way to any notice, Exit focus stays', () => {
+    const banner = () => <div data-testid="review-banner">Agent is waiting</div>;
+    const fileNameEl = () => header().querySelector('[data-focus-file-name]');
+    const { rerender } = renderHeader({ focusMode: true, renderBanner: banner, handOff: null });
+    expect(fileNameEl()?.textContent).toBe('spec.md');
+
+    const withNotice = (notice: Partial<React.ComponentProps<typeof AppHeader>>) => (
+      <AppHeader
+        fileName="spec.md"
+        folderPath="~/specs/payments"
+        error={null}
+        errorKind={null}
+        accessRequestShown={false}
+        onTrustFolder={vi.fn()}
+        isLoading={false}
+        renderBanner={banner}
+        handOff={null}
+        focusMode
+        onExitFocus={vi.fn()}
+        onOpenPalette={vi.fn()}
+        {...notice}
+      />
+    );
+    for (const notice of [
+      { error: 'Save failed: disk full', errorKind: 'generic' as const },
+      { error: 'Access denied', errorKind: 'access-denied' as const },
+      { isLoading: true },
+    ]) {
+      rerender(withNotice(notice));
+      expect(header().querySelector('[data-header-notices]')).toBeTruthy();
+      expect(fileNameEl()).toBeNull();
+      expect(screen.getByRole('button', { name: 'Exit focus' })).toBeTruthy();
+      expect(screen.getByTestId('review-banner')).toBeTruthy();
+    }
+    rerender(withNotice({}));
+    expect(fileNameEl()?.textContent).toBe('spec.md');
+  });
+
   it('root carries data-app-header and adds --window-inset-left to its own left padding', () => {
     renderHeader();
     expect(header()).toBeTruthy();

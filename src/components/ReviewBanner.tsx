@@ -156,12 +156,15 @@ export function ReviewBanner({
   compact = false,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
-  // The review the header shows in its row. It stays there while it lasts
-  // (see `pickHeaderSessions`), so a click never lands on another review's
-  // button that took its place.
+  // The review the header shows in its row. While the row is held (see
+  // `pickHeaderSessions`) it stays there, so a click never lands on another
+  // review's button that took its place.
   const [shownId, setShownId] = useState<string | null>(null);
   // While the pointer is over the header's row, the row holds still.
   const [rowHovered, setRowHovered] = useState(false);
+  // The held review ended under the pointer, so the row now shows another
+  // review whose actions take no clicks until the pointer leaves.
+  const [rowInert, setRowInert] = useState(false);
   // Sessions with a send in flight, claimed synchronously at the click,
   // before any await: a second click landing while the first waits on a save
   // must not post the same batch. Keyed by session, so another review's
@@ -412,6 +415,7 @@ export function ReviewBanner({
     // The row unmounts without a pointerleave, so the next review's row must
     // not start out held.
     if (rowHovered) setRowHovered(false);
+    if (rowInert) setRowInert(false);
     return null;
   }
 
@@ -420,7 +424,12 @@ export function ReviewBanner({
   // a row may wrap.
   const renderRow = (
     s: ReviewSession,
-    opts: { compact: boolean; inline: boolean; leading?: React.ReactNode },
+    opts: {
+      compact: boolean;
+      inline: boolean;
+      leading?: React.ReactNode;
+      actionsInert?: boolean;
+    },
   ) => {
     // Unified agent-reviewing row: covers both wait-mode (pending ask) and
     // fire-and-forget. Shape is always the same; only the status differs.
@@ -445,6 +454,7 @@ export function ReviewBanner({
           compact={opts.compact}
           inline={opts.inline}
           leading={opts.leading}
+          actionsInert={opts.actionsInert}
         />
       );
     }
@@ -459,6 +469,7 @@ export function ReviewBanner({
         compact={opts.compact}
         inline={opts.inline}
         leading={opts.leading}
+        actionsInert={opts.actionsInert}
         indicator={<span className="inline-block h-2 w-2 rounded-full bg-warning" aria-hidden />}
         status={
           <>
@@ -515,9 +526,10 @@ export function ReviewBanner({
   };
 
   if (layout === 'header') {
-    const { primary, others } = pickHeaderSessions(
+    const asks = pendingAskCountsBySession ?? NO_ASKS;
+    const { primary, others, heldEnded } = pickHeaderSessions(
       sessions,
-      pendingAskCountsBySession ?? NO_ASKS,
+      asks,
       (s) =>
         s.origin === 'user' &&
         sessionIsReady(s, commentCounts) &&
@@ -526,10 +538,14 @@ export function ReviewBanner({
       { id: shownId, hold: rowHovered || (busyId !== null && busyId === shownId) },
     );
     const primaryId = primary?.id ?? null;
-    // Remember what the row shows, so the next render keeps it.
+    // Remember what the row shows, so the next render can hold it.
     if (primaryId !== shownId) setShownId(primaryId);
+    // The held review ended with the pointer on its row: whatever took its
+    // place must not take the click meant for it.
+    if (heldEnded && rowHovered && !rowInert) setRowInert(true);
+    const othersWithQuestions = others.filter((s) => (asks.get(s.id) ?? 0) > 0).length;
     const othersButton = others.length > 0 && (
-      <OtherReviews count={others.length}>
+      <OtherReviews count={others.length} withQuestions={othersWithQuestions}>
         {others.map((s) => renderRow(s, { compact: false, inline: false }))}
       </OtherReviews>
     );
@@ -538,9 +554,18 @@ export function ReviewBanner({
         data-testid="review-banner"
         className="relative min-w-0 flex-1 flex items-center text-content"
         onPointerEnter={() => setRowHovered(true)}
-        onPointerLeave={() => setRowHovered(false)}
+        onPointerLeave={() => {
+          setRowHovered(false);
+          setRowInert(false);
+        }}
       >
-        {primary && renderRow(primary, { compact, inline: true, leading: othersButton })}
+        {primary &&
+          renderRow(primary, {
+            compact,
+            inline: true,
+            leading: othersButton,
+            actionsInert: rowInert || (heldEnded && rowHovered),
+          })}
       </div>
     );
   }

@@ -139,8 +139,12 @@ export function AppHeader({
 
       {focusMode && (
         <>
-          {banner && fileName && (
-            <span className="min-w-0 max-w-[30%] truncate text-[13px] text-content-muted">
+          {/* Gives way to a notice, so the notice and the review row both fit. */}
+          {banner && fileName && !notices && (
+            <span
+              data-focus-file-name
+              className="min-w-0 max-w-[30%] truncate text-[13px] text-content-muted"
+            >
               {fileName}
             </span>
           )}

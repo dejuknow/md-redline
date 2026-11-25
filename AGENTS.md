@@ -909,8 +909,9 @@ the old toolbar status row, so there is one chrome row instead of two.
   `data-preserve-selection`: without it, the mouseup of the click dropped a
   painted selection before the palette could read it.
 - In focus mode, an **Exit focus** button (`data-focus-chip`, title "Exit focus
-  mode", with the `⌘.` hint) ends the row, after the file name when a review
-  row has taken the status.
+  mode", with the `⌘.` hint) ends the row, after the file name
+  (`data-focus-file-name`) when a review row has taken the status. The file
+  name hides while any notice shows, so the notice and the review row both fit.
 
 The header measures its own width (`useElementWidth`); under 900px (0, not yet
 measured, counts as wide) the review row renders compact (see Review banner).
@@ -1008,18 +1009,25 @@ Crimson fill (`bg-primary`) is only on **Send N comments**; **End review** and
 The header shows one review. `pickHeaderSessions` picks it: a review with an agent
 question awaiting a reply first, then a reviewer-origin review that is ready to
 send (every file's count loaded, not `waitingForAgent`, and at least one unsent
-comment), then the first in the list. Once shown, a review keeps the row while
-it exists, so a click never lands on another review's button that just took its
-place (a send turns its own Send off in the same render that another review's
-could turn on). It gives the row up only when it needs nothing from the reviewer
-and another review now has a question waiting, and not while the pointer is over
-the row or its send is in flight. The rest sit behind a **+N** button
+comment), then the first in the list; ties keep list order. That pick is redone
+on every render unless the row is **held**: the pointer is over the row
+(including its More menu and the Other reviews popover), or a send, send &
+finish, finish, cancel or end of the shown review is in flight. A held review
+keeps the row, so a click never lands on another review's button that just
+took its place. If the held review ends while the pointer is on the row, the
+next review by priority takes it with its actions inert (`[data-row-actions]`
+gets `aria-disabled` and `pointer-events-none`, and clicks are swallowed) until
+the pointer leaves. The rest sit behind a **+N** button
 (`aria-label="Other reviews"`) that opens a popover (`[data-review-popover]`)
-listing their rows with their full actions, in list order. The popover hangs
-from the row's right edge and is nudged back inside the window when that edge
-is too far left. An outside press, focus moving outside it (a palette opened by
-keyboard) or Escape closes it and the More menu; Escape is left alone while
-another dialog is open above them. App's Escape guard treats the popover as
+listing their rows with their full actions, in list order. When any of them has
+an agent question waiting, the button carries a crimson dot
+(`[data-questions-marker]`) and its name says so (`Other reviews, N with
+questions`). The popover hangs from the row's right edge and is nudged back
+inside the window when that edge is too far left, again on a window resize or
+when the banner changes size while it is open (a ResizeObserver). An outside
+press, focus moving outside it (a palette opened by keyboard) or Escape closes
+it and the More menu; Escape is left alone while another dialog is open above
+them. App's Escape guard treats the popover as
 owning the key.
 
 Under 900px of header width the row is **compact**: its quiet and secondary
