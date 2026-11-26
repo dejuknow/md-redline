@@ -12,6 +12,8 @@ import { getEffectiveStatus } from '../types';
 import { getAuthorColor } from '../hooks/useAuthor';
 import { useAutoResize } from '../hooks/useAutoResize';
 import { useSettings } from '../contexts/SettingsContext';
+import { useCardDraftsApi } from '../contexts/CardDraftsContext';
+import type { CardEditorTarget } from '../hooks/useCardDrafts';
 import type { CommentCardEditorState } from '../lib/comment-editor-state';
 import { timeAgo } from '../lib/time-ago';
 import { ActionButton } from './ActionButton';
@@ -153,9 +155,52 @@ export const CommentCard = memo(function CommentCard({
   // pill exists for. A resolved comment needs no such hint: it is finished.
   const showAnswered = Boolean(answered) && !isResolved;
   const commentTimeAgo = timeAgo(comment.timestamp);
-  const [editText, setEditText] = useState(comment.text);
-  const [replyText, setReplyText] = useState('');
-  const [editReplyText, setEditReplyText] = useState('');
+  const isEditing = editor?.mode === 'comment-edit';
+  const isReplying = editor?.mode === 'reply-compose';
+  const editingReplyId = editor?.mode === 'reply-edit' ? editor.replyId : null;
+  const editorToken = editor?.token ?? 0;
+
+  // The app's draft store (#213), so a reply or edit left unsent survives a
+  // tab switch, the raw view, or another card's editor opening. Absent outside
+  // the app, where the text lives in this card only.
+  const drafts = useCardDraftsApi();
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const commentEditTarget: CardEditorTarget = { mode: 'comment-edit', commentId: comment.id };
+  const replyComposeTarget: CardEditorTarget = { mode: 'reply-compose', commentId: comment.id };
+  const replyEditTarget = (replyId: string): CardEditorTarget => ({
+    mode: 'reply-edit',
+    commentId: comment.id,
+    replyId,
+  });
+  const caretOf = (el: HTMLTextAreaElement): [number, number] => [
+    el.selectionStart,
+    el.selectionEnd,
+  ];
+  // The draft a target's editor can take back, if any: an edit only while the
+  // text it was made on is still there.
+  const usableDraft = (target: CardEditorTarget, base: string) => {
+    const kept = draftsRef.current?.readDraft(target);
+    return kept && kept.base === base ? kept : null;
+  };
+  // A card mounting with its editor already open is coming back after a tab
+  // or view switch. Its text starts as the draft, so the caret can be put
+  // back where it was when the field takes focus.
+  const [editText, setEditText] = useState(() =>
+    isEditing ? (usableDraft(commentEditTarget, comment.text)?.text ?? comment.text) : comment.text,
+  );
+  const [replyText, setReplyText] = useState(() =>
+    isReplying ? (usableDraft(replyComposeTarget, '')?.text ?? '') : '',
+  );
+  const [editReplyText, setEditReplyText] = useState(() => {
+    const reply = comment.replies?.find((r) => r.id === editingReplyId);
+    if (!editingReplyId || !reply) return '';
+    return usableDraft(replyEditTarget(editingReplyId), reply.text)?.text ?? reply.text;
+  });
+  // The text each editor opened on, to tell a draft from an untouched field
+  // and to keep an edit from being saved over text that changed under it.
+  const editBaseRef = useRef(comment.text);
+  const editReplyBaseRef = useRef('');
   const [isTextExpanded, setIsTextExpanded] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
   const [isClamped, setIsClamped] = useState(false);
@@ -165,10 +210,6 @@ export const CommentCard = memo(function CommentCard({
   const resizeEditTextarea = useAutoResize(textareaRef, editText);
   useAutoResize(replyRef, replyText);
   const resizeEditReplyTextarea = useAutoResize(editReplyRef, editReplyText);
-  const isEditing = editor?.mode === 'comment-edit';
-  const isReplying = editor?.mode === 'reply-compose';
-  const editingReplyId = editor?.mode === 'reply-edit' ? editor.replyId : null;
-  const editorToken = editor?.token ?? 0;
 
   // Detect if comment text is long enough to need clamping. Re-check when
   // fonts finish loading and when the text element resizes (container width
@@ -203,50 +244,115 @@ export const CommentCard = memo(function CommentCard({
     return () => ro.disconnect();
   }, [checkClamped, isEditing]);
 
+  // Puts the caret back where it was left when the field holds the draft it
+  // was left in (a card mounting with its editor open), else at the default.
+  const focusEditor = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      target: CardEditorTarget,
+      defaultCaret: 'end' | 'none',
+    ): (() => void) | undefined => {
+      // Only an editor the reader just opened takes the keyboard outright.
+      // One the store shows again (the file coming back, a thread reopened,
+      // a deleted comment undone) takes it only if nothing else has it.
+      const restoring = drafts ? !drafts.takeFreshOpen(editorToken) : false;
+      const take = () => {
+        el.focus({ preventScroll: restoring });
+        if (document.activeElement !== el) return false;
+        const kept = draftsRef.current?.readDraft(target);
+        if (kept && kept.text === el.value) {
+          el.setSelectionRange(kept.caret[0], kept.caret[1]);
+        } else if (defaultCaret === 'end') {
+          el.selectionStart = el.value.length;
+        }
+        return true;
+      };
+      if (!restoring) {
+        take();
+        return undefined;
+      }
+      // Coming back, the editor takes the keyboard as it was left with it,
+      // but not from another field or dialog that has it (the comment form's
+      // own draft coming back at the same time, a palette, a search). The
+      // anchored rail keeps a card hidden until it is placed, and a hidden
+      // field refuses focus, so it tries again for a few frames.
+      let frame = 0;
+      let tries = 0;
+      const attempt = () => {
+        if (!el.isConnected || !canTakeFocusBack() || take()) return;
+        if (++tries < 30) frame = requestAnimationFrame(attempt);
+      };
+      attempt();
+      return () => cancelAnimationFrame(frame);
+    },
+    [editorToken, drafts],
+  );
+
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       resizeEditTextarea();
-      textareaRef.current.focus();
-      textareaRef.current.selectionStart = textareaRef.current.value.length;
+      return focusEditor(
+        textareaRef.current,
+        { mode: 'comment-edit', commentId: comment.id },
+        'end',
+      );
     }
-  }, [isEditing, resizeEditTextarea, editorToken]);
+  }, [isEditing, resizeEditTextarea, editorToken, focusEditor, comment.id]);
 
   useEffect(() => {
     if (isReplying && replyRef.current) {
-      replyRef.current.focus();
+      return focusEditor(
+        replyRef.current,
+        { mode: 'reply-compose', commentId: comment.id },
+        'none',
+      );
     }
-  }, [isReplying, editorToken]);
+  }, [isReplying, editorToken, focusEditor, comment.id]);
 
   useEffect(() => {
     if (editingReplyId && editReplyRef.current) {
       resizeEditReplyTextarea();
-      editReplyRef.current.focus();
-      editReplyRef.current.selectionStart = editReplyRef.current.value.length;
+      return focusEditor(
+        editReplyRef.current,
+        { mode: 'reply-edit', commentId: comment.id, replyId: editingReplyId },
+        'end',
+      );
     }
-  }, [editingReplyId, resizeEditReplyTextarea, editorToken]);
+  }, [editingReplyId, resizeEditReplyTextarea, editorToken, focusEditor, comment.id]);
 
+  // Opening an editor puts in its kept draft when there is one it can take
+  // back: an edit only while the text it was made on is still there.
   useEffect(() => {
     if (editor?.mode === 'comment-edit') {
-      setEditText(comment.text);
+      editBaseRef.current = comment.text;
+      setEditText(
+        usableDraft({ mode: 'comment-edit', commentId: comment.id }, comment.text)?.text ??
+          comment.text,
+      );
     }
-  }, [editor?.mode, editorToken, comment.text]);
+  }, [editor?.mode, editorToken, comment.text, comment.id]);
 
   useEffect(() => {
     if (editor?.mode === 'reply-compose') {
-      setReplyText('');
+      setReplyText(usableDraft({ mode: 'reply-compose', commentId: comment.id }, '')?.text ?? '');
     }
-  }, [editor?.mode, editorToken]);
+  }, [editor?.mode, editorToken, comment.id]);
 
   const handleSave = () => {
     const trimmed = editText.trim();
+    // Too long to save (Cmd+Enter; the button is off): keep the field and its
+    // draft rather than close on text that went nowhere.
+    if (trimmed.length > COMMENT_MAX_LENGTH) return;
     if (trimmed && trimmed !== comment.text && trimmed.length <= COMMENT_MAX_LENGTH) {
       onEdit(comment.id, trimmed);
     }
+    drafts?.discardDraft(commentEditTarget);
     onCloseEditor();
   };
 
   const handleCancel = () => {
     setEditText(comment.text);
+    drafts?.discardDraft(commentEditTarget);
     onCloseEditor();
   };
 
@@ -258,10 +364,18 @@ export const CommentCard = memo(function CommentCard({
 
   const handleReplySubmit = () => {
     const trimmed = replyText.trim();
+    if (trimmed.length > COMMENT_MAX_LENGTH) return;
     if (trimmed && trimmed.length <= COMMENT_MAX_LENGTH) {
       onReply(comment.id, trimmed);
       setReplyText('');
     }
+    drafts?.discardDraft(replyComposeTarget);
+    onCloseEditor();
+  };
+
+  const handleReplyCancel = () => {
+    setReplyText('');
+    drafts?.discardDraft(replyComposeTarget);
     onCloseEditor();
   };
 
@@ -296,16 +410,22 @@ export const CommentCard = memo(function CommentCard({
 
   useEffect(() => {
     if (editor?.mode === 'reply-edit') {
-      setEditReplyText(editingReply?.text ?? '');
+      const text = editingReply?.text ?? '';
+      const kept = editingReplyId
+        ? usableDraft({ mode: 'reply-edit', commentId: comment.id, replyId: editingReplyId }, text)
+        : null;
+      editReplyBaseRef.current = text;
+      setEditReplyText(kept?.text ?? text);
       return;
     }
     if (editingReplyId === null) {
       setEditReplyText('');
     }
-  }, [editor?.mode, editorToken, editingReply?.text, editingReplyId]);
+  }, [editor?.mode, editorToken, editingReply?.text, editingReplyId, comment.id]);
 
   const handleReplyEditSave = () => {
     const trimmed = editReplyText.trim();
+    if (trimmed.length > COMMENT_MAX_LENGTH) return;
     if (
       editingReplyId &&
       editingReply &&
@@ -315,11 +435,13 @@ export const CommentCard = memo(function CommentCard({
     ) {
       onEditReply(comment.id, editingReplyId, trimmed);
     }
+    if (editingReplyId) drafts?.discardDraft(replyEditTarget(editingReplyId));
     setEditReplyText('');
     onCloseEditor();
   };
 
   const handleReplyEditCancel = () => {
+    if (editingReplyId) drafts?.discardDraft(replyEditTarget(editingReplyId));
     setEditReplyText('');
     onCloseEditor();
   };
@@ -486,14 +608,24 @@ export const CommentCard = memo(function CommentCard({
             )}
             <textarea
               ref={textareaRef}
+              data-card-editor={drafts ? true : undefined}
               value={editText}
-              onChange={(e) => setEditText(e.target.value)}
+              onChange={(e) => {
+                setEditText(e.target.value);
+                drafts?.writeDraft(
+                  commentEditTarget,
+                  e.target.value,
+                  editBaseRef.current,
+                  caretOf(e.target),
+                );
+              }}
+              onSelect={(e) => drafts?.setCaret(commentEditTarget, caretOf(e.currentTarget))}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   handleSave();
                 }
-                if (e.key === 'Escape') {
+                if (e.key === 'Escape' && !e.repeat) {
                   handleCancel();
                 }
               }}
@@ -643,14 +775,26 @@ export const CommentCard = memo(function CommentCard({
                     )}
                     <textarea
                       ref={editReplyRef}
+                      data-card-editor={drafts ? true : undefined}
                       value={editReplyText}
-                      onChange={(e) => setEditReplyText(e.target.value)}
+                      onChange={(e) => {
+                        setEditReplyText(e.target.value);
+                        drafts?.writeDraft(
+                          replyEditTarget(reply.id),
+                          e.target.value,
+                          editReplyBaseRef.current,
+                          caretOf(e.target),
+                        );
+                      }}
+                      onSelect={(e) =>
+                        drafts?.setCaret(replyEditTarget(reply.id), caretOf(e.currentTarget))
+                      }
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                           e.preventDefault();
                           handleReplyEditSave();
                         }
-                        if (e.key === 'Escape') {
+                        if (e.key === 'Escape' && !e.repeat) {
                           handleReplyEditCancel();
                         }
                       }}
@@ -789,16 +933,23 @@ export const CommentCard = memo(function CommentCard({
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
           <textarea
             ref={replyRef}
+            data-card-editor={drafts ? true : undefined}
             value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
+            onChange={(e) => {
+              setReplyText(e.target.value);
+              drafts?.writeDraft(replyComposeTarget, e.target.value, '', caretOf(e.target));
+            }}
+            onSelect={(e) => drafts?.setCaret(replyComposeTarget, caretOf(e.currentTarget))}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 handleReplySubmit();
               }
-              if (e.key === 'Escape') {
-                setReplyText('');
-                onCloseEditor();
+              // Not an auto-repeat: a held Escape that closed something else
+              // must not cancel an editor that took focus after it, as with
+              // the comment form.
+              if (e.key === 'Escape' && !e.repeat) {
+                handleReplyCancel();
               }
             }}
             placeholder="Write a reply..."
@@ -818,14 +969,7 @@ export const CommentCard = memo(function CommentCard({
             </p>
           )}
           <div className="flex justify-end gap-1.5 mt-1">
-            <ActionButton
-              onClick={() => {
-                setReplyText('');
-                onCloseEditor();
-              }}
-            >
-              Cancel
-            </ActionButton>
+            <ActionButton onClick={handleReplyCancel}>Cancel</ActionButton>
             <ActionButton
               intent="submit"
               onClick={handleReplySubmit}
@@ -891,6 +1035,24 @@ export const CommentCard = memo(function CommentCard({
     </div>
   );
 });
+
+/**
+ * Whether an editor coming back may take the keyboard: not from another text
+ * field or an open dialog.
+ */
+function canTakeFocusBack(): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return true;
+  // Already its own (an effect run twice in development).
+  if (active.matches('[data-card-editor]')) return true;
+  if (active.closest('[role="dialog"]')) return false;
+  return !(
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement ||
+    active.isContentEditable
+  );
+}
 
 function DeleteIconButton({
   onClick,

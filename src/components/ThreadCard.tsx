@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { MdComment } from '../types';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { CommentCard } from './CommentCard';
+import { CardDraftsContext, useCardDraftsApi } from '../contexts/CardDraftsContext';
 
 export interface ThreadCardProps {
   thread: MdComment;
@@ -91,6 +92,7 @@ export function ThreadCard({
   const [internalEditor, setInternalEditor] = useState<SidebarCommentEditorState>(null);
 
   const externalEditorMode = externalEditor !== undefined;
+  const outerDrafts = useCardDraftsApi();
 
   const editor = externalEditorMode ? (externalEditor ?? null) : internalEditor;
 
@@ -144,34 +146,40 @@ export function ThreadCard({
       data-comment-card-id={thread.id}
       className="outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-primary-ring"
     >
-      <CommentCard
-        comment={thread}
-        isActive={active}
-        anchorMissing={anchorMissing}
-        anchorHidden={anchorHidden}
-        sent={sent}
-        answered={answered}
-        onActivate={onSelect}
-        onResolve={onResolve}
-        onUnresolve={onUnresolve}
-        onDelete={onDelete}
-        onEdit={onEdit}
-        onReply={onReply}
-        onEditReply={onEditReply}
-        onDeleteReply={onDeleteReply}
-        editor={editor?.commentId === thread.id ? editor : null}
-        onRequestCommentEdit={openCommentEdit}
-        onRequestReplyCompose={openReplyCompose}
-        onRequestReplyEdit={openReplyEdit}
-        onCloseEditor={closeEditor}
-        onContextMenu={onContextMenu}
-        showAnchorContext={showAnchorContext}
-        selectionText={selectionText}
-        selectionOffset={selectionOffset}
-        onReanchorToSelection={onReanchorToSelection}
-        compact={compact}
-        unreadReplyIds={unreadReplyIds}
-      />
+      {/* The app's card draft store keeps the editor of the rail and the
+          drawer, which reopen it when the file comes back (#213). A card
+          keeping its own editor (the popover, the Mermaid thread panel) has
+          nothing to reopen it, so its text stays its own, as before. */}
+      <CardDraftsContext.Provider value={externalEditorMode ? outerDrafts : null}>
+        <CommentCard
+          comment={thread}
+          isActive={active}
+          anchorMissing={anchorMissing}
+          anchorHidden={anchorHidden}
+          sent={sent}
+          answered={answered}
+          onActivate={onSelect}
+          onResolve={onResolve}
+          onUnresolve={onUnresolve}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onReply={onReply}
+          onEditReply={onEditReply}
+          onDeleteReply={onDeleteReply}
+          editor={editor?.commentId === thread.id ? editor : null}
+          onRequestCommentEdit={openCommentEdit}
+          onRequestReplyCompose={openReplyCompose}
+          onRequestReplyEdit={openReplyEdit}
+          onCloseEditor={closeEditor}
+          onContextMenu={onContextMenu}
+          showAnchorContext={showAnchorContext}
+          selectionText={selectionText}
+          selectionOffset={selectionOffset}
+          onReanchorToSelection={onReanchorToSelection}
+          compact={compact}
+          unreadReplyIds={unreadReplyIds}
+        />
+      </CardDraftsContext.Provider>
     </div>
   );
 }

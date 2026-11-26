@@ -5,6 +5,7 @@ import type { RailDensity } from '../hooks/usePaneLayout';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { GAP, RAIL, PAD_R } from '../lib/page-geometry';
 import { ThreadCard } from './ThreadCard';
+import { useSurfaceCardEditor } from '../contexts/CardDraftsContext';
 import {
   CommentListSurface,
   type SidebarContextMenuInfo,
@@ -193,26 +194,8 @@ function AnchoredCards({
   // surface: this is what lets an externally requested edit (context menu,
   // agent-ask flow) land on the right card, and what keeps opening one
   // card's editor from leaving another card's editor open underneath it.
-  const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
-
-  useEffect(() => {
-    if (requestedEditor) setActiveEditor(requestedEditor);
-  }, [requestedEditor]);
-
-  useEffect(() => {
-    if (!activeEditor) return;
-    const comment = anchoredComments.find((candidate) => candidate.id === activeEditor.commentId);
-    if (!comment) {
-      setActiveEditor(null);
-      return;
-    }
-    if (
-      activeEditor.mode === 'reply-edit' &&
-      !comment.replies?.some((reply) => reply.id === activeEditor.replyId)
-    ) {
-      setActiveEditor(null);
-    }
-  }, [anchoredComments, activeEditor]);
+  // In the app it is the file's own editor, kept across tab switches (#213).
+  const [activeEditor, setActiveEditor] = useSurfaceCardEditor(requestedEditor, anchoredComments);
 
   const openCommentEdit = (commentId: string) => {
     setActiveEditor({ mode: 'comment-edit', commentId, token: Date.now() });

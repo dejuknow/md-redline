@@ -315,8 +315,12 @@ export function useSelection(
         escapeOwned = false;
       }
       const target = e.target as Element | null;
+      // The comment form's field and a card's reply or edit field own their
+      // Escape: clearing the selection too would close the comment form and
+      // its draft along with the card editor the key was meant for (#213).
       const inCommentField =
-        target?.tagName === 'TEXTAREA' && target.closest?.('[data-comment-form]') != null;
+        target?.tagName === 'TEXTAREA' &&
+        target.closest?.('[data-comment-form], [data-card-editor]') != null;
       escapeOwned = escapeOwned || inCommentField || (escapeOwnedElsewhere?.current?.() ?? false);
     };
 

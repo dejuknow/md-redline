@@ -216,4 +216,16 @@ describe('typingOutsideCommentDraft', () => {
     expect(typingOutsideCommentDraft(document.body)).toBe(false);
     expect(typingOutsideCommentDraft(null)).toBe(false);
   });
+
+  it('leaves out the comment form and comment card fields, whose drafts survive a switch', () => {
+    const form = document.createElement('div');
+    form.setAttribute('data-comment-form', '');
+    const formField = document.createElement('textarea');
+    form.append(formField);
+    const cardField = document.createElement('textarea');
+    cardField.setAttribute('data-card-editor', '');
+    document.body.append(form, cardField);
+    expect(typingOutsideCommentDraft(formField)).toBe(false);
+    expect(typingOutsideCommentDraft(cardField)).toBe(false);
+  });
 });
