@@ -85,7 +85,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/DocStrip.tsx`: the document panel's tab row: tabs on the left; on the right the view switch, find, the View options menu (diff, copy), the comments button and Hand off
 - `src/components/DiffBar.tsx`: row under the tab strip with the change count, Show/Hide diff, diff reference label, prev/next change and Mark reviewed
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
-- `src/components/NoFileOpen.tsx`: what the page shows with no file open (the app logo, an Open file button with its shortcut, the five most recent files); with no file open the strip also drops its document controls (`DocStrip`'s `hasDocument`)
+- `src/components/NoFileOpen.tsx`: what the page shows with no file open (the app logo, an Open file button with its shortcut, Command palette and Keyboard shortcuts buttons with theirs, the five most recent files); with no file open the strip also drops its document controls (`DocStrip`'s `hasDocument`)
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
@@ -1005,9 +1005,13 @@ notice when it appears.
 
 The bar's other jobs moved: the file path to the tab's tooltip (and the folder
 label on same-named tabs, see Tab strip), Exit focus to the tab strip's right
-end, the Commands hint to the sidebar (see Left sidebar), and Shortcuts to the
-command palette, `?` and the foot of the Settings dialog's section list
-(`settings-open-shortcuts`).
+end, and the Commands and Shortcuts hints to the empty page (`NoFileOpen`: a
+**Command palette** button, `data-palette-hint`, and a **Keyboard shortcuts**
+button, `data-shortcuts-hint`, each with its key cap). The window keeps no
+persistent hint for either: a bare key cap in the sidebar footer read as the
+gear's shortcut. Shortcuts is also in the command palette, on `?`, and at the
+foot of the Settings dialog's section list (`settings-open-shortcuts`, styled
+like the section links).
 
 ### Folder permission requests
 
@@ -1588,7 +1592,7 @@ Two details are load-bearing:
 The palette entry is called `Copy selection as markdown`, spelling out its
 subject because nothing sits under the cursor there. Like the menu, it resolves
 the markdown when the palette opens (`paletteSelectionMarkdown`, read by
-`openCommandPalette()`, behind both Cmd+K and the sidebar's Commands hint, before the palette
+`openCommandPalette()`, behind Cmd+K, before the palette
 focuses its input) and copies that text, so it
 covers a committed selection and a pending touch or pen one alike (#163).
 Reading at run time failed both ways: focusing the palette's input takes the
@@ -2674,15 +2678,13 @@ The sidebar owns the window's full left edge, top to bottom; the main column
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): the Explorer/Outline
   view tabs and close X share the 34px top row (`[data-sidebar-top]`, the tab
-  strip's height, so the two rows share a center line; no logo), then the panel content, and the settings gear pinned in a bottom row, then the
-  Commands hint (`data-palette-hint`, `aria-label="Command palette"`, a `⌘K` or
-  `Ctrl+K` key cap, carrying `data-preserve-selection` so the click keeps a
-  painted selection for "Copy selection as markdown"), with the author name
-  button (`AuthorButton`, click to edit in place) at the row's right end.
+  strip's height, so the two rows share a center line; no logo), then the panel content, and the settings gear pinned in a bottom row, with the author name
+  button (`AuthorButton`, click to edit in place) to the right of the gear.
+  Nothing else goes in that row.
 - **Collapsed icon rail** (`[data-sidebar-rail]`, 40px): the open panel
   folded, item for item, with no logo: Show Explorer and Show Outline icon
   buttons (the first centered on the 34px row the tabs and the open panel's
-  switch share), spacer, a Command palette icon, settings gear at the bottom. Clicking an icon expands
+  switch share), spacer, settings gear at the bottom. Clicking an icon expands
   the panel to that view. The app logo appears only on the empty page.
 
 There is no explorer toggle in the tab strip; `Cmd+B` still toggles
@@ -2977,7 +2979,7 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 
 ### Command palette
 
-`Cmd+K`, or the sidebar's Commands hint, opens the palette; both run App's
+`Cmd+K`, or the empty page's Command palette button, opens the palette; both run App's
 `openCommandPalette()`. Commands include: navigation (next/prev comment, find),
 tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),

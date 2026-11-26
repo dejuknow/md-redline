@@ -372,14 +372,22 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange, onOpenSho
                 onClick={onOpenShortcuts}
                 data-testid="settings-open-shortcuts"
                 title="Keyboard shortcuts (?)"
-                className="mt-auto w-full text-left px-4 py-2 flex items-center gap-2 text-xs text-content-muted hover:bg-tint hover:text-content transition-colors"
+                className="mt-auto w-full text-left px-4 py-2 flex items-center gap-2.5 text-sm text-content-secondary hover:bg-tint hover:text-content transition-colors"
               >
-                <kbd
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
                   aria-hidden="true"
-                  className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-secondary"
                 >
-                  ?
-                </kbd>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"
+                  />
+                </svg>
                 Shortcuts
               </button>
             )}

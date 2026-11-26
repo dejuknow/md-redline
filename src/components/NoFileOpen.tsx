@@ -10,9 +10,14 @@ interface Props {
   explorerShown: boolean;
   onOpenPicker: () => void;
   onOpenRecent: (path: string) => void;
+  onOpenPalette: () => void;
+  onOpenShortcuts: () => void;
 }
 
 const MAX_SHOWN = 5;
+
+const hintButtonClass =
+  'h-7 px-2 inline-flex items-center gap-2 rounded-md text-[12px] text-content-muted hover:text-content hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
 
 const kbdClass =
   'px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-muted';
@@ -27,8 +32,12 @@ export function NoFileOpen({
   explorerShown,
   onOpenPicker,
   onOpenRecent,
+  onOpenPalette,
+  onOpenShortcuts,
 }: Props) {
-  const openKeys = isApplePlatform() ? '⌘O' : 'Ctrl+O';
+  const isMac = isApplePlatform();
+  const openKeys = isMac ? '⌘O' : 'Ctrl+O';
+  const paletteKeys = isMac ? '⌘K' : 'Ctrl+K';
   const recent = recentFiles.slice(0, MAX_SHOWN);
 
   return (
@@ -53,6 +62,33 @@ export function NoFileOpen({
             {openKeys}
           </kbd>
         </button>
+
+        {/* Where the app teaches its two other shortcuts: with no document
+            open there is room, and nothing else to do yet. */}
+        <div className="mt-3 flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            data-palette-hint
+            className={hintButtonClass}
+          >
+            Command palette
+            <kbd className={kbdClass} aria-hidden="true">
+              {paletteKeys}
+            </kbd>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenShortcuts}
+            data-shortcuts-hint
+            className={hintButtonClass}
+          >
+            Keyboard shortcuts
+            <kbd className={kbdClass} aria-hidden="true">
+              ?
+            </kbd>
+          </button>
+        </div>
 
         {recent.length > 0 && (
           <div className="mt-12 w-full">

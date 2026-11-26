@@ -190,70 +190,35 @@ const COMMENTED_DOC = TEST_DOC_BASELINE.replace(
 );
 
 test.describe('Review band and window chrome', () => {
-  test("the sidebar's Commands hint opens the command palette, open or collapsed", async ({
+  test('the empty page teaches the command palette and the shortcuts, and both open', async ({
     page,
   }) => {
-    await openFixture(page);
+    await page.goto('/');
+    const empty = page.getByTestId('no-file-open');
+    await expect(empty).toBeVisible({ timeout: 10_000 });
+    await empty.getByRole('button', { name: /Command palette/ }).click();
     const input = page.getByPlaceholder('Type a command...');
-    await page
-      .locator('[data-sidebar-panel]')
-      .getByRole('button', { name: 'Command palette' })
-      .click();
     await expect(input).toBeVisible();
     await expect(input).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(input).toHaveCount(0);
 
+    await empty.getByRole('button', { name: /Keyboard shortcuts/ }).click();
+    await expect(page.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeVisible();
+  });
+
+  test('the sidebar footer holds only Settings and the author', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('[data-palette-hint]')).toHaveCount(0);
     await page.keyboard.press(withMod('b'));
-    await page
-      .locator('[data-sidebar-rail]')
-      .getByRole('button', { name: 'Command palette' })
-      .click();
-    await expect(input).toBeVisible();
+    await expect(page.locator('[data-sidebar-rail]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Command palette' })).toHaveCount(0);
   });
 
   test('the window has no status bar', async ({ page }) => {
     await openFixture(page);
     await expect(page.locator('footer')).toHaveCount(0);
     await expect(page.locator('[data-status-bar]')).toHaveCount(0);
-  });
-
-  test('select text, click the Commands hint: "Copy selection as markdown" is offered and copies that selection', async ({
-    page,
-    context,
-  }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await openFixture(page);
-    await page.evaluate(() => navigator.clipboard.writeText(''));
-    // A mouse selection, committed and painted, the way a drag leaves one.
-    await page.evaluate(() => {
-      const el = [...document.querySelectorAll('.prose p')].find((p) =>
-        p.textContent?.includes('authentication system'),
-      );
-      if (!el) throw new Error('paragraph not found');
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const selection = window.getSelection()!;
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    });
-    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
-
-    await page
-      .locator('[data-sidebar-panel]')
-      .getByRole('button', { name: 'Command palette' })
-      .click();
-    await page.getByPlaceholder('Type a command...').fill('copy selection');
-    await page
-      .locator('button[data-selected]', { hasText: 'Copy selection as markdown' })
-      .click({ timeout: 5000 });
-
-    await expect
-      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toBe(
-        'The authentication system supports email and password login. Users must provide valid credentials to access the application. The system validates all inputs before processing.',
-      );
   });
 
   test('hand off is hidden during a review and back after it ends', async ({
