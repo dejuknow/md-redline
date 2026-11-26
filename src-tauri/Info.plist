@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Registers the mdr:// URL scheme so the CLI can focus-or-open the app.
+       Merged into the bundle's Info.plist by the Tauri bundler. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.dejuknow.mdr</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>mdr</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

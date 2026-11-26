@@ -6,7 +6,15 @@ import tseslint from 'typescript-eslint';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig([
-  globalIgnores(['dist', 'test-results', 'playwright-report', 'eval/results']),
+  globalIgnores([
+    'dist',
+    'test-results',
+    'playwright-report',
+    'eval/results',
+    // Desktop app build output (any CARGO_TARGET_DIR under src-tauri).
+    'src-tauri/target*',
+    'src-tauri/gen',
+  ]),
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [
