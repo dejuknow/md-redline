@@ -673,16 +673,32 @@ export function useTabs(options?: {
   );
 
   /**
-   * Records a write of the tab's own content that moved the file's mtime, so a
-   * save queued before it still checks against the right mtime. Only writes
-   * that keep the tab's content belong here: a queued save carries that
-   * content plus its own edits, never anything the write did not have.
+   * Takes the mtime a write of the tab's own content produced: `fromMtime` is
+   * the one the write was checked against, `toMtime` the one it left. Only
+   * writes that keep the tab's content belong here, since a queued save
+   * carries that content plus its own edits and may follow the move.
+   *
+   * The tab takes the new mtime only while it still holds `fromMtime`. A
+   * change that reached the tab while the write was out (an agent's edit,
+   * through the watcher) is newer than the write, and its mtime goes with the
+   * text the tab now shows.
    */
   const noteOwnWrite = useCallback(
     (path: string, fromMtime: number | undefined, toMtime: number) => {
+      setTabDataState((prev) => {
+        const tabKey = findTabKey(prev, path);
+        const existing = tabKey ? prev.get(tabKey) : undefined;
+        // A write sent without an mtime was never checked, so there is no
+        // older state of the tab for it to be stale against.
+        const tabMovedOn = fromMtime !== undefined && existing?.mtime !== fromMtime;
+        if (!existing || tabMovedOn || existing.mtime === toMtime) return prev;
+        const next = new Map(prev);
+        next.set(tabKey!, { ...existing, mtime: toMtime });
+        return next;
+      });
       if (fromMtime === toMtime) return;
       // Nothing queued for the file means nothing holds an older mtime: the
-      // next save reads the tab's, which the caller has just moved.
+      // next save reads the tab's.
       if (!pendingSavesRef.current.get(path)) return;
       let moves = ownWritesRef.current.get(path);
       if (!moves) {
@@ -691,7 +707,7 @@ export function useTabs(options?: {
       }
       moves.set(fromMtime, toMtime);
     },
-    [],
+    [setTabDataState],
   );
 
   const saveFileAt = useCallback(
@@ -743,7 +759,6 @@ export function useTabs(options?: {
           updateTab(path, {
             lastSaved: new Date(),
             error: null,
-            mtime: data.mtime,
             ...(newerWriteQueued ? {} : { dirty: false }),
           });
         } catch (err) {

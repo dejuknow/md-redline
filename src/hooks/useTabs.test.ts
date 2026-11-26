@@ -505,7 +505,7 @@ describe('useTabs: a queued save and the file on disk', () => {
   // 409 when its expectedMtime is more than 1ms off the file's, the same rule
   // the real one applies. Each write moves the mtime by 100 so the tolerance
   // never blurs two writes together. A PUT to `slowPath` waits for `release`.
-  function stubDisk(slowPath: string) {
+  function stubDisk(slowPath: string, afterWrite?: (path: string) => void) {
     const disk = new Map<string, { content: string; mtime: number }>([
       [A, { content: '# A\n', mtime: 1000 }],
       [B, { content: '# B\n', mtime: 2000 }],
@@ -542,6 +542,7 @@ describe('useTabs: a queued save and the file on disk', () => {
           }
           const mtime = file.mtime + 100;
           disk.set(body.path, { content: body.content, mtime });
+          afterWrite?.(body.path);
           return json(200, { success: true, path: body.path, mtime });
         }
         const path = decodeURIComponent(String(url).split('path=')[1] ?? '');
@@ -670,6 +671,54 @@ describe('useTabs: a queued save and the file on disk', () => {
     expect(result.current.getTabSnapshot(A)?.mtime).toBe(1200);
     expect(puts.find((p) => p.path === A)?.expectedMtime).toBe(1100);
     expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it('keeps the mtime of a change that reached the tab before the save was answered', async () => {
+    // The save lands, an agent writes the file, and the watcher hands the tab
+    // the agent's text and mtime, all before the save's response comes back.
+    // The response's mtime is the save's own write, older than what the tab
+    // now shows: taking it would pair the agent's text with the wrong mtime,
+    // and the next comment on that text would conflict.
+    const hook: { r?: { current: ReturnType<typeof useTabs> } } = {};
+    const { disk, puts } = stubDisk('', (path) => {
+      if (path === A && hook.r) agentWrites(hook.r, disk, '# A, then the agent\n');
+    });
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+    hook.r = result;
+
+    await act(async () => {
+      result.current.saveFileAt(A, '# A with my comment\n');
+      await result.current.whenSaved();
+    });
+    hook.r = undefined;
+    expect(result.current.getTabSnapshot(A)?.mtime).toBe(1200);
+
+    await act(async () => {
+      result.current.saveFileAt(A, '# A, then the agent, plus a reply\n');
+      await result.current.whenSaved();
+    });
+    expect(puts.filter((p) => p.path === A).map((p) => p.expectedMtime)).toEqual([1000, 1200]);
+    expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it('moves the tab to a write outside the queue only from the mtime it was made against', async () => {
+    const { disk } = stubDisk('');
+    const { result } = await openBoth();
+
+    disk.set(A, { content: '# A\n', mtime: 1100 });
+    act(() => result.current.noteOwnWrite(A, 1000, 1100));
+    expect(result.current.getTabSnapshot(A)?.mtime).toBe(1100);
+
+    // An agent's change reached the tab after a backfill was sent: the
+    // backfill's answer is older than the tab and must not replace it.
+    agentWrites(result, disk, '# A rewritten by the agent\n');
+    act(() => result.current.noteOwnWrite(A, 1100, 1150));
+    expect(result.current.getTabSnapshot(A)?.mtime).toBe(1200);
+
+    // A write sent without an mtime skipped the check, so it always lands.
+    act(() => result.current.noteOwnWrite(A, undefined, 1300));
+    expect(result.current.getTabSnapshot(A)?.mtime).toBe(1300);
   });
 });
 

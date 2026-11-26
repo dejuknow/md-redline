@@ -1005,13 +1005,11 @@ export default function App() {
             // the server's lastWrittenContent cache, so no SSE event will
             // deliver this mtime — we have to read it from the response.
             // It writes the content the tab already holds, so a save queued
-            // before it builds on this write and may follow it (#263).
+            // before it builds on this write and may follow it (#263). The
+            // tab keeps a newer change that reached it while this was out.
             if (res.ok) {
               const data = await readJsonResponse<{ mtime?: number }>(res);
-              if (data?.mtime != null) {
-                noteOwnWrite(path, expectedMtime, data.mtime);
-                updateTab(path, { mtime: data.mtime });
-              }
+              if (data?.mtime != null) noteOwnWrite(path, expectedMtime, data.mtime);
             }
             // 409s are expected and benign here (see above) — ignore.
           } catch {
@@ -1020,7 +1018,7 @@ export default function App() {
         }, BACKFILL_WRITE_DELAY_MS),
       );
     },
-    [getTabSnapshot, noteOwnWrite, updateTab],
+    [getTabSnapshot, noteOwnWrite],
   );
   // `announce` asks for a toast on success too: the View menu closes on the
   // click, taking the copy item's checkmark with it.
