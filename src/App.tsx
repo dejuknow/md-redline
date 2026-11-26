@@ -2339,6 +2339,9 @@ export default function App() {
   // (`boot`) marks the URL's review as opened and ends the boot wait: a review
   // the shell opens later is not the one in the URL.
   const reviewTabsOpenedRef = useRef(false);
+  // The URL review's files as the boot open fetched them, so its active tab
+  // can be remembered before the first sessions poll answers.
+  const bootReviewFilesRef = useRef<readonly string[]>([]);
   const openReviewSessionTabs = useCallback(
     async (
       reviewId: string,
@@ -2363,7 +2366,10 @@ export default function App() {
             openTabInBackground(path);
           }
         }
-        if (boot) reviewTabsOpenedRef.current = true;
+        if (boot) {
+          bootReviewFilesRef.current = session.filePaths;
+          reviewTabsOpenedRef.current = true;
+        }
         // The explorer starts beside the document that opens, which a reload
         // can make a file other than the first.
         if (activeTarget) {
@@ -2401,8 +2407,14 @@ export default function App() {
     if (!activeFilePath || !reviewTabsOpenedRef.current) return;
     const reviewId = new URLSearchParams(window.location.search).get('review');
     if (!reviewId) return;
+    // The polled session also knows files added to the review since boot.
     const session = reviewSessions.find((s) => s.id === reviewId);
-    if (session?.filePaths.includes(activeFilePath)) saveActiveTab(reviewId, activeFilePath);
+    if (
+      bootReviewFilesRef.current.includes(activeFilePath) ||
+      session?.filePaths.includes(activeFilePath)
+    ) {
+      saveActiveTab(reviewId, activeFilePath);
+    }
   }, [activeFilePath, reviewSessions]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session

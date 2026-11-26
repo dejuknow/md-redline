@@ -7,7 +7,7 @@
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -262,6 +262,9 @@ static ENSURE_LOCK: Mutex<()> = Mutex::new(());
 /// can run, so an open never slips in ahead of the reconcile taking
 /// ENSURE_LOCK.
 static RECONCILING: AtomicBool = AtomicBool::new(true);
+/// The port the window's UI is served from, once the shell has picked one
+/// (0 until then). Only this loopback port loads inside the window.
+static UI_PORT: AtomicU16 = AtomicU16::new(0);
 
 /// Clears RECONCILING when the reconcile ends, on every return path.
 struct ReconcileDone;
@@ -275,7 +278,8 @@ impl Drop for ReconcileDone {
 /// Wait (bounded) for the startup reconcile, so opens use the server it
 /// settles on.
 fn wait_for_reconcile() {
-    let deadline = Instant::now() + Duration::from_secs(60);
+    // Past the reconcile's own worst case (45s for the CLI, 20s to settle).
+    let deadline = Instant::now() + Duration::from_secs(90);
     while RECONCILING.load(Ordering::SeqCst) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -468,8 +472,15 @@ fn spawn_mdr_no_open(reason: &str) -> Option<Child> {
     };
     let mut command = Command::new(&shell);
     command.args(["-lic", "mdr --no-open"]).stdin(Stdio::null()).stdout(stdout).stderr(stderr);
-    if let Some(home) = own_home().filter(|h| std::path::Path::new(h).is_dir()) {
-        command.current_dir(home);
+    // The home as an absolute path: a relative MD_REDLINE_HOME would
+    // otherwise be resolved again inside the new cwd.
+    if let Some(home) = own_home().and_then(|h| std::path::absolute(h).ok()) {
+        if home.is_dir() {
+            if std::env::var_os("MD_REDLINE_HOME").is_some_and(|v| !v.is_empty()) {
+                command.env("MD_REDLINE_HOME", &home);
+            }
+            command.current_dir(home);
+        }
     }
     match command.spawn() {
         Ok(child) => Some(child),
@@ -522,12 +533,14 @@ fn reconcile_server_at_startup() {
     }
     // The CLI exits once the server it keeps or starts is up, so wait for
     // it rather than probing early, while the old server still answers.
+    // A shell that never finishes (an rc file waiting on input, say) is
+    // stopped rather than left to swap the server later, under opens that
+    // went ahead without it.
     if let Some(mut child) = spawn_mdr_no_open("reconcile") {
-        if !wait_for_exit(&mut child, Duration::from_secs(30)) {
-            log_start("reconcile: mdr --no-open still running after 30s");
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
+        if !wait_for_exit(&mut child, Duration::from_secs(45)) {
+            log_start("reconcile: mdr --no-open still running after 45s; stopped it");
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
     // Then hold until the health check is steady: 3 consecutive successes
@@ -691,21 +704,20 @@ enum NavDecision {
     External,
 }
 
-/// The app lives on 127.0.0.1, on a port the shell would pick for it (the
-/// server's scan range, or the Vite client's in dev). Any other web link,
-/// including another local service such as a dev server on localhost:3000,
-/// plus mailto:/tel:, is external: loading it here would replace the app.
-/// Everything else (tauri://, about:blank, and any other internal scheme)
-/// stays in the webview so the shell never blocks its own chrome.
-fn classify_navigation(url: &Url) -> NavDecision {
+/// The app lives on 127.0.0.1, on the port the shell picked for its UI
+/// (`ui_port`, 0 before it has picked one). Any other web link, including
+/// another local service such as a dev server on localhost:3000, plus
+/// mailto:/tel:, is external: loading it here would replace the app.
+/// Everything else (tauri://, about:blank, and any other internal scheme,
+/// plus Windows' http://tauri.localhost for the bundled loading page) stays
+/// in the webview so the shell never blocks its own chrome.
+fn classify_navigation(url: &Url, ui_port: u16) -> NavDecision {
     let host = url.host_str().unwrap_or("");
     let loopback = host == "127.0.0.1" || host == "localhost";
-    let mdr_port = url.port_or_known_default().is_some_and(|p| {
-        (DEFAULT_SERVER_PORT..DEFAULT_SERVER_PORT + MAX_PORT_SCAN).contains(&p)
-            || (DEFAULT_CLIENT_PORT..DEFAULT_CLIENT_PORT + MAX_PORT_SCAN).contains(&p)
-    });
+    let ours = ui_port != 0 && url.port_or_known_default() == Some(ui_port);
     match url.scheme() {
-        "http" | "https" if loopback && mdr_port => NavDecision::Allow,
+        "http" | "https" if loopback && ours => NavDecision::Allow,
+        "http" | "https" if host == "tauri.localhost" => NavDecision::Allow,
         "http" | "https" | "mailto" | "tel" => NavDecision::External,
         _ => NavDecision::Allow,
     }
@@ -742,7 +754,7 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
     #[cfg(not(target_os = "macos"))]
     let builder = builder.initialization_script(TAB_KEY_SCRIPT);
     builder
-        .on_navigation(|url| match classify_navigation(url) {
+        .on_navigation(|url| match classify_navigation(url, UI_PORT.load(Ordering::SeqCst)) {
             NavDecision::Allow => true,
             NavDecision::External => {
                 open_external(url.as_str());
@@ -797,6 +809,8 @@ fn open_target(app: &AppHandle, target: Option<Target>, grant: bool) {
         }
     }
 
+    // Before any navigation to it, so the navigation filter lets it through.
+    UI_PORT.store(ui_port, Ordering::SeqCst);
     let url = build_ui_url(ui_port, &target);
     let has_target = target.is_some();
     let open_script = build_open_script(&target, &url);
@@ -869,10 +883,12 @@ mod tests {
 
     #[test]
     fn classify_navigation_keeps_the_app_in_and_sends_links_out() {
-        let allow = |u: &str| classify_navigation(&Url::parse(u).unwrap()) == NavDecision::Allow;
+        let allow =
+            |u: &str| classify_navigation(&Url::parse(u).unwrap(), 6373) == NavDecision::Allow;
         // In-app: the SPA and loading chrome.
         assert!(allow("http://127.0.0.1:6373/?file=%2Ftmp%2Fa.md"));
-        assert!(allow("http://localhost:5188/"));
+        assert!(allow("http://localhost:6373/"));
+        assert!(allow("http://tauri.localhost/index.html"));
         assert!(allow("tauri://localhost/index.html"));
         assert!(allow("about:blank"));
         // External: hand off to the OS.
@@ -884,8 +900,16 @@ mod tests {
         assert!(!allow("http://localhost:3000/"));
         assert!(!allow("http://127.0.0.1:8080/docs"));
         assert!(!allow("http://127.0.0.1/"));
-        assert!(allow("http://127.0.0.1:6382/"));
-        assert!(!allow("http://127.0.0.1:6383/"));
+        // Only the UI port the shell picked, not its whole scan range.
+        assert!(!allow("http://127.0.0.1:6374/"));
+        assert!(!allow("http://localhost:5188/"));
+        // A server adopted from the port file on a custom port, or the dev
+        // client, is allowed once it is the UI port.
+        let on = |u: &str, port: u16| classify_navigation(&Url::parse(u).unwrap(), port);
+        assert_eq!(on("http://127.0.0.1:7100/", 7100), NavDecision::Allow);
+        assert_eq!(on("http://127.0.0.1:5188/?file=a.md", 5188), NavDecision::Allow);
+        // Before a port is picked, no loopback page loads.
+        assert_eq!(on("http://127.0.0.1:6373/", 0), NavDecision::External);
     }
 
     #[test]

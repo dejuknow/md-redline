@@ -3202,14 +3202,17 @@ nothing builds or tests it there yet.
   `mdr --no-open` through `$SHELL -lic` (fallback `/bin/zsh`). It must be
   interactive, not just login: nvm puts PATH in `~/.zshrc`, which `-lc`
   never reads, so a Finder or Dock launch could not find an nvm-linked `mdr`.
-  The spawn runs from the user's home: a Finder or Dock launch has `/` as its
-  cwd, and the server trusts the folder it starts in. Its output goes to
+  The spawn runs from the user's home (made absolute, and passed on as
+  `MD_REDLINE_HOME` when that is set): a Finder or Dock launch has `/` as its
+  cwd, and the server trusts the folder it starts in. In restricted mode that
+  still trusts the home, as `mdr` run from there would. Its output goes to
   `~/Library/Logs/mdr/server-start.log`. A production server serves `/`
   itself, so the shell skips the dev-mode wait for a Vite client there. Once
   per launch it also runs `mdr --no-open` against a running production server
   so the CLI can swap a stale one after an upgrade; opens wait for that to
   finish (`RECONCILING`, then `ENSURE_LOCK`), so a launch-time Finder open is
-  neither loaded from nor granted on a server about to be replaced.
+  neither loaded from nor granted on a server about to be replaced. A CLI
+  still running after 45s is stopped rather than left to swap later.
 - A window left on another origin (a dead server, or one on another port)
   is re-navigated on the next open or Dock click instead of eval'ing into it.
 - The `mdr://open?file=...` link (registered via `src-tauri/Info.plist`) and
@@ -3255,11 +3258,11 @@ nothing builds or tests it there yet.
   system browser, not the webview. An injected init script turns an
   external-link click into a top-level navigation, and the window's
   `on_navigation` handler (`classify_navigation`) sends every http(s)/mailto/tel
-  URL to `open` and cancels the in-webview load, except loopback on mdr's own
-  ports (the server's 6373-6382 and the Vite client's 5188-5197); a link to
-  another local service, such as a dev server on `localhost:3000`, would
-  otherwise replace the app. Internal schemes (tauri://, about:blank) are
-  allowed through. The main
+  URL to `open` and cancels the in-webview load, except loopback on the one
+  port the shell picked for its UI (`UI_PORT`, set before it navigates there);
+  a link to another local service, such as a dev server on `localhost:3000`,
+  would otherwise replace the app. Internal schemes (tauri://, about:blank,
+  and Windows' http://tauri.localhost) are allowed through. The main
   window is built in code (`build_main_window`), not declared in
   tauri.conf.json, because init scripts and nav handlers are builder-only.
 
