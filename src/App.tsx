@@ -145,6 +145,10 @@ const HEADING_JUMP_OFFSET = 16 + 28 + 8;
 
 declare global {
   interface Window {
+    /** Set while the app is mounted; called by the desktop shell to open a
+     *  file, folder or review session in place instead of navigating the page.
+     *  Exactly one field, matching what the shell's build_open_script emits. */
+    __mdrOpenTarget?: (target: { file: string } | { dir: string } | { review: string }) => void;
     /** Set while the app is mounted; called by the desktop shell for its
      *  Close Tab shortcut (Cmd+W, Ctrl+W). Closes the active tab, through the
      *  unsaved-changes guard, and returns true; returns false when no tab is
@@ -2327,22 +2331,27 @@ export default function App() {
     };
   }, []);
 
-  // Open files referenced by ?review=<sessionId> in URL on first load.
-  // The session itself is discovered via useReviewSession's poll; this
-  // effect just makes sure the relevant tabs are open, activating the one the
-  // reader had open before a reload (the first file on a first visit).
+  // Open the tabs referenced by a review session, activating the one the
+  // reader had open before a reload (the first file on a first visit). Shared
+  // by the ?review boot effect below and the desktop shell's __mdrOpenTarget
+  // hook. The session itself is discovered via useReviewSession's poll either
+  // way; this just makes sure the relevant tabs are open. Only the boot open
+  // (`boot`) marks the URL's review as opened and ends the boot wait: a review
+  // the shell opens later is not the one in the URL.
   const reviewTabsOpenedRef = useRef(false);
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const reviewId = params.get('review');
-    if (!reviewId) return;
-    let cancelled = false;
-    (async () => {
+  const openReviewSessionTabs = useCallback(
+    async (
+      reviewId: string,
+      {
+        boot = false,
+        isCancelled = () => false,
+      }: { boot?: boolean; isCancelled?: () => boolean } = {},
+    ) => {
       try {
-        const res = await fetch(`/api/review-sessions/${reviewId}`);
+        const res = await fetch(`/api/review-sessions/${encodeURIComponent(reviewId)}`);
         if (!res.ok) return;
         const session = (await res.json()) as { filePaths: string[] };
-        if (cancelled) return;
+        if (isCancelled()) return;
         // Same shape as the session restore above: the target opens via
         // openTab (which activates it) at its own position, and background
         // opens never steal activation, so both the order and the active tab are kept.
@@ -2354,7 +2363,7 @@ export default function App() {
             openTabInBackground(path);
           }
         }
-        reviewTabsOpenedRef.current = true;
+        if (boot) reviewTabsOpenedRef.current = true;
         // The explorer starts beside the document that opens, which a reload
         // can make a file other than the first.
         if (activeTarget) {
@@ -2364,13 +2373,23 @@ export default function App() {
       } catch {
         /* ignore */
       } finally {
-        if (!cancelled) setReviewTargetKnown(true);
+        if (boot && !isCancelled()) setReviewTargetKnown(true);
       }
-    })();
+    },
+    [openTab, openTabInBackground, setExplorerDir],
+  );
+
+  // Open files referenced by ?review=<sessionId> in URL on first load.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reviewId = params.get('review');
+    if (!reviewId) return;
+    let cancelled = false;
+    void openReviewSessionTabs(reviewId, { boot: true, isCancelled: () => cancelled });
     return () => {
       cancelled = true;
     };
-  }, [openTab, openTabInBackground]);
+  }, [openReviewSessionTabs]);
 
   // Remember the active document for a reload of this review. Only once the
   // review's own tabs are open: until then activeFilePath can be a file the
@@ -2444,6 +2463,29 @@ export default function App() {
     },
     [openTab, addRecentFile],
   );
+
+  // The desktop shell's open entry point: it evals a call to this instead of
+  // navigating, so an `mdr foo.md` while the app is open adds a tab in place,
+  // with no reload and the open tabs kept. A file open mirrors the ?file boot
+  // path (the explorer moves to the file's folder); a folder open shows that
+  // folder in the explorer, switching to it and leaving focus mode.
+  useEffect(() => {
+    window.__mdrOpenTarget = (target) => {
+      if ('file' in target) {
+        openTab(target.file);
+        addRecentFile(target.file);
+        const parent = getParentDir(target.file);
+        if (parent) setExplorerDir(parent);
+      } else if ('dir' in target) {
+        revealDirInExplorer(target.dir);
+      } else {
+        void openReviewSessionTabs(target.review);
+      }
+    };
+    return () => {
+      delete window.__mdrOpenTarget;
+    };
+  }, [openTab, addRecentFile, setExplorerDir, revealDirInExplorer, openReviewSessionTabs]);
 
   // The desktop shell's Close Tab (Cmd+W, Ctrl+W): browsers keep that key for
   // their own tabs, so only the shell calls this.
