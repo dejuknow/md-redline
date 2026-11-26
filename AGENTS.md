@@ -2880,8 +2880,10 @@ Keep them when restyling or refactoring:
     tab, `Cmd+9` the last; `Ctrl+` on Windows and Linux; past the last tab
     nothing happens). Both keep the page's `Cmd+Shift+[` / `]` rule: nothing
     while typing in a text field other than the comment form's (whose draft is
-    handed back). A confirm dialog makes them wait; any other overlay closes
-    first, as for New Tab.
+    handed back), and nothing while the Mermaid fullscreen view is open (its
+    composer keeps no draft, and the page's key does nothing there either), or
+    for the tab already active. A confirm dialog makes them wait; any other
+    overlay closes first, as for New Tab.
   - `__mdrToggleExplorer()`, `__mdrToggleOutline()`, `__mdrToggleComments()`,
     `__mdrToggleFocusMode()`, `__mdrOpenSettings(section?)` (`'about'` opens
     Settings on About; it opens rather than toggles) and

@@ -28,19 +28,23 @@ export function useRecentFiles() {
     };
   }, []);
 
-  const addRecentFile = useCallback((path: string) => {
+  // Several at once (a drop of files on the desktop app) in one update and
+  // one save, the first one newest: one save per file could reach the server
+  // out of order and leave a shorter list on disk.
+  const addRecentFiles = useCallback((paths: string[]) => {
+    const fresh = [...new Set(paths)];
+    if (fresh.length === 0) return;
     hasLocalMutationRef.current = true;
     setRecentFiles((prev) => {
-      const name = getPathBasename(path) || path;
-      const filtered = prev.filter((f) => f.path !== path);
-      const next = [{ path, name, openedAt: new Date().toISOString() }, ...filtered].slice(
-        0,
-        MAX_RECENT,
-      );
+      const openedAt = new Date().toISOString();
+      const added = fresh.map((path) => ({ path, name: getPathBasename(path) || path, openedAt }));
+      const next = [...added, ...prev.filter((f) => !fresh.includes(f.path))].slice(0, MAX_RECENT);
       void savePreferencesToDisk({ recentFiles: next });
       return next;
     });
   }, []);
+
+  const addRecentFile = useCallback((path: string) => addRecentFiles([path]), [addRecentFiles]);
 
   const clearRecentFiles = useCallback(() => {
     hasLocalMutationRef.current = true;
@@ -48,5 +52,5 @@ export function useRecentFiles() {
     void savePreferencesToDisk({ recentFiles: [] });
   }, []);
 
-  return { recentFiles, addRecentFile, clearRecentFiles };
+  return { recentFiles, addRecentFile, addRecentFiles, clearRecentFiles };
 }

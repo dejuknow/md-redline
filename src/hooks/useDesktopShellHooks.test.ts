@@ -87,7 +87,7 @@ describe('useDesktopShellHooks', () => {
     expect(actions.selectTabAt).not.toHaveBeenCalled();
   });
 
-  it("keeps the Mermaid fullscreen view's composer, which has no draft to hand back", () => {
+  it('leaves the Mermaid fullscreen view open, whose composer keeps no draft', () => {
     const actions = makeActions({ mermaidFullscreenOpen: () => true });
     renderHook(() => useDesktopShellHooks(actions));
     const form = document.createElement('div');
@@ -98,10 +98,10 @@ describe('useDesktopShellHooks', () => {
     textarea.focus();
     expect(window.__mdrSwitchTab!(1)).toBe(false);
     expect(window.__mdrSelectTab!(2)).toBe(false);
-    expect(actions.clearOverlays).not.toHaveBeenCalled();
-    // Not typing: the view closes and the tab switches, as for New Tab.
+    // Focus elsewhere in the view (its Cancel button, say): still nothing.
     textarea.blur();
-    expect(window.__mdrSwitchTab!(1)).toBe(true);
+    expect(window.__mdrSwitchTab!(1)).toBe(false);
+    expect(actions.clearOverlays).not.toHaveBeenCalled();
   });
 
   it('leaves tabs alone with none open, while a confirm dialog waits, or while typing', () => {

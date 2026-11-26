@@ -1094,7 +1094,9 @@ impl PendingOpens {
                 self.shell_nav = None;
                 std::mem::take(&mut self.scripts)
             }
-            _ => Vec::new(),
+            // Nothing loading: nothing to wait for.
+            None => std::mem::take(&mut self.scripts),
+            Some(_) => Vec::new(),
         }
     }
 
@@ -1113,10 +1115,18 @@ impl PendingOpens {
         run
     }
 
-    fn has_held(&self) -> bool {
-        !self.scripts.is_empty()
+    /// When the held opens run if the current load never finishes; None
+    /// with nothing held.
+    fn release_at(&self) -> Option<Instant> {
+        if self.scripts.is_empty() {
+            return None;
+        }
+        Some(self.loading_since.map(|t| t + LOAD_WAIT).unwrap_or_else(Instant::now))
     }
 }
+
+/// Whether a thread is already watching the held opens (see deliver_open).
+static OPENS_WATCHED: AtomicBool = AtomicBool::new(false);
 
 static PENDING_OPENS: Mutex<PendingOpens> = Mutex::new(PendingOpens::new());
 
@@ -1124,27 +1134,28 @@ static PENDING_OPENS: Mutex<PendingOpens> = Mutex::new(PendingOpens::new());
 /// loaded.
 fn deliver_open(win: &WebviewWindow, script: String) {
     let run = PENDING_OPENS.lock().unwrap().submit(script, Instant::now());
-    if run.is_empty() {
-        // Held for the load. Should it never finish, run it anyway once
+    if run.is_empty() && !OPENS_WATCHED.swap(true, Ordering::SeqCst) {
+        // Held for the load. Should it never finish, run them anyway once
         // LOAD_WAIT is up: the script falls back to a full navigation when the
-        // page has no hook, so the open is never silently dropped. A newer
-        // load can restart the wait, so keep checking while anything is held.
+        // page has no hook, so an open is never silently dropped. One watcher,
+        // kept up while anything is held, follows the current load's deadline
+        // (a newer load restarts it).
         let win = win.clone();
-        std::thread::spawn(move || {
-            for _ in 0..8 {
-                std::thread::sleep(LOAD_WAIT + Duration::from_millis(100));
-                let mut pending = PENDING_OPENS.lock().unwrap();
-                if !pending.has_held() {
+        std::thread::spawn(move || loop {
+            let Some(at) = PENDING_OPENS.lock().unwrap().release_at() else {
+                OPENS_WATCHED.store(false, Ordering::SeqCst);
+                // Something held since the check above gets a new watcher.
+                if PENDING_OPENS.lock().unwrap().release_at().is_none()
+                    || OPENS_WATCHED.swap(true, Ordering::SeqCst)
+                {
                     return;
                 }
-                let run = pending.take_if_stale(Instant::now());
-                drop(pending);
-                if !run.is_empty() {
-                    for script in run {
-                        let _ = win.eval(&script);
-                    }
-                    return;
-                }
+                continue;
+            };
+            std::thread::sleep(at.saturating_duration_since(Instant::now()) + Duration::from_millis(100));
+            let run = PENDING_OPENS.lock().unwrap().take_if_stale(Instant::now());
+            for script in run {
+                let _ = win.eval(&script);
             }
         });
     }
@@ -1718,12 +1729,14 @@ mod tests {
         assert!(!p.shell_navigating_to(6373, t0 + LOAD_WAIT));
         // A second open is held, not navigated.
         assert!(p.submit("b".into(), t0).is_empty());
+        assert_eq!(p.release_at(), Some(t0 + LOAD_WAIT));
         // The loading page reporting late does not end it.
         assert!(p.page_finished(false).is_empty());
         assert!(p.shell_navigating_to(6373, t0));
         // The UI loading does, and runs what waited.
         assert_eq!(p.page_finished(true), vec!["b".to_string()]);
         assert!(!p.shell_navigating_to(6373, t0));
+        assert_eq!(p.release_at(), None);
         // With no shell navigation, any page finishing releases opens.
         p.load_started(t0);
         assert!(p.submit("c".into(), t0).is_empty());

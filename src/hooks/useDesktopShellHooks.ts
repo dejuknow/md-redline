@@ -114,14 +114,15 @@ export function useDesktopShellHooks(actions: DesktopShellActions): void {
       return true;
     };
     // A key with no other tab to go to does nothing at all: the overlays
-    // close only for a switch that will happen. Nor does one while typing:
-    // only the document's comment form hands its draft back, and the Mermaid
-    // fullscreen view's composer, which closes with the view, does not.
+    // close only for a switch that will happen. Nor does one while typing
+    // (only the document's comment form hands its draft back), or while the
+    // Mermaid fullscreen view is open: its composer keeps no draft, so closing
+    // the view could throw away a comment being written, wherever focus is.
+    // The page's own Cmd+Shift+[ / ] does nothing there either.
     const switchTo = (canSwitch: boolean, run: () => void) => {
       if (!canSwitch) return false;
-      const focused = document.activeElement;
-      if (typingOutsideCommentDraft(focused)) return false;
-      if (a().mermaidFullscreenOpen() && isTextEntry(focused)) return false;
+      if (a().mermaidFullscreenOpen()) return false;
+      if (typingOutsideCommentDraft(document.activeElement)) return false;
       if (!a().clearOverlays()) return false;
       run();
       return true;

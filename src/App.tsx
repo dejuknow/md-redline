@@ -441,7 +441,7 @@ export default function App() {
   // re-render (that would scroll the panel a second time).
   const explorerRevealConsumedRef = useRef<number | null>(null);
   const [homeDir, setHomeDir] = useState<string>('');
-  const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
+  const { recentFiles, addRecentFile, addRecentFiles, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const {
     settings,
@@ -2565,8 +2565,8 @@ export default function App() {
         if (!first) return;
         openTab(first);
         for (const path of rest) void openTabInBackground(path);
-        // Newest last, so the active first file leads the Recent list.
-        for (const path of [...target.files].reverse()) addRecentFile(path);
+        // One update, the active first file newest.
+        addRecentFiles(target.files);
         const parent = getParentDir(first);
         if (parent) setExplorerDir(parent);
       } else if ('dir' in target) {
@@ -2585,6 +2585,7 @@ export default function App() {
     openTab,
     openTabInBackground,
     addRecentFile,
+    addRecentFiles,
     setExplorerDir,
     revealDirInExplorer,
     openReviewSessionTabs,
