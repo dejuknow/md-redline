@@ -85,6 +85,13 @@ export interface CreateAppOptions {
   platformName?: NodeJS.Platform;
   staticDir?: string;
   defaultTrustHome?: boolean;
+  /** Whether the folder the server starts in is trusted. Default true: `mdr`
+   * run from a project folder trusts that folder. The desktop app turns it
+   * off (MD_REDLINE_INTERNAL_NO_CWD_TRUST=1), because it starts the server
+   * from the home folder, which the user never chose; trusting it would undo
+   * restricted mode (#239). The home folder is still trusted when the
+   * persisted roots say so, as they do by default. */
+  trustCwd?: boolean;
   /** Injected by the boot path; returns the latest published version when it
    * is strictly newer than APP_VERSION, else null. Absent in tests and when
    * the update check is disabled. */
@@ -335,7 +342,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     if (initialArg) initialFile = initialArg;
   }
 
-  const allowedRoots = [canonicalize(cwd)];
+  const allowedRoots = options.trustCwd === false ? [] : [canonicalize(cwd)];
   // When opening a single file, grant access to its parent directory so
   // the user can navigate to sibling files via the explorer.
   if (initialFile) {
@@ -1007,7 +1014,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
   });
 
   app.get('/api/browse', async (c) => {
-    const dir = c.req.query('dir') || cwd;
+    const requested = c.req.query('dir');
+    const dir = requested || cwd;
 
     try {
       const resolved = await resolveAndValidate(dir);
@@ -1045,7 +1053,13 @@ export function createAppFull(options: CreateAppOptions = {}) {
       });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
-        return c.json({ error: err.message }, 403);
+        // With no folder asked for, the refused one is the server's start
+        // folder, which the client cannot know. Name it so the explorer can
+        // offer to trust it instead of showing a bare error.
+        return c.json(
+          requested ? { error: err.message } : { error: err.message, dir: canonicalize(cwd) },
+          403,
+        );
       }
       console.error('GET /api/browse failed:', err);
       return c.json({ error: 'Directory not found or not accessible' }, 404);
@@ -1585,6 +1599,7 @@ const updateChecker = createUpdateChecker({
 const { app, reviewSessions, baselines } = createAppFull({
   staticDir: detectStaticDir(),
   defaultTrustHome: true,
+  trustCwd: process.env.MD_REDLINE_INTERNAL_NO_CWD_TRUST !== '1',
   getLatestVersion: updatesEnabled ? updateChecker.getLatest : undefined,
   isUpdateCheckPending: updatesEnabled ? updateChecker.isPending : undefined,
 });

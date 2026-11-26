@@ -243,6 +243,7 @@ This makes feedback:
 - **Linux**: supported; system file picker requires `zenity`
 - **Windows**: supported; system file picker uses PowerShell
 - **Touch browsers** (iPad Safari and similar): supported for reviewing and commenting; selections made by touch or pen use the floating **Comment** button flow
+- **macOS desktop app** (optional, build from source): opens your docs in one app window instead of a browser tab per `mdr` call. It runs against the same `mdr` server, so you still install the npm package. See [src-tauri/README.md](./src-tauri/README.md)
 
 ## Permissions
 
@@ -352,6 +353,15 @@ npm run dev
 
 Open the local URL printed by Vite (usually `http://localhost:5188`).
 
+### Desktop app
+
+The optional macOS app lives in `src-tauri/` and needs a Rust toolchain. See [src-tauri/README.md](./src-tauri/README.md) for prerequisites and installing the built app.
+
+```bash
+npm run app:dev      # Run the app with a live-reloading shell
+npm run app:build    # Build a release .app bundle
+```
+
 ### Scripts
 
 ```bash
@@ -383,6 +393,7 @@ src/lib/comment-parser.ts  Inline comment parsing and mutation helpers
 src/markdown/pipeline.ts   Markdown rendering pipeline
 eval/                      Eval harness for agent behavior against inline comments
 e2e/                       Playwright end-to-end coverage
+src-tauri/                 Optional macOS desktop app (Tauri) around the same server
 ```
 
 ## License

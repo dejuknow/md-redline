@@ -90,6 +90,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
+- `src/hooks/useCardDrafts.ts`: unsent reply and edit drafts on comment cards, and each file's open card editor, kept per file across tab and view switches; `src/contexts/CardDraftsContext.tsx` hands them to the cards and their surfaces, and `src/components/CardDraftNotice.tsx` offers a draft whose card cannot take it back
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/lib/agent-notifications.ts`: the desktop app's agent notifications (#244): what counts as an event, batching, dedupe and wording (see Desktop shell hooks)
 - `src/hooks/useAgentNotifications.ts`: feeds it from external file changes and review sessions, and registers `window.__mdrTakeAgentNotifications`
@@ -574,7 +575,9 @@ value counts as set.
 Two further sets are deliberately outside the rule. `MD_REDLINE_INTERNAL_BROWSER_*` are
 set by `bin/cli.js` and expanded by the Windows `cmd` it spawns, never read
 through `process.env`, so a `process.env` grep will not find them: they are an
-argument-passing mechanism rather than configuration. `RELEASE_SKIP_CI_CHECK` and
+argument-passing mechanism rather than configuration. `MD_REDLINE_INTERNAL_NO_CWD_TRUST`
+is set by the desktop app when it starts the server (see the desktop section) and
+is not for users. `RELEASE_SKIP_CI_CHECK` and
 `RELEASE_SKIP_CLAUDE` are local to `scripts/release.mjs`.
 
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
@@ -1455,10 +1458,10 @@ cannot show.
     can post on a surviving copy.
 
 The tab shortcut (`Cmd+Shift+[` / `]`) works from inside the comment form's
-field, the one text field it is not ignored in. A draft handed back takes the
-keyboard, so cycling would otherwise stop at the first tab holding one, and
-the draft is safe across the switch. Reply and edit fields on cards still
-ignore it, because their text is lost on a switch.
+field and a comment card's reply and edit fields (`data-card-editor`), the
+text fields it is not ignored in. A draft handed back takes the keyboard, so
+cycling would otherwise stop at the first tab holding one, and the draft is
+safe across the switch.
 
 Only a form with text in it is kept. An empty form or a pill just closes, as
 before. Cancel, Escape and posting discard the draft for good. The store trusts
@@ -1468,6 +1471,74 @@ since all three clear the selection and tell nobody else.
 Drafts live in memory. Closing a tab keeps its draft, so opening the file again
 brings it back, and a page reload drops them all. The Mermaid fullscreen view's
 own form is not covered.
+
+### Unsent replies and edits on comment cards
+
+A reply, or an edit to a comment or a reply, typed on a card and not sent
+survives leaving its document, the raw view, a density change and the drawer
+closing (#213). `useCardDrafts` (`src/hooks/useCardDrafts.ts`) keeps, per file,
+the open card editor (which comment, which mode, its token) and one draft per
+editor target: the text, the caret, and the text the editor opened on (`base`;
+empty for a new reply). A target's key encodes its ids as a list, since ids
+are free text and a joined string could name two replies at once. `App` passes it the active file once loaded without an
+error, in either view, since the comments drawer shows cards in the raw view.
+The store reaches the cards through `CardDraftsContext`, and the surfaces read
+the file's editor from it through `useSurfaceCardEditor`, so the rail's two
+densities and the drawer share one editor per file instead of each keeping
+their own. Outside the app (no provider), a surface keeps its editor and a card
+its text, as before.
+
+- **Kept.** The card writes its field to the store on every change
+  (`writeDraft`) and the caret on every selection change. Text that is empty,
+  or only what the editor opened on, is not a draft and drops any kept one.
+  Typing does not re-render the app: drafts live in a ref, and the store
+  re-renders only when a draft appears or goes, or the editor changes.
+- **Handed back.** Coming back to the file, the same editor opens on the same
+  text and its card is selected again (the store runs after the tab-switch
+  effect that clears the selection, and calls `onEditorBack`). With no comment
+  surface showing, `App` opens one for it (`ensureCommentSurface`): the drawer
+  in the raw view or a narrow window, which is also what the desktop shell's
+  tab switch closes on the way out. A card mounting with its editor already
+  open starts its field on the draft and puts the caret back. Only an editor
+  the reader just opened takes the keyboard outright (`takeFreshOpen`, true
+  once per `setEditor`). One the store shows again, after a tab switch, a
+  Reopen or an undo, takes it only if no other text field or dialog has it,
+  so the comment form wins when both come back. It retries for a few frames,
+  because the anchored rail keeps a card `visibility: hidden` until it is
+  placed. An editor with nothing typed closes when its file is left, as an
+  empty comment form does.
+- **Two cards.** Only one card editor is open at a time, as before, but
+  opening another card's editor no longer loses the first one's text: its
+  draft is kept and comes back when that editor is opened again.
+- **Done with.** Cancel, Escape, Save and Reply discard the draft for good.
+  Cmd+Enter on text over the length limit keeps the field and its draft (the
+  button is off then), and an auto-repeated Escape does nothing, so a held key
+  that closed something else does not cancel an editor that took focus after
+  it. The card's Escape is its own: `useSelection` does not also clear the
+  selection, which would close an open comment form and its draft.
+- **When the card cannot take it back.** A reply belongs to one comment and an
+  edit to one text, so a draft is never put anywhere else. `judgeCardTarget`
+  refuses a draft whose comment is gone (deleted, resolved away in remove mode,
+  the file rewritten), whose reply is gone, whose thread is resolved (every
+  card hides its editors there), or, for an edit, whose comment or reply text
+  is no longer the text it opened on (saving would overwrite someone else's
+  change). The editor does not show, and `CardDraftNotice`, a line at the top
+  of the page under `PageNotice`, says why and offers **Copy** and **Discard**
+  for the first such draft (and counts the rest). Nothing is dropped: if the
+  comment comes back (an undo, a Reopen, the text changing back), the draft
+  and its editor go back in by themselves, and its card is selected (a compact
+  card hides a reply's editor), without opening a surface. Opening that editor afresh instead
+  (Edit on a comment whose text changed) moves the old draft out of its way;
+  it stays offered in the notice.
+- **Not a change.** An agent replying to the comment, other comments coming
+  and going, or the prose changing around the anchor leave a reply draft
+  alone: unlike a new comment (above), a reply has no anchor to place, only a
+  comment id.
+- Not covered: the highlight popover's and the Mermaid thread panel's cards.
+  They keep their own editor (`ThreadCard` without an `editor` prop), which
+  nothing reopens after a switch, so `ThreadCard` hands their card a null
+  store. Their text stays the card's own, as before, and their fields carry no
+  `data-card-editor`, so the tab shortcut stays off in them.
 
 ### Right-clicking a selection
 
@@ -1559,7 +1630,8 @@ the draft once focus comes back to it. One Escape per layer: the first closes
 the overlay or menu, a second clears the selection.
 
 Two more rules on that keyup. An Escape that goes down in the comment form's
-field is the form's: it acts on keydown (clearing an untouched template, or
+field, or in a comment card's reply or edit field (`data-card-editor`, #213),
+is that field's: it acts on keydown (clearing an untouched template, or
 cancelling), and the keyup clearing too closed the form a template had just
 been cleared from. And the release clears nothing if a selection was handed
 in from outside while the key was down (`useSelection` counts
@@ -2937,8 +3009,8 @@ Keep them when restyling or refactoring:
     `Ctrl+Shift+Tab`) and `__mdrSelectTab(n)` (`Cmd+1` to `Cmd+8` pick that
     tab, `Cmd+9` the last; `Ctrl+` on Windows and Linux; past the last tab
     nothing happens). Both keep the page's `Cmd+Shift+[` / `]` rule: nothing
-    while typing in a text field other than the comment form's (whose draft is
-    handed back), and nothing while the Mermaid fullscreen view is open (its
+    while typing in a text field other than the comment form's or a comment
+    card's reply and edit fields (whose drafts are handed back), and nothing while the Mermaid fullscreen view is open (its
     composer keeps no draft, and the page's key does nothing there either), or
     for the tab already active. A confirm dialog makes them wait; any other
     overlay closes first, as for New Tab.
@@ -3169,7 +3241,7 @@ resolved card, in either mode) at the left, aligned to the card's content edge, 
 labelled "Delete thread" when the comment has replies and "Delete" when it has none. While
 the comment editor, a reply editor or the reply composer is open, every one of those steps
 aside (the first comment's Edit, the reply rows' actions, the anchor-repair pair, the reply
-field and the thread bar), because a click would switch editors and lose the draft. There
+field and the thread bar), so a click cannot switch editors under the draft. There
 is no footer Reply button in any state.
 
 Overlay surfaces (command palette, settings, file opener, keyboard shortcuts, confirm dialog)
@@ -3377,8 +3449,21 @@ nothing builds or tests it there yet.
   never reads, so a Finder or Dock launch could not find an nvm-linked `mdr`.
   The spawn runs from the user's home (made absolute, and passed on as
   `MD_REDLINE_HOME` when that is set): a Finder or Dock launch has `/` as its
-  cwd, and the server trusts the folder it starts in. In restricted mode that
-  still trusts the home, as `mdr` run from there would. Its output goes to
+  cwd. A server trusts the folder it starts in, so the spawn also sets
+  `MD_REDLINE_INTERNAL_NO_CWD_TRUST=1` (`mdr_no_open_command`); the CLI hands
+  its environment to the server it starts, and the server's `trustCwd: false`
+  leaves its start folder out of `allowedRoots`. The home is then trusted only
+  when the persisted roots say so (the default seed does), so restricted mode
+  (`mdr --restrict`) holds (#239). With no folder asked for, the explorer
+  browses the start folder; a refusal there names it (`dir` in the 403), and
+  the explorer offers the Allow-access card for it. After any grant it lists
+  the folder just allowed (`grantedDir`), not the start folder, which stays
+  refused when the user picked another. Two consequences in restricted mode:
+  a Finder open outside the trusted folders lands on the Allow card, because
+  `/api/grant-access` only confirms paths inside existing roots (no local
+  caller may widen trust without the picker); and when the launch-time
+  reconcile swaps a stale server, the replacement drops the old server's
+  start folder, as any restart does. Its output goes to
   `~/Library/Logs/mdr/server-start.log`. A production server serves `/`
   itself, so the shell skips the dev-mode wait for a Vite client there. Once
   per launch it also runs `mdr --no-open` against a running production server

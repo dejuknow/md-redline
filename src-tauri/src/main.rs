@@ -420,14 +420,7 @@ fn close_tab_or_window(app: &AppHandle) {
 /// window is built.
 #[cfg(target_os = "macos")]
 fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-    let about = AboutMetadata {
-        name: Some(app.package_info().name.clone()),
-        version: Some(app.package_info().version.to_string()),
-        copyright: Some("\u{a9} 2026 Dennis Ju. MIT License.".into()),
-        credits: Some(format!("Review markdown with comments your AI agent can read.\n{GITHUB_URL}")),
-        ..Default::default()
-    };
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
     let sep = || PredefinedMenuItem::separator(app);
     let item = |id: &str, text: &str, accel: Option<&str>| MenuItem::with_id(app, id, text, true, accel);
     let tab_items = (1..=9)
@@ -484,7 +477,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
                 app.package_info().name.clone(),
                 true,
                 &[
-                    &PredefinedMenuItem::about(app, None, Some(about))?,
+                    &item(MENU_ABOUT, &format!("About {}", app.package_info().name), None)?,
                     &sep()?,
                     &item(MENU_SETTINGS, "Settings\u{2026}", Some("CmdOrCtrl+Comma"))?,
                     &sep()?,
@@ -558,6 +551,8 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
 const GITHUB_URL: &str = "https://github.com/dejuknow/md-redline";
 
 #[cfg(target_os = "macos")]
+const MENU_ABOUT: &str = "about";
+#[cfg(target_os = "macos")]
 const MENU_NEW_TAB: &str = "new-tab";
 #[cfg(target_os = "macos")]
 const MENU_CLOSE_TAB: &str = "close-tab";
@@ -610,6 +605,7 @@ enum MenuAction {
     CloseTab,
     ReopenTab,
     CloseWindow,
+    About,
     Zoom(i32),
     /// Run a core hook (JS that evaluates to the hook's boolean result);
     /// `show` brings the window back first when it acted, for items whose
@@ -626,6 +622,7 @@ fn menu_action(id: &str) -> Option<MenuAction> {
         MENU_CLOSE_TAB => Some(MenuAction::CloseTab),
         MENU_REOPEN_TAB => Some(MenuAction::ReopenTab),
         MENU_CLOSE_WINDOW => Some(MenuAction::CloseWindow),
+        MENU_ABOUT => Some(MenuAction::About),
         MENU_ZOOM_IN => Some(MenuAction::Zoom(1)),
         MENU_ZOOM_OUT => Some(MenuAction::Zoom(-1)),
         MENU_ZOOM_RESET => Some(MenuAction::Zoom(0)),
@@ -677,6 +674,70 @@ fn call_hook(app: &AppHandle, call: &str, show: bool) {
     });
 }
 
+/// The standard About panel, filled in by hand rather than through
+/// `PredefinedMenuItem::about`, for three things it cannot do:
+/// - Our own icon. Left to itself the panel draws the system's copy of the
+///   app icon, which on recent macOS comes back recolored (the document's
+///   dark lines turn red), while Finder and the Dock draw it right.
+/// - Styled credits. The predefined item passes them as plain text, which
+///   the panel sets left-aligned in a larger font than every other line.
+/// - No build number. An empty `Version` drops the "(0.6.0)" that would
+///   otherwise repeat the version.
+#[cfg(target_os = "macos")]
+fn show_about_panel(app: &AppHandle) {
+    use objc2::{rc::Retained, runtime::AnyObject, AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{
+        NSApplication, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage,
+        NSLinkAttributeName, NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSTextAlignment,
+    };
+    use objc2_foundation::{
+        NSAttributedString, NSData, NSDictionary, NSMutableAttributedString, NSRange, NSSize, NSString, NSURL,
+    };
+
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let info = app.package_info();
+
+    let data = NSData::with_bytes(include_bytes!("../icons/128x128@2x.png"));
+    let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else { return };
+    // A 256 px image, drawn as a 2x one.
+    icon.setSize(NSSize::new(128.0, 128.0));
+
+    let tagline = "Review markdown with comments\u{2028}your AI agent can read.";
+    let link = GITHUB_URL.trim_start_matches("https://");
+    let text = format!("{tagline}\n{link}");
+    let credits = NSMutableAttributedString::from_nsstring(&NSString::from_str(&text));
+    let style = NSMutableParagraphStyle::new();
+    style.setAlignment(NSTextAlignment::Center);
+    style.setParagraphSpacing(6.0);
+    let font = NSFont::systemFontOfSize(NSFont::smallSystemFontSize());
+    let utf16_len = |s: &str| s.encode_utf16().count();
+    let all = NSRange::new(0, utf16_len(&text));
+    let link_range = NSRange::new(utf16_len(tagline) + 1, utf16_len(link));
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(GITHUB_URL)) else { return };
+    unsafe {
+        credits.addAttribute_value_range(NSFontAttributeName, &font, all);
+        credits.addAttribute_value_range(NSParagraphStyleAttributeName, &style, all);
+        credits.addAttribute_value_range(NSForegroundColorAttributeName, &NSColor::secondaryLabelColor(), all);
+        credits.addAttribute_value_range(NSLinkAttributeName, &url, link_range);
+    }
+    let credits: Retained<NSAttributedString> = credits.into_super();
+
+    let string = |s: &str| -> Retained<AnyObject> { NSString::from_str(s).into() };
+    let keys = ["ApplicationIcon", "ApplicationName", "ApplicationVersion", "Version", "Credits", "Copyright"]
+        .map(NSString::from_str);
+    let values: [Retained<AnyObject>; 6] = [
+        icon.into(),
+        string(&info.name),
+        string(&info.version.to_string()),
+        string(""),
+        credits.into(),
+        string("\u{a9} 2026 Dennis Ju \u{b7} MIT License"),
+    ];
+    let key_refs: Vec<&NSString> = keys.iter().map(|k| &**k).collect();
+    let options = NSDictionary::from_retained_objects(&key_refs, &values);
+    unsafe { NSApplication::sharedApplication(mtm).orderFrontStandardAboutPanelWithOptions(&options) };
+}
+
 #[cfg(target_os = "macos")]
 fn handle_menu(app: &AppHandle, id: &str) {
     match menu_action(id) {
@@ -688,6 +749,7 @@ fn handle_menu(app: &AppHandle, id: &str) {
                 let _ = win.hide();
             }
         }
+        Some(MenuAction::About) => show_about_panel(app),
         Some(MenuAction::Zoom(dir)) => change_zoom(app, dir),
         Some(MenuAction::Hook { js, show }) => call_hook(app, &js, show),
         Some(MenuAction::Open(url)) => open_external(url),
@@ -935,6 +997,19 @@ fn log_start(line: &str) {
     }
 }
 
+/// The login shell that runs `mdr --no-open`. It runs from the home folder
+/// (set by the caller), which a server trusts as its start folder unless told
+/// otherwise. The user never chose that folder, so trusting it would undo
+/// restricted mode (`mdr --restrict`, #239); the env var tells the server not
+/// to, and the CLI passes its environment on to the server it starts. The
+/// home folder stays trusted when the user's trusted folders include it, as
+/// they do by default.
+fn mdr_no_open_command(shell: &str) -> Command {
+    let mut command = Command::new(shell);
+    command.args(["-lic", "mdr --no-open"]).env("MD_REDLINE_INTERNAL_NO_CWD_TRUST", "1");
+    command
+}
+
 /// Start the stack via the mdr CLI without opening anything. GUI apps
 /// launch with a bare PATH, so go through the user's shell to find their
 /// mdr install. It must be interactive as well as login (-lic): nvm's
@@ -959,8 +1034,8 @@ fn spawn_mdr_no_open(reason: &str) -> Option<Child> {
         Some((out, err)) => (Stdio::from(out), Stdio::from(err)),
         None => (Stdio::null(), Stdio::null()),
     };
-    let mut command = Command::new(&shell);
-    command.args(["-lic", "mdr --no-open"]).stdin(Stdio::null()).stdout(stdout).stderr(stderr);
+    let mut command = mdr_no_open_command(&shell);
+    command.stdin(Stdio::null()).stdout(stdout).stderr(stderr);
     // The home as an absolute path: a relative MD_REDLINE_HOME would
     // otherwise be resolved again inside the new cwd.
     if let Some(home) = own_home().and_then(|h| std::path::absolute(h).ok()) {
@@ -1731,6 +1806,19 @@ mod tests {
         assert_eq!(on("http://127.0.0.1:5188/?file=a.md", 5188), NavDecision::Allow);
         // Before a port is picked, no loopback page loads.
         assert_eq!(on("http://127.0.0.1:6373/", 0), NavDecision::External);
+    }
+
+    #[test]
+    fn mdr_no_open_command_tells_the_server_not_to_trust_its_start_folder() {
+        let command = mdr_no_open_command("/bin/zsh");
+        assert_eq!(command.get_program(), "/bin/zsh");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["-lic", "mdr --no-open"]);
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs.contains(&(
+            std::ffi::OsStr::new("MD_REDLINE_INTERNAL_NO_CWD_TRUST"),
+            Some(std::ffi::OsStr::new("1"))
+        )));
     }
 
     #[test]

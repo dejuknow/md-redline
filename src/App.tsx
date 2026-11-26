@@ -11,6 +11,9 @@ import { useTabs } from './hooks/useTabs';
 import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
 import { useCommentDrafts } from './hooks/useCommentDrafts';
+import { useCardDrafts } from './hooks/useCardDrafts';
+import { CardDraftsContext } from './contexts/CardDraftsContext';
+import { CardDraftNotice } from './components/CardDraftNotice';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
 import { useUnreadReplies } from './hooks/useUnreadReplies';
@@ -376,6 +379,7 @@ export default function App() {
   // from the document area re-browses the panel too: both surfaces are usually
   // refused by the same folder, and only one of them can own the picker call.
   const [grantNonce, setGrantNonce] = useState(0);
+  const [grantedDir, setGrantedDir] = useState<string | null>(null);
   // True once a grant has completed while the permission card is still up,
   // which means the picked folder did not cover the file.
   const [sawGrant, setSawGrant] = useState(false);
@@ -414,6 +418,7 @@ export default function App() {
           return false;
         }
         await retryAllAccessDenied();
+        setGrantedDir(data.path);
         setGrantNonce((n) => n + 1);
         setSawGrant(true);
         return true;
@@ -2053,6 +2058,24 @@ export default function App() {
     }
   }, [activeFilePath, setDiffEnabled, setActiveCommentId, closeViewerMenu]);
 
+  // Unsent replies and edits on comment cards, per file (#213). After the
+  // effect above, so the card whose editor comes back is selected again
+  // after a tab switch has cleared the selection. With no surface showing
+  // (the drawer closed by the switch, the raw view), one opens to hold it.
+  const {
+    api: cardDraftsApi,
+    setAside: setAsideCardDrafts,
+    discardSetAside: discardSetAsideCardDraft,
+  } = useCardDrafts({
+    file: firstLoadInProgress || (error !== null && !rawMarkdown) ? null : activeFilePath,
+    comments,
+    requestedEditor,
+    onEditorBack: (commentId, reveal) => {
+      setActiveCommentId(commentId);
+      if (reveal && !commentsSurfaceVisible) ensureCommentSurface(commentId);
+    },
+  });
+
   // IDs of the replies present in newContent but not in oldContent. Kept
   // separate from the two things done with them (marking unread, stamping a
   // timestamp) so a caller that has already parsed both sides can pass its own
@@ -3133,10 +3156,14 @@ export default function App() {
 
       // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari). Not from a
       // text field, where a switch would throw away what is being typed,
-      // except the comment form's: its draft is set aside and handed back
-      // (#196). A draft handed back takes the keyboard, so without this the
-      // shortcut would stop for good at the first tab holding one.
-      const inCommentDraft = isInput && target.closest('[data-comment-form]') !== null;
+      // except the comment form's and a comment card's reply and edit fields:
+      // their drafts are set aside and handed back (#196, #213). A draft
+      // handed back takes the keyboard, so without this the shortcut would
+      // stop for good at the first tab holding one.
+      const inCommentDraft =
+        isInput &&
+        (target.closest('[data-comment-form]') !== null ||
+          target.closest('[data-card-editor]') !== null);
       if (mod && e.shiftKey && (!isInput || inCommentDraft) && activeModal !== 'commandPalette') {
         if (e.code === 'BracketLeft') {
           e.preventDefault();
@@ -3941,7 +3968,7 @@ export default function App() {
   // explorer before start-up has chosen its folder.
   const explorerDirKnown = startupTargetKnown || startupCapElapsed;
 
-  return (
+  const page = (
     <div data-app-root className="h-screen flex flex-col bg-frame">
       <div className="flex-1 min-h-0 flex p-2">
         <ReadingPositionCapture
@@ -4074,6 +4101,7 @@ export default function App() {
                           onTrustFolder={handleTrustFolder}
                           trustPending={trustFolderPending}
                           grantNonce={grantNonce}
+                          grantedDir={grantedDir}
                           hideHeader
                         />
                       )}
@@ -4305,6 +4333,16 @@ export default function App() {
                       // screen, and a row appearing above it would shove it down.
                       isLoading={firstLoadInProgress}
                     />
+                    <CardDraftNotice
+                      setAside={setAsideCardDrafts}
+                      onCopy={(text) =>
+                        void navigator.clipboard.writeText(text).then(
+                          () => showToast('Copied.', 'success'),
+                          () => showToast("Couldn't copy the draft.", 'error'),
+                        )
+                      }
+                      onDiscard={discardSetAsideCardDraft}
+                    />
                     <DiffBar
                       diffEnabled={diffEnabled}
                       referenceLabel={
@@ -4408,10 +4446,17 @@ export default function App() {
                                     : '100%',
                                 }}
                               >
+                                {/* flex-col makes the viewer a flex item, which WebKit
+                                    treats as a selection root. Otherwise the sheet is
+                                    the root (it is positioned), and a drag selection
+                                    paints block fills out to the sheet's edges plus a
+                                    stray bar in the right gutter. Positioning this
+                                    column instead would move the drag handles' and
+                                    popover's containing block off the sheet. */}
                                 <div
                                   ref={proseRef}
                                   data-prose-column
-                                  className={pageWidthTransition}
+                                  className={`flex flex-col ${pageWidthTransition}`}
                                   style={{ marginLeft: PAD_L, width: geometry.colWidth }}
                                 >
                                   {diffEnabled && currentSnapshot != null && diffLines ? (
@@ -4817,4 +4862,7 @@ export default function App() {
       </div>
     </div>
   );
+
+  // Every comment card, wherever it is drawn, reads its drafts from here.
+  return <CardDraftsContext.Provider value={cardDraftsApi}>{page}</CardDraftsContext.Provider>;
 }
