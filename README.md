@@ -243,7 +243,7 @@ This makes feedback:
 - **Linux**: supported; system file picker requires `zenity`
 - **Windows**: supported; system file picker uses PowerShell
 - **Touch browsers** (iPad Safari and similar): supported for reviewing and commenting; selections made by touch or pen use the floating **Comment** button flow
-- **macOS desktop app** (optional, build from source): opens your docs in one app window instead of a browser tab per `mdr` call. It runs against the same `mdr` server, so you still install the npm package. See [src-tauri/README.md](./src-tauri/README.md)
+- **macOS desktop app** (optional, build from source): opens your docs in one app window instead of a browser tab per `mdr` call. With Agent notifications on (Settings), it also tells you when an agent replies, asks a question or finishes a review while the window is in the background. It runs against the same `mdr` server, so you still install the npm package. See [src-tauri/README.md](./src-tauri/README.md)
 
 ## Permissions
 
