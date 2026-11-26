@@ -29,7 +29,8 @@ export interface ShellOverlayState {
  *   is part of reading the document, as a browser's is.
  *
  * Checked top down, the order they stack in: a menu opened from the drawer
- * or a popover sits above it.
+ * or a popover sits above it, and the drawer (Cmd+\ opens it over an open
+ * popover) above the popover.
  */
 export type ShellOverlayAction =
   | 'blocked'
@@ -37,8 +38,8 @@ export type ShellOverlayAction =
   | 'close-modal'
   | 'close-context-menu'
   | 'dismiss-popup'
-  | 'close-comment-popover'
   | 'close-drawer'
+  | 'close-comment-popover'
   | null;
 
 export function shellOverlayAction(state: ShellOverlayState): ShellOverlayAction {
@@ -49,7 +50,7 @@ export function shellOverlayAction(state: ShellOverlayState): ShellOverlayAction
   if (state.activeModal !== null && state.activeModal !== 'search') return 'close-modal';
   if (state.contextMenuOpen) return 'close-context-menu';
   if (state.popupOpen) return 'dismiss-popup';
-  if (state.commentPopoverOpen) return 'close-comment-popover';
   if (state.drawerOpen) return 'close-drawer';
+  if (state.commentPopoverOpen) return 'close-comment-popover';
   return null;
 }

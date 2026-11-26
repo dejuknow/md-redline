@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   type RefObject,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { useTabs } from './hooks/useTabs';
 import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
@@ -291,9 +292,19 @@ export default function App() {
     closeTabsToRightDirect,
   ]);
 
+  // While the unsaved-changes dialog is up, it answers for one close, and a
+  // second request must not take its place: the dialog's message names no
+  // file, so the reader would confirm discarding a tab they had not asked
+  // about. The palette can open over the dialog, and its Close tab reaches
+  // these wrappers. Read through a ref so a request in the same commit sees it.
+  const pendingCloseRef = useRef(pendingClose);
+  pendingCloseRef.current = pendingClose;
+
   const closeTab = useCallback(
     (path: string) => {
+      if (pendingCloseRef.current) return;
       if (isTabDirty(path)) {
+        pendingCloseRef.current = { type: 'single', path };
         setPendingClose({ type: 'single', path });
         return;
       }
@@ -304,6 +315,7 @@ export default function App() {
 
   const closeOtherTabs = useCallback(
     (keepPath: string) => {
+      if (pendingCloseRef.current) return;
       const hasDirty = tabs.some((t) => t.filePath !== keepPath && isTabDirty(t.filePath));
       if (hasDirty) {
         setPendingClose({ type: 'others', path: keepPath });
@@ -315,6 +327,7 @@ export default function App() {
   );
 
   const closeAllTabs = useCallback(() => {
+    if (pendingCloseRef.current) return;
     const hasDirty = tabs.some((t) => isTabDirty(t.filePath));
     if (hasDirty) {
       setPendingClose({ type: 'all' });
@@ -325,6 +338,7 @@ export default function App() {
 
   const closeTabsToRight = useCallback(
     (path: string) => {
+      if (pendingCloseRef.current) return;
       const idx = tabs.findIndex((t) => t.filePath === path);
       const hasDirty = tabs.slice(idx + 1).some((t) => isTabDirty(t.filePath));
       if (hasDirty) {
@@ -2601,16 +2615,20 @@ export default function App() {
     const state = shellOverlayStateRef.current();
     if (!state) return true;
     if (shellOverlayAction(state) === 'blocked') return false;
-    if (state.mermaidFullscreenOpen || state.activeModal === 'mermaidFullscreen') {
-      closeShellOverlay('close-mermaid');
-    }
-    if (state.activeModal !== null && state.activeModal !== 'search') {
-      closeShellOverlay('close-modal');
-    }
-    if (state.contextMenuOpen) closeShellOverlay('close-context-menu');
+    // Committed at once, so that the Escape below finds no dialog still in the
+    // DOM: useDismiss leaves Escape to an open dialog, and the menu would stay.
+    flushSync(() => {
+      if (state.mermaidFullscreenOpen || state.activeModal === 'mermaidFullscreen') {
+        closeShellOverlay('close-mermaid');
+      }
+      if (state.activeModal !== null && state.activeModal !== 'search') {
+        closeShellOverlay('close-modal');
+      }
+      if (state.contextMenuOpen) closeShellOverlay('close-context-menu');
+      if (state.commentPopoverOpen) closeShellOverlay('close-comment-popover');
+      if (state.drawerOpen) closeShellOverlay('close-drawer');
+    });
     if (state.popupOpen) closeShellOverlay('dismiss-popup');
-    if (state.commentPopoverOpen) closeShellOverlay('close-comment-popover');
-    if (state.drawerOpen) closeShellOverlay('close-drawer');
     return true;
   }, [closeShellOverlay]);
 
@@ -2655,13 +2673,15 @@ export default function App() {
   // does nothing) and closes any other overlay before the tab comes back.
   useEffect(() => {
     window.__mdrReopenClosedTab = () => {
+      // Nothing to reopen is a no-op: the overlays stay as they are.
+      if (!canReopenClosedTab) return false;
       if (!clearOverlaysForShell()) return false;
       return reopenClosedTab();
     };
     return () => {
       delete window.__mdrReopenClosedTab;
     };
-  }, [reopenClosedTab, clearOverlaysForShell]);
+  }, [canReopenClosedTab, reopenClosedTab, clearOverlaysForShell]);
 
   const revealInFinder = useCallback(
     (path: string) => {

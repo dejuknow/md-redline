@@ -17,6 +17,14 @@ const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
 const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
 // Opened and closed only, so Reopen Closed Tab has something to bring back.
 const FIXTURE_3 = resolve(__dirname, 'fixtures/toc-doc.md');
+// Opened only, to make the tab strip overflow; never written.
+const OTHER_FIXTURES = [
+  'formatted-doc.md',
+  'emphasis-doc.md',
+  'mermaid-doc.md',
+  'highlight-seam-doc.md',
+  'agent-baseline-doc.md',
+].map((name) => resolve(__dirname, 'fixtures', name));
 const IS_MAC = process.platform === 'darwin';
 const MOD = IS_MAC ? '⌘' : 'Ctrl';
 
@@ -195,6 +203,18 @@ test.describe('Desktop Close Tab with an overlay open', () => {
     expect(await page.evaluate(() => window.__mdrReopenClosedTab?.())).toBe(false);
     await expect(tabClose(page, 'toc-doc.md')).toHaveCount(0);
 
+    // The palette can open over the dialog. Its Close tab must not point the
+    // dialog at the active tab either.
+    await page.keyboard.press(withMod('k'));
+    const paletteInput = page.getByPlaceholder('Type a command...');
+    await expect(paletteInput).toBeVisible();
+    await paletteInput.fill('close tab');
+    // It opens under the dialog, so only its input's keys reach it.
+    await paletteInput.press('Enter');
+    await expect(paletteInput).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(tabClose(page, 'test-doc-2.md')).toBeAttached();
+
     // The dialog still closes the tab it asked about.
     await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(tabClose(page, 'test-doc.md')).toHaveCount(0);
@@ -219,5 +239,26 @@ test.describe('Desktop Close Tab over a comment popover', () => {
     expect(await page.evaluate(() => window.__mdrCloseActiveTab?.())).toBe(true);
     await expect(popover).toHaveCount(0);
     await expect(tabClose(page, 'test-doc.md')).toBeAttached();
+  });
+});
+
+test.describe('The tab list and Escape', () => {
+  test('Escape closes the shortcuts panel opened over the tab list', async ({ page }) => {
+    // Enough tabs to overflow a narrow window, so the tab list shows.
+    await page.setViewportSize({ width: 720, height: 800 });
+    await openBoth(page);
+    for (const fixture of [FIXTURE_3, ...OTHER_FIXTURES]) {
+      await page.evaluate((path) => window.__mdrOpenTarget?.({ file: path }), fixture);
+    }
+    await page.getByTestId('tab-list-button').click();
+    const menu = page.getByTestId('tab-list-menu');
+    await expect(menu).toBeVisible();
+
+    await page.keyboard.press('?');
+    const help = page.getByRole('heading', { name: 'Keyboard Shortcuts' });
+    await expect(help).toBeVisible();
+    // The panel is on top, so the Escape is its own, not the tab list's.
+    await page.keyboard.press('Escape');
+    await expect(help).toHaveCount(0);
   });
 });

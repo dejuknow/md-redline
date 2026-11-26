@@ -35,6 +35,15 @@ describe('renderDocumentHtml', () => {
     expect(render).toHaveBeenCalledTimes(4);
   });
 
+  it('keeps one entry per path for the same document in two folders', () => {
+    const md = uniqueDoc();
+    renderDocumentHtml(md, '/a/doc.md', {});
+    renderDocumentHtml(md, '/b/doc.md', {});
+    renderDocumentHtml(md, '/a/doc.md', {});
+    renderDocumentHtml(md, '/b/doc.md', {});
+    expect(render).toHaveBeenCalledTimes(2);
+  });
+
   it(`keeps the ${RENDERED_HTML_CACHE_SIZE} most recently used documents`, () => {
     const docs = Array.from({ length: RENDERED_HTML_CACHE_SIZE + 1 }, uniqueDoc);
     for (const md of docs) renderDocumentHtml(md, undefined, {});

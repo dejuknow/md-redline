@@ -938,7 +938,10 @@ Closed tabs can come back. `useTabs` keeps the 20 most recently closed tabs
 (`closedTabs`, newest first, one entry per path, in memory only) with the
 index each had, filled by every close path: Close, Close Others, Close Tabs to
 the Right and Close All. A close cancelled at the unsaved-changes dialog
-records nothing. `reopenClosedTab()` takes the newest entry, opens it at its old
+records nothing. While that dialog is up, every other close request (the
+palette's Close tab, which can open under it, a tab's x, a tab menu item) is
+ignored: the dialog answers for the close it asked about, and its message
+names no file. `reopenClosedTab()` takes the newest entry, opens it at its old
 index (clamped to the strip) and activates it, or just switches to it when that
 path is open again; a file deleted since loads into the usual missing-file
 error state. A batch close comes back one tab per call, leftmost first, so each
@@ -2850,16 +2853,17 @@ Keep them when restyling or refactoring:
   delete all, the rail's own) is left waiting for its answer; otherwise the
   topmost of the Mermaid fullscreen view, a modal (palette, file opener,
   settings, shortcuts), App's context menus, other menus (the View menu, the
-  tab list, a review popover, which get an Escape), the highlight's comment
-  popover and the comments drawer closes. The find bar does not count.
+  tab list, a review popover, which get an Escape), the comments drawer and
+  the highlight's comment popover closes (`Cmd+\` can open the drawer over
+  an open popover). The find bar does not count.
   Otherwise it closes the active tab through the unsaved-changes guard and
   returns true; returns false with no tab open, so the shell can close the
   window instead.
 - `window.__mdrReopenClosedTab()`: set by `App.tsx` while mounted, for the
   shell's Reopen Closed Tab (`Cmd+Shift+T`). Reopens the most recently closed
   tab and returns true; returns false when none is left (see the tab strip
-  above), or while a confirm dialog is up. Any other overlay closes first, as
-  for New Tab.
+  above), leaving any overlay as it is, or while a confirm dialog is up.
+  Otherwise any other overlay closes first, as for New Tab.
 - `[data-sidebar-panel]`: the expanded sidebar panel; `[data-sidebar-top]` is its
   top row (Explorer/Outline and close).
 - `--window-inset-left`: a CSS variable the shell sets to clear native window

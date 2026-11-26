@@ -58,8 +58,15 @@ describe('shellOverlayAction', () => {
       'close-context-menu',
     );
     expect(shellOverlayAction({ ...all, popupOpen: true })).toBe('dismiss-popup');
-    expect(shellOverlayAction(all)).toBe('close-comment-popover');
     expect(shellOverlayAction({ ...nothing, drawerOpen: true })).toBe('close-drawer');
+  });
+
+  it('closes the drawer before a popover left open under it', () => {
+    // Cmd+\ opens the drawer over an open popover, whose unsent reply must
+    // not go before the drawer that covers it.
+    expect(shellOverlayAction({ ...nothing, drawerOpen: true, commentPopoverOpen: true })).toBe(
+      'close-drawer',
+    );
   });
 
   it('closes a comment popover rather than the document under it', () => {

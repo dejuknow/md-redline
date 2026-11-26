@@ -44,12 +44,10 @@ import type { UndoEntry, UndoSlot } from './useUndoSlot';
 /** How many rendered documents renderDocumentHtml keeps. */
 export const RENDERED_HTML_CACHE_SIZE = 8;
 
-// Keyed by the clean markdown string itself (held by the tab anyway), so
-// nothing is copied into a key. The newest entry is last.
-const renderedHtmlCache = new Map<
-  string,
-  { filePath: string | undefined; optionsKey: string; html: string }
->();
+// Keyed by path, render options and the clean markdown together, so two
+// copies of one document in different folders (whose links resolve apart)
+// keep an entry each. The newest entry is last.
+const renderedHtmlCache = new Map<string, string>();
 
 /**
  * renderMarkdown for a whole document, remembering the last few. Switching to
@@ -66,20 +64,21 @@ export function renderDocumentHtml(
     hiddenCommentPrefixes?: string[];
   },
 ): string {
-  const optionsKey = JSON.stringify([
+  const key = JSON.stringify([
+    filePath ?? null,
     options.keepLineBreaks ?? false,
     options.renderHtmlComments ?? false,
     options.hiddenCommentPrefixes ?? [],
+    cleanMarkdown,
   ]);
-  const hit = renderedHtmlCache.get(cleanMarkdown);
-  if (hit && hit.filePath === filePath && hit.optionsKey === optionsKey) {
-    renderedHtmlCache.delete(cleanMarkdown);
-    renderedHtmlCache.set(cleanMarkdown, hit);
-    return hit.html;
+  const hit = renderedHtmlCache.get(key);
+  if (hit !== undefined) {
+    renderedHtmlCache.delete(key);
+    renderedHtmlCache.set(key, hit);
+    return hit;
   }
   const html = renderMarkdown(cleanMarkdown, filePath, options);
-  renderedHtmlCache.delete(cleanMarkdown);
-  renderedHtmlCache.set(cleanMarkdown, { filePath, optionsKey, html });
+  renderedHtmlCache.set(key, html);
   while (renderedHtmlCache.size > RENDERED_HTML_CACHE_SIZE) {
     renderedHtmlCache.delete(renderedHtmlCache.keys().next().value as string);
   }
