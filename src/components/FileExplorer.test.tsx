@@ -456,3 +456,98 @@ describe('FileExplorer: loading indicator', () => {
     expect(screen.queryByText('Loading...')).toBeNull();
   });
 });
+
+describe('FileExplorer: refused start folder', () => {
+  it('offers to allow the start folder the server names when browsing with no folder', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            error: 'Access denied: path outside allowed directories',
+            dir: '/Users/reader',
+          }),
+        ),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onTrustFolder = vi.fn().mockResolvedValue(false);
+
+    render(
+      <FileExplorer
+        activeFilePath={null}
+        onOpenFile={vi.fn()}
+        onClose={vi.fn()}
+        onTrustFolder={onTrustFolder}
+      />,
+    );
+
+    const allow = await screen.findByRole('button', { name: /Allow this folder/ });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/browse');
+    act(() => allow.click());
+    await waitFor(() => expect(onTrustFolder).toHaveBeenCalledWith('/Users/reader'));
+  });
+
+  it('lists the folder the user allowed, not the refused start folder, after a grant', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        url === '/api/browse'
+          ? {
+              ok: false,
+              status: 403,
+              text: () =>
+                Promise.resolve(
+                  JSON.stringify({
+                    error: 'Access denied: path outside allowed directories',
+                    dir: '/Users/reader',
+                  }),
+                ),
+            }
+          : {
+              ok: true,
+              text: () =>
+                Promise.resolve(
+                  JSON.stringify(
+                    browseResult({
+                      dir: '/Users/reader/project',
+                      parent: null,
+                      files: [{ name: 'spec.md', path: '/Users/reader/project/spec.md' }],
+                    }),
+                  ),
+                ),
+            },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    // The app bumps grantNonce and reports the granted folder before the
+    // picker's promise resolves, as handleTrustFolder does.
+    const props = {
+      activeFilePath: null,
+      onOpenFile: vi.fn(),
+      onClose: vi.fn(),
+    };
+    let resolveTrust: (granted: boolean) => void = () => {};
+    const onTrustFolder = vi.fn(() => new Promise<boolean>((resolve) => (resolveTrust = resolve)));
+    const { rerender } = render(
+      <FileExplorer {...props} onTrustFolder={onTrustFolder} grantNonce={0} />,
+    );
+
+    const allow = await screen.findByRole('button', { name: /Allow this folder/ });
+    act(() => allow.click());
+    await waitFor(() => expect(onTrustFolder).toHaveBeenCalled());
+    rerender(
+      <FileExplorer
+        {...props}
+        onTrustFolder={onTrustFolder}
+        grantNonce={1}
+        grantedDir="/Users/reader/project"
+      />,
+    );
+    await act(async () => resolveTrust(true));
+
+    await screen.findByText('spec.md');
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.at(-1)).toBe(`/api/browse?dir=${encodeURIComponent('/Users/reader/project')}`);
+    expect(urls).not.toContain(`/api/browse?dir=${encodeURIComponent('/Users/reader')}`);
+  });
+});

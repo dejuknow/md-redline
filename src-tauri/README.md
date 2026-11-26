@@ -128,9 +128,10 @@ rather than taken for a filename.
   `mdr://open?review=<id>` (browser fallback as usual).
 - **Start log**: when the app starts the server, the output goes to
   `~/Library/Logs/mdr/server-start.log`. The server it starts runs from your
-  home folder, so it trusts that folder even in restricted mode
-  (`mdr --restrict`), as `mdr` run from your home would. To keep it narrower,
-  start mdr yourself from a project folder before opening the app.
+  home folder but does not trust it for that reason alone, so restricted mode
+  (`mdr --restrict`) holds; it trusts the folders you have allowed, which by
+  default include your home. This needs an `mdr` at least as new as the app:
+  an older one ignores the app's request and trusts the home folder.
 - **Version**: the app has its own version number (About mdr), separate from
   the npm package's.
 

@@ -366,6 +366,7 @@ export default function App() {
   // from the document area re-browses the panel too: both surfaces are usually
   // refused by the same folder, and only one of them can own the picker call.
   const [grantNonce, setGrantNonce] = useState(0);
+  const [grantedDir, setGrantedDir] = useState<string | null>(null);
   // True once a grant has completed while the permission card is still up,
   // which means the picked folder did not cover the file.
   const [sawGrant, setSawGrant] = useState(false);
@@ -404,6 +405,7 @@ export default function App() {
           return false;
         }
         await retryAllAccessDenied();
+        setGrantedDir(data.path);
         setGrantNonce((n) => n + 1);
         setSawGrant(true);
         return true;
@@ -3946,6 +3948,7 @@ export default function App() {
                           onTrustFolder={handleTrustFolder}
                           trustPending={trustFolderPending}
                           grantNonce={grantNonce}
+                          grantedDir={grantedDir}
                           hideHeader
                         />
                       )}
