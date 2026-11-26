@@ -53,6 +53,24 @@ test.describe('Hand-off button', () => {
     await expect(btn).toBeEnabled();
   });
 
+  test('keeps its width when the first comment enables it, so the tabs stay put', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    // The tabs take whatever width the hand-off slot leaves them, so a slot
+    // that keeps its width keeps every tab where it was.
+    const group = page.getByTestId('handoff-group');
+    await expect(page.getByTestId('handoff-button')).toBeDisabled();
+    const before = await group.boundingBox();
+
+    await addComment(page, 'authentication system', 'Needs more detail');
+    await expect(page.getByTestId('handoff-button')).toBeEnabled({ timeout: 10_000 });
+    const after = await group.boundingBox();
+
+    expect(after?.width).toBeCloseTo(before?.width ?? 0, 0);
+    expect(after?.x).toBeCloseTo(before?.x ?? 0, 0);
+  });
+
   test('becomes disabled again when all comments are deleted', async ({ page }) => {
     await openFixture(page);
     await addComment(page, 'authentication system', 'Needs more detail');
@@ -73,9 +91,9 @@ test.describe('Hand-off button', () => {
     await openFixture(page);
     // Hover the wrapping span (Tooltip wrapper). Disabled buttons don't fire
     // mouseenter natively, so the wrapper has to do it — that's the whole
-    // point of the span-based Tooltip.
-    const group = page.getByTestId('handoff-group');
-    await group.hover();
+    // point of the span-based Tooltip. The icon, not the group: the group
+    // also holds the invisible width reserve beside it.
+    await page.getByTestId('handoff-button').hover();
     // Wait long enough for the slow first-reveal delay (~600ms).
     const tooltip = page.getByRole('tooltip', { name: /add comments first/i });
     await expect(tooltip).toBeVisible({ timeout: 2_000 });

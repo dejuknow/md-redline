@@ -2907,6 +2907,11 @@ Keep them when restyling or refactoring:
   child is the padded row of panels.
 - `data-review-band`: the review row docked at the bottom of the page card, present only
   while a review is shown (see Review band above).
+- `--window-gutter` / `--window-gutter-top`: CSS variables a desktop shell
+  sets on `data-app-root` for the padding around the panels (default 8px).
+  It keeps the gutter the same on screen at every page zoom, like native
+  window chrome, and grows the top one so the top rows center on window
+  controls that do not scale with the zoom (#253).
 - `--window-inset-top`: a CSS variable a desktop shell sets when its window
   controls sit over the collapsed rail's top; the rail's top padding adds it,
   pushing its icons below the controls. (There is no `data-sidebar-logo` any
@@ -3033,9 +3038,12 @@ Keep them when restyling or refactoring:
   controls, on whichever row sits under them: `[data-sidebar-top]` while the
   panel is open, `[data-doc-strip]` when no sidebar covers them. Each of those
   rows' left padding adds it. The review band no longer takes it: it is docked
-  at the bottom of the page, away from the window controls. `[data-sidebar-top]`
-  is a size container: when the inset leaves it under 200px, the Explorer and
-  Outline switches drop to icons (their labels stay as accessible names).
+  at the bottom of the page, away from the window controls. When the inset
+  leaves `[data-sidebar-top]` too little room, the Explorer and Outline
+  switches drop to icons (their labels stay as accessible names). The room is
+  measured (`useLabelsFit`), not a container query: under the desktop app's
+  page zoom, WKWebView let a 200px query show the labels in a row too narrow
+  for them, wrapping each under its icon.
 
 The main column (`data-main-column`), the document panel (`data-doc-panel`) and
 its tab strip (`data-doc-strip`) and the page card (`data-doc-page-surface`) are also
@@ -3607,7 +3615,15 @@ nothing builds or tests it there yet.
   on the top row, centered at DEFAULT_ZOOM (125%). They stay at fixed window
   points while the page zooms, so the init script converts the room they need
   to CSS px at the current zoom: the shell calls its `__mdrShellZoom(z)` on
-  every zoom change and every page load. It sets the
+  every zoom change and every page load. Tauri cannot move the lights after
+  the window is built (tao re-applies their position on every redraw), so the
+  page frames itself around them: `--window-gutter` keeps the panels' gutter
+  at 10pt on screen at every zoom (the lights stay as far inside the panel's
+  edge), and `--window-gutter-top` grows past it until the 34px top rows
+  center on the lights. Zoomed in, the rows are too tall to center there
+  below a gutter, so the lights sit in their upper half (about 4pt above
+  center at 150%, 13pt at 200%). The insets are computed from the gutter.
+  It also sets the
   app's `--window-inset-left` / `--window-inset-top` hooks for the open
   sidebar, the collapsed rail plus tab strip, and focus mode, drops them in
   native full screen, and makes the top 44px drag the window (double-click

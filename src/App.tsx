@@ -49,6 +49,7 @@ import { NoFileOpen } from './components/NoFileOpen';
 import { DragHandles } from './components/DragHandles';
 import { RawView, type RawViewHandle } from './components/RawView';
 import { RenderedDiffView, type RenderedDiffViewHandle } from './components/RenderedDiffView';
+import { useLabelsFit } from './hooks/useLabelsFit';
 import { useDiffLines } from './hooks/useDiffLines';
 import { DocStrip } from './components/DocStrip';
 import { DiffBar } from './components/DiffBar';
@@ -434,6 +435,8 @@ export default function App() {
   );
 
   const [explorerDir, setExplorerDir] = useState<string | undefined>(undefined);
+  const sidebarSwitchRef = useRef<HTMLDivElement>(null);
+  const [switchLabelsFit, sidebarTopRef] = useLabelsFit(sidebarSwitchRef);
   // Which document opens first, and which folder the explorer starts in, are
   // decided by start-up sources that answer at different times: ?file or
   // ?dir, a restored session, the CLI's initial file or folder, and on a
@@ -3970,7 +3973,16 @@ export default function App() {
 
   const page = (
     <div data-app-root className="h-screen flex flex-col bg-frame">
-      <div className="flex-1 min-h-0 flex p-2">
+      {/* --window-gutter / --window-gutter-top: a desktop shell sets the
+          gutter around the panels so it stays the same on screen at every
+          zoom, and the top rows center on its window controls. */}
+      <div
+        className="flex-1 min-h-0 flex"
+        style={{
+          padding: 'var(--window-gutter, 0.5rem)',
+          paddingTop: 'var(--window-gutter-top, var(--window-gutter, 0.5rem))',
+        }}
+      >
         <ReadingPositionCapture
           path={activeFilePath}
           view={readingView}
@@ -4001,16 +4013,17 @@ export default function App() {
                     line. Its left padding reads
                     --window-inset-left, which a desktop shell sets here to clear
                     its window controls; when that leaves the row too narrow,
-                    the two switches drop to icons (a container query). */}
+                    the two switches drop to icons (useLabelsFit, measured). */}
                   <div
+                    ref={sidebarTopRef}
                     data-sidebar-top
-                    className="@container h-[34px] flex items-center gap-1 pr-2 shrink-0"
+                    className="h-[34px] flex items-center gap-1 pr-2 shrink-0"
                     style={{ paddingLeft: 'calc(var(--window-inset-left, 0px) + 0.25rem)' }}
                   >
-                    <div className="min-w-0 flex items-center gap-0.5">
+                    <div ref={sidebarSwitchRef} className="min-w-0 flex items-center gap-0.5">
                       <button
                         onClick={() => setLeftPanelView('explorer')}
-                        className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        className={`px-2.5 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors ${
                           leftPanelView === 'explorer'
                             ? 'bg-surface-inset text-content'
                             : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
@@ -4018,7 +4031,7 @@ export default function App() {
                         title="File explorer"
                       >
                         <svg
-                          className="w-3.5 h-3.5 inline-block mr-1 @max-[200px]:mr-0 -mt-0.5"
+                          className={`w-3.5 h-3.5 inline-block -mt-0.5 ${switchLabelsFit ? 'mr-1' : ''}`}
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -4030,11 +4043,11 @@ export default function App() {
                             d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
                           />
                         </svg>
-                        <span className="@max-[200px]:sr-only">Explorer</span>
+                        <span className={switchLabelsFit ? undefined : 'sr-only'}>Explorer</span>
                       </button>
                       <button
                         onClick={() => setLeftPanelView('outline')}
-                        className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        className={`px-2.5 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-colors ${
                           leftPanelView === 'outline'
                             ? 'bg-surface-inset text-content'
                             : 'text-content-muted hover:text-content-secondary hover:bg-tint/50'
@@ -4042,7 +4055,7 @@ export default function App() {
                         title="Document outline"
                       >
                         <svg
-                          className="w-3.5 h-3.5 inline-block mr-1 @max-[200px]:mr-0 -mt-0.5"
+                          className={`w-3.5 h-3.5 inline-block -mt-0.5 ${switchLabelsFit ? 'mr-1' : ''}`}
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -4054,7 +4067,7 @@ export default function App() {
                             d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
                           />
                         </svg>
-                        <span className="@max-[200px]:sr-only">Outline</span>
+                        <span className={switchLabelsFit ? undefined : 'sr-only'}>Outline</span>
                       </button>
                     </div>
                     <button

@@ -308,6 +308,36 @@ describe('TabBar: the strip look', () => {
   });
 });
 
+describe('TabBar: the flush first tab', () => {
+  function renderInStrip(paddingLeft: string) {
+    return render(
+      <div data-doc-strip style={{ paddingLeft }}>
+        <TabBar
+          tabs={TABS}
+          activeFilePath="/docs/one.md"
+          commentCounts={new Map()}
+          onSwitchTab={() => {}}
+          onCloseTab={() => {}}
+          onOpenFile={() => {}}
+        />
+      </div>,
+    );
+  }
+
+  it('marks the active first tab flush when it sits on the page edge', () => {
+    const { getByTitle } = renderInStrip('0px');
+    expect(getByTitle('/docs/one.md').hasAttribute('data-tab-flush')).toBe(true);
+  });
+
+  it('does not mark it flush when a window inset pushes the strip off the page edge', () => {
+    // A desktop shell pads the strip to clear its window controls (focus
+    // mode, or the collapsed rail at most zooms), so the first tab no longer
+    // stands on the page's corner.
+    const { getByTitle } = renderInStrip('22px');
+    expect(getByTitle('/docs/one.md').hasAttribute('data-tab-flush')).toBe(false);
+  });
+});
+
 describe('TabBar folder labels', () => {
   it('labels same-named tabs with the folder that tells them apart', () => {
     const tabs = [
