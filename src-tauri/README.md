@@ -1,54 +1,62 @@
-# mdr desktop shell
+# mdr desktop app
 
-A thin macOS desktop app around the same local `mdr` server. It exists only on
-the long-living `tauri-shell` branch and is not intended to merge to `main`.
+An optional macOS app around the same local `mdr` server. Instead of every
+`mdr foo.md` opening another browser tab you can lose among dozens, docs open
+in one app window that comes forward on demand.
 
-The point of the shell is to end browser-tab pileup: instead of every
-`mdr foo.md` spawning a new tab you can lose among dozens, docs open in one
-findable app window that focuses on demand.
+The npm package stays the way to install mdr. The app needs it: it does not
+bundle a server, and it is not part of the npm package. For now you build it
+from source.
 
 ## What it is (and isn't)
 
-The shell is a pure client. It does not bundle a server. It discovers the
-running `mdr` server (same port-file, port-scan, and `/api/config` health
-check the CLI uses) and points one webview window at `http://127.0.0.1:PORT`.
-If nothing is running it starts the stack by shelling out to `mdr --no-open`.
+The app is a pure client. It finds the running `mdr` server (the same port
+file, port scan and `/api/config` home check the CLI uses) and points one
+window at `http://127.0.0.1:PORT`. If nothing is running it starts the stack
+by running `mdr --no-open`.
 
-All product logic lives in the web app. This crate only handles window
-lifecycle, the `mdr://` deep link, `.md` file associations, and routing
-external links to the system browser.
+All product logic lives in the web app. This crate only handles the window,
+the `mdr://` link, the `.md` file association, and sending external links to
+the system browser.
 
 ## Prerequisites
 
-- macOS (the only supported target for now).
-- Node with the repo installed and `mdr` linked on your `PATH` (the shell
-  starts the server through an interactive login shell, `$SHELL -lic`, so
-  `mdr` must resolve in a normal terminal; PATH set up in `~/.zshrc`, as
-  nvm does, is picked up).
-- A Rust toolchain (`rustup default stable`). Built and tested against Rust
-  1.97 and Tauri v2.
+- macOS. Windows and Linux are not supported yet.
+- `mdr` on your `PATH`, from npm (`npm install -g md-redline`) or linked from
+  this checkout (`npm link`), at a version that knows `mdr --no-open` (the
+  first release that ships with this app, or later). The app starts the server
+  through an interactive login shell (`$SHELL -lic`), so `mdr` must resolve in
+  a normal terminal; a `PATH` set up in `~/.zshrc`, as nvm does, is picked up.
+- A Rust toolchain (`rustup default stable`). Built and tested with Rust 1.97
+  and Tauri 2.11.
+- The repo's npm dependencies (`npm ci`), which include the Tauri CLI.
 
 ## Build and run
 
 From the repo root:
 
 ```bash
-npm run app:dev            # tauri dev: hot-reloading shell for development
+npm run app:dev            # tauri dev: the app with a live-reloading shell
 npm run app:build          # optimized release .app bundle
-npx tauri build --debug    # fast debug .app bundle, good for dogfooding
+npx tauri build --debug    # faster debug .app bundle
 ```
 
-The debug bundle lands at
-`src-tauri/target/debug/bundle/macos/mdr.app`; the release bundle at
-`src-tauri/target/release/bundle/macos/mdr.app`. To install, copy the bundle
-to `/Applications` (that also makes it visible to Spotlight and Raycast).
+The debug bundle lands at `src-tauri/target/debug/bundle/macos/mdr.app`, the
+release bundle at `src-tauri/target/release/bundle/macos/mdr.app` (under
+`$CARGO_TARGET_DIR` instead when that is set). To install, copy the bundle to
+`/Applications`, which also makes it visible to Spotlight and Raycast.
 
 Launch the built app once so macOS registers its `mdr://` scheme and `.md`
-file associations with LaunchServices:
+file association:
 
 ```bash
 open src-tauri/target/debug/bundle/macos/mdr.app
 ```
+
+To make it the default app for Markdown files, use Finder: Get Info on any
+`.md` file, choose mdr under "Open with", then "Change All...".
+
+Rust tests: `cargo test` in this directory.
 
 Icons are generated from the web app's favicon:
 
@@ -58,66 +66,76 @@ npx tauri icon icon-1024.png   # a red squircle composite of public/favicon.svg
 
 ## Opening documents
 
-Once the app is installed, the CLI prefers it automatically:
+Once the app is installed, the CLI prefers it:
 
 ```bash
 mdr foo.md          # opens (or focuses) the app on foo.md
-mdr ~/notes         # re-roots the app's file explorer at a directory
+mdr ~/notes         # shows a folder in the app's file explorer
 mdr                 # brings the existing window forward
 ```
 
-`mdr` tries the `mdr://` deep link first and falls back to the browser when
-the app is not installed. Opens land on top of what you already have open: a
-file adds or activates a tab, a directory re-roots the explorer, existing tabs
-survive. A bare `mdr` or Dock click never navigates away from an open doc.
+`mdr` tries the `mdr://` link first and falls back to the browser when the app
+is not installed. Opens land on top of what you already have open: a file adds
+or activates a tab, a folder is shown in the explorer, existing tabs stay. A
+bare `mdr` or a Dock click never navigates away from an open doc.
 
-Finder "Open With mdr" (and double-clicking `.md`/`.markdown` files once the
-association is set) opens files the same way, without going through the CLI.
+The CLI keeps the browser when the app would not find the same server: with
+`MD_REDLINE_BROWSER` or `MDR_BROWSER` set, with `MD_REDLINE_HOME` pointing at
+another home, or with a port outside 6373-6382 (`MD_REDLINE_PORT` or `PORT`).
+
+Finder "Open With mdr" (and double-clicking `.md` files once mdr is the
+default) opens files the same way, without going through the CLI.
 
 ## CLI options
 
-These live in `bin/cli.js` and apply whether or not the app is installed:
+These live in `bin/cli.js` and work whether or not the app is installed:
 
 | Flag | Effect |
 | --- | --- |
-| `--browser` | Open in the default browser even when the app is installed. Position independent (`mdr --browser foo.md` or `mdr foo.md --browser`). |
-| `--no-open` | Start the server without opening anything. Used by the shell to boot the stack. |
+| `--browser` | Open in the default browser even when the app is installed. Goes before or after the target (`mdr --browser foo.md` or `mdr foo.md --browser`). |
+| `--no-open` | Start the server without opening anything. The app uses it to start the stack. |
 
-Use `--` before a filename that starts with `-`. Unknown dash-args are
-reported rather than silently treated as a filename.
+Use `--` before a filename that starts with `-`. Unknown options are reported
+rather than taken for a filename.
 
 ## Behavior notes
 
 - **External links** in rendered markdown open in the system browser, not the
-  webview. Loopback and internal schemes (`tauri://`, `about:blank`) load
-  in-app; any other `http(s)`/`mailto`/`tel` URL is handed to `open`.
-- **Window lifecycle**: Cmd-W hides the window (the app stays in the Dock),
+  app window. Loopback and internal schemes (`tauri://`, `about:blank`) load
+  in the app; any other `http(s)`, `mailto` or `tel` URL is handed to `open`.
+- **Tabs**: Cmd-W closes the active tab and Shift-Cmd-T reopens the last
+  closed one (File menu). Cmd-W with no tab open hides the window.
+- **Window**: closing the window hides it and the app stays in the Dock;
   clicking the Dock icon brings it back, Cmd-Q quits.
 - **Zoom**: starts at 125% to match a typical browser zoom; Cmd +/- adjust it.
-  The default is applied once per launch so a manual change is not clobbered by
-  later opens. Zoom does not persist across restarts yet.
-- **MCP reviews**: agent-triggered reviews also prefer the app, via
+  The default is applied once per launch so a manual change is not clobbered
+  by later opens. Zoom does not persist across restarts yet.
+- **MCP reviews**: agent-triggered reviews also prefer the app, through
   `mdr://open?review=<id>` (browser fallback as usual).
+- **Start log**: when the app starts the server, the output goes to
+  `~/Library/Logs/mdr/server-start.log`.
 
 ## Dev-mode gotcha
 
-When the shell has to start the server it runs the globally linked `mdr`,
-which picks production vs dev solely by whether `dist/server.js` exists. A
-stale `dist/` (for example, left by `npm test`, which builds first) makes
+When the app has to start the server it runs the `mdr` on your `PATH`, which
+picks production vs dev solely by whether `dist/server.js` exists. A stale
+`dist/` (for example, left by `npm test`, which builds first) makes
 `npm run app:dev` silently boot the production server with no HMR. Fix:
-`mdr --stop`, then start `npm run dev` yourself before relying on the shell's
+`mdr --stop`, then start `npm run dev` yourself before relying on the app's
 auto-start.
 
 ## Where things live
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.rs` | The whole shell: server discovery, window lifecycle, deep link and file-association handling, external-link routing. |
-| `tauri.conf.json` | Bundle config, identifier (`com.dejuknow.mdr`), file associations. The main window is built in code, not declared here, because init scripts and nav handlers are builder-only. |
+| `src/main.rs` | The whole shell: server discovery, window lifecycle, link and file-association handling, external-link routing. |
+| `scripts/tab-keys.js` | Ctrl+W and Ctrl+Shift+T for Windows and Linux, injected into the page (macOS uses the File menu). |
+| `tauri.conf.json` | Bundle config, identifier (`com.dejuknow.mdr`), file association. The main window is built in code, not declared here, because init scripts and navigation handlers are builder-only. |
 | `Info.plist` | Registers the `mdr://` URL scheme. |
-| `loading/index.html` | The spinner shown at launch while the server is discovered. |
-| `capabilities/default.json` | Baseline permissions. The remote SPA gets no IPC access. |
+| `loading/index.html` | The spinner shown at launch while the server is found. |
+| `capabilities/default.json` | Baseline permissions for the loading window. |
+| `capabilities/window-drag.json` | Lets the loopback mdr page drag and zoom its own window (the overlay title bar), nothing else. |
 | `icons/` | App icon set (committed). |
 
-For the agent-facing version of this documentation, see the "Desktop shell"
+For the agent-facing version of this documentation, see the "Desktop app"
 section of `AGENTS.md`.
