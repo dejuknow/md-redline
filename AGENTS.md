@@ -971,7 +971,7 @@ it, so every call paints what it would without it (`wrapTextIndex.test.ts`).
 The visible-text walker (`src/lib/visible-text.ts`) skips a hidden container
 (`<style>`, SVG `<defs>`) as a whole subtree rather than climbing every text
 node's ancestors. On a 134 KB document with 180 comments, a production build
-went from about 430 ms to about 110 ms for a reopen or a switch.
+went from about 430 ms to about 120 ms for a reopen or a switch.
 
 The controls group on the right (`data-testid="panel-toolbar"`) is kept short
 so the tabs keep the width. In order:
