@@ -102,6 +102,7 @@ const SETTING_SANITIZERS: {
   renderHtmlComments: sanitizeBoolean,
   // The same validator the client's parseSettings uses.
   hiddenComments: (v) => normalizeHiddenCommentSettings(v) ?? undefined,
+  agentNotifications: sanitizeBoolean,
 };
 
 function sanitizeSettings(value: unknown): AppSettings | undefined {
