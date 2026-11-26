@@ -237,7 +237,35 @@ function startScreenCapture(page: Page, clipName: string) {
 // Page setup: wallpaper, window chrome, fake cursor, click ripples
 // ---------------------------------------------------------------------------
 
+// The status bar prints the open file's absolute path, which for a fixture is
+// the maintainer's checkout (home directory, worktree name). Show it as if the
+// fixture folder lived at `shownAs` instead, the same place the terminal clips
+// claim. Display only: the app still reads the real file.
+async function maskStatusPath(page: Page, realDir: string, shownAs: string) {
+  await page.addInitScript(
+    ({ realDir, shownAs }) => {
+      const rewrite = () => {
+        for (const el of document.querySelectorAll<HTMLElement>('[data-status-path]')) {
+          const text = el.textContent ?? '';
+          if (text.startsWith(realDir)) {
+            el.textContent = shownAs + text.slice(realDir.length);
+            el.title = el.textContent;
+          }
+        }
+      };
+      new MutationObserver(rewrite).observe(document, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    },
+    { realDir, shownAs },
+  );
+}
+
 async function setupDemoPage(page: Page) {
+  await maskStatusPath(page, DEMO_WORKSPACE, '~/dev/myapp');
+
   // Serve the wallpaper file from demo/assets via Playwright's route handler
   await page.route('**/demo-wallpaper.png', async (route) => {
     const buffer = readFileSync(WALLPAPER);
@@ -321,6 +349,14 @@ async function setupDemoPage(page: Page) {
           box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
           transform: translate(0);
           font-size: 18.5px;
+        }
+
+        /* The app sizes itself to the viewport (h-screen), which is taller
+           than this window. Fit it to #root, or its bottom (the docked review
+           row, the status bar) is clipped, and a scrollIntoView can scroll
+           #root and jump the whole frame. */
+        [data-app-root] {
+          height: 100% !important;
         }
 
         /* The comment form uses position:fixed with viewport-relative
@@ -1010,7 +1046,8 @@ test.describe.serial('Demo recording', () => {
     await syncCard.click();
     await page.waitForTimeout(T.POST_CARD_CLICK);
 
-    const replyOpenBtn = syncCard.getByRole('button', { name: /^reply$/i }).first();
+    // The selected card's reply field: a button that opens the composer in place.
+    const replyOpenBtn = syncCard.getByRole('button', { name: 'Write a reply...' });
     const replyOpenBox = await replyOpenBtn.boundingBox();
     if (replyOpenBox) {
       await slowMove(
@@ -1041,7 +1078,7 @@ test.describe.serial('Demo recording', () => {
     await page.waitForTimeout(T.POST_TYPE);
 
     // Submit with the split-click ripple pattern (see settled decisions).
-    const replySubmitBtn = syncCard.getByRole('button', { name: /^reply$/i }).last();
+    const replySubmitBtn = syncCard.getByRole('button', { name: 'Reply', exact: true });
     const submitBox = await replySubmitBtn.boundingBox();
     if (submitBox) {
       const cx = submitBox.x + submitBox.width / 2;
@@ -1103,6 +1140,8 @@ test.describe('Product shots — hero', () => {
     const apiPath = resolve(heroDir, 'api-design.md');
     const dataPath = resolve(heroDir, 'data-model.md');
 
+    await maskStatusPath(page, heroDir, '~/dev/specs');
+
     // Trust the fixtures dir so /api/file can read the tabbed files.
     await request.put(`${baseURL}/api/preferences`, {
       data: { author: 'Dennis', trustedRoots: [heroDir] },
@@ -1134,11 +1173,9 @@ test.describe('Product shots — hero', () => {
     await expect(page.getByRole('heading', { name: 'Password Management' })).toBeVisible({
       timeout: 10_000,
     });
-    // Comment layout -> Anchored.
-    await page
-      .getByRole('group', { name: 'Comment layout density' })
-      .getByRole('button', { name: 'Anchored' })
-      .click();
+    // Comment layout -> Anchored (the Layout choice in the comments button's menu).
+    await page.getByRole('button', { name: 'Comment options' }).click();
+    await page.getByRole('menuitemradio', { name: 'Anchored' }).click();
 
     // Gate on a card actually rendering (the bcrypt comment's reply text).
     await expect(page.getByText('argon2id', { exact: false })).toBeVisible({ timeout: 10_000 });
@@ -1153,7 +1190,7 @@ test.describe('Product shots — hero', () => {
     const bcryptCard = page.locator(CARD, { hasText: 'cost factor 12' }).first();
     await bcryptCard.click();
     await page.waitForTimeout(200);
-    await bcryptCard.getByRole('button', { name: 'Reply' }).first().click();
+    await bcryptCard.getByRole('button', { name: 'Write a reply...' }).click();
     await page
       .getByPlaceholder('Write a reply...')
       .fill('Agreed. New installs default to argon2id; bcrypt hashes upgrade on next login.');
@@ -1179,7 +1216,9 @@ test.describe('Product shots — hero', () => {
       }
       if (!s) return null;
       s.style.scrollBehavior = 'auto';
-      s.scrollTop += h.getBoundingClientRect().top - s.getBoundingClientRect().top - 24;
+      // 32, not less: the sticky section breadcrumb sits at the top of the
+      // scroller and would cover the heading.
+      s.scrollTop += h.getBoundingClientRect().top - s.getBoundingClientRect().top - 32;
       return Math.round(h.getBoundingClientRect().top - s.getBoundingClientRect().top);
     };
     await page.waitForTimeout(500);

@@ -145,6 +145,15 @@ rather than grabbing a whole sequence.
 **VHS fails with "failed to execute command".** Flaky ttyd connection.
 Just re-run `npm run demo:record`. It usually passes on retry.
 
+**The review session call returns 403, or the app shows the wrong files.**
+Another checkout's dev server already holds the demo ports (3101 and 4173), and
+Playwright's `reuseExistingServer` attached to it. That server cannot see this
+checkout's fixtures. Pick free ports:
+
+```bash
+DEMO_SERVER_PORT=3191 DEMO_VITE_PORT=4191 npm run demo:record
+```
+
 **Playwright test times out.** Usually the selector the test clicks has
 been renamed. See the table in §2.
 
