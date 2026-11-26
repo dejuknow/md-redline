@@ -866,6 +866,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
       const commentCount = (body.content.match(/@comment\{/g) ?? []).length;
       const prevLock = writeLocks.get(resolved) ?? Promise.resolve();
       let conflictResponse: Response | null = null;
+      let writtenMtime = 0;
       const currentWrite = prevLock
         // Settle, don't succeed. See withFileLock. A save that queued behind
         // a failing one used to inherit its rejection and answer 500 without
@@ -898,6 +899,11 @@ export function createAppFull(options: CreateAppOptions = {}) {
           }
 
           await atomicWriteFile(resolved, body.content);
+          // Read inside the lock, before anything else can write the file.
+          // The editor checks its next queued save against this mtime, so
+          // one taken after the lock could be another writer's, and that
+          // save would then overwrite the other write without a conflict.
+          writtenMtime = (await stat(resolved)).mtimeMs;
           lastWrittenContent.set(resolved, body.content);
           // LRU eviction: cap cache size to prevent unbounded memory growth
           if (lastWrittenContent.size > MAX_WRITTEN_CACHE) {
@@ -933,8 +939,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
       } catch (err) {
         console.warn(`[review-session] inline-reply sweep after save failed for ${resolved}:`, err);
       }
-      const newStat = await stat(resolved);
-      return c.json({ success: true, path: resolved, mtime: newStat.mtimeMs });
+      return c.json({ success: true, path: resolved, mtime: writtenMtime });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         return c.json({ error: err.message }, 403);
