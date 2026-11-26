@@ -4318,10 +4318,17 @@ export default function App() {
                                     : '100%',
                                 }}
                               >
+                                {/* flex-col makes the viewer a flex item, which WebKit
+                                    treats as a selection root. Otherwise the sheet is
+                                    the root (it is positioned), and a drag selection
+                                    paints block fills out to the sheet's edges plus a
+                                    stray bar in the right gutter. Positioning this
+                                    column instead would move the drag handles' and
+                                    popover's containing block off the sheet. */}
                                 <div
                                   ref={proseRef}
                                   data-prose-column
-                                  className={pageWidthTransition}
+                                  className={`flex flex-col ${pageWidthTransition}`}
                                   style={{ marginLeft: PAD_L, width: geometry.colWidth }}
                                 >
                                   {diffEnabled && currentSnapshot != null && diffLines ? (
