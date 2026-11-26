@@ -11,6 +11,10 @@ Claude-specific skill routing and points here. Do not duplicate content between 
 - Frontend: React 19 + TypeScript + Tailwind CSS v4 + Vite 8
 - Backend: Hono server in `server/index.ts`
 - CLI entry: `bin/md-redline`, exposed as `mdr` and `md-redline`; the body is `bin/cli.js`
+- Naming in user-facing copy: the product is **md-redline** (app name, Settings, banners,
+  notifications, docs prose); `mdr` appears only where it is something you type (commands,
+  `mdr_*` tool names, prompts addressed to an agent). The desktop app keeps the
+  `com.dejuknow.mdr` identifier and the `mdr://` scheme.
 
 ## Architecture overview
 
@@ -3087,9 +3091,9 @@ stable. The active tab's top lines up with the sidebar's, with or without a revi
 - **Prose typeface**: `'serif'` or `'sans'`, default `'sans'`. Controls the rendered document body font (`[data-prose-font]` attribute plus `.prose` font-family in `src/index.css`). Set from the General tab.
 - **Document width**: `'narrow' | 'default' | 'wide'` (520/672/860px column caps, `DOC_WIDTH_COLS` in `src/lib/page-geometry.ts`), default `'default'`. Feeds the page geometry's `colMax`; also settable from the command palette ("Document width: ..."). The rail threshold (888px) is width-setting independent since `COL_MIN` governs it.
 - **Prose size**: `'small' | 'default' | 'large'` (14px/16px/18px), default `'default'`. Controls the rendered document body font size (`[data-prose-size]` attribute plus `.prose` font-size rules in `src/index.css`); the typography plugin's em-based spacing scales proportionally with it. Set from the General tab; also settable from the command palette ("Prose size: ...").
-- **Agent notifications**: boolean, default `false`, shown only in the desktop app where it can deliver them (`desktopNotificationsSupported()`). A system notification when an agent replies to a thread, asks a question or finishes a review while the window is in the background (see `__mdrTakeAgentNotifications` under Desktop shell hooks). With it on, a line under it says where to turn them on when macOS refuses notifications for mdr, or when its prompt has not been answered yet (the shell reports `'unknown'`). Sits after Quick comment in the General tab.
+- **Agent notifications**: boolean, default `false`, shown only in the desktop app where it can deliver them (`desktopNotificationsSupported()`). A system notification when an agent replies to a thread, asks a question or finishes a review while the window is in the background (see `__mdrTakeAgentNotifications` under Desktop shell hooks). With it on, a line under it says where to turn them on when macOS refuses notifications for md-redline, or when its prompt has not been answered yet (the shell reports `'unknown'`). Sits after Quick comment in the General tab.
 - **Keep line breaks**: boolean, default `false`. When on, `remark-breaks` (in `src/markdown/pipeline.ts`, via the `keepLineBreaks` render option) turns each single newline inside a paragraph into a `<br>`, the way Obsidian and GitHub comments render. Off follows CommonMark, where a soft break renders as a space, which is also what GitHub's file view does. The DOM text does not change (remark-rehype emits a `<br>` followed by a `"\n"` text node), so comment anchoring behaves the same either way. Applies to the rendered view and the rendered diff; fenced code is untouched. Set from the General tab; also togglable from the command palette ("Keep line breaks: On/Off").
-- **About** (last tab, `data-settings-about`): the mdr version from `GET /api/version`, fetched only while the tab shows ("Unknown" when it fails), the desktop app's own version when `desktopAppVersion()` has one, and links to GitHub, new issues and releases (`target="_blank"`, which the desktop app hands to the system browser). The palette's "About mdr" and `__mdrOpenSettings('about')` open Settings on it (`initialSection`, applied each time the dialog opens; without it the dialog keeps the last tab shown).
+- **About** (last tab, `data-settings-about`): the md-redline version from `GET /api/version`, fetched only while the tab shows ("Unknown" when it fails), the desktop app's own version when `desktopAppVersion()` has one, and links to GitHub, new issues and releases (`target="_blank"`, which the desktop app hands to the system browser). The palette's "About md-redline" and `__mdrOpenSettings('about')` open Settings on it (`initialSection`, applied each time the dialog opens; without it the dialog keeps the last tab shown).
 
 The Prose typeface, Document width, and Prose size controls are each an accessible
 segmented control (`role="group"` with a label) whose segments show a crimson
@@ -3257,7 +3261,7 @@ tabs (prev/next, new tab, close tab while one is open, reopen closed tab while o
 desktop keys show only inside the desktop app), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
 file ops (reload, open, mark reviewed, and Show in Finder for the active tab, labeled per platform as
-in the tab menu), settings, keyboard help, About mdr (Settings on its About tab), undo (Undo delete /
+in the tab menu), settings, keyboard help, About md-redline (Settings on its About tab), undo (Undo delete /
 Undo diff reset, while the open file has one), all themes,
 comment bulk ops (resolve all, clear resolved, delete all, hand off to agent),
 active comment ops
@@ -3288,7 +3292,7 @@ available: <current> -> <latest>. Run: npm install -g md-redline@latest`.
 The same pill also covers an upgrade under an open tab (#116): the server was
 restarted onto a new version while the tab kept running the old page code.
 `useUpdateNotice.ts` records the `version` from its first successful poll,
-and once a later poll reports a different one shows "mdr was updated. Reload
+and once a later poll reports a different one shows "md-redline was updated. Reload
 to get the new version." with a Reload button (`location.reload()`) in place
 of the update-available content, since stale page code matters more than a
 pending release and reloading picks up either. This reload note is not
@@ -3530,7 +3534,7 @@ nothing builds or tests it there yet.
   `Shift-Cmd-O`, Toggle Comments `Cmd-\`, Toggle Focus Mode `Cmd-.`, Actual
   Size `Cmd-0`, Zoom In `Cmd-=`, Zoom Out `Cmd--`, full screen), Go (Previous /
   Next Tab `Ctrl-Shift-Tab` / `Ctrl-Tab`, Tab 1-8 and Last Tab `Cmd-1`-`Cmd-9`,
-  Next / Previous Comment), Window, Help (Keyboard Shortcuts, mdr on GitHub,
+  Next / Previous Comment), Window, Help (Keyboard Shortcuts, md-redline on GitHub,
   Report an Issue, Release Notes; the links go through the same `open` as
   external links, the navigation rule unchanged). Items call the hooks in
   Desktop shell hooks (`menu_action` maps ids to them); with the window

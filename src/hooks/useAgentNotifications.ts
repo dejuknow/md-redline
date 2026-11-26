@@ -13,7 +13,7 @@ import {
 } from '../lib/agent-notifications';
 import type { MdComment } from '../types';
 
-/** What the shell last learned from the system about notifications for mdr;
+/** What the shell last learned from the system about notifications for md-redline;
  *  null until a shell has said. 'unknown' means the prompt has not been
  *  answered. */
 export type AgentNotificationPermission = 'unknown' | 'granted' | 'denied' | null;

@@ -464,7 +464,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
         &[
             &item(MENU_HELP_SHORTCUTS, "Keyboard Shortcuts", None)?,
             &sep()?,
-            &item(MENU_HELP_GITHUB, "mdr on GitHub", None)?,
+            &item(MENU_HELP_GITHUB, "md-redline on GitHub", None)?,
             &item(MENU_HELP_ISSUE, "Report an Issue", None)?,
             &item(MENU_HELP_RELEASES, "Release Notes", None)?,
         ],
@@ -1468,7 +1468,7 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
     // was last (in its window-ready hook, during build), keep_on_screen
     // checks the result, and only then is it shown, so it never jumps.
     let builder = WebviewWindowBuilder::new(app, "main", url)
-        .title("mdr")
+        .title("md-redline")
         .inner_size(1360.0, 940.0)
         .min_inner_size(640.0, 480.0)
         .visible(false)

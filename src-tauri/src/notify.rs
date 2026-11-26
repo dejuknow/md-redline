@@ -41,7 +41,7 @@ pub struct Take {
 }
 
 /// The permission the shell reports back to core, which shows a hint in
-/// Settings when the system has notifications for mdr turned off.
+/// Settings when the system has notifications for md-redline turned off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Permission {
     Unknown,

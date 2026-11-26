@@ -20,7 +20,7 @@ describe('UpdateNotice', () => {
     const { getByText } = render(
       <UpdateNotice latest="0.7.0" reloadReady={false} onDismiss={vi.fn()} showToast={vi.fn()} />,
     );
-    expect(getByText('mdr 0.7.0 is available')).toBeTruthy();
+    expect(getByText('md-redline 0.7.0 is available')).toBeTruthy();
     expect(getByText(UPGRADE_COMMAND)).toBeTruthy();
     expect(UPGRADE_COMMAND).toBe('npm install -g md-redline@latest');
   });
@@ -50,8 +50,8 @@ describe('UpdateNotice', () => {
     const { getByText, queryByText } = render(
       <UpdateNotice latest="0.7.0" reloadReady={true} onDismiss={vi.fn()} showToast={vi.fn()} />,
     );
-    expect(getByText('mdr was updated. Reload to get the new version.')).toBeTruthy();
-    expect(queryByText('mdr 0.7.0 is available')).toBeNull();
+    expect(getByText('md-redline was updated. Reload to get the new version.')).toBeTruthy();
+    expect(queryByText('md-redline 0.7.0 is available')).toBeNull();
     expect(document.querySelector('[data-reload-notice]')).toBeTruthy();
     expect(document.querySelector('[data-update-notice]')).toBeNull();
   });

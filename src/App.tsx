@@ -3623,7 +3623,7 @@ export default function App() {
       },
       {
         id: 'about',
-        label: 'About mdr',
+        label: 'About md-redline',
         section: 'General',
         onExecute: () => openSettings('about'),
       },

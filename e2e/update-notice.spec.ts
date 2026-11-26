@@ -32,7 +32,7 @@ test.describe('Update notice', () => {
     await openFixture(page);
     const notice = page.locator('[data-update-notice]');
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText('mdr 99.0.0 is available');
+    await expect(notice).toContainText('md-redline 99.0.0 is available');
     await expect(notice).toContainText(UPGRADE_COMMAND);
   });
 
