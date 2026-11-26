@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { TEST_DOC_BASELINE, TEST_DOC_2_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { withMod } from './helpers/shortcuts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -216,5 +217,70 @@ test.describe('Tab switching content integrity', () => {
 
     // The comment should be visible but active state is implementation-dependent
     await expect(getCard(page, 'Active state test')).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reopen closed tab
+// ---------------------------------------------------------------------------
+
+test.describe('Reopen closed tab', () => {
+  const stripOrder = (page: Page) =>
+    page
+      .locator('[data-doc-strip] span[data-label]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-label')));
+
+  async function tabMenu(page: Page, name: string) {
+    await page.locator('[data-doc-strip] button', { hasText: name }).first().click({
+      button: 'right',
+    });
+    const menu = page.locator('.context-menu-enter');
+    await expect(menu).toBeVisible();
+    return menu;
+  }
+
+  test('brings a closed tab back at its old place from the palette and the tab menu', async ({
+    page,
+  }) => {
+    await openFixture(page, FIXTURE_1);
+    await openSecondFile(page);
+    await expect.poll(() => stripOrder(page)).toEqual(['test-doc.md', 'test-doc-2.md']);
+
+    // Nothing has closed yet: the menu item is there but disabled, and the
+    // palette does not list the command.
+    let menu = await tabMenu(page, 'test-doc.md');
+    await expect(menu.getByRole('button', { name: 'Reopen Closed Tab' })).toBeDisabled();
+    await menu.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect.poll(() => stripOrder(page)).toEqual(['test-doc-2.md']);
+
+    // From the palette.
+    await page.keyboard.press(withMod('k'));
+    const input = page.getByPlaceholder('Type a command...');
+    await expect(input).toBeVisible({ timeout: 3_000 });
+    await input.fill('reopen closed');
+    await page.locator('button[data-selected]', { hasText: 'Reopen closed tab' }).click();
+    await expect.poll(() => stripOrder(page)).toEqual(['test-doc.md', 'test-doc-2.md']);
+    await expect(page.getByRole('heading', { name: 'Test Document', exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // Nothing left to reopen: the palette drops the command again.
+    await page.keyboard.press(withMod('k'));
+    await input.fill('reopen closed');
+    await expect(
+      page.locator('button[data-selected]', { hasText: 'Reopen closed tab' }),
+    ).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // From the tab menu.
+    menu = await tabMenu(page, 'test-doc.md');
+    await menu.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect.poll(() => stripOrder(page)).toEqual(['test-doc-2.md']);
+    menu = await tabMenu(page, 'test-doc-2.md');
+    await menu.getByRole('button', { name: 'Reopen Closed Tab' }).click();
+    await expect.poll(() => stripOrder(page)).toEqual(['test-doc.md', 'test-doc-2.md']);
+    await expect(page.getByRole('heading', { name: 'Test Document', exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
   });
 });

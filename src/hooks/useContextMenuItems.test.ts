@@ -13,6 +13,7 @@ function setup(
   selectionAsMarkdown = vi.fn(() => null as string | null),
   comments: MdComment[] = [],
   canPlaceSelection: (sel: SelectionInfo) => boolean = () => true,
+  overrides: Partial<UseContextMenuItemsParams> = {},
 ) {
   const viewerCtxMenu = menu();
   const params = {
@@ -42,10 +43,13 @@ function setup(
     closeOtherTabs: vi.fn(),
     closeAllTabs: vi.fn(),
     closeTabsToRight: vi.fn(),
+    reopenClosedTab: vi.fn(),
+    canReopenClosedTab: false,
     viewerCtxMenu,
     explorerCtxMenu: menu(),
     tabCtxMenu: menu(),
     sidebarCtxMenu: menu(),
+    ...overrides,
   } as unknown as UseContextMenuItemsParams;
   const { result } = renderHook(() => useContextMenuItems(params));
   return { result, viewerCtxMenu, params };
@@ -228,5 +232,35 @@ describe('Reopen with the resolve workflow off (#159)', () => {
   it('offers Reopen on a resolved card and no Resolve on an open one', () => {
     expect(cardLabels(comment('resolved'))).toContain('Reopen');
     expect(cardLabels(comment('open'))).not.toContain('Resolve');
+  });
+});
+
+describe('Reopen Closed Tab in the tab menu', () => {
+  function tabMenu(canReopenClosedTab: boolean) {
+    const reopenClosedTab = vi.fn();
+    const { result } = setup({} as SelectionInfo, undefined, [], undefined, {
+      tabs: [{ filePath: '/docs/a.md' }],
+      reopenClosedTab,
+      canReopenClosedTab,
+    });
+    act(() => {
+      result.current.handleTabContextMenu({ filePath: '/docs/a.md', x: 0, y: 0 });
+    });
+    const item = result.current.tabCtxMenuItems.find(
+      (entry) => (entry as { label?: string }).label === 'Reopen Closed Tab',
+    ) as { onClick: () => void; disabled?: boolean } | undefined;
+    return { item, reopenClosedTab };
+  }
+
+  it('reopens the most recent closed tab', () => {
+    const { item, reopenClosedTab } = tabMenu(true);
+    expect(item?.disabled).toBe(false);
+    item!.onClick();
+    expect(reopenClosedTab).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled when no tab has closed', () => {
+    const { item } = tabMenu(false);
+    expect(item?.disabled).toBe(true);
   });
 });

@@ -55,6 +55,10 @@ export interface UseContextMenuItemsParams {
   closeOtherTabs: (path: string) => void;
   closeAllTabs: () => void;
   closeTabsToRight: (path: string) => void;
+  /** Brings back the most recently closed tab. */
+  reopenClosedTab: () => void;
+  /** Whether any closed tab is left to reopen. */
+  canReopenClosedTab: boolean;
   viewerCtxMenu: ContextMenuInstance;
   explorerCtxMenu: ContextMenuInstance;
   tabCtxMenu: ContextMenuInstance;
@@ -112,6 +116,8 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
     closeOtherTabs,
     closeAllTabs,
     closeTabsToRight,
+    reopenClosedTab,
+    canReopenClosedTab,
     viewerCtxMenu,
     explorerCtxMenu,
     tabCtxMenu,
@@ -384,6 +390,11 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
           disabled: !hasTabsToRight,
         },
         { label: 'Close All', onClick: () => closeAllTabs() },
+        {
+          label: 'Reopen Closed Tab',
+          onClick: () => reopenClosedTab(),
+          disabled: !canReopenClosedTab,
+        },
         { type: 'divider' as const },
         {
           label: 'Reveal in Explorer Sidebar',
@@ -406,6 +417,8 @@ export function useContextMenuItems(params: UseContextMenuItemsParams) {
       closeOtherTabs,
       closeAllTabs,
       closeTabsToRight,
+      reopenClosedTab,
+      canReopenClosedTab,
       revealInFinder,
       revealLabel,
       revealDirInExplorer,

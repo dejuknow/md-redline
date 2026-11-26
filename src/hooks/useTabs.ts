@@ -28,6 +28,43 @@ export function saveStateOf(tab: TabState | undefined, pendingSaves: number): Sa
   return 'saved';
 }
 
+/** How many closed tabs Reopen Closed Tab remembers. */
+export const MAX_CLOSED_TABS = 20;
+
+/** A closed tab Reopen Closed Tab can bring back, at the index it had. */
+export interface ClosedTab {
+  path: string;
+  index: number;
+}
+
+/**
+ * Puts tabs just closed at the front of the closed list, newest first. A path
+ * already in the list keeps only its newest entry, and the list keeps the
+ * MAX_CLOSED_TABS most recent.
+ */
+export function recordClosedTabs(prev: ClosedTab[], closedNewestFirst: ClosedTab[]): ClosedTab[] {
+  if (closedNewestFirst.length === 0) return prev;
+  const closedPaths = new Set(closedNewestFirst.map((t) => t.path));
+  return [...closedNewestFirst, ...prev.filter((t) => !closedPaths.has(t.path))].slice(
+    0,
+    MAX_CLOSED_TABS,
+  );
+}
+
+/**
+ * The closed-list entries for a batch close, given the removed tabs' paths and
+ * original indices in strip order. The leftmost counts as newest, so repeated
+ * reopens bring them back in ascending index order and each one lands back in
+ * its old slot.
+ */
+function batchClosedTabs(order: string[], removed: (path: string) => boolean): ClosedTab[] {
+  const out: ClosedTab[] = [];
+  order.forEach((path, index) => {
+    if (removed(path)) out.push({ path, index });
+  });
+  return out;
+}
+
 interface PendingTabUpdate {
   tabData: Map<string, TabState>;
   tabOrder: string[];
@@ -85,6 +122,8 @@ export function applyPendingTabState(
   prevActiveFilePath: string | null,
   path: string,
   activate: boolean,
+  /** Where to insert the tab, clamped to the strip; appends when omitted. */
+  index?: number,
 ): PendingTabUpdate {
   const nextData = new Map(prevData);
   nextData.set(path, {
@@ -95,9 +134,13 @@ export function applyPendingTabState(
     errorKind: null,
     lastSaved: null,
   });
+  const nextOrder = [...prevOrder];
+  const at =
+    index === undefined ? nextOrder.length : Math.max(0, Math.min(index, nextOrder.length));
+  nextOrder.splice(at, 0, path);
   return {
     tabData: nextData,
-    tabOrder: [...prevOrder, path],
+    tabOrder: nextOrder,
     activeFilePath: activate ? path : prevActiveFilePath,
   };
 }
@@ -181,6 +224,8 @@ export function useTabs(options?: {
   const [tabOrder, setTabOrder] = useState<string[]>([]);
   const [tabData, setTabData] = useState<Map<string, TabState>>(new Map());
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  // Recently closed tabs, newest first. In memory only: a reload forgets them.
+  const [closedTabs, setClosedTabs] = useState<ClosedTab[]>([]);
 
   // Use refs to avoid closures depending on state (which changes every render)
   const tabDataRef = useRef(tabData);
@@ -189,6 +234,8 @@ export function useTabs(options?: {
   tabOrderRef.current = tabOrder;
   const activeFilePathRef = useRef(activeFilePath);
   activeFilePathRef.current = activeFilePath;
+  const closedTabsRef = useRef(closedTabs);
+  closedTabsRef.current = closedTabs;
   const loadRequestIdsRef = useRef(new Map<string, number>());
   const nextLoadRequestIdRef = useRef(1);
   const abortControllersRef = useRef(new Map<string, AbortController>());
@@ -219,6 +266,31 @@ export function useTabs(options?: {
       setActiveFilePath(next);
     },
     [],
+  );
+
+  const setClosedTabsState = useCallback((next: ClosedTab[]) => {
+    closedTabsRef.current = next;
+    setClosedTabs(next);
+  }, []);
+
+  const rememberClosedTabs = useCallback(
+    (closedNewestFirst: ClosedTab[]) => {
+      setClosedTabsState(recordClosedTabs(closedTabsRef.current, closedNewestFirst));
+    },
+    [setClosedTabsState],
+  );
+
+  // A path opened again by any route is no longer closed. Without this, its
+  // entry would make Reopen Closed Tab spend a press switching to a tab that
+  // is already there, and keep offering a reopen with nothing behind it.
+  const forgetClosedTab = useCallback(
+    (path: string) => {
+      const prev = closedTabsRef.current;
+      if (prev.some((t) => t.path === path)) {
+        setClosedTabsState(prev.filter((t) => t.path !== path));
+      }
+    },
+    [setClosedTabsState],
   );
 
   const startLoadRequest = useCallback((path: string) => {
@@ -262,6 +334,7 @@ export function useTabs(options?: {
     (requestedPath: string, loadedPath: string, content: string) => {
       if (requestedPath !== loadedPath) {
         onPathResolvedRef.current?.(requestedPath, loadedPath);
+        forgetClosedTab(loadedPath);
       }
       const next = applyLoadedTabState(
         tabDataRef.current,
@@ -276,11 +349,12 @@ export function useTabs(options?: {
       setTabOrderState(next.tabOrder);
       setActiveFilePathState(next.activeFilePath);
     },
-    [setActiveFilePathState, setTabDataState, setTabOrderState],
+    [forgetClosedTab, setActiveFilePathState, setTabDataState, setTabOrderState],
   );
 
-  const openTab = useCallback(
-    async (path: string) => {
+  const openTabAt = useCallback(
+    async (path: string, index?: number) => {
+      forgetClosedTab(path);
       const existingPath = findTabKey(tabDataRef.current, path);
       // If already open, just switch to it
       if (existingPath) {
@@ -294,6 +368,7 @@ export function useTabs(options?: {
         activeFilePathRef.current,
         path,
         true,
+        index,
       );
       setTabDataState(next.tabData);
       setTabOrderState(next.tabOrder);
@@ -348,6 +423,7 @@ export function useTabs(options?: {
     [
       applyLoadedResponse,
       finishLoadRequest,
+      forgetClosedTab,
       isCurrentLoadRequest,
       setActiveFilePathState,
       setTabDataState,
@@ -357,8 +433,11 @@ export function useTabs(options?: {
     ],
   );
 
+  const openTab = useCallback((path: string) => openTabAt(path), [openTabAt]);
+
   const openTabInBackground = useCallback(
     async (path: string) => {
+      forgetClosedTab(path);
       // If already open, do nothing (don't switch)
       if (findTabKey(tabDataRef.current, path)) return;
 
@@ -417,6 +496,7 @@ export function useTabs(options?: {
     [
       applyLoadedResponse,
       finishLoadRequest,
+      forgetClosedTab,
       isCurrentLoadRequest,
       setTabDataState,
       setTabOrderState,
@@ -432,6 +512,7 @@ export function useTabs(options?: {
       const currentOrder = tabOrderRef.current;
       const idx = currentOrder.indexOf(tabKey);
       const remaining = currentOrder.filter((p) => p !== tabKey);
+      if (idx !== -1) rememberClosedTabs([{ path: tabKey, index: idx }]);
 
       setTabOrderState(remaining);
       // If closing the active tab, switch to an adjacent one
@@ -446,12 +527,19 @@ export function useTabs(options?: {
         return next;
       });
     },
-    [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState],
+    [
+      cancelLoadRequest,
+      rememberClosedTabs,
+      setActiveFilePathState,
+      setTabDataState,
+      setTabOrderState,
+    ],
   );
 
   const closeOtherTabs = useCallback(
     (keepPath: string) => {
       const keepKey = findTabKey(tabDataRef.current, keepPath) ?? keepPath;
+      rememberClosedTabs(batchClosedTabs(tabOrderRef.current, (p) => p !== keepKey));
       for (const path of tabDataRef.current.keys()) {
         if (path !== keepKey) cancelLoadRequest(path);
       }
@@ -464,10 +552,17 @@ export function useTabs(options?: {
         return next;
       });
     },
-    [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState],
+    [
+      cancelLoadRequest,
+      rememberClosedTabs,
+      setActiveFilePathState,
+      setTabDataState,
+      setTabOrderState,
+    ],
   );
 
   const closeAllTabs = useCallback(() => {
+    rememberClosedTabs(batchClosedTabs(tabOrderRef.current, () => true));
     for (const controller of abortControllersRef.current.values()) {
       controller.abort();
     }
@@ -476,7 +571,7 @@ export function useTabs(options?: {
     setTabOrderState([]);
     setTabDataState(new Map());
     setActiveFilePathState(null);
-  }, [setActiveFilePathState, setTabDataState, setTabOrderState]);
+  }, [rememberClosedTabs, setActiveFilePathState, setTabDataState, setTabOrderState]);
 
   const closeTabsToRight = useCallback(
     (path: string) => {
@@ -487,6 +582,7 @@ export function useTabs(options?: {
 
       const kept = currentOrder.slice(0, idx + 1);
       const removed = currentOrder.slice(idx + 1);
+      rememberClosedTabs(removed.map((p, i) => ({ path: p, index: idx + 1 + i })));
 
       setTabOrderState(kept);
       setActiveFilePathState((currentActive) => {
@@ -502,8 +598,32 @@ export function useTabs(options?: {
         });
       }
     },
-    [cancelLoadRequest, setActiveFilePathState, setTabDataState, setTabOrderState],
+    [
+      cancelLoadRequest,
+      rememberClosedTabs,
+      setActiveFilePathState,
+      setTabDataState,
+      setTabOrderState,
+    ],
   );
+
+  /**
+   * Brings back the most recently closed tab at the index it had (clamped to
+   * the strip) and activates it. Opening a path by any other route drops its
+   * entry, so the switch openTabAt does for an open path is only a fallback
+   * (two spellings of one file). A batch close comes back one tab per call. Returns false when
+   * there is nothing to reopen. A file deleted since it closed loads into the
+   * same error state as any missing file.
+   */
+  const reopenClosedTab = useCallback((): boolean => {
+    const [entry, ...rest] = closedTabsRef.current;
+    if (!entry) return false;
+    setClosedTabsState(rest);
+    void openTabAt(entry.path, entry.index);
+    return true;
+  }, [openTabAt, setClosedTabsState]);
+
+  const canReopenClosedTab = closedTabs.length > 0;
 
   const switchTab = useCallback(
     (path: string) => {
@@ -721,6 +841,8 @@ export function useTabs(options?: {
     closeOtherTabs,
     closeAllTabs,
     closeTabsToRight,
+    reopenClosedTab,
+    canReopenClosedTab,
     switchTab,
     saveFile,
     saveFileAt,

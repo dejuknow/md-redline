@@ -490,3 +490,238 @@ describe('useTabs save state', () => {
     expect(result.current.getSaveState(path)).toBe('failed');
   });
 });
+
+describe('useTabs: reopen closed tab', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Every GET answers with the path asked for, except the paths in `missing`,
+  // which answer 404 the way the server does for a file deleted since.
+  function stubFiles(missing = new Set<string>()) {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = decodeURIComponent(String(url).split('path=')[1] ?? '');
+      if (missing.has(path)) {
+        return new Response(JSON.stringify({ error: `File not found: ${path}` }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ path, content: `# ${path}\n`, mtime: 1 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  async function openAll(paths: string[]) {
+    const hook = renderHook(() => useTabs());
+    for (const path of paths) {
+      await act(() => hook.result.current.openTab(path));
+    }
+    return hook;
+  }
+
+  const order = (r: { current: ReturnType<typeof useTabs> }) =>
+    r.current.tabs.map((t) => t.filePath);
+
+  async function reopen(r: { current: ReturnType<typeof useTabs> }) {
+    let reopened = false;
+    await act(async () => {
+      reopened = r.current.reopenClosedTab();
+    });
+    await waitFor(() => expect(r.current.tabs.every((t) => !t.isLoading)).toBe(true));
+    return reopened;
+  }
+
+  it('has nothing to reopen before any tab closes', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md']);
+    expect(result.current.canReopenClosedTab).toBe(false);
+    let reopened = true;
+    act(() => {
+      reopened = result.current.reopenClosedTab();
+    });
+    expect(reopened).toBe(false);
+    expect(order(result)).toEqual(['/a.md']);
+  });
+
+  it('reopens a single closed tab at its old index and activates it', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md']);
+    act(() => result.current.closeTab('/b.md'));
+    expect(order(result)).toEqual(['/a.md', '/c.md']);
+    expect(result.current.canReopenClosedTab).toBe(true);
+
+    expect(await reopen(result)).toBe(true);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md']);
+    expect(result.current.activeFilePath).toBe('/b.md');
+    expect(result.current.rawMarkdown).toBe('# /b.md\n');
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('reopens single closes newest first', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md', '/d.md']);
+    act(() => result.current.closeTab('/c.md'));
+    act(() => result.current.closeTab('/a.md'));
+    expect(order(result)).toEqual(['/b.md', '/d.md']);
+
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/d.md']);
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md', '/d.md']);
+  });
+
+  it('clamps the index when the strip has fewer tabs than before', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md']);
+    act(() => result.current.closeTab('/c.md'));
+    act(() => result.current.closeTab('/a.md'));
+    act(() => result.current.closeTab('/b.md'));
+    // Reopen b (index 1) into an empty strip: it lands at 0.
+    await reopen(result);
+    expect(order(result)).toEqual(['/b.md']);
+  });
+
+  it('restores Close Others one tab at a time, back in place', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md', '/d.md']);
+    act(() => result.current.closeOtherTabs('/b.md'));
+    expect(order(result)).toEqual(['/b.md']);
+
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md']);
+    expect(result.current.activeFilePath).toBe('/a.md');
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md']);
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md', '/d.md']);
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('restores Close All one tab at a time, back in place', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md']);
+    act(() => result.current.closeAllTabs());
+    expect(order(result)).toEqual([]);
+
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md']);
+    await reopen(result);
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md']);
+    expect(result.current.activeFilePath).toBe('/c.md');
+  });
+
+  it('restores Close Tabs to the Right one tab at a time, back in place', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md', '/d.md']);
+    act(() => result.current.closeTabsToRight('/b.md'));
+    expect(order(result)).toEqual(['/a.md', '/b.md']);
+
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md']);
+    await reopen(result);
+    expect(order(result)).toEqual(['/a.md', '/b.md', '/c.md', '/d.md']);
+  });
+
+  it('records nothing when Close Tabs to the Right has nothing to close', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md']);
+    act(() => result.current.closeTabsToRight('/b.md'));
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('forgets a closed tab once it is opened again some other way', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md', '/c.md']);
+    act(() => result.current.closeTab('/b.md'));
+    act(() => result.current.closeTab('/a.md'));
+    await act(() => result.current.openTab('/a.md'));
+    expect(order(result)).toEqual(['/c.md', '/a.md']);
+
+    // The next reopen skips a.md, which is open, and brings back b.md.
+    expect(await reopen(result)).toBe(true);
+    expect(order(result)).toEqual(['/c.md', '/b.md', '/a.md']);
+    expect(result.current.activeFilePath).toBe('/b.md');
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('forgets a closed tab opened again in the background', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md']);
+    act(() => result.current.closeTab('/a.md'));
+    await act(() => result.current.openTabInBackground('/a.md'));
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('switches to a closed path that is open again under another spelling', async () => {
+    // /link.md resolves to /real.md. Opening /link.md again only learns it is
+    // /real.md once the load answers, so the closed entry for /real.md goes
+    // then, and a reopen has nothing left to do.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const asked = decodeURIComponent(String(url).split('path=')[1] ?? '');
+        const path = asked === '/link.md' ? '/real.md' : asked;
+        return new Response(JSON.stringify({ path, content: `# ${path}\n`, mtime: 1 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    const { result } = await openAll(['/a.md', '/link.md']);
+    expect(order(result)).toEqual(['/a.md', '/real.md']);
+    act(() => result.current.closeTab('/real.md'));
+    expect(result.current.canReopenClosedTab).toBe(true);
+    await act(() => result.current.openTab('/link.md'));
+    expect(order(result)).toEqual(['/a.md', '/real.md']);
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('keeps one entry per path, the newest', async () => {
+    stubFiles();
+    const { result } = await openAll(['/a.md', '/b.md']);
+    act(() => result.current.closeTab('/a.md'));
+    await act(() => result.current.openTab('/a.md'));
+    act(() => result.current.closeTab('/a.md'));
+
+    await reopen(result);
+    expect(order(result)).toEqual(['/b.md', '/a.md']);
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  it('keeps only the 20 most recent closes', async () => {
+    stubFiles();
+    const paths = Array.from({ length: 25 }, (_, i) => `/f${i}.md`);
+    const { result } = await openAll(paths);
+    for (const path of paths) {
+      act(() => result.current.closeTab(path));
+    }
+
+    const reopened: string[] = [];
+    while (result.current.canReopenClosedTab) {
+      await reopen(result);
+      reopened.push(result.current.activeFilePath!);
+    }
+    expect(reopened).toEqual(paths.slice(5).reverse());
+  });
+
+  it('puts a file deleted since it closed in the missing-file error state', async () => {
+    const missing = new Set<string>();
+    stubFiles(missing);
+    const { result } = await openAll(['/a.md', '/gone.md']);
+    expect(result.current.tabs[1].error).toBeNull();
+    act(() => result.current.closeTab('/gone.md'));
+    missing.add('/gone.md');
+
+    expect(await reopen(result)).toBe(true);
+    expect(order(result)).toEqual(['/a.md', '/gone.md']);
+    expect(result.current.activeFilePath).toBe('/gone.md');
+    expect(result.current.error).toMatch(/File not found/);
+    expect(result.current.errorKind).toBe('generic');
+  });
+});
