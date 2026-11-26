@@ -2853,7 +2853,9 @@ Keep them when restyling or refactoring:
   delete all, the rail's own) is left waiting for its answer; otherwise the
   topmost of the Mermaid fullscreen view, a modal (palette, file opener,
   settings, shortcuts), App's context menus, other menus (the View menu, the
-  tab list, a review popover, which get an Escape), the comments drawer and
+  tab list, a review popover, closed through `useDismiss`'s
+  `mdr:dismiss-popups` window event, which they honor even with a dialog
+  open, unlike Escape), the comments drawer and
   the highlight's comment popover closes (`Cmd+\` can open the drawer over
   an open popover). The find bar does not count.
   Otherwise it closes the active tab through the unsaved-changes guard and

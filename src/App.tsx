@@ -7,7 +7,6 @@ import {
   useLayoutEffect,
   type RefObject,
 } from 'react';
-import { flushSync } from 'react-dom';
 import { useTabs } from './hooks/useTabs';
 import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
@@ -119,6 +118,7 @@ import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 import { getEnabledHiddenCommentPrefixes } from './lib/settings';
 import { isDesktopApp } from './lib/desktop';
+import { DISMISS_POPUPS_EVENT } from './hooks/useDismiss';
 import {
   shellOverlayAction,
   type ShellOverlayAction,
@@ -239,6 +239,7 @@ export default function App() {
     closeTabsToRight: closeTabsToRightDirect,
     reopenClosedTab,
     canReopenClosedTab,
+    hasClosedTab,
     switchTab,
     saveFile,
     getSaveState,
@@ -318,6 +319,7 @@ export default function App() {
       if (pendingCloseRef.current) return;
       const hasDirty = tabs.some((t) => t.filePath !== keepPath && isTabDirty(t.filePath));
       if (hasDirty) {
+        pendingCloseRef.current = { type: 'others', path: keepPath };
         setPendingClose({ type: 'others', path: keepPath });
         return;
       }
@@ -330,6 +332,7 @@ export default function App() {
     if (pendingCloseRef.current) return;
     const hasDirty = tabs.some((t) => isTabDirty(t.filePath));
     if (hasDirty) {
+      pendingCloseRef.current = { type: 'all' };
       setPendingClose({ type: 'all' });
       return;
     }
@@ -342,6 +345,7 @@ export default function App() {
       const idx = tabs.findIndex((t) => t.filePath === path);
       const hasDirty = tabs.slice(idx + 1).some((t) => isTabDirty(t.filePath));
       if (hasDirty) {
+        pendingCloseRef.current = { type: 'right', path };
         setPendingClose({ type: 'right', path });
         return;
       }
@@ -2588,12 +2592,9 @@ export default function App() {
           closeSidebarMenu();
           return;
         case 'dismiss-popup':
-          // These menus close themselves on Escape (useDismiss, caught on the
-          // window on the way down and stopped there), so send them one. From
-          // the body, not the window, so nothing past them sees it.
-          document.body.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-          );
+          // Menus App does not own close through useDismiss, which listens
+          // for this; nothing else sees it.
+          window.dispatchEvent(new Event(DISMISS_POPUPS_EVENT));
           return;
       }
     },
@@ -2615,20 +2616,16 @@ export default function App() {
     const state = shellOverlayStateRef.current();
     if (!state) return true;
     if (shellOverlayAction(state) === 'blocked') return false;
-    // Committed at once, so that the Escape below finds no dialog still in the
-    // DOM: useDismiss leaves Escape to an open dialog, and the menu would stay.
-    flushSync(() => {
-      if (state.mermaidFullscreenOpen || state.activeModal === 'mermaidFullscreen') {
-        closeShellOverlay('close-mermaid');
-      }
-      if (state.activeModal !== null && state.activeModal !== 'search') {
-        closeShellOverlay('close-modal');
-      }
-      if (state.contextMenuOpen) closeShellOverlay('close-context-menu');
-      if (state.commentPopoverOpen) closeShellOverlay('close-comment-popover');
-      if (state.drawerOpen) closeShellOverlay('close-drawer');
-    });
+    if (state.mermaidFullscreenOpen || state.activeModal === 'mermaidFullscreen') {
+      closeShellOverlay('close-mermaid');
+    }
+    if (state.activeModal !== null && state.activeModal !== 'search') {
+      closeShellOverlay('close-modal');
+    }
+    if (state.contextMenuOpen) closeShellOverlay('close-context-menu');
     if (state.popupOpen) closeShellOverlay('dismiss-popup');
+    if (state.commentPopoverOpen) closeShellOverlay('close-comment-popover');
+    if (state.drawerOpen) closeShellOverlay('close-drawer');
     return true;
   }, [closeShellOverlay]);
 
@@ -2673,15 +2670,16 @@ export default function App() {
   // does nothing) and closes any other overlay before the tab comes back.
   useEffect(() => {
     window.__mdrReopenClosedTab = () => {
-      // Nothing to reopen is a no-op: the overlays stay as they are.
-      if (!canReopenClosedTab) return false;
+      // Nothing to reopen is a no-op: the overlays stay as they are. Read
+      // live, since a Cmd+W just before can land before this hook re-renders.
+      if (!hasClosedTab()) return false;
       if (!clearOverlaysForShell()) return false;
       return reopenClosedTab();
     };
     return () => {
       delete window.__mdrReopenClosedTab;
     };
-  }, [canReopenClosedTab, reopenClosedTab, clearOverlaysForShell]);
+  }, [hasClosedTab, reopenClosedTab, clearOverlaysForShell]);
 
   const revealInFinder = useCallback(
     (path: string) => {

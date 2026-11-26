@@ -624,6 +624,8 @@ export function useTabs(options?: {
   }, [openTabAt, setClosedTabsState]);
 
   const canReopenClosedTab = closedTabs.length > 0;
+  /** canReopenClosedTab read live, for callers outside a render. */
+  const hasClosedTab = useCallback(() => closedTabsRef.current.length > 0, []);
 
   const switchTab = useCallback(
     (path: string) => {
@@ -843,6 +845,7 @@ export function useTabs(options?: {
     closeTabsToRight,
     reopenClosedTab,
     canReopenClosedTab,
+    hasClosedTab,
     switchTab,
     saveFile,
     saveFileAt,

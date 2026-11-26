@@ -44,10 +44,13 @@ import type { UndoEntry, UndoSlot } from './useUndoSlot';
 /** How many rendered documents renderDocumentHtml keeps. */
 export const RENDERED_HTML_CACHE_SIZE = 8;
 
-// Keyed by path, render options and the clean markdown together, so two
-// copies of one document in different folders (whose links resolve apart)
-// keep an entry each. The newest entry is last.
-const renderedHtmlCache = new Map<string, string>();
+// Keyed by the clean markdown string itself (held by the tab anyway), so no
+// copy of a long document is made for a key; each entry holds the HTML per
+// path and render options, since two copies of one document in different
+// folders resolve their links apart. The newest document is last.
+const renderedHtmlCache = new Map<string, Map<string, string>>();
+/** Path and option variants kept per document. */
+const VARIANTS_PER_DOCUMENT = 4;
 
 /**
  * renderMarkdown for a whole document, remembering the last few. Switching to
@@ -64,21 +67,23 @@ export function renderDocumentHtml(
     hiddenCommentPrefixes?: string[];
   },
 ): string {
-  const key = JSON.stringify([
+  const variantKey = JSON.stringify([
     filePath ?? null,
     options.keepLineBreaks ?? false,
     options.renderHtmlComments ?? false,
     options.hiddenCommentPrefixes ?? [],
-    cleanMarkdown,
   ]);
-  const hit = renderedHtmlCache.get(key);
-  if (hit !== undefined) {
-    renderedHtmlCache.delete(key);
-    renderedHtmlCache.set(key, hit);
-    return hit;
+  const variants = renderedHtmlCache.get(cleanMarkdown) ?? new Map<string, string>();
+  renderedHtmlCache.delete(cleanMarkdown);
+  renderedHtmlCache.set(cleanMarkdown, variants);
+  let html = variants.get(variantKey);
+  if (html === undefined) {
+    html = renderMarkdown(cleanMarkdown, filePath, options);
+    variants.set(variantKey, html);
+    while (variants.size > VARIANTS_PER_DOCUMENT) {
+      variants.delete(variants.keys().next().value as string);
+    }
   }
-  const html = renderMarkdown(cleanMarkdown, filePath, options);
-  renderedHtmlCache.set(key, html);
   while (renderedHtmlCache.size > RENDERED_HTML_CACHE_SIZE) {
     renderedHtmlCache.delete(renderedHtmlCache.keys().next().value as string);
   }
