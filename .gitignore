@@ -44,6 +44,12 @@ eval/results/
 !public/**/*.png
 !e2e/fixtures/**/*.png
 !demo/assets/**/*.png
+!src-tauri/icons/**/*.png
+
+# Tauri desktop shell
+src-tauri/target/
+src-tauri/target-*/
+src-tauri/gen/
 
 # Claude Code
 .claude/

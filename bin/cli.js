@@ -22,6 +22,8 @@ import process from 'process';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { createRequire } from 'module';
+import { shouldPreferApp } from './app-handoff.js';
+import { parseCliArgs } from './cli-args.js';
 import { acquireFileLock, LOCK_MAX_WAIT_MS, LockContentionError } from './file-lock.js';
 import { atomicWriteFile, errorCode, retryTransient } from './fs-atomic.js';
 import { resolveHomeDir } from './home-dir.js';
@@ -67,10 +69,6 @@ const APP_PORT_RETRY_MS = 3_000;
 const UPDATE_CHECK_WAIT_MS = 6_000;
 const UPDATE_CHECK_POLL_MS = 100;
 const SESSIONS_REQUEST_TIMEOUT_MS = 5_000;
-// Every subcommand name, so a positional-file guard can check against the
-// whole set instead of one name at a time and a new subcommand cannot repeat
-// the bug where its name got forwarded to the server as a path.
-const SUBCOMMANDS = new Set(['mcp', 'baseline', 'sessions']);
 
 function printHelp() {
   console.log('Usage: mdr [file.md | directory]');
@@ -84,6 +82,10 @@ function printHelp() {
   console.log('Options:');
   console.log('  --stop          Stop the running mdr server');
   console.log('  --restrict      Disable the default home-directory trust');
+  console.log('  --browser       Open in the browser even if the mdr desktop app is installed');
+  console.log(
+    '  --no-open       Start the server without opening anything (used by the desktop app)',
+  );
   console.log('  -v, --version   Show version number');
   console.log('  -h, --help      Show this help message');
   console.log('');
@@ -604,7 +606,10 @@ function isProductionMode() {
   }
 }
 
-async function ensureServerRunning() {
+/**
+ * @param {string} [initialTarget]
+ */
+async function ensureServerRunning(initialTarget = '') {
   const existing = await findServerPort();
   if (existing) {
     const info = await getServerVersionInfo(existing);
@@ -663,15 +668,12 @@ async function ensureServerRunning() {
   let child;
   if (isProductionMode()) {
     const serverArgs = [DIST_SERVER];
-    const userArg = process.argv[2];
-    // Don't forward a subcommand name as a positional file arg. When Claude
-    // Code spawns `mdr mcp`, or a hook runs `mdr baseline`, argv[2] is the
-    // subcommand name, which would otherwise resolve against the caller's cwd
-    // and get passed to the server as an initial path, opening a nonexistent
-    // file (or, for `mcp`, triggering a bogus trusted-roots permission
-    // dialog). Covers every subcommand in SUBCOMMANDS, not just `mcp`.
-    if (userArg && !userArg.startsWith('-') && !SUBCOMMANDS.has(userArg)) {
-      serverArgs.push(resolve(userArg));
+    // initialTarget is the already-parsed, already-resolved target path
+    // from the caller (empty for the mcp flow). The server seeds its
+    // allowed roots from it, so it must reflect the real target even when
+    // flags precede the filename on the command line.
+    if (initialTarget) {
+      serverArgs.push(initialTarget);
     }
     child = await spawnDetached(process.execPath, serverArgs, { cwd: process.cwd() });
   } else {
@@ -764,6 +766,20 @@ async function requireAppPort() {
 }
 
 /**
+ * The explicit browser command from MD_REDLINE_BROWSER (or the legacy
+ * MDR_BROWSER), or '' when neither is set. openInBrowser documents the rules.
+ *
+ * @returns {string}
+ */
+function browserOverride() {
+  return (
+    [process.env.MD_REDLINE_BROWSER, process.env.MDR_BROWSER]
+      .map((v) => v?.trim())
+      .find((v) => v) ?? ''
+  );
+}
+
+/**
  * @param {string} url
  * @returns {Promise<void>}
  */
@@ -779,10 +795,7 @@ async function openInBrowser(url) {
   // First non-EMPTY wins, not first non-undefined: `??` alone would let
   // MD_REDLINE_BROWSER="" discard a working MDR_BROWSER and fall through to the OS
   // default. ports.js documents why blank has to count as unset everywhere.
-  const override =
-    [process.env.MD_REDLINE_BROWSER, process.env.MDR_BROWSER]
-      .map((v) => v?.trim())
-      .find((v) => v) ?? '';
+  const override = browserOverride();
   if (override) {
     if (process.platform === 'win32') {
       const needsShell = /\.(?:cmd|bat)$/i.test(override);
@@ -805,6 +818,45 @@ async function openInBrowser(url) {
     return;
   }
   console.log(`Open in your browser: ${url}`);
+}
+
+/**
+ * @param {string} file
+ * @param {string} dir
+ * @returns {string}
+ */
+function buildDeepLink(file, dir) {
+  if (file) return `mdr://open?file=${encodeURIComponent(file)}`;
+  if (dir) return `mdr://open?dir=${encodeURIComponent(dir)}`;
+  return 'mdr://open';
+}
+
+/**
+ * Try to hand the target to the mdr desktop app via its mdr:// URL scheme.
+ * `open` exits non-zero at once, with no prompt, when no app has registered
+ * the scheme (the app isn't installed), which is the cue to fall back to the
+ * browser. shouldPreferApp decides when the app may take the open at all:
+ * macOS only, no browser override, and only for the server the app itself
+ * would find.
+ *
+ * @param {string} deepLink
+ * @param {number | null} serverPort the API server this CLI resolved
+ * @returns {Promise<boolean>}
+ */
+function tryOpenInApp(deepLink, serverPort) {
+  const preferApp = shouldPreferApp({
+    platform: process.platform,
+    browserOverride: browserOverride(),
+    resolvedHome: resolveHomeDir(),
+    userHome: homedir(),
+    serverPort,
+  });
+  if (!preferApp) return Promise.resolve(false);
+  return new Promise((resolveOpen) => {
+    const child = spawn('open', [deepLink], { stdio: 'ignore' });
+    child.once('error', () => resolveOpen(false));
+    child.once('exit', (code) => resolveOpen(code === 0));
+  });
 }
 
 function getClaudeDesktopConfigPath() {
@@ -1331,13 +1383,35 @@ async function runMcpStdio() {
   // Dynamic import so the SDK is only loaded when the mcp subcommand is invoked
   const mod = await import(pathToFileURL(distMcp).href);
 
+  // MCP review flows open a ?review=<id> URL. Prefer handing the review id
+  // to the desktop app via its deep link (focus-or-open) so agent-triggered
+  // reviews land in the app instead of a new browser tab. Only the opaque
+  // review id crosses the deep link, never the raw URL, so the scheme
+  // cannot be used to navigate the app to arbitrary addresses.
+  /**
+   * @param {string} url
+   * @returns {Promise<void>}
+   */
+  async function openUrlPreferringApp(url) {
+    try {
+      const review = new URL(url).searchParams.get('review');
+      const deepLink = review ? `mdr://open?review=${encodeURIComponent(review)}` : '';
+      if (deepLink && (await tryOpenInApp(deepLink, await findServerPort()))) {
+        return;
+      }
+    } catch {
+      /* malformed URL: the browser fallback below takes it */
+    }
+    await openInBrowser(url);
+  }
+
   // Bin owns the baseUrl state so there's no module-level mutable in the
   // mcp-stdio module. runMcpServer reads it via getBaseUrl() on every tool
   // call, after ensureServerRunning() has had a chance to refresh it.
   let currentBaseUrl = `http://127.0.0.1:${DEFAULT_SERVER_PORT}`;
   await mod.runMcpServer({
     getBaseUrl: () => currentBaseUrl,
-    openInBrowser,
+    openInBrowser: openUrlPreferringApp,
     ensureServerRunning: async () => {
       await ensureServerRunning();
       currentBaseUrl = `http://127.0.0.1:${await requireAppPort()}`;
@@ -1453,8 +1527,19 @@ async function main() {
   }
 
   try {
-    const { file, dir } = await resolveTarget(process.argv[2] ?? '');
-    let versionInfo = await ensureServerRunning();
+    const { noOpen, forceBrowser, positional, unknownOption } = parseCliArgs(process.argv.slice(2));
+    if (unknownOption) {
+      console.error(`Unknown or misplaced option: ${unknownOption}`);
+      console.error("Run 'mdr --help' for usage. Use '--' before filenames starting with '-'.");
+      process.exitCode = 1;
+      return;
+    }
+    const { file, dir } = await resolveTarget(positional);
+    // Pass the parsed target down: a freshly-spawned server seeds its
+    // allowed roots from this, and /api/grant-access refuses paths outside
+    // existing roots, so reading raw argv here would silently drop the
+    // target whenever a flag precedes it.
+    let versionInfo = await ensureServerRunning(file || dir);
 
     // Grant the server access to the target path before opening in browser
     const targetPath = file || dir;
@@ -1481,11 +1566,22 @@ async function main() {
 
     const url = await buildUrl(file, dir);
 
-    try {
-      await openInBrowser(url);
-      console.log(`Opened in browser: ${url}`);
-    } catch {
-      console.log(`Open in your browser: ${url}`);
+    if (noOpen) {
+      console.log(`mdr is running: ${url}`);
+      return;
+    }
+
+    // The app takes the open when it is installed; the update notice below
+    // still runs either way.
+    if (!forceBrowser && (await tryOpenInApp(buildDeepLink(file, dir), await findServerPort()))) {
+      console.log(`Opened in mdr: ${url}`);
+    } else {
+      try {
+        await openInBrowser(url);
+        console.log(`Opened in browser: ${url}`);
+      } catch {
+        console.log(`Open in your browser: ${url}`);
+      }
     }
 
     if (!versionInfo) {

@@ -115,7 +115,7 @@ export async function checkServer(port, { fetchFn = fetch, timeoutMs = 1_000, ho
  * @param {string} b
  * @returns {boolean}
  */
-function sameDir(a, b) {
+export function sameDir(a, b) {
   /** @param {string} p */
   const canon = (p) => {
     try {
