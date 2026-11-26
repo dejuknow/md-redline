@@ -787,6 +787,19 @@ fn log_start(line: &str) {
     }
 }
 
+/// The login shell that runs `mdr --no-open`. It runs from the home folder
+/// (set by the caller), which a server trusts as its start folder unless told
+/// otherwise. The user never chose that folder, so trusting it would undo
+/// restricted mode (`mdr --restrict`, #239); the env var tells the server not
+/// to, and the CLI passes its environment on to the server it starts. The
+/// home folder stays trusted when the user's trusted folders include it, as
+/// they do by default.
+fn mdr_no_open_command(shell: &str) -> Command {
+    let mut command = Command::new(shell);
+    command.args(["-lic", "mdr --no-open"]).env("MD_REDLINE_INTERNAL_NO_CWD_TRUST", "1");
+    command
+}
+
 /// Start the stack via the mdr CLI without opening anything. GUI apps
 /// launch with a bare PATH, so go through the user's shell to find their
 /// mdr install. It must be interactive as well as login (-lic): nvm's
@@ -801,19 +814,6 @@ fn log_start(line: &str) {
 /// so inheriting that cwd would open the whole disk to it.
 ///
 /// Returns the shell, which exits once `mdr --no-open` has a server up.
-/// The login shell that runs `mdr --no-open`. It runs from the home folder
-/// (set by the caller), which a server trusts as its start folder unless told
-/// otherwise. The user never chose that folder, so trusting it would undo
-/// restricted mode (`mdr --restrict`, #239); the env var tells the server not
-/// to, and the CLI passes its environment on to the server it starts. The
-/// home folder stays trusted when the user's trusted folders include it, as
-/// they do by default.
-fn mdr_no_open_command(shell: &str) -> Command {
-    let mut command = Command::new(shell);
-    command.args(["-lic", "mdr --no-open"]).env("MD_REDLINE_INTERNAL_NO_CWD_TRUST", "1");
-    command
-}
-
 fn spawn_mdr_no_open(reason: &str) -> Option<Child> {
     let shell = user_shell(std::env::var("SHELL").ok());
     log_start(&format!("{reason}: {shell} -lic 'mdr --no-open'"));

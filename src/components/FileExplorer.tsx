@@ -65,6 +65,8 @@ interface Props {
    * that is already trusted.
    */
   grantNonce?: number;
+  /** The folder the latest grant trusted, reported alongside grantNonce. */
+  grantedDir?: string | null;
 }
 
 export function FileExplorer({
@@ -82,6 +84,7 @@ export function FileExplorer({
   onTrustFolder,
   trustPending,
   grantNonce = 0,
+  grantedDir = null,
 }: Props) {
   const [data, setData] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -116,6 +119,11 @@ export function FileExplorer({
   // refresh is about to add.
   const dataRevealNonceRef = useRef<number | null>(null);
 
+  // Whether the refusal on screen is for the server's start folder, which the
+  // user never chose. A grant then lists the folder they allowed rather than
+  // retrying the start folder, which stays refused when they picked another.
+  const startFolderRefusedRef = useRef(false);
+
   const browse = useCallback(async (dir?: string, forRevealNonce?: number) => {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -125,6 +133,7 @@ export function FileExplorer({
     setError(null);
     setErrorKind(null);
     setAccessDeniedDir(null);
+    startFolderRefusedRef.current = false;
     // With no folder asked for, the server browses the folder it started in,
     // and a refusal names that folder so the card below can offer to trust it.
     let refusedDir = dir ?? '';
@@ -133,7 +142,10 @@ export function FileExplorer({
       const res = await fetch(`/api/browse${params}`, { signal: controller.signal });
       const result = await readJsonResponse<BrowseResponse>(res);
       if (!res.ok || !result) {
-        if (!dir && typeof result?.dir === 'string') refusedDir = result.dir;
+        if (!dir && typeof result?.dir === 'string') {
+          refusedDir = result.dir;
+          startFolderRefusedRef.current = true;
+        }
         throw new Error(getApiErrorMessage(res, result, 'Failed to browse'));
       }
       setData(result);
@@ -165,11 +177,15 @@ export function FileExplorer({
   // being refused so an unrelated grant does not re-fetch a healthy listing.
   const deniedDirRef = useRef<string | null>(null);
   deniedDirRef.current = errorKind === 'access-denied' ? accessDeniedDir : null;
+  const grantedDirRef = useRef(grantedDir);
+  grantedDirRef.current = grantedDir;
   const firstGrantNonceRef = useRef(grantNonce);
   useEffect(() => {
     if (grantNonce === firstGrantNonceRef.current) return;
     const denied = deniedDirRef.current;
-    if (denied !== null) browse(denied);
+    if (denied === null) return;
+    const granted = grantedDirRef.current;
+    browse(startFolderRefusedRef.current && granted ? granted : denied);
   }, [grantNonce, browse]);
 
   // Keep the open file visible when the listing changes or a reveal lands, so
@@ -298,7 +314,12 @@ export function FileExplorer({
             // Only re-browse on an actual grant. A cancelled dialog leaves the
             // folder exactly as refused as it was, so refetching costs a round
             // trip and a card flash that reads like the grant failed.
-            if (await onTrustFolder!(accessDeniedDir!)) browse(accessDeniedDir!);
+            // A refused start folder is left to the grant effect above, which
+            // lists the folder actually allowed.
+            const startFolder = startFolderRefusedRef.current;
+            if ((await onTrustFolder!(accessDeniedDir!)) && !startFolder) {
+              browse(accessDeniedDir!);
+            }
           }}
         />
       )}

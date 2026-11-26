@@ -3328,7 +3328,14 @@ nothing builds or tests it there yet.
   when the persisted roots say so (the default seed does), so restricted mode
   (`mdr --restrict`) holds (#239). With no folder asked for, the explorer
   browses the start folder; a refusal there names it (`dir` in the 403), and
-  the explorer offers the Allow-access card for it. Its output goes to
+  the explorer offers the Allow-access card for it. After any grant it lists
+  the folder just allowed (`grantedDir`), not the start folder, which stays
+  refused when the user picked another. Two consequences in restricted mode:
+  a Finder open outside the trusted folders lands on the Allow card, because
+  `/api/grant-access` only confirms paths inside existing roots (no local
+  caller may widen trust without the picker); and when the launch-time
+  reconcile swaps a stale server, the replacement drops the old server's
+  start folder, as any restart does. Its output goes to
   `~/Library/Logs/mdr/server-start.log`. A production server serves `/`
   itself, so the shell skips the dev-mode wait for a Vite client there. Once
   per launch it also runs `mdr --no-open` against a running production server

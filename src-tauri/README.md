@@ -130,7 +130,8 @@ rather than taken for a filename.
   `~/Library/Logs/mdr/server-start.log`. The server it starts runs from your
   home folder but does not trust it for that reason alone, so restricted mode
   (`mdr --restrict`) holds; it trusts the folders you have allowed, which by
-  default include your home.
+  default include your home. This needs an `mdr` at least as new as the app:
+  an older one ignores the app's request and trusts the home folder.
 - **Version**: the app has its own version number (About mdr), separate from
   the npm package's.
 
