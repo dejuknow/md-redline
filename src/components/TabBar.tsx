@@ -149,6 +149,11 @@ export function TabBar({
   const folderLabels = useMemo(() => tabDisambiguators(tabs.map((t) => t.filePath)), [tabs]);
   const [tabListOpen, setTabListOpen] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  // Whether the strip starts on the page's left edge. A desktop shell pads it
+  // (--window-inset-left) to clear its window controls in focus mode and on
+  // the collapsed rail, and then the first tab no longer stands on the page's
+  // corner, so the page keeps that corner rounded (#251).
+  const [atPageEdge, setAtPageEdge] = useState(true);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -158,6 +163,12 @@ export function TabBar({
 
     const maxScrollLeft = Math.max(viewport.scrollWidth - viewport.clientWidth, 0);
     setIsOverflowing(maxScrollLeft > 1);
+    // Read here because an inset change narrows the scrollport, which the
+    // resize observer below reports. A value that does not parse (no strip
+    // around the bar) counts as no inset.
+    const strip = viewport.closest('[data-doc-strip]');
+    const inset = strip ? parseFloat(getComputedStyle(strip).paddingLeft) : 0;
+    setAtPageEdge(!(inset > 0.5));
     setCanScrollLeft(viewport.scrollLeft > 1);
     setCanScrollRight(viewport.scrollLeft < maxScrollLeft - 1);
   }, []);
@@ -220,6 +231,11 @@ export function TabBar({
 
     resizeObserver?.observe(viewport);
     if (tabsContentRef.current) resizeObserver?.observe(tabsContentRef.current);
+    // The strip too: a window inset that comes or goes (focus mode, a zoom
+    // change) narrows its content box even when the tabs fit either way, and
+    // updateTabOverflow re-reads the inset from it.
+    const strip = viewport.closest('[data-doc-strip]');
+    if (strip) resizeObserver?.observe(strip);
 
     return () => {
       viewport.removeEventListener('scroll', handleScroll);
@@ -328,7 +344,9 @@ export function TabBar({
                   data-tab-in-review={inReview ? '' : undefined}
                   // The active first tab stands on the page's left edge, so the
                   // page squares that corner (index.css) and the two read as one.
-                  data-tab-flush={isActive && index === 0 && !isOverflowing ? '' : undefined}
+                  data-tab-flush={
+                    isActive && index === 0 && !isOverflowing && atPageEdge ? '' : undefined
+                  }
                 >
                   {/* The name always takes its medium-weight width (an invisible
                       copy drawn by ::after), so a tab is the same size active
