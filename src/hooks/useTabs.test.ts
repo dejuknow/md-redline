@@ -491,6 +491,188 @@ describe('useTabs save state', () => {
   });
 });
 
+// All saves share one queue, so a write to one file can wait behind a slow
+// write to another. These pin what the waiting write checks against (#263).
+describe('useTabs: a queued save and the file on disk', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const A = '/tmp/a.md';
+  const B = '/tmp/b.md';
+
+  // A stand-in for the server: GETs read `disk`, and a PUT is refused with a
+  // 409 when its expectedMtime is more than 1ms off the file's, the same rule
+  // the real one applies. Each write moves the mtime by 100 so the tolerance
+  // never blurs two writes together. A PUT to `slowPath` waits for `release`.
+  function stubDisk(slowPath: string) {
+    const disk = new Map<string, { content: string; mtime: number }>([
+      [A, { content: '# A\n', mtime: 1000 }],
+      [B, { content: '# B\n', mtime: 2000 }],
+    ]);
+    const puts: Array<{ path: string; content: string; expectedMtime?: number }> = [];
+    let release: () => void = () => {};
+    const slowGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          const body = JSON.parse(String(init.body)) as {
+            path: string;
+            content: string;
+            expectedMtime?: number;
+          };
+          puts.push(body);
+          if (body.path === slowPath) await slowGate;
+          const file = disk.get(body.path)!;
+          if (body.expectedMtime != null && Math.abs(file.mtime - body.expectedMtime) > 1) {
+            return json(409, {
+              error: 'File was modified externally. Reload to see the latest version.',
+              code: 'CONFLICT',
+              currentContent: file.content,
+              mtime: file.mtime,
+            });
+          }
+          const mtime = file.mtime + 100;
+          disk.set(body.path, { content: body.content, mtime });
+          return json(200, { success: true, path: body.path, mtime });
+        }
+        const path = decodeURIComponent(String(url).split('path=')[1] ?? '');
+        const file = disk.get(path)!;
+        return json(200, { path, content: file.content, mtime: file.mtime });
+      }),
+    );
+    return { disk, puts, release: () => release() };
+  }
+
+  async function openBoth(onSaveError?: (msg: string) => void) {
+    const hook = renderHook(() => useTabs({ onSaveError }));
+    await act(() => hook.result.current.openTab(B));
+    await act(() => hook.result.current.openTab(A));
+    return hook;
+  }
+
+  // What the file watcher does when an agent writes the file: the tab takes
+  // the new content and mtime as clean.
+  function agentWrites(
+    r: { current: ReturnType<typeof useTabs> },
+    disk: Map<string, { content: string; mtime: number }>,
+    content: string,
+  ) {
+    const mtime = disk.get(A)!.mtime + 100;
+    disk.set(A, { content, mtime });
+    act(() => r.current.updateTab(A, { rawMarkdown: content, mtime, dirty: false }));
+  }
+
+  it('turns a change on disk made while the save waited into a conflict', async () => {
+    const { disk, puts, release } = stubDisk(B);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    act(() => {
+      result.current.saveFileAt(B, '# B edited\n');
+      result.current.saveFileAt(A, '# A with my comment\n');
+    });
+    agentWrites(result, disk, '# A rewritten by the agent\n');
+
+    await act(async () => {
+      release();
+      await result.current.whenSaved();
+    });
+
+    // The save went out against the mtime its content was read at, not the
+    // one the tab picked up while it waited, so the agent's text survives.
+    expect(puts.find((p) => p.path === A)?.expectedMtime).toBe(1000);
+    expect(disk.get(A)!.content).toBe('# A rewritten by the agent\n');
+    expect(onSaveError).toHaveBeenCalledWith(
+      'File was modified externally. Reload to see the latest version.',
+    );
+    expect(result.current.getTabSnapshot(A)?.error).toBe(
+      'File was modified externally. Reload to see the latest version.',
+    );
+  });
+
+  it('still chains two queued saves to one file behind a slow save to another', async () => {
+    const { disk, puts, release } = stubDisk(B);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    act(() => {
+      result.current.saveFileAt(B, '# B edited\n');
+      result.current.saveFileAt(A, '# A one\n');
+      result.current.saveFileAt(A, '# A one two\n');
+    });
+
+    await act(async () => {
+      release();
+      await result.current.whenSaved();
+    });
+
+    // Both were queued at 1000, but the second builds on the first, so it
+    // checks against the mtime the first one wrote.
+    expect(puts.filter((p) => p.path === A).map((p) => p.expectedMtime)).toEqual([1000, 1100]);
+    expect(disk.get(A)!.content).toBe('# A one two\n');
+    expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it('lets a save made on top of the agent change through after the stale one conflicts', async () => {
+    const { disk, puts, release } = stubDisk(B);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    act(() => {
+      result.current.saveFileAt(B, '# B edited\n');
+      result.current.saveFileAt(A, '# A with my comment\n');
+    });
+    agentWrites(result, disk, '# A rewritten by the agent\n');
+    act(() => {
+      result.current.saveFileAt(A, '# A rewritten by the agent, plus a reply\n');
+    });
+
+    await act(async () => {
+      release();
+      await result.current.whenSaved();
+    });
+
+    expect(puts.filter((p) => p.path === A).map((p) => p.expectedMtime)).toEqual([1000, 1100]);
+    expect(onSaveError).toHaveBeenCalledTimes(1);
+    expect(disk.get(A)!.content).toBe('# A rewritten by the agent, plus a reply\n');
+    expect(result.current.getTabSnapshot(A)?.error).toBeNull();
+  });
+
+  it('follows a write made outside the queue that kept the tab content', async () => {
+    // The reply-timestamp backfill writes the tab's own content back to disk
+    // outside the queue. A save queued before it builds on that same content,
+    // so it checks against the mtime the backfill wrote.
+    const { disk, puts, release } = stubDisk(B);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    act(() => {
+      result.current.saveFileAt(B, '# B edited\n');
+      result.current.saveFileAt(A, '# A with my comment\n');
+    });
+    disk.set(A, { content: '# A\n', mtime: 1100 });
+    act(() => result.current.noteOwnWrite(A, 1000, 1100));
+
+    await act(async () => {
+      release();
+      await result.current.whenSaved();
+    });
+
+    expect(result.current.getTabSnapshot(A)?.mtime).toBe(1200);
+    expect(puts.find((p) => p.path === A)?.expectedMtime).toBe(1100);
+    expect(onSaveError).not.toHaveBeenCalled();
+  });
+});
+
 describe('useTabs: reopen closed tab', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
