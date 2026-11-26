@@ -62,6 +62,40 @@ describe('SettingsPanel', () => {
   });
 });
 
+describe('SettingsPanel: agent notifications (#244)', () => {
+  it('is hidden where the shell cannot deliver notifications', () => {
+    renderPanel();
+    expect(document.querySelector('[data-setting="agent-notifications"]')).toBeNull();
+  });
+
+  it('is off by default and switches on in the desktop app', async () => {
+    renderPanel({ canNotify: true });
+    const row = document.querySelector('[data-setting="agent-notifications"]') as HTMLElement;
+    const toggle = within(row).getByRole('switch');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    await waitFor(() => expect(fetchPreferences).toHaveBeenCalled());
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    await waitFor(() =>
+      expect(savePreferencesToDisk).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({ agentNotifications: true }),
+        }),
+      ),
+    );
+  });
+
+  it('says where to turn them back on when macOS has them off', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { agentNotifications: true } });
+    renderPanel({ canNotify: true, notificationPermission: 'denied' });
+    await waitFor(() =>
+      expect(document.querySelector('[data-notification-denied]')?.textContent).toContain(
+        'System Settings',
+      ),
+    );
+  });
+});
+
 describe('SettingsPanel: hidden HTML comments', () => {
   /** The collapsed summary row, which doubles as the expand button. */
   const summary = () =>

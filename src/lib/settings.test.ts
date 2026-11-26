@@ -112,6 +112,7 @@ describe('parseSettings', () => {
       keepLineBreaks: true,
       renderHtmlComments: false,
       hiddenComments: { shownTools: ['vale'], custom: ['TODO'], customEnabled: false },
+      agentNotifications: true,
     };
     expect(parseSettings(full)).toEqual(full);
   });
@@ -430,5 +431,14 @@ describe('enableResolve default', () => {
 
   it('still honours an explicit false', () => {
     expect(parseSettings({ enableResolve: false }).enableResolve).toBe(false);
+  });
+});
+
+describe('parseSettings agentNotifications', () => {
+  it('is off by default and only a real boolean turns it on', () => {
+    expect(DEFAULT_SETTINGS.agentNotifications).toBe(false);
+    expect(parseSettings({}).agentNotifications).toBe(false);
+    expect(parseSettings({ agentNotifications: true }).agentNotifications).toBe(true);
+    expect(parseSettings({ agentNotifications: 'yes' }).agentNotifications).toBe(false);
   });
 });

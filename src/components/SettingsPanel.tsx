@@ -20,6 +20,10 @@ interface Props {
   onOpenShortcuts?: () => void;
   /** Section to show when the dialog opens; without it the dialog keeps the last section shown. */
   initialSection?: SettingsSection;
+  /** The desktop shell can deliver agent notifications (#244); the setting shows only then. */
+  canNotify?: boolean;
+  /** What the shell last learned from the system: 'denied' shows how to turn them back on. */
+  notificationPermission?: 'unknown' | 'granted' | 'denied';
 }
 
 /**
@@ -55,6 +59,8 @@ export function SettingsPanel({
   onAuthorChange,
   onOpenShortcuts,
   initialSection,
+  canNotify = false,
+  notificationPermission = 'unknown',
 }: Props) {
   const {
     settings,
@@ -69,6 +75,7 @@ export function SettingsPanel({
     updateKeepLineBreaks,
     updateRenderHtmlComments,
     updateHiddenComments,
+    updateAgentNotifications,
     resetTemplates,
   } = useSettings();
   const { theme, setTheme } = useThemePersistence();
@@ -787,6 +794,41 @@ export function SettingsPanel({
                     </button>
                   </label>
                 </div>
+
+                {/* Agent notifications: desktop app only (#244) */}
+                {canNotify && (
+                  <div data-setting="agent-notifications">
+                    <label className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-content">Agent notifications</h3>
+                        <p className="text-xs text-content-muted mt-0.5">
+                          When mdr is in the background, notify me when an agent replies to a
+                          thread, asks a question or finishes a review.
+                        </p>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={settings.agentNotifications}
+                        onClick={() => updateAgentNotifications(!settings.agentNotifications)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                          settings.agentNotifications ? 'bg-primary' : 'bg-border'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                            settings.agentNotifications ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                          }`}
+                        />
+                      </button>
+                    </label>
+                    {settings.agentNotifications && notificationPermission === 'denied' && (
+                      <p className="text-xs text-content-secondary mt-1.5" data-notification-denied>
+                        macOS has notifications for mdr turned off. Turn them on in System Settings,
+                        under Notifications.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Prose Typeface */}
                 <div>

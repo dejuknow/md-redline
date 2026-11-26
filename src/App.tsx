@@ -117,7 +117,8 @@ import { headingChain } from './lib/heading-chain';
 import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 import { getEnabledHiddenCommentPrefixes } from './lib/settings';
-import { isDesktopApp } from './lib/desktop';
+import { desktopNotificationsSupported, isDesktopApp } from './lib/desktop';
+import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useDesktopShellHooks } from './hooks/useDesktopShellHooks';
 import { DISMISS_POPUPS_EVENT } from './hooks/useDismiss';
 import {
@@ -125,6 +126,9 @@ import {
   type ShellOverlayAction,
   type ShellOverlayState,
 } from './lib/shell-overlay';
+
+/** How long a notification click waits for its thread to load (#244). */
+const PENDING_THREAD_MS = 10_000;
 
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
@@ -157,7 +161,11 @@ declare global {
      *  file, folder or review session in place instead of navigating the page.
      *  Exactly one field, matching what the shell's build_open_script emits. */
     __mdrOpenTarget?: ((
-      target: { file: string } | { files: string[] } | { dir: string } | { review: string },
+      target:
+        | { file: string; commentId?: string }
+        | { files: string[] }
+        | { dir: string }
+        | { review: string },
     ) => void) & { acceptsFiles?: true };
     /** Set while the app is mounted; called by the desktop shell for its New
      *  Tab shortcut (Cmd+T, Ctrl+T). Does what the tab strip's "+" does: opens
@@ -185,6 +193,8 @@ const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 // (browsers keep these keys for their own tabs), so the palette shows their
 // keys only there.
 const desktopApp = isDesktopApp();
+// Whether this shell can deliver agent notifications (#244): the macOS app.
+const canNotify = desktopNotificationsSupported();
 const newTabShortcut = desktopApp ? `${modKey}+T` : undefined;
 const closeTabShortcut = desktopApp ? `${modKey}+W` : undefined;
 const reopenTabShortcut = desktopApp ? `${modKey}+Shift+T` : undefined;
@@ -1076,11 +1086,22 @@ export default function App() {
     shownSessions: shownReviewSessions,
     refresh: refreshReviewSessions,
     fetched: reviewSessionsFetched,
+    loaded: reviewSessionsLoaded,
   } = useReviewSession(
     activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
   );
   // An agent can add files to a review this tab is showing (#117): open them.
   useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
+  // System notifications for agent activity while the window is in the
+  // background (#244). Desktop app only, and only with the setting on.
+  const agentNotificationsOn = canNotify && settings.agentNotifications;
+  const { reportFileChange: reportAgentFileChange, permission: agentNotificationPermission } =
+    useAgentNotifications({
+      enabled: agentNotificationsOn,
+      readerName: author,
+      sessions: reviewSessions,
+      sessionsLoaded: reviewSessionsLoaded,
+    });
   // The review the docked row shows. Its files are what the tab strip marks,
   // so the marks match what the row's Send covers even with other reviews
   // open, and whether it needs the reader sets the row's emphasis.
@@ -2102,6 +2123,9 @@ export default function App() {
       opts: { priorLoaded: boolean; arrivingReplyIds?: ReadonlySet<string> },
     ): { content: string; arrivingReplyIds: ReadonlySet<string> } => {
       if (!opts.priorLoaded) return { content, arrivingReplyIds: NO_REPLY_IDS };
+      // Agent replies and questions notify from here, the one place all
+      // external content passes with a loaded prior to compare against.
+      reportAgentFileChange(path, priorContent, content);
       const arrivingReplyIds = opts.arrivingReplyIds ?? findArrivingReplies(priorContent, content);
       markRepliesUnread(path, arrivingReplyIds);
       return {
@@ -2109,7 +2133,7 @@ export default function App() {
         arrivingReplyIds,
       };
     },
-    [correctReplyTimestamps, findArrivingReplies, markRepliesUnread],
+    [correctReplyTimestamps, findArrivingReplies, markRepliesUnread, reportAgentFileChange],
   );
 
   // Reload fetches on its own inside useTabs, so it reaches the sequence above
@@ -2159,8 +2183,12 @@ export default function App() {
       if (!isActiveTab && !snapshot) return;
       // Once the event turns out to belong to a tab the reader has moved off,
       // it gets the background handler's rules: never overwrite unsaved local
-      // edits, in memory or (via the debounced save below) on disk.
-      if (!isActiveTab && snapshot?.dirty === true) return;
+      // edits, in memory or (via the debounced save below) on disk. An agent's
+      // reply still notifies (#244): detection only reads.
+      if (!isActiveTab && snapshot?.dirty === true) {
+        if (!snapshot.isLoading) reportAgentFileChange(path, snapshot.rawMarkdown, content);
+        return;
+      }
       // The active tab's live content lives in the ref, which is ahead of the
       // snapshot; a background tab has only its snapshot. Either way, content
       // that hasn't loaded yet is not a baseline to diff against.
@@ -2268,6 +2296,7 @@ export default function App() {
       applyExternalContent,
       closeViewerMenu,
       getTabSnapshot,
+      reportAgentFileChange,
       scheduleBackfillWrite,
       setDiffEnabled,
       showToast,
@@ -2280,7 +2309,29 @@ export default function App() {
   const onExternalChangeRef = useRef(onExternalChange);
   onExternalChangeRef.current = onExternalChange;
 
-  useFileWatcher({ filePath: activeFilePath, onExternalChange });
+  // With agent notifications on, the watchers stay connected while the window
+  // is hidden: that is when the agent's replies need noticing. The connection
+  // limit they otherwise close for is a browser's, across its tabs; the
+  // desktop app has one window.
+  // Reads the file after the watcher comes back from a dropped connection,
+  // which the server only answers with "connected".
+  const onWatcherReconnect = useCallback((path: string) => {
+    fetch(`/api/file?path=${encodeURIComponent(path)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { content?: string; mtime?: number } | null) => {
+        if (typeof data?.content !== 'string') return;
+        if (data.content !== rawMarkdownRef.current) {
+          onExternalChangeRef.current(data.content, data.mtime, path);
+        }
+      })
+      .catch(() => {});
+  }, []);
+  useFileWatcher({
+    filePath: activeFilePath,
+    onExternalChange,
+    onReconnect: onWatcherReconnect,
+    keepWhileHidden: agentNotificationsOn,
+  });
 
   // Watch background tabs for external changes so they stay fresh during handoff.
   // The active tab is handled by useFileWatcher above; this covers the rest.
@@ -2290,8 +2341,9 @@ export default function App() {
     .filter((p) => p && p !== activeFilePath)
     .join('\0');
 
+  const watchBackgroundTabs = pageVisible || agentNotificationsOn;
   useEffect(() => {
-    if (!pageVisible) return;
+    if (!watchBackgroundTabs) return;
     const paths = backgroundPathsKey ? backgroundPathsKey.split('\0') : [];
     if (paths.length === 0) return;
 
@@ -2301,35 +2353,63 @@ export default function App() {
     // to the same server don't exhaust the limit.
     const params = paths.map((p) => `path=${encodeURIComponent(p)}`).join('&');
     const es = new EventSource(`/api/watch?${params}`);
+    const applyChange = (content: string, path: string, mtime: number | undefined) => {
+      const snapshot = getTabSnapshot(path);
+      // Skip dirty background tabs. The user has unsaved local edits we'd
+      // otherwise overwrite (in memory AND on disk via the backfill write
+      // below). They should resolve the conflict by switching to the tab and
+      // reloading explicitly. An agent's reply still notifies (#244):
+      // detection only reads.
+      if (snapshot?.dirty === true) {
+        if (!snapshot.isLoading) reportAgentFileChange(path, snapshot.rawMarkdown, content);
+        return;
+      }
+      if (!snapshot) return;
+      // Same sequence the active-tab handler runs (stamp the arriving
+      // replies, mark them unread), minus the toast, since background tabs
+      // aren't visible. The background case is the one that matters most: a
+      // handoff answered on a tab the reader isn't looking at, where the
+      // unread mark is the only thing that survives until they switch to it.
+      const { content: nextContent } = applyExternalContent(
+        path,
+        snapshot.rawMarkdown,
+        content,
+        mtime,
+        { priorLoaded: !snapshot.isLoading },
+      );
+      updateTab(path, {
+        rawMarkdown: nextContent,
+        ...(mtime != null ? { mtime } : {}),
+      });
+      if (nextContent !== content) {
+        scheduleBackfillWrite(path, nextContent, mtime);
+      }
+    };
     es.addEventListener('change', (e) => {
       try {
         const { content, path, mtime } = JSON.parse(e.data);
-        const snapshot = getTabSnapshot(path);
-        // Skip dirty background tabs entirely. The user has unsaved local
-        // edits we'd otherwise overwrite (in memory AND on disk via the
-        // backfill write below). They should resolve the conflict by switching
-        // to the tab and reloading explicitly.
-        if (snapshot?.dirty === true) return;
-        if (!snapshot) return;
-        // Same sequence the active-tab handler runs (stamp the arriving
-        // replies, mark them unread), minus the toast, since background tabs
-        // aren't visible. The background case is the one that matters most: a
-        // handoff answered on a tab the reader isn't looking at, where the
-        // unread mark is the only thing that survives until they switch to it.
-        const { content: nextContent } = applyExternalContent(
-          path,
-          snapshot.rawMarkdown,
-          content,
-          mtime,
-          { priorLoaded: !snapshot.isLoading },
-        );
-        updateTab(path, {
-          rawMarkdown: nextContent,
-          ...(mtime != null ? { mtime } : {}),
-        });
-        if (nextContent !== content) {
-          scheduleBackfillWrite(path, nextContent, mtime);
-        }
+        applyChange(content, path, mtime);
+      } catch {
+        // ignore malformed events
+      }
+    });
+    // A dropped connection reconnects by itself, but the server only says
+    // "connected": a change made in the gap would never arrive. Each path
+    // that comes back after an error is read once.
+    let missed = new Set<string>();
+    es.onerror = () => {
+      missed = new Set(paths);
+    };
+    es.addEventListener('connected', (e) => {
+      try {
+        const { path } = JSON.parse(e.data) as { path?: string };
+        if (!path || !missed.delete(path)) return;
+        fetch(`/api/file?path=${encodeURIComponent(path)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data: { content?: string; mtime?: number } | null) => {
+            if (typeof data?.content === 'string') applyChange(data.content, path, data.mtime);
+          })
+          .catch(() => {});
       } catch {
         // ignore malformed events
       }
@@ -2340,7 +2420,8 @@ export default function App() {
     applyExternalContent,
     backgroundPathsKey,
     getTabSnapshot,
-    pageVisible,
+    reportAgentFileChange,
+    watchBackgroundTabs,
     scheduleBackfillWrite,
     updateTab,
   ]);
@@ -2545,6 +2626,25 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
+  // A thread to focus once its file is the active tab and parsed: a desktop
+  // notification click opens the file and names the thread (#244). Dropped
+  // after PENDING_THREAD_MS (a file that never loads, a comment since gone),
+  // so it can never fire later out of nowhere.
+  const pendingThreadRef = useRef<{ file: string; commentId: string; until: number } | null>(null);
+  const [pendingThreadToken, setPendingThreadToken] = useState(0);
+  useEffect(() => {
+    const pending = pendingThreadRef.current;
+    if (!pending) return;
+    if (Date.now() > pending.until) {
+      pendingThreadRef.current = null;
+      return;
+    }
+    if (activeFilePath !== pending.file) return;
+    if (!comments.some((c) => c.id === pending.commentId)) return;
+    pendingThreadRef.current = null;
+    requestCommentFocus(pending.commentId);
+  }, [pendingThreadToken, activeFilePath, comments, requestCommentFocus]);
+
   // The desktop shell's open entry point: it evals a call to this instead of
   // navigating, so an `mdr foo.md` while the app is open adds a tab in place,
   // with no reload and the open tabs kept. A file open mirrors the ?file boot
@@ -2557,6 +2657,15 @@ export default function App() {
         addRecentFile(target.file);
         const parent = getParentDir(target.file);
         if (parent) setExplorerDir(parent);
+        // A click on an agent notification names the thread too (#244).
+        if (target.commentId) {
+          pendingThreadRef.current = {
+            file: target.file,
+            commentId: target.commentId,
+            until: Date.now() + PENDING_THREAD_MS,
+          };
+          setPendingThreadToken((n) => n + 1);
+        }
       } else if ('files' in target) {
         // Files dropped on the desktop app's window, in the order dropped:
         // all open as tabs, the first one active (background opens never
@@ -4653,6 +4762,8 @@ export default function App() {
             onAuthorChange={setAuthor}
             onOpenShortcuts={() => setActiveModal('shortcuts')}
             initialSection={settingsSection}
+            canNotify={canNotify}
+            notificationPermission={agentNotificationPermission}
           />
           <KeyboardShortcutsPanel
             open={activeModal === 'shortcuts'}

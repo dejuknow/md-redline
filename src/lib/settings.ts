@@ -38,6 +38,12 @@ export interface AppSettings {
   renderHtmlComments: boolean;
   /** Which HTML comments stay hidden even with renderHtmlComments on. */
   hiddenComments: HiddenCommentSettings;
+  /**
+   * Desktop app only: a system notification when an agent replies, asks a
+   * question or finishes a review while the window is in the background
+   * (#244). Off by default; the browser never shows or reads it.
+   */
+  agentNotifications: boolean;
 }
 
 /**
@@ -337,6 +343,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   keepLineBreaks: false,
   renderHtmlComments: true,
   hiddenComments: DEFAULT_HIDDEN_COMMENTS,
+  agentNotifications: false,
 };
 
 /**
@@ -405,5 +412,9 @@ export function parseSettings(input: unknown): AppSettings {
         ? parsed.renderHtmlComments
         : DEFAULT_SETTINGS.renderHtmlComments,
     hiddenComments: storedHiddenCommentSettings(parsed) ?? DEFAULT_HIDDEN_COMMENTS,
+    agentNotifications:
+      typeof parsed.agentNotifications === 'boolean'
+        ? parsed.agentNotifications
+        : DEFAULT_SETTINGS.agentNotifications,
   };
 }
