@@ -4,6 +4,7 @@ import type { CommentFocusOrigin } from '../hooks/useComments';
 import { anchorSearchText, getEffectiveStatus } from '../types';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { ThreadCard } from './ThreadCard';
+import { useSurfaceCardEditor } from '../contexts/CardDraftsContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -116,7 +117,7 @@ export function CommentListSurface({
   const commentRefs = useRef(new Map<string, HTMLDivElement>());
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterMode>('all');
-  const [activeEditor, setActiveEditor] = useState<SidebarCommentEditorState>(null);
+  const [activeEditor, setActiveEditor] = useSurfaceCardEditor(requestedEditor, comments);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   // The comments the delete-all confirmation was opened for. If none of them
   // is still listed (the reader switched files by keyboard with the dialog
@@ -234,29 +235,6 @@ export function CommentListSurface({
     if (!matchesSearch(c, search)) setSearch('');
     if (widened) setFilter(widened);
   }, [activeCommentId, comments, filter, search, showStatus]);
-
-  useEffect(() => {
-    if (requestedEditor) {
-      setActiveEditor(requestedEditor);
-    }
-  }, [requestedEditor]);
-
-  useEffect(() => {
-    if (!activeEditor) return;
-
-    const comment = comments.find((candidate) => candidate.id === activeEditor.commentId);
-    if (!comment) {
-      setActiveEditor(null);
-      return;
-    }
-
-    if (
-      activeEditor.mode === 'reply-edit' &&
-      !comment.replies?.some((reply) => reply.id === activeEditor.replyId)
-    ) {
-      setActiveEditor(null);
-    }
-  }, [comments, activeEditor]);
 
   const openCommentEdit = (commentId: string) => {
     setActiveEditor({ mode: 'comment-edit', commentId, token: Date.now() });

@@ -11,6 +11,9 @@ import { useTabs } from './hooks/useTabs';
 import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
 import { useCommentDrafts } from './hooks/useCommentDrafts';
+import { useCardDrafts } from './hooks/useCardDrafts';
+import { CardDraftsContext } from './contexts/CardDraftsContext';
+import { CardDraftNotice } from './components/CardDraftNotice';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
 import { useUnreadReplies } from './hooks/useUnreadReplies';
@@ -2032,6 +2035,20 @@ export default function App() {
     }
   }, [activeFilePath, setDiffEnabled, setActiveCommentId, closeViewerMenu]);
 
+  // Unsent replies and edits on comment cards, per file (#213). After the
+  // effect above, so the card whose editor comes back is selected again
+  // after a tab switch has cleared the selection.
+  const {
+    api: cardDraftsApi,
+    setAside: setAsideCardDrafts,
+    discardSetAside: discardSetAsideCardDraft,
+  } = useCardDrafts({
+    file: firstLoadInProgress || (error !== null && !rawMarkdown) ? null : activeFilePath,
+    comments,
+    requestedEditor,
+    setActiveCommentId,
+  });
+
   // IDs of the replies present in newContent but not in oldContent. Kept
   // separate from the two things done with them (marking unread, stamping a
   // timestamp) so a caller that has already parsed both sides can pass its own
@@ -3005,10 +3022,14 @@ export default function App() {
 
       // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari). Not from a
       // text field, where a switch would throw away what is being typed,
-      // except the comment form's: its draft is set aside and handed back
-      // (#196). A draft handed back takes the keyboard, so without this the
-      // shortcut would stop for good at the first tab holding one.
-      const inCommentDraft = isInput && target.closest('[data-comment-form]') !== null;
+      // except the comment form's and a comment card's reply and edit fields:
+      // their drafts are set aside and handed back (#196, #213). A draft
+      // handed back takes the keyboard, so without this the shortcut would
+      // stop for good at the first tab holding one.
+      const inCommentDraft =
+        isInput &&
+        (target.closest('[data-comment-form]') !== null ||
+          target.closest('[data-card-editor]') !== null);
       if (mod && e.shiftKey && (!isInput || inCommentDraft) && activeModal !== 'commandPalette') {
         if (e.code === 'BracketLeft') {
           e.preventDefault();
@@ -3813,7 +3834,7 @@ export default function App() {
   // explorer before start-up has chosen its folder.
   const explorerDirKnown = startupTargetKnown || startupCapElapsed;
 
-  return (
+  const page = (
     <div data-app-root className="h-screen flex flex-col bg-frame">
       <div className="flex-1 min-h-0 flex p-2">
         <ReadingPositionCapture
@@ -4176,6 +4197,16 @@ export default function App() {
                       // A first load only: a reload keeps the document on
                       // screen, and a row appearing above it would shove it down.
                       isLoading={firstLoadInProgress}
+                    />
+                    <CardDraftNotice
+                      setAside={setAsideCardDrafts}
+                      onCopy={(text) =>
+                        void navigator.clipboard.writeText(text).then(
+                          () => showToast('Copied.', 'success'),
+                          () => showToast("Couldn't copy the draft.", 'error'),
+                        )
+                      }
+                      onDiscard={discardSetAsideCardDraft}
                     />
                     <DiffBar
                       diffEnabled={diffEnabled}
@@ -4687,4 +4718,7 @@ export default function App() {
       </div>
     </div>
   );
+
+  // Every comment card, wherever it is drawn, reads its drafts from here.
+  return <CardDraftsContext.Provider value={cardDraftsApi}>{page}</CardDraftsContext.Provider>;
 }

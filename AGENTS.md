@@ -90,6 +90,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
+- `src/hooks/useCardDrafts.ts`: unsent reply and edit drafts on comment cards, and each file's open card editor, kept per file across tab and view switches; `src/contexts/CardDraftsContext.tsx` hands them to the cards and their surfaces, and `src/components/CardDraftNotice.tsx` offers a draft whose card cannot take it back
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
 - `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the change count in the diff bar (`DiffBar`) and the strip's View options menu (`DocStrip`)
@@ -1448,10 +1449,10 @@ cannot show.
     can post on a surviving copy.
 
 The tab shortcut (`Cmd+Shift+[` / `]`) works from inside the comment form's
-field, the one text field it is not ignored in. A draft handed back takes the
-keyboard, so cycling would otherwise stop at the first tab holding one, and
-the draft is safe across the switch. Reply and edit fields on cards still
-ignore it, because their text is lost on a switch.
+field and a comment card's reply and edit fields (`data-card-editor`), the
+text fields it is not ignored in. A draft handed back takes the keyboard, so
+cycling would otherwise stop at the first tab holding one, and the draft is
+safe across the switch.
 
 Only a form with text in it is kept. An empty form or a pill just closes, as
 before. Cancel, Escape and posting discard the draft for good. The store trusts
@@ -1461,6 +1462,60 @@ since all three clear the selection and tell nobody else.
 Drafts live in memory. Closing a tab keeps its draft, so opening the file again
 brings it back, and a page reload drops them all. The Mermaid fullscreen view's
 own form is not covered.
+
+### Unsent replies and edits on comment cards
+
+A reply, or an edit to a comment or a reply, typed on a card and not sent
+survives leaving its document, the raw view, a density change and the drawer
+closing (#213). `useCardDrafts` (`src/hooks/useCardDrafts.ts`) keeps, per file,
+the open card editor (which comment, which mode, its token) and one draft per
+editor target: the text, the caret, and the text the editor opened on (`base`;
+empty for a new reply). `App` passes it the active file once loaded without an
+error, in either view, since the comments drawer shows cards in the raw view.
+The store reaches the cards through `CardDraftsContext`, and the surfaces read
+the file's editor from it through `useSurfaceCardEditor`, so the rail's two
+densities and the drawer share one editor per file instead of each keeping
+their own. Outside the app (no provider), a surface keeps its editor and a card
+its text, as before.
+
+- **Kept.** The card writes its field to the store on every change
+  (`writeDraft`) and the caret on every selection change. Text that is empty,
+  or only what the editor opened on, is not a draft and drops any kept one.
+  Typing does not re-render the app: drafts live in a ref, and the store
+  re-renders only when a draft appears or goes, or the editor changes.
+- **Handed back.** Coming back to the file, the same editor opens on the same
+  text and its card is selected again (the store runs after the tab-switch
+  effect that clears the selection). A card mounting with its editor already
+  open starts its field on the draft and puts the caret back. It takes the
+  keyboard as the comment form's handed-back draft does, but not from another
+  text field or a dialog, so the comment form wins when both come back, and it
+  retries for a few frames because the anchored rail keeps a card
+  `visibility: hidden` until it is placed. An editor with nothing typed closes
+  when its file is left, as an empty comment form does.
+- **Two cards.** Only one card editor is open at a time, as before, but
+  opening another card's editor no longer loses the first one's text: its
+  draft is kept and comes back when that editor is opened again.
+- **Done with.** Cancel, Escape, Save and Reply discard the draft for good.
+- **When the card cannot take it back.** A reply belongs to one comment and an
+  edit to one text, so a draft is never put anywhere else. `judgeCardTarget`
+  refuses a draft whose comment is gone (deleted, resolved away in remove mode,
+  the file rewritten), whose reply is gone, whose thread is resolved (every
+  card hides its editors there), or, for an edit, whose comment or reply text
+  is no longer the text it opened on (saving would overwrite someone else's
+  change). The editor does not show, and `CardDraftNotice`, a line at the top
+  of the page under `PageNotice`, says why and offers **Copy** and **Discard**
+  for the first such draft (and counts the rest). Nothing is dropped: if the
+  comment comes back (an undo, a Reopen, the text changing back), the draft
+  and its editor go back in by themselves. Opening that editor afresh instead
+  (Edit on a comment whose text changed) moves the old draft out of its way;
+  it stays offered in the notice.
+- **Not a change.** An agent replying to the comment, other comments coming
+  and going, or the prose changing around the anchor leave a reply draft
+  alone: unlike a new comment (above), a reply has no anchor to place, only a
+  comment id.
+- The popover's and the Mermaid thread panel's cards keep their own editor as
+  before, but their text goes through the same store, so reopening the field
+  brings it back.
 
 ### Right-clicking a selection
 
@@ -2880,8 +2935,8 @@ Keep them when restyling or refactoring:
     `Ctrl+Shift+Tab`) and `__mdrSelectTab(n)` (`Cmd+1` to `Cmd+8` pick that
     tab, `Cmd+9` the last; `Ctrl+` on Windows and Linux; past the last tab
     nothing happens). Both keep the page's `Cmd+Shift+[` / `]` rule: nothing
-    while typing in a text field other than the comment form's (whose draft is
-    handed back), and nothing while the Mermaid fullscreen view is open (its
+    while typing in a text field other than the comment form's or a comment
+    card's reply and edit fields (whose drafts are handed back), and nothing while the Mermaid fullscreen view is open (its
     composer keeps no draft, and the page's key does nothing there either), or
     for the tab already active. A confirm dialog makes them wait; any other
     overlay closes first, as for New Tab.
@@ -3111,7 +3166,7 @@ resolved card, in either mode) at the left, aligned to the card's content edge, 
 labelled "Delete thread" when the comment has replies and "Delete" when it has none. While
 the comment editor, a reply editor or the reply composer is open, every one of those steps
 aside (the first comment's Edit, the reply rows' actions, the anchor-repair pair, the reply
-field and the thread bar), because a click would switch editors and lose the draft. There
+field and the thread bar), so a click cannot switch editors under the draft. There
 is no footer Reply button in any state.
 
 Overlay surfaces (command palette, settings, file opener, keyboard shortcuts, confirm dialog)

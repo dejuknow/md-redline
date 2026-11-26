@@ -75,12 +75,12 @@ const HOOK_NAMES = [
 
 /**
  * Whether a tab switch now would throw away what is being typed: focus is in
- * a text field other than the comment form's, whose draft is set aside and
- * handed back on return (#196). The page's own Cmd+Shift+[ / ] keeps the same
- * rule.
+ * a text field other than the comment form's or a comment card's reply and
+ * edit fields, whose drafts are set aside and handed back on return (#196,
+ * #213). The page's own Cmd+Shift+[ / ] keeps the same rule.
  */
 export function typingOutsideCommentDraft(el: Element | null): boolean {
-  return isTextEntry(el) && el!.closest('[data-comment-form]') === null;
+  return isTextEntry(el) && el!.closest('[data-comment-form], [data-card-editor]') === null;
 }
 
 /** Whether `el` takes typed text: an input, a textarea or an editable element. */
