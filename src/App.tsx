@@ -2047,9 +2047,9 @@ export default function App() {
     file: firstLoadInProgress || (error !== null && !rawMarkdown) ? null : activeFilePath,
     comments,
     requestedEditor,
-    onEditorBack: (commentId) => {
+    onEditorBack: (commentId, reveal) => {
       setActiveCommentId(commentId);
-      if (!commentsSurfaceVisible) ensureCommentSurface(commentId);
+      if (reveal && !commentsSurfaceVisible) ensureCommentSurface(commentId);
     },
   });
 

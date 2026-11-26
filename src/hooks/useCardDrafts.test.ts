@@ -96,7 +96,7 @@ describe('useCardDrafts', () => {
       caret: [4, 4],
     });
     // Its card is selected again.
-    expect(view.onEditorBack).toHaveBeenLastCalledWith('a1');
+    expect(view.onEditorBack).toHaveBeenLastCalledWith('a1', true);
   });
 
   it('closes an editor with nothing typed when its file is left', () => {
@@ -171,9 +171,28 @@ describe('useCardDrafts', () => {
     ]);
 
     // An undo puts the comment back: so is its editor, and nothing is aside.
+    // Its card is selected again, without asking for a surface to open.
     view.rerender({ file: 'a.md', comments: A_COMMENTS });
     expect(view.result.current.api!.editor).toBe(editor);
     expect(view.result.current.setAside).toEqual([]);
+    expect(view.onEditorBack).toHaveBeenLastCalledWith('a1', false);
+  });
+
+  it('does not report an editor the reader opened as one coming back', () => {
+    const view = setup({ file: 'a.md', comments: A_COMMENTS });
+    act(() =>
+      view.result.current.api!.setEditor({ mode: 'reply-compose', commentId: 'a1', token: 1 }),
+    );
+    expect(view.onEditorBack).not.toHaveBeenCalled();
+  });
+
+  it('keeps reply edits apart even when ids contain the separator', () => {
+    const view = setup({ file: 'a.md', comments: A_COMMENTS });
+    const api = () => view.result.current.api!;
+    const first: CardEditorTarget = { mode: 'reply-edit', commentId: 'a:b', replyId: 'c' };
+    const second: CardEditorTarget = { mode: 'reply-edit', commentId: 'a', replyId: 'b:c' };
+    act(() => api().writeDraft(first, 'Original, edited', 'Original', [0, 0]));
+    expect(api().readDraft(second)).toBeNull();
   });
 
   it('sets aside an edit whose comment text changed under it', () => {

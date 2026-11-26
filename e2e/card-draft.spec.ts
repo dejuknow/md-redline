@@ -6,6 +6,7 @@ import {
   clickCardAction,
   getCard,
   openCommentsDrawer,
+  selectText,
   switchToListDensity,
 } from './helpers/comments';
 import { withMod } from './helpers/shortcuts';
@@ -268,6 +269,19 @@ test.describe('An unsent reply on a comment card', () => {
   });
 });
 
+test('Escape in a card reply leaves an open comment form and its draft alone', async ({ page }) => {
+  await openBothFiles(page);
+  // A new-comment draft on a selection, then a reply on a card.
+  await selectText(page, 'login form');
+  await page.locator('[data-comment-form]').getByRole('button', { name: 'Comment' }).click();
+  await page.getByPlaceholder('Add your comment...').fill('New comment draft');
+  await startReply(page, 'Second note', 'A reply to drop');
+
+  await replyField(page, 'Second note').press('Escape');
+  await expect(page.getByPlaceholder('Write a reply...')).toHaveCount(0);
+  await expect(page.getByPlaceholder('Add your comment...')).toHaveValue('New comment draft');
+});
+
 test.describe('An unsent edit on a comment card', () => {
   const editField = (page: Page, note: string) =>
     getCard(page, note).locator('textarea:not([placeholder])');
@@ -336,9 +350,11 @@ test.describe('An unsent edit on a comment card', () => {
     await page.getByRole('button', { name: 'Close comments drawer' }).click();
     await expect(drawer).toHaveCount(0);
 
+    // Still the raw view, where the page shows the source.
     await tab(page, 'card-draft-b.md').click();
-    await expect(headingB(page)).toBeVisible();
+    await expect(page.locator('.raw-view-table')).toContainText('Nothing to see here.');
     await tab(page, 'card-draft-a.md').click();
+    await expect(page.locator('.raw-view-table')).toContainText('Card Draft Doc');
     await expect(drawer.getByPlaceholder('Write a reply...')).toHaveValue('Written in the drawer', {
       timeout: 5000,
     });

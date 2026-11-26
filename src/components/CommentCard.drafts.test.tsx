@@ -243,4 +243,31 @@ describe('CommentCard with the card draft store (#213)', () => {
     // Nothing reopens this editor after a switch, so the tab shortcut stays off in it.
     expect(replyField().hasAttribute('data-card-editor')).toBe(false);
   });
+
+  it('Cmd+Enter on a reply too long to send keeps the field and its draft', async () => {
+    fetchPreferences.mockResolvedValue({
+      settings: { enableResolve: false, commentMaxLength: 10 },
+    });
+    setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Write a reply...' }));
+    // Wait for the setting to land: the counter shows past 80% of the limit.
+    fireEvent.change(replyField(), { target: { value: 'much longer than ten' } });
+    await screen.findByText('20/10');
+    fireEvent.keyDown(replyField(), { key: 'Enter', metaKey: true });
+    expect(onReply).not.toHaveBeenCalledWith('c1', 'much longer than ten');
+    expect(replyField().value).toBe('much longer than ten');
+    expect(held.store?.readDraft({ mode: 'reply-compose', commentId: 'c1' })?.text).toBe(
+      'much longer than ten',
+    );
+  });
+
+  it('an auto-repeated Escape does not cancel the editor', () => {
+    setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Write a reply...' }));
+    fireEvent.change(replyField(), { target: { value: 'held key' } });
+    fireEvent.keyDown(replyField(), { key: 'Escape', repeat: true });
+    expect(replyField().value).toBe('held key');
+    fireEvent.keyDown(replyField(), { key: 'Escape' });
+    expect(screen.queryByPlaceholderText('Write a reply...')).toBeNull();
+  });
 });

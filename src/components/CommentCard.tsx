@@ -340,6 +340,9 @@ export const CommentCard = memo(function CommentCard({
 
   const handleSave = () => {
     const trimmed = editText.trim();
+    // Too long to save (Cmd+Enter; the button is off): keep the field and its
+    // draft rather than close on text that went nowhere.
+    if (trimmed.length > COMMENT_MAX_LENGTH) return;
     if (trimmed && trimmed !== comment.text && trimmed.length <= COMMENT_MAX_LENGTH) {
       onEdit(comment.id, trimmed);
     }
@@ -361,6 +364,7 @@ export const CommentCard = memo(function CommentCard({
 
   const handleReplySubmit = () => {
     const trimmed = replyText.trim();
+    if (trimmed.length > COMMENT_MAX_LENGTH) return;
     if (trimmed && trimmed.length <= COMMENT_MAX_LENGTH) {
       onReply(comment.id, trimmed);
       setReplyText('');
@@ -421,6 +425,7 @@ export const CommentCard = memo(function CommentCard({
 
   const handleReplyEditSave = () => {
     const trimmed = editReplyText.trim();
+    if (trimmed.length > COMMENT_MAX_LENGTH) return;
     if (
       editingReplyId &&
       editingReply &&
@@ -620,7 +625,7 @@ export const CommentCard = memo(function CommentCard({
                   e.preventDefault();
                   handleSave();
                 }
-                if (e.key === 'Escape') {
+                if (e.key === 'Escape' && !e.repeat) {
                   handleCancel();
                 }
               }}
@@ -789,7 +794,7 @@ export const CommentCard = memo(function CommentCard({
                           e.preventDefault();
                           handleReplyEditSave();
                         }
-                        if (e.key === 'Escape') {
+                        if (e.key === 'Escape' && !e.repeat) {
                           handleReplyEditCancel();
                         }
                       }}
@@ -940,7 +945,10 @@ export const CommentCard = memo(function CommentCard({
                 e.preventDefault();
                 handleReplySubmit();
               }
-              if (e.key === 'Escape') {
+              // Not an auto-repeat: a held Escape that closed something else
+              // must not cancel an editor that took focus after it, as with
+              // the comment form.
+              if (e.key === 'Escape' && !e.repeat) {
                 handleReplyCancel();
               }
             }}

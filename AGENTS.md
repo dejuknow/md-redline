@@ -1470,7 +1470,8 @@ survives leaving its document, the raw view, a density change and the drawer
 closing (#213). `useCardDrafts` (`src/hooks/useCardDrafts.ts`) keeps, per file,
 the open card editor (which comment, which mode, its token) and one draft per
 editor target: the text, the caret, and the text the editor opened on (`base`;
-empty for a new reply). `App` passes it the active file once loaded without an
+empty for a new reply). A target's key encodes its ids as a list, since ids
+are free text and a joined string could name two replies at once. `App` passes it the active file once loaded without an
 error, in either view, since the comments drawer shows cards in the raw view.
 The store reaches the cards through `CardDraftsContext`, and the surfaces read
 the file's editor from it through `useSurfaceCardEditor`, so the rail's two
@@ -1501,6 +1502,11 @@ its text, as before.
   opening another card's editor no longer loses the first one's text: its
   draft is kept and comes back when that editor is opened again.
 - **Done with.** Cancel, Escape, Save and Reply discard the draft for good.
+  Cmd+Enter on text over the length limit keeps the field and its draft (the
+  button is off then), and an auto-repeated Escape does nothing, so a held key
+  that closed something else does not cancel an editor that took focus after
+  it. The card's Escape is its own: `useSelection` does not also clear the
+  selection, which would close an open comment form and its draft.
 - **When the card cannot take it back.** A reply belongs to one comment and an
   edit to one text, so a draft is never put anywhere else. `judgeCardTarget`
   refuses a draft whose comment is gone (deleted, resolved away in remove mode,
@@ -1511,7 +1517,8 @@ its text, as before.
   of the page under `PageNotice`, says why and offers **Copy** and **Discard**
   for the first such draft (and counts the rest). Nothing is dropped: if the
   comment comes back (an undo, a Reopen, the text changing back), the draft
-  and its editor go back in by themselves. Opening that editor afresh instead
+  and its editor go back in by themselves, and its card is selected (a compact
+  card hides a reply's editor), without opening a surface. Opening that editor afresh instead
   (Edit on a comment whose text changed) moves the old draft out of its way;
   it stays offered in the notice.
 - **Not a change.** An agent replying to the comment, other comments coming
@@ -1614,7 +1621,8 @@ the draft once focus comes back to it. One Escape per layer: the first closes
 the overlay or menu, a second clears the selection.
 
 Two more rules on that keyup. An Escape that goes down in the comment form's
-field is the form's: it acts on keydown (clearing an untouched template, or
+field, or in a comment card's reply or edit field (`data-card-editor`, #213),
+is that field's: it acts on keydown (clearing an untouched template, or
 cancelling), and the keyup clearing too closed the form a template had just
 been cleared from. And the release clears nothing if a selection was handed
 in from outside while the key was down (`useSelection` counts

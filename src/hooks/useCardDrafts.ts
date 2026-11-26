@@ -36,9 +36,13 @@ export interface SetAsideCardDraft {
 }
 
 export function cardDraftKey(target: CardEditorTarget): string {
-  return target.mode === 'reply-edit'
-    ? `reply-edit:${target.commentId}:${target.replyId}`
-    : `${target.mode}:${target.commentId}`;
+  // Encoded as a list, not joined: ids are free text, so `a:b` + `c` and
+  // `a` + `b:c` must not name the same reply.
+  return JSON.stringify(
+    target.mode === 'reply-edit'
+      ? [target.mode, target.commentId, target.replyId]
+      : [target.mode, target.commentId],
+  );
 }
 
 export function editorTarget(editor: NonNullable<SidebarCommentEditorState>): CardEditorTarget {
@@ -98,10 +102,12 @@ interface Params {
   /** An editor asked for from outside the cards (the context menu's Edit and Reply). */
   requestedEditor: SidebarCommentEditorState;
   /**
-   * The file came back with a card editor that can show again: select its
-   * card, and make sure a surface is there to show it.
+   * A kept card editor can show again: select its card (a compact card hides
+   * a reply's editor). `reveal` when its file came back, so a surface should
+   * be there to show it; not when its comment did (a reopen, an undo, the
+   * text changing back) while the reader is in the file.
    */
-  onEditorBack: (commentId: string) => void;
+  onEditorBack: (commentId: string, reveal: boolean) => void;
 }
 
 /**
@@ -139,6 +145,9 @@ export function useCardDrafts({ file, comments, requestedEditor, onEditorBack }:
   // focused it. An editor shown again later (the file coming back, its
   // thread reopened) is not fresh, and takes focus only if nothing has it.
   const freshTokenRef = useRef<number | null>(null);
+  // setEditor ran since the last render: the editor showing is the reader's
+  // own open, not one coming back.
+  const justSetRef = useRef(false);
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const detachedSeqRef = useRef(0);
@@ -160,6 +169,7 @@ export function useCardDrafts({ file, comments, requestedEditor, onEditorBack }:
       if (files.editor === editor) return;
       files.editor = editor;
       freshTokenRef.current = editor?.token ?? null;
+      justSetRef.current = true;
       // Opening an editor whose kept draft cannot go back in (the text it
       // edits changed) starts it afresh. The draft stays offered, apart from
       // it, or it would keep the editor from showing at all.
@@ -207,7 +217,7 @@ export function useCardDrafts({ file, comments, requestedEditor, onEditorBack }:
       if (back) {
         const target = editorTarget(back);
         const draft = filesRef.current.get(file)?.drafts.get(cardDraftKey(target));
-        if (judgeCardTarget(target, draft, comments) === null) onEditorBack(back.commentId);
+        if (judgeCardTarget(target, draft, comments) === null) onEditorBack(back.commentId, true);
       }
     }
     // Only on a change of file; comments are read as they are then.
@@ -305,6 +315,19 @@ export function useCardDrafts({ file, comments, requestedEditor, onEditorBack }:
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, comments, version]);
+
+  // The same file, and its kept editor shows again without the reader opening
+  // it: its comment came back.
+  const prevShownRef = useRef({ file, editor });
+  useEffect(() => {
+    const prev = prevShownRef.current;
+    prevShownRef.current = { file, editor };
+    const opened = justSetRef.current;
+    justSetRef.current = false;
+    if (prev.file !== file || opened) return;
+    if (prev.editor === null && editor !== null) onEditorBack(editor.commentId, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file, editor]);
 
   const api = useMemo<CardDraftsApi | null>(
     () =>
