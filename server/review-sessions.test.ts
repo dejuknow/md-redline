@@ -1864,6 +1864,18 @@ describe('agent rounds (#244)', () => {
     expect(rounds(session.id)).toBe(2);
   });
 
+  it('a rolled-back post does not finish a round', () => {
+    const session = store.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    store.recordAgentComments(session.id, 2);
+    store.unrecordAgentComments(session.id, 2);
+    void store.waitForSessionDone(session.id);
+    expect(rounds(session.id)).toBe(0);
+  });
+
   it('rounds and a pending return survive a restore', () => {
     const user = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
     store.beginWaitPark(user.id);

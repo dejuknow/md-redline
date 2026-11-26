@@ -269,6 +269,11 @@ pub mod mac {
         center.getNotificationSettingsWithCompletionHandler(&block);
     }
 
+    /// Switching the setting back on is a request to be asked again.
+    pub fn allow_asking_again() {
+        ASKED.store(false, Ordering::SeqCst);
+    }
+
     fn request_permission() {
         let center = UNUserNotificationCenter::currentNotificationCenter();
         let block = RcBlock::new(|granted: objc2::runtime::Bool, err: *mut NSError| {

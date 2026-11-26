@@ -1206,6 +1206,8 @@ export class ReviewSessionStore {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     s.agentCommentCount = Math.max(0, s.agentCommentCount - count);
+    // A rolled-back post is not one a finished round can stand on (#244).
+    s.agentPostSeq = Math.max(s.agentPostSeqAtRound, s.agentPostSeq - 1);
     this.onChange?.();
   }
 

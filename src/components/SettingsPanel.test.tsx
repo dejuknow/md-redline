@@ -85,6 +85,19 @@ describe('SettingsPanel: agent notifications (#244)', () => {
     );
   });
 
+  it('says the prompt is waiting while macOS has not been answered', async () => {
+    fetchPreferences.mockResolvedValue({ settings: { agentNotifications: true } });
+    renderPanel({ canNotify: true, notificationPermission: 'unknown' });
+    await waitFor(() =>
+      expect(document.querySelector('[data-notification-unanswered]')).not.toBeNull(),
+    );
+    cleanup();
+    // Nothing before the shell has said anything.
+    renderPanel({ canNotify: true, notificationPermission: null });
+    await waitFor(() => expect(fetchPreferences).toHaveBeenCalled());
+    expect(document.querySelector('[data-notification-unanswered]')).toBeNull();
+  });
+
   it('says where to turn them back on when macOS has them off', async () => {
     fetchPreferences.mockResolvedValue({ settings: { agentNotifications: true } });
     renderPanel({ canNotify: true, notificationPermission: 'denied' });

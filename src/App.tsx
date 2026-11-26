@@ -2315,17 +2315,24 @@ export default function App() {
   // desktop app has one window.
   // Reads the file after the watcher comes back from a dropped connection,
   // which the server only answers with "connected".
-  const onWatcherReconnect = useCallback((path: string) => {
-    fetch(`/api/file?path=${encodeURIComponent(path)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { content?: string; mtime?: number } | null) => {
-        if (typeof data?.content !== 'string') return;
-        if (data.content !== rawMarkdownRef.current) {
+  // A tab with unsaved edits keeps them: only an agent's reply is noted.
+  const onWatcherReconnect = useCallback(
+    (path: string) => {
+      fetch(`/api/file?path=${encodeURIComponent(path)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { content?: string; mtime?: number } | null) => {
+          if (typeof data?.content !== 'string') return;
+          if (data.content === rawMarkdownRef.current) return;
+          if (getTabSnapshot(path)?.dirty === true) {
+            reportAgentFileChange(path, rawMarkdownRef.current, data.content);
+            return;
+          }
           onExternalChangeRef.current(data.content, data.mtime, path);
-        }
-      })
-      .catch(() => {});
-  }, []);
+        })
+        .catch(() => {});
+    },
+    [getTabSnapshot, reportAgentFileChange],
+  );
   useFileWatcher({
     filePath: activeFilePath,
     onExternalChange,

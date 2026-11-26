@@ -1594,13 +1594,6 @@ export function registerReviewSessionRoutes(
       return c.json({ error: '/agent-wait only applies to agent-origin sessions' }, 409);
     }
 
-    let doneWaiter: Promise<void>;
-    try {
-      doneWaiter = reviewSessions.waitForSessionDone(id);
-    } catch {
-      return c.json({ error: 'Session not found' }, 404);
-    }
-
     const timeoutParam = c.req.query('timeout');
     // Validate the parsed timeout: NaN (e.g. 'abc') or non-positive values
     // would have fallen into the unbounded-wait branch, leaving the caller
@@ -1616,6 +1609,15 @@ export function registerReviewSessionRoutes(
         );
       }
       timeoutMs = parsedSec * 1000;
+    }
+
+    // After the timeout check: starting the wait counts a finished round
+    // (#244), and a rejected request never started one.
+    let doneWaiter: Promise<void>;
+    try {
+      doneWaiter = reviewSessions.waitForSessionDone(id);
+    } catch {
+      return c.json({ error: 'Session not found' }, 404);
     }
 
     // Build the post-wait response. setSessionDone (user clicked Done) →

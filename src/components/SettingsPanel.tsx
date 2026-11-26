@@ -22,8 +22,9 @@ interface Props {
   initialSection?: SettingsSection;
   /** The desktop shell can deliver agent notifications (#244); the setting shows only then. */
   canNotify?: boolean;
-  /** What the shell last learned from the system: 'denied' shows how to turn them back on. */
-  notificationPermission?: 'unknown' | 'granted' | 'denied';
+  /** What the shell last learned from the system (null before it has said): 'denied' or an
+   *  unanswered prompt ('unknown') shows how to turn them on. */
+  notificationPermission?: 'unknown' | 'granted' | 'denied' | null;
 }
 
 /**
@@ -60,7 +61,7 @@ export function SettingsPanel({
   onOpenShortcuts,
   initialSection,
   canNotify = false,
-  notificationPermission = 'unknown',
+  notificationPermission = null,
 }: Props) {
   const {
     settings,
@@ -825,6 +826,15 @@ export function SettingsPanel({
                       <p className="text-xs text-content-secondary mt-1.5" data-notification-denied>
                         macOS has notifications for mdr turned off. Turn them on in System Settings,
                         under Notifications.
+                      </p>
+                    )}
+                    {settings.agentNotifications && notificationPermission === 'unknown' && (
+                      <p
+                        className="text-xs text-content-secondary mt-1.5"
+                        data-notification-unanswered
+                      >
+                        macOS is waiting for you to allow notifications from mdr. Allow them in its
+                        prompt, or in System Settings, under Notifications.
                       </p>
                     )}
                   </div>

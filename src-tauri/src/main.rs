@@ -282,7 +282,11 @@ fn start_notification_poll(app: AppHandle) {
             std::thread::sleep(TAKE_EVERY);
             let enabled = take_notifications(&app);
             if enabled.is_some() {
+                let was = enabled_seen;
                 enabled_seen = enabled == Some(true);
+                if enabled_seen && !was {
+                    notify::mac::allow_asking_again();
+                }
             }
             if enabled_seen
                 && last_permission_check.is_none_or(|at| at.elapsed() >= PERMISSION_EVERY)

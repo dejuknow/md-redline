@@ -13,8 +13,10 @@ import {
 } from '../lib/agent-notifications';
 import type { MdComment } from '../types';
 
-/** What the shell last learned from the system about notifications for mdr. */
-export type AgentNotificationPermission = 'unknown' | 'granted' | 'denied';
+/** What the shell last learned from the system about notifications for mdr;
+ *  null until a shell has said. 'unknown' means the prompt has not been
+ *  answered. */
+export type AgentNotificationPermission = 'unknown' | 'granted' | 'denied' | null;
 
 /** What the shell passes on each take. */
 export interface ShellTakeArgs {
@@ -40,8 +42,8 @@ function localKeyStorage(): KeyStorage {
   }
 }
 
-/** The reader is looking at the page: it is shown and has focus. */
-function readerPresent(): boolean {
+/** The page thinks the reader is looking at it: shown and focused. */
+function pageFocused(): boolean {
   return document.visibilityState === 'visible' && document.hasFocus();
 }
 
@@ -74,7 +76,13 @@ export function useAgentNotifications({ enabled, readerName, sessions, sessionsL
   const readerNameRef = useRef(readerName);
   readerNameRef.current = readerName;
   const roundStateRef = useRef(INITIAL_ROUND_STATE);
-  const [permission, setPermission] = useState<AgentNotificationPermission>('unknown');
+  const [permission, setPermission] = useState<AgentNotificationPermission>(null);
+  // Whether the shell's window had focus at its last take. The page's own
+  // focus can lag a switch away by a moment, so an event arriving then is
+  // queued whenever either says the reader is away; the take, which has the
+  // shell's current answer, drops it if they are back.
+  const shellFocusedRef = useRef<boolean | null>(null);
+  const readerPresent = useCallback(() => pageFocused() && shellFocusedRef.current !== false, []);
 
   // Rounds are tracked with the setting off too, so turning it on never
   // reports rounds that finished before. The baseline is the first real list:
@@ -86,7 +94,7 @@ export function useAgentNotifications({ enabled, readerName, sessions, sessionsL
     if (enabledRef.current && events.length > 0) {
       queueRef.current!.add(events, Date.now(), readerPresent());
     }
-  }, [sessions, sessionsLoaded]);
+  }, [sessions, sessionsLoaded, readerPresent]);
 
   /**
    * An external change a tab took in. `priorContent` must be content the tab
@@ -116,7 +124,7 @@ export function useAgentNotifications({ enabled, readerName, sessions, sessionsL
       const events = detectThreadEvents(path, oldComments, newComments, readerNameRef.current);
       if (events.length > 0) queueRef.current!.add(events, Date.now(), readerPresent());
     },
-    [],
+    [readerPresent],
   );
 
   useEffect(() => {
@@ -127,10 +135,11 @@ export function useAgentNotifications({ enabled, readerName, sessions, sessionsL
     window.__mdrTakeAgentNotifications = (shell) => {
       const p = shell?.permission;
       if (p === 'granted' || p === 'denied' || p === 'unknown') setPermission(p);
+      if (typeof shell?.focused === 'boolean') shellFocusedRef.current = shell.focused;
       if (!enabledRef.current) return { enabled: false, items: [] };
       // The shell knows whether its window has focus; the page alone can only
       // guess (a hidden page can still report focus for a moment).
-      const present = typeof shell?.focused === 'boolean' ? shell.focused : readerPresent();
+      const present = typeof shell?.focused === 'boolean' ? shell.focused : pageFocused();
       const events = queueRef.current!.take(Date.now(), present);
       return { enabled: true, items: buildNotifications(events) };
     };
