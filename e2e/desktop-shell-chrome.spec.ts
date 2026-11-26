@@ -25,12 +25,14 @@ function shellChromeScript(zoom: number): string {
   return match[1].replaceAll('__MDR_ZOOM__', String(zoom));
 }
 
-// The lights' center, fixed in window points (traffic_light_position), in CSS
-// px at `zoom`. The rows cannot rise above the window's top edge, which caps
-// how high their center goes: 8px of padding minus the 8px the offset may
-// take back, plus half of a 34px row.
+// The lights' center and the page's gutter stay fixed in window points while
+// the page zooms, so in CSS px they shrink as the zoom grows. The top rows
+// (34px tall) center on the lights wherever the top gutter allows; zoomed in,
+// the gutter wins and the lights sit in the rows' upper half.
 const LIGHTS_CENTER_PT = 31.25;
-const expectedCenter = (zoom: number) => Math.max(LIGHTS_CENTER_PT / zoom, 17);
+const GUTTER_PT = 10;
+const gutter = (zoom: number) => GUTTER_PT / zoom;
+const expectedCenter = (zoom: number) => Math.max(gutter(zoom), LIGHTS_CENTER_PT / zoom - 17) + 17;
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(FIXTURE, TEST_DOC_BASELINE);
@@ -63,12 +65,18 @@ async function centerY(page: Page, selector: string): Promise<number> {
 
 test.describe('Desktop shell chrome: traffic lights and the top rows', () => {
   for (const zoom of [0.8, 1, 1.25, 1.5, 2]) {
-    test(`at ${zoom * 100}% the top rows stay centered on the lights`, async ({ page }) => {
+    test(`at ${zoom * 100}% the top rows center on the lights as far as the gutter allows`, async ({
+      page,
+    }) => {
       await openAsMacApp(page, zoom);
       const expected = expectedCenter(zoom);
 
-      // Sidebar open: its top row sits under the lights.
+      // Sidebar open: its top row sits under the lights, and the panel keeps
+      // the same on-screen gutter to the window's left edge at every zoom.
       await expect(page.locator('[data-sidebar-panel]')).toBeVisible();
+      const panel = await page.locator('[data-sidebar-panel]').boundingBox();
+      expect(panel!.x).toBeCloseTo(gutter(zoom), 0);
+      expect(panel!.y).toBeGreaterThanOrEqual(gutter(zoom) - 0.5);
       expect(await centerY(page, '[data-sidebar-top]')).toBeCloseTo(expected, 0);
       expect(await centerY(page, '[data-doc-strip]')).toBeCloseTo(expected, 0);
 

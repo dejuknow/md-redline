@@ -461,6 +461,38 @@ test.describe('Review band and window chrome', () => {
     await expect(top.getByRole('button', { name: 'Outline' })).toBeVisible();
   });
 
+  test('the Explorer and Outline labels never wrap under their icons, and come back when there is room', async ({
+    page,
+  }) => {
+    await openFixture(page);
+    const top = page.locator('[data-sidebar-top]');
+    // sr-only keeps a 1px box, which Playwright counts as visible.
+    const labelWidth = () =>
+      top.getByText('Explorer', { exact: true }).evaluate((el) => el.getBoundingClientRect().width);
+    const switchHeights = () =>
+      top.evaluate((el) =>
+        [
+          ...el.querySelectorAll('button[title="File explorer"], button[title="Document outline"]'),
+        ].map((b) => Math.round(b.getBoundingClientRect().height)),
+      );
+
+    // Room for the labels: shown, each on one line beside its icon.
+    await expect.poll(labelWidth).toBeGreaterThan(20);
+    for (const h of await switchHeights()) expect(h).toBeLessThanOrEqual(30);
+
+    // An inset that leaves too little room: icons only.
+    await top.evaluate((el) =>
+      (el as HTMLElement).style.setProperty('--window-inset-left', '72px'),
+    );
+    await expect.poll(labelWidth).toBeLessThan(2);
+    for (const h of await switchHeights()) expect(h).toBeLessThanOrEqual(30);
+
+    // The inset goes away: the labels come back.
+    await top.evaluate((el) => (el as HTMLElement).style.removeProperty('--window-inset-left'));
+    await expect.poll(labelWidth).toBeGreaterThan(20);
+    for (const h of await switchHeights()) expect(h).toBeLessThanOrEqual(30);
+  });
+
   test('shell inset shifts the strip in every sidebar state', async ({ page }) => {
     await openFixture(page);
     const firstChildOffset = () =>
