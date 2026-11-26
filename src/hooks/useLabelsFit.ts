@@ -64,13 +64,21 @@ export function useLabelsFit(
 
   // Watches the content box: a window inset that comes or goes changes the
   // row's padding, not its outer size. A newly mounted row starts labeled
-  // and is measured afresh.
+  // and is measured afresh, and so does a row once the web fonts load, since
+  // a width remembered under a fallback font can keep the labels hidden.
   useLayoutEffect(() => {
     if (!row || typeof ResizeObserver === 'undefined') return;
     setFits(true);
+    let live = true;
+    document.fonts?.ready.then(() => {
+      if (live) setFits(true);
+    });
     const observer = new ResizeObserver(() => check());
     observer.observe(row);
-    return () => observer.disconnect();
+    return () => {
+      live = false;
+      observer.disconnect();
+    };
   }, [row, check]);
 
   return [fits, setRow];

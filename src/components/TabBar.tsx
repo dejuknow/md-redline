@@ -163,14 +163,17 @@ export function TabBar({
 
     const maxScrollLeft = Math.max(viewport.scrollWidth - viewport.clientWidth, 0);
     setIsOverflowing(maxScrollLeft > 1);
-    // Read here because an inset change narrows the scrollport, which the
-    // resize observer below reports. A value that does not parse (no strip
-    // around the bar) counts as no inset.
-    const strip = viewport.closest('[data-doc-strip]');
-    const inset = strip ? parseFloat(getComputedStyle(strip).paddingLeft) : 0;
-    setAtPageEdge(!(inset > 0.5));
     setCanScrollLeft(viewport.scrollLeft > 1);
     setCanScrollRight(viewport.scrollLeft < maxScrollLeft - 1);
+  }, []);
+
+  // The inset only changes with a resize, which the observer below reports,
+  // so this stays off the scroll path. A value that does not parse (no strip
+  // around the bar) counts as no inset.
+  const updatePageEdge = useCallback(() => {
+    const strip = tabsViewportRef.current?.closest('[data-doc-strip]');
+    const inset = strip ? parseFloat(getComputedStyle(strip).paddingLeft) : 0;
+    setAtPageEdge(!(inset > 0.5));
   }, []);
 
   // Bring the active tab into view. The open-file button sits after the
@@ -203,6 +206,7 @@ export function TabBar({
     if (!viewport) return;
 
     updateTabOverflow();
+    updatePageEdge();
 
     const handleScroll = () => updateTabOverflow();
     viewport.addEventListener('scroll', handleScroll, { passive: true });
@@ -226,6 +230,7 @@ export function TabBar({
               viewportWidthRef.current = width;
             }
             updateTabOverflow();
+            updatePageEdge();
           })
         : null;
 
@@ -233,7 +238,7 @@ export function TabBar({
     if (tabsContentRef.current) resizeObserver?.observe(tabsContentRef.current);
     // The strip too: a window inset that comes or goes (focus mode, a zoom
     // change) narrows its content box even when the tabs fit either way, and
-    // updateTabOverflow re-reads the inset from it.
+    // updatePageEdge re-reads the inset from it.
     const strip = viewport.closest('[data-doc-strip]');
     if (strip) resizeObserver?.observe(strip);
 
@@ -248,7 +253,7 @@ export function TabBar({
     // effect aligns unconditionally, so every background tab open would pull
     // the strip off whatever the user is reading. Both halves are pinned by
     // TabBar.test.tsx.
-  }, [tabs.length, scrollActiveTabIntoView, updateTabOverflow]);
+  }, [tabs.length, scrollActiveTabIntoView, updateTabOverflow, updatePageEdge]);
 
   useEffect(() => {
     if (!activeFilePath) return;

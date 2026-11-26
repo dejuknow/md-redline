@@ -187,7 +187,7 @@ const SHELL_CHROME_SCRIPT: &str = r#"(function () {
     // Sidebar collapsed: the rail's icons drop below the lights (rail top at
     // the top gutter, plus its own 5px), and the tab strip (48px past the
     // gutter: the 40px rail and its 8px gap) clears them.
-    on + '[data-sidebar-rail] { --window-inset-top: calc(var(--mdr-lights-b) - var(--mdr-gutter-top) - 5px); }',
+    on + '[data-sidebar-rail] { --window-inset-top: max(0px, calc(var(--mdr-lights-b) - var(--mdr-gutter-top) - 5px)); }',
     on + '[data-app-root]:has([data-sidebar-rail]) [data-doc-strip] { --window-inset-left: max(0px, calc(var(--mdr-lights-r) - var(--mdr-gutter) - 48px)); }',
     // No sidebar (focus mode): the tab strip starts at the gutter.
     on + '[data-app-root]:not(:has([data-sidebar-rail], [data-sidebar-panel])) [data-doc-strip] { --window-inset-left: calc(var(--mdr-lights-r) - var(--mdr-gutter)); }'
