@@ -8,6 +8,12 @@ import { withMod } from './helpers/shortcuts';
 import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
 import { setRailDensity } from './helpers/strip';
 
+/** A click on the bare window frame under the page: outside the prose and any form. */
+async function clickFrame(page: Page) {
+  const { width, height } = page.viewportSize()!;
+  await page.mouse.click(width / 2, height - 3);
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
 const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
@@ -261,11 +267,8 @@ test.describe('Quick comment mode', () => {
     await selectText(page, 'valid credentials');
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
 
-    // Click on an area outside the form and outside the prose (the status bar's path).
-    // The logo is pointer-events-none and sits over the sidebar panel header, so
-    // force the click past the actionability check (the app dismisses on the
-    // document-level mousedown regardless of the exact target).
-    await page.locator('[data-status-path]').click({ force: true });
+    // Click on an area outside the form and outside the prose: the window frame.
+    await clickFrame(page);
 
     // Form should be dismissed
     await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
@@ -281,8 +284,8 @@ test.describe('Quick comment mode', () => {
 
     await textarea.fill('Important feedback');
 
-    // Click outside (see note above: force past the pointer-events-none logo).
-    await page.locator('[data-status-path]').click({ force: true });
+    // Click outside, on the window frame.
+    await clickFrame(page);
 
     // Form should still be visible since it has text
     await expect(textarea).toBeVisible();

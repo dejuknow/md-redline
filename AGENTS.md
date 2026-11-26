@@ -76,7 +76,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/RawView.tsx`: raw markdown view with syntax highlighting and diff overlay
 - `src/components/RenderedDiffView.tsx`: rendered prose view of the diff overlay
 - `src/components/ReviewBand.tsx`: the review row as a band across the top of the document panel, mounted only while a review is shown
-- `src/components/StatusBar.tsx`: the bottom line on the frame: the active file's path, notices, Exit focus, and the Commands and Shortcuts hints
+- `src/components/PageNotice.tsx`: the thin line at the top of the page card for a load error, lost access with its Allow button, or a slow load; renders nothing otherwise
 - `src/components/CommentsButton.tsx`: the comments split button in the tab strip: the rail toggle plus a menu with Anchored/List, prev/next and the bulk actions
 - `src/components/ReviewBanner.tsx`: review session rows (send batch, finish, cancel, end review); `layout="header"` is the review band's one-row form
 - `src/components/ReviewRow.tsx`: the shared review row shape (`SessionRow`), the agent row and the pending-question chip
@@ -888,7 +888,13 @@ medium-weight width (an invisible `::after` copy), and no tab keeps room for its
 close button, which appears on hover (or keyboard focus) over the name's end on
 a patch of the tab's own fill that fades into the text. A tab with marks (comment
 badge, resolved mark, error dot) instead hides them on hover and shows the close
-button in their place. The active tab's top lines up with the sidebar's. The strip is
+button in their place. The active tab's top lines up with the sidebar's.
+A tab's `title` is the file's full path, the only place the path shows. When two
+open files share a name, each tab shows a muted folder label after it
+(`[data-tab-folder]`, from `tabDisambiguators` in `path-utils.ts`): the nearest
+parent folder, or as many folders as it takes to tell them apart
+(`one/docs`, `two/docs`), VS Code style. The "Show all open tabs" list shows the
+same labels. The strip is
 not inside an `overflow-clip` ancestor (only the page card below it clips),
 which is what lets the "Show all open tabs" menu (`tab-list-menu`) hang below it
 unclipped.
@@ -915,7 +921,9 @@ so the tabs keep the width. In order:
   document."), since the menu closes and takes the copy item's checkmark with it;
 - a hairline, then the comments split button (`CommentsButton.tsx`, see
   Comments rail);
-- Hand off (`HandOffButton`), last, unless the active file is in a shown user review, whose own Send delivers its comments (`reviewOwnsSending`; the ⌘K Hand off command uses the same gate). An agent's review has no send of its own, so Hand off stays beside it. Its other-files picker leaves out files a shown user review owns.
+- Hand off (`HandOffButton`), unless the active file is in a shown user review, whose own Send delivers its comments (`reviewOwnsSending`; the ⌘K Hand off command uses the same gate). An agent's review has no send of its own, so Hand off stays beside it. Its other-files picker leaves out files a shown user review owns;
+- in focus mode, **Exit focus** (`data-focus-chip`, see Focus mode), last. It
+  sits outside `panel-toolbar`, so it shows with no file open too.
 
 Under 600px of strip width (`useElementNarrowerThan`), the rendered/raw choice
 folds into the same menu too, and its button reads **View** with a chevron; the
@@ -977,32 +985,36 @@ spare, so it never flip-flops; another review taking a folded row is tried wide
 again. The slot's `min-width` is set to the row's least width. Unmeasured (no
 layout) counts as wide.
 
-### Status bar
+### Page notices
 
-`StatusBar.tsx` (`[data-status-bar]`) is a 28px line on the frame under both
-panels:
+There is no status bar. What the page cannot say for itself goes in
+`PageNotice.tsx` (`[data-page-notices]`), a 32px line at the top of the page
+card, above the diff bar, rendered only when it has something to say:
 
-- the active file's full path (`[data-status-path]`, home shortened to `~`),
-  truncating with the full path in its `title`;
-- load errors, "Loading..." and the lost-access notice with its compact Allow
-  button (`toolbar-allow-access`), in `[data-status-notices]`, each text
-  truncating with its full text in `title`. The lost-access pair shows exactly
-  when `errorKind === 'access-denied' && !accessRequestShown`;
-- on the right: in focus mode an **Exit focus** button (`data-focus-chip`, title
-  "Exit focus mode", with the `⌘.` hint); the **Commands** hint
-  (`aria-label="Command palette"`, `⌘K` or `Ctrl+K`), which calls App's
-  `openCommandPalette()`, the same function the `Cmd+K` shortcut runs, so it
-  reads the selection for "Copy selection as markdown" first, and carries
-  `data-preserve-selection` so the click's mouseup does not drop a painted
-  selection; and the **Shortcuts** hint (`aria-label="Keyboard shortcuts"`),
-  which opens the shortcuts panel like `?`.
+- load errors, in `text-danger`, truncating with the full text in `title`;
+- the lost-access notice with its compact Allow button
+  (`toolbar-allow-access`), shown exactly when
+  `errorKind === 'access-denied' && !accessRequestShown`;
+- "Loading...", only for a file's first load (`firstLoadInProgress`; a reload
+  keeps the document up, and a row appearing above it would shove it down) and
+  only once it has run `PAGE_LOADING_DELAY_MS` (300ms), so a normal load never
+  flashes it.
+
+The `role="status"` wrapper stays mounted, empty, so screen readers announce a
+notice when it appears.
+
+The bar's other jobs moved: the file path to the tab's tooltip (and the folder
+label on same-named tabs, see Tab strip), Exit focus to the tab strip's right
+end, the Commands hint to the sidebar (see Left sidebar), and Shortcuts to the
+command palette, `?` and the foot of the Settings dialog's section list
+(`settings-open-shortcuts`).
 
 ### Folder permission requests
 
 Opening a file outside the allowed roots is a consent moment, not a failure, and
 `AccessRequest.tsx` is the only place that says so. The document area renders it
 over the sheet (`variant="page"`), the explorer renders the quieter
-`variant="panel"` when a browse is refused, and the status bar stays out of it
+`variant="panel"` when a browse is refused, and the page notice stays out of it
 whenever the card is up. Three surfaces shouting the same absolute path in
 `text-danger` was the state this replaced; if a fourth surface ever needs to
 report a refused folder, give it a variant here rather than its own copy.
@@ -1024,7 +1036,7 @@ Two conditions gate it, and they are not the same one:
   The `!rawMarkdown` term is load-bearing: `reloadFile` keeps the loaded content
   on failure, so a directory that rotates out from under an open file 403s a tab
   the user is still reading. The card must not cover a document it cannot give
-  back. Those tabs keep their content and the status bar reports the refusal with
+  back. Those tabs keep their content and the page notice reports the refusal with
   its own compact Allow button, so exactly one surface ever owns the ask.
 - `accessDeniedDir` may be null (`?file=~`, a Windows drive-relative path, both
   of which `getParentDir` answers with `''`). Null names no folder but still
@@ -1576,7 +1588,7 @@ Two details are load-bearing:
 The palette entry is called `Copy selection as markdown`, spelling out its
 subject because nothing sits under the cursor there. Like the menu, it resolves
 the markdown when the palette opens (`paletteSelectionMarkdown`, read by
-`openCommandPalette()`, behind both Cmd+K and the status bar's Commands hint, before the palette
+`openCommandPalette()`, behind both Cmd+K and the sidebar's Commands hint, before the palette
 focuses its input) and copies that text, so it
 covers a committed selection and a pending touch or pen one alike (#163).
 Reading at run time failed both ways: focusing the palette's input takes the
@@ -2658,16 +2670,19 @@ conflict still 409s; Reload discards the open edit and loads the disk content.
 ### Left sidebar (full height)
 
 The sidebar owns the window's full left edge, top to bottom; the main column
-(the document panel: its tab strip, then the page, with the review band docked at its bottom while a review is shown) starts to its right; the status bar runs under both. Two states:
+(the document panel: its tab strip, then the page, with the review band docked at its bottom while a review is shown) starts to its right. Two states:
 
 - **Expanded panel** (`[data-sidebar-panel]`, resizable): the Explorer/Outline
   view tabs and close X share the 34px top row (`[data-sidebar-top]`, the tab
-  strip's height, so the two rows share a center line; no logo), then the panel content, and the settings gear pinned in a bottom row, with the author name button
-  (`AuthorButton`, click to edit in place) to the right of the gear.
+  strip's height, so the two rows share a center line; no logo), then the panel content, and the settings gear pinned in a bottom row, then the
+  Commands hint (`data-palette-hint`, `aria-label="Command palette"`, a `⌘K` or
+  `Ctrl+K` key cap, carrying `data-preserve-selection` so the click keeps a
+  painted selection for "Copy selection as markdown"), with the author name
+  button (`AuthorButton`, click to edit in place) at the row's right end.
 - **Collapsed icon rail** (`[data-sidebar-rail]`, 40px): the open panel
   folded, item for item, with no logo: Show Explorer and Show Outline icon
   buttons (the first centered on the 34px row the tabs and the open panel's
-  switch share), spacer, settings gear at the bottom. Clicking an icon expands
+  switch share), spacer, a Command palette icon, settings gear at the bottom. Clicking an icon expands
   the panel to that view. The app logo appears only on the empty page.
 
 There is no explorer toggle in the tab strip; `Cmd+B` still toggles
@@ -2717,7 +2732,7 @@ Sidebar view (`Cmd+Shift+O`) showing heading structure for quick navigation.
 `Cmd+.` toggles focus mode: the file explorer and the comments rail both hide
 (their prior visibility is snapshotted first), leaving just the document. An
 **Exit focus** button (`data-focus-chip`, title "Exit focus mode") appears at the
-right end of the status bar; click it, or press `Cmd+.` again, to exit and
+right end of the tab strip; click it, or press `Cmd+.` again, to exit and
 restore the panes to their snapshotted state, whatever mix they were in. The density strip and section breadcrumb both stay available in focus
 mode. Toggling
 the explorer or the rail individually while focus mode is active (`Cmd+B`,
@@ -2738,11 +2753,10 @@ with no Exit focus button present to explain why or restore them. Toggle the exp
 The desktop shell (a separate private shell around this app) styles the window
 chrome from outside, so these hooks are a contract. Keep them when restyling:
 
-- `data-app-root`: the root element that holds the frame background; its first
-  child is the padded row of panels, its last the status bar.
+- `data-app-root`: the root element that holds the frame background; its only
+  child is the padded row of panels.
 - `data-review-band`: the review row docked at the bottom of the page card, present only
   while a review is shown (see Review band above).
-- `data-status-bar`: the bottom line on the frame (see Status bar above).
 - `--window-inset-top`: a CSS variable a desktop shell sets when its window
   controls sit over the collapsed rail's top; the rail's top padding adds it,
   pushing its icons below the controls. (There is no `data-sidebar-logo` any
@@ -2898,7 +2912,7 @@ theme it sets no sheet shadow (`--theme-sheet-shadow: none`).
 Every theme also defines `--theme-frame`, the window frame the inset panels sit on, which
 Tailwind exposes as `bg-frame` (`--color-frame`). `[data-app-root]` paints it and pads it by
 8px (`bg-frame p-2`), and the sidebar and the page (`[data-doc-page-surface]`) sit on it
-as rounded panels, with the tab strip and the status bar on the frame itself. It is a step darker than the panels in light themes (default light
+as rounded panels, with the tab strip on the frame itself. It is a step darker than the panels in light themes (default light
 `#ebebee`) and a step darker than the canvas in dark ones (default dark `#141416`). A new
 theme must set it: `server/theme-contrast.test.ts` (`inset frame`) checks every theme.
 
@@ -2963,7 +2977,7 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 
 ### Command palette
 
-`Cmd+K`, or the status bar's Commands hint, opens the palette; both run App's
+`Cmd+K`, or the sidebar's Commands hint, opens the palette; both run App's
 `openCommandPalette()`. Commands include: navigation (next/prev comment, find),
 tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),

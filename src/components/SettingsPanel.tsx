@@ -13,6 +13,8 @@ interface Props {
   onClose: () => void;
   author: string;
   onAuthorChange: (name: string) => void;
+  /** Swaps this dialog for the keyboard shortcuts panel. */
+  onOpenShortcuts?: () => void;
 }
 
 /**
@@ -41,7 +43,7 @@ function PrefixWords({ words }: { words: string[] }) {
   );
 }
 
-export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) {
+export function SettingsPanel({ open, onClose, author, onAuthorChange, onOpenShortcuts }: Props) {
   const {
     settings,
     updateTemplates,
@@ -349,7 +351,7 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
 
         <div className="flex h-[580px]">
           {/* Sidebar navigation */}
-          <div className="w-40 border-r border-border bg-surface-secondary shrink-0 py-2">
+          <div className="w-40 border-r border-border bg-surface-secondary shrink-0 py-2 flex flex-col">
             {sections.map((s) => (
               <button
                 key={s.key}
@@ -364,6 +366,23 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange }: Props) 
                 {s.label}
               </button>
             ))}
+            {onOpenShortcuts && (
+              <button
+                type="button"
+                onClick={onOpenShortcuts}
+                data-testid="settings-open-shortcuts"
+                title="Keyboard shortcuts (?)"
+                className="mt-auto w-full text-left px-4 py-2 flex items-center gap-2 text-xs text-content-muted hover:bg-tint hover:text-content transition-colors"
+              >
+                <kbd
+                  aria-hidden="true"
+                  className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-secondary"
+                >
+                  ?
+                </kbd>
+                Shortcuts
+              </button>
+            )}
           </div>
 
           {/* Content area */}

@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { getPathBasename } from '../lib/path-utils';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { getPathBasename, tabDisambiguators } from '../lib/path-utils';
 
 interface Tab {
   filePath: string;
@@ -143,6 +143,9 @@ export function TabBar({
   // identity and the resize observer below survives tab switches.
   const activeFilePathRef = useRef(activeFilePath);
   activeFilePathRef.current = activeFilePath;
+  // Two open files with the same name each show the folder that tells them
+  // apart; the full path stays in the tooltip.
+  const folderLabels = useMemo(() => tabDisambiguators(tabs.map((t) => t.filePath)), [tabs]);
   const [tabListOpen, setTabListOpen] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -352,6 +355,14 @@ export function TabBar({
                   >
                     <span className="truncate">{fileName}</span>
                   </span>
+                  {folderLabels.has(tab.filePath) && (
+                    <span
+                      data-tab-folder
+                      className="min-w-0 max-w-[96px] -ml-0.5 truncate text-[12px] font-normal text-content-muted"
+                    >
+                      {folderLabels.get(tab.filePath)}
+                    </span>
+                  )}
                   {hasMarks ? (
                     // A tab with marks swaps them for its close button on
                     // hover, so the x never lands on half a badge.
@@ -501,6 +512,11 @@ export function TabBar({
                           className={`text-xs truncate flex-1 ${isActive ? 'text-content font-medium' : 'text-content'}`}
                         >
                           {fileName}
+                          {folderLabels.has(tab.filePath) && (
+                            <span className="ml-1.5 font-normal text-content-muted">
+                              {folderLabels.get(tab.filePath)}
+                            </span>
+                          )}
                         </span>
                         {count > 0 && (
                           <span

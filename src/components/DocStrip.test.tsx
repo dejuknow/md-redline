@@ -228,4 +228,16 @@ describe('DocStrip', () => {
     expect(within(menu).getByTitle('Show diff')).toBeTruthy();
     expect(within(menu).getByTestId('copy-button')).toBeTruthy();
   });
+
+  it('focus mode: "Exit focus" sits at the end of the strip, with no file open too', () => {
+    const onExitFocus = vi.fn();
+    const { props, rerender } = renderStrip({ onExitFocus });
+    expect(document.querySelector('[data-focus-chip]')).toBeNull();
+    rerender(<DocStrip {...props} focusMode hasDocument={false} />);
+    const exit = screen.getByRole('button', { name: 'Exit focus' });
+    expect(exit.hasAttribute('data-focus-chip')).toBe(true);
+    expect(exit.getAttribute('title')).toBe('Exit focus mode');
+    fireEvent.click(exit);
+    expect(onExitFocus).toHaveBeenCalledTimes(1);
+  });
 });

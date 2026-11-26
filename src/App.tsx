@@ -36,7 +36,7 @@ import { CommentPopover } from './components/CommentPopover';
 import { computeAnsweredCommentIds, effectiveSentCommentIds } from './lib/answered-comments';
 import { CommentForm } from './components/CommentForm';
 import { ReviewBand } from './components/ReviewBand';
-import { StatusBar } from './components/StatusBar';
+import { PageNotice } from './components/PageNotice';
 import { CommentsButton } from './components/CommentsButton';
 import { TabBar } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
@@ -98,7 +98,7 @@ import {
   rangeFromPaintedSelection,
   resolveSelectionMarkdown,
 } from './lib/copy-as-markdown';
-import { getParentDir, tildeShortenPath } from './lib/path-utils';
+import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { useOpenAddedReviewFiles } from './hooks/useOpenAddedReviewFiles';
 import { ReviewBanner, type ShownReview } from './components/ReviewBanner';
@@ -107,7 +107,7 @@ import { loadActiveTab, pickActiveTab, saveActiveTab } from './lib/active-tab';
 import { selectAgentAsks } from './lib/agent-asks';
 import { CommentsRail } from './components/CommentsRail';
 import { IconButton } from './components/IconButton';
-import { getPrimaryModifierLabel } from './lib/platform';
+import { getPrimaryModifierLabel, isApplePlatform } from './lib/platform';
 import { CommentsDrawer } from './components/CommentsDrawer';
 import { useMarginLayout } from './hooks/useMarginLayout';
 import { DensityStrip } from './components/DensityStrip';
@@ -3434,9 +3434,11 @@ export default function App() {
   // explorer before start-up has chosen its folder.
   const explorerDirKnown = startupTargetKnown || startupCapElapsed;
 
+  const paletteKeys = isApplePlatform() ? '⌘K' : 'Ctrl+K';
+
   return (
     <div data-app-root className="h-screen flex flex-col bg-frame">
-      <div className="flex-1 min-h-0 flex p-2 pb-0">
+      <div className="flex-1 min-h-0 flex p-2">
         <ReadingPositionCapture
           path={activeFilePath}
           view={readingView}
@@ -3598,6 +3600,21 @@ export default function App() {
                         />
                       </svg>
                     </IconButton>
+                    <button
+                      type="button"
+                      // Keeps a painted selection through the click, so the
+                      // palette can offer to copy it the same as the shortcut does.
+                      data-preserve-selection
+                      data-palette-hint
+                      onClick={openCommandPalette}
+                      aria-label="Command palette"
+                      title={`Command palette (${paletteKeys})`}
+                      className="ml-0.5 h-6 shrink-0 px-1 flex items-center rounded text-content-muted hover:bg-tint hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
+                      <kbd className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-secondary">
+                        {paletteKeys}
+                      </kbd>
+                    </button>
                     <div className="ml-auto min-w-0">
                       <AuthorButton author={author} onAuthorChange={setAuthor} />
                     </div>
@@ -3653,6 +3670,22 @@ export default function App() {
                   <div className="flex-1" />
                   <IconButton
                     size="md"
+                    data-preserve-selection
+                    data-palette-hint
+                    onClick={openCommandPalette}
+                    aria-label="Command palette"
+                    title={`Command palette (${paletteKeys})`}
+                  >
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z"
+                      />
+                    </svg>
+                  </IconButton>
+                  <IconButton
+                    size="md"
                     onClick={() => setActiveModal('settings')}
                     title={`Settings (${getPrimaryModifierLabel()}+,)`}
                   >
@@ -3705,6 +3738,8 @@ export default function App() {
               >
                 <DocStrip
                   hasDocument={!!activeFilePath}
+                  focusMode={focusMode}
+                  onExitFocus={exitFocusMode}
                   tabs={
                     <TabBar
                       tabs={tabs}
@@ -3787,6 +3822,15 @@ export default function App() {
                       review row's menus can hang past the card's edges. The
                       radius follows the card's (squared when a tab is flush). */}
                   <div className="flex-1 min-h-0 flex flex-col overflow-clip rounded-[inherit]">
+                    <PageNotice
+                      error={error}
+                      errorKind={errorKind}
+                      accessRequestShown={showAccessRequest}
+                      onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
+                      // A first load only: a reload keeps the document on
+                      // screen, and a row appearing above it would shove it down.
+                      isLoading={firstLoadInProgress}
+                    />
                     <DiffBar
                       diffEnabled={diffEnabled}
                       referenceLabel={
@@ -4259,6 +4303,7 @@ export default function App() {
             onClose={() => setActiveModal(null)}
             author={author}
             onAuthorChange={setAuthor}
+            onOpenShortcuts={() => setActiveModal('shortcuts')}
           />
           <KeyboardShortcutsPanel
             open={activeModal === 'shortcuts'}
@@ -4291,21 +4336,6 @@ export default function App() {
           />
         </div>
       </div>
-      <StatusBar
-        filePath={
-          activeFilePath ? tildeShortenPath(activeFilePath, homeDir) || activeFilePath : null
-        }
-        error={error}
-        errorKind={errorKind}
-        accessRequestShown={showAccessRequest}
-        onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
-        isLoading={isLoading}
-        focusMode={focusMode}
-        onExitFocus={exitFocusMode}
-        onOpenPalette={openCommandPalette}
-        onOpenShortcuts={() => setActiveModal('shortcuts')}
-        hidden={!startupLaidOut}
-      />
     </div>
   );
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getParentDir, getPathBasename, middleTruncatePath, tildeShortenPath } from './path-utils';
+import {
+  getParentDir,
+  getPathBasename,
+  middleTruncatePath,
+  tabDisambiguators,
+  tildeShortenPath,
+} from './path-utils';
 
 describe('middleTruncatePath', () => {
   it('leaves a path that already fits alone', () => {
@@ -149,5 +155,46 @@ describe('getParentDir', () => {
 
   it('ignores a trailing separator', () => {
     expect(getParentDir('/Users/dennis/docs/')).toBe('/Users/dennis');
+  });
+});
+
+describe('tabDisambiguators', () => {
+  it('leaves unique names alone', () => {
+    expect(tabDisambiguators(['/a/spec.md', '/b/plan.md']).size).toBe(0);
+  });
+
+  it('labels colliding names with their nearest folder', () => {
+    const labels = tabDisambiguators(['/p/docs/README.md', '/p/README.md', '/p/plan.md']);
+    expect(labels.get('/p/docs/README.md')).toBe('docs');
+    expect(labels.get('/p/README.md')).toBe('p');
+    expect(labels.has('/p/plan.md')).toBe(false);
+  });
+
+  it('walks up until the folders differ', () => {
+    const labels = tabDisambiguators(['/one/docs/README.md', '/two/docs/README.md']);
+    expect(labels.get('/one/docs/README.md')).toBe('one/docs');
+    expect(labels.get('/two/docs/README.md')).toBe('two/docs');
+  });
+
+  it('only walks as far as each path needs', () => {
+    const labels = tabDisambiguators([
+      '/one/docs/README.md',
+      '/two/docs/README.md',
+      '/three/specs/README.md',
+    ]);
+    expect(labels.get('/three/specs/README.md')).toBe('specs');
+    expect(labels.get('/one/docs/README.md')).toBe('one/docs');
+  });
+
+  it('shows every folder a shorter path has', () => {
+    const labels = tabDisambiguators(['/a/README.md', '/x/a/README.md']);
+    expect(labels.get('/a/README.md')).toBe('a');
+    expect(labels.get('/x/a/README.md')).toBe('x/a');
+  });
+
+  it('reads Windows separators', () => {
+    const labels = tabDisambiguators(['C:\\one\\spec.md', 'C:\\two\\spec.md']);
+    expect(labels.get('C:\\one\\spec.md')).toBe('one');
+    expect(labels.get('C:\\two\\spec.md')).toBe('two');
   });
 });

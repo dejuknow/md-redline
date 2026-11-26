@@ -307,3 +307,25 @@ describe('TabBar: the strip look', () => {
     expect(within(tab('two.md')).getByText('2')).toBeTruthy();
   });
 });
+
+describe('TabBar folder labels', () => {
+  it('labels same-named tabs with the folder that tells them apart', () => {
+    const tabs = [
+      { filePath: '/p/docs/README.md', error: null },
+      { filePath: '/p/README.md', error: null },
+      { filePath: '/p/plan.md', error: null },
+    ];
+    const { container } = render(
+      <TabBar
+        tabs={tabs}
+        activeFilePath="/p/plan.md"
+        commentCounts={new Map()}
+        onSwitchTab={() => {}}
+        onCloseTab={() => {}}
+        onOpenFile={() => {}}
+      />,
+    );
+    const labels = [...container.querySelectorAll('[data-tab-folder]')].map((el) => el.textContent);
+    expect(labels).toEqual(['docs', 'p']);
+  });
+});

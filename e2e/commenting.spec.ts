@@ -8,6 +8,12 @@ import { resetTestAppState } from './helpers/test-state';
 import { withMod } from './helpers/shortcuts';
 import { openCommentOptions, setRailDensity } from './helpers/strip';
 
+/** A click on the bare window frame under the page: outside the prose and any form. */
+async function clickFrame(page: Page) {
+  const { width, height } = page.viewportSize()!;
+  await page.mouse.click(width / 2, height - 3);
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMP_FIXTURE_DIR = resolve(__dirname, '..', 'node_modules', '.md-redline-e2e');
 const FIXTURE_ORIGINAL = TEST_DOC_BASELINE;
@@ -634,8 +640,8 @@ test.describe('Comment form click-outside dismiss', () => {
     const textarea = page.getByPlaceholder('Add your comment...');
     await expect(textarea).toBeVisible();
 
-    // Click outside the form on the status bar's path (not prose, not form)
-    await page.locator('[data-status-path]').click({ force: true });
+    // Click outside the form on the window frame (not prose, not form)
+    await clickFrame(page);
 
     // Form should be dismissed
     await expect(textarea).not.toBeVisible();
@@ -671,8 +677,8 @@ test.describe('Comment form click-outside dismiss', () => {
     await expect(textarea).toBeVisible();
     await textarea.fill('Some draft text');
 
-    // Click outside the form on the status bar's path
-    await page.locator('[data-status-path]').click({ force: true });
+    // Click outside the form on the window frame
+    await clickFrame(page);
 
     // Form should still be visible because it has text
     await expect(textarea).toBeVisible();

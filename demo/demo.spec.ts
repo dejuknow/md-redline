@@ -237,35 +237,7 @@ function startScreenCapture(page: Page, clipName: string) {
 // Page setup: wallpaper, window chrome, fake cursor, click ripples
 // ---------------------------------------------------------------------------
 
-// The status bar prints the open file's absolute path, which for a fixture is
-// the maintainer's checkout (home directory, worktree name). Show it as if the
-// fixture folder lived at `shownAs` instead, the same place the terminal clips
-// claim. Display only: the app still reads the real file.
-async function maskStatusPath(page: Page, realDir: string, shownAs: string) {
-  await page.addInitScript(
-    ({ realDir, shownAs }) => {
-      const rewrite = () => {
-        for (const el of document.querySelectorAll<HTMLElement>('[data-status-path]')) {
-          const text = el.textContent ?? '';
-          if (text.startsWith(realDir)) {
-            el.textContent = shownAs + text.slice(realDir.length);
-            el.title = el.textContent;
-          }
-        }
-      };
-      new MutationObserver(rewrite).observe(document, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-    },
-    { realDir, shownAs },
-  );
-}
-
 async function setupDemoPage(page: Page) {
-  await maskStatusPath(page, DEMO_WORKSPACE, '~/dev/myapp');
-
   // Serve the wallpaper file from demo/assets via Playwright's route handler
   await page.route('**/demo-wallpaper.png', async (route) => {
     const buffer = readFileSync(WALLPAPER);
@@ -353,7 +325,7 @@ async function setupDemoPage(page: Page) {
 
         /* The app sizes itself to the viewport (h-screen), which is taller
            than this window. Fit it to #root, or its bottom (the docked review
-           row, the status bar) is clipped, and a scrollIntoView can scroll
+           row) is clipped, and a scrollIntoView can scroll
            #root and jump the whole frame. */
         [data-app-root] {
           height: 100% !important;
@@ -1139,8 +1111,6 @@ test.describe('Product shots — hero', () => {
     const authPath = resolve(heroDir, 'authentication-spec.md');
     const apiPath = resolve(heroDir, 'api-design.md');
     const dataPath = resolve(heroDir, 'data-model.md');
-
-    await maskStatusPath(page, heroDir, '~/dev/specs');
 
     // Trust the fixtures dir so /api/file can read the tabbed files.
     await request.put(`${baseURL}/api/preferences`, {
