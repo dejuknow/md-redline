@@ -1995,6 +1995,39 @@ describe('restoring against the current trusted folders (#255)', () => {
     after.dispose();
   });
 
+  it('does not deliver a queued batch whose counted files were all dropped', () => {
+    let only = '';
+    let mixed = '';
+    const state = saved((store) => {
+      only = store.createSession({ filePaths: [TRUSTED, UNTRUSTED], enableResolve: false }).id;
+      store.queueBatch(only, ['c1'], new Map([[UNTRUSTED, 1]]));
+      mixed = store.createSession({
+        filePaths: [TRUSTED, UNTRUSTED],
+        enableResolve: false,
+        clientId: 'other',
+      }).id;
+      store.queueBatch(
+        mixed,
+        ['c2', 'c3'],
+        new Map([
+          [TRUSTED, 1],
+          [UNTRUSTED, 1],
+        ]),
+      );
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getQueuedBatch(only)).toBeNull();
+    expect(after.getSession(only)?.hasQueuedBatch).toBe(false);
+    // The ids name no file, so a batch with a trusted file left keeps them all.
+    expect(after.getQueuedBatch(mixed)).toEqual({
+      commentIds: ['c2', 'c3'],
+      commentCountsByPath: new Map([[TRUSTED, 1]]),
+    });
+    after.dispose();
+  });
+
   it('does not restore an open session left with no trusted file', () => {
     let id = '';
     const state = saved((store) => {

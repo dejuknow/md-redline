@@ -1582,11 +1582,16 @@ export function createAppFull(options: CreateAppOptions = {}) {
    * another folder, or a desktop-app server in restricted mode). Each saved
    * path gets the same check as /api/file, and restoreState leaves out what
    * fails it.
+   *
+   * Returns once the sessions are in place. Clearing the flags of the asks
+   * that closed (a read and possibly a write of each of their files) runs
+   * after that, so a slow file never holds the requests waiting for the
+   * restore; `markersCleared` settles when it is done.
    */
   async function restoreReviewSessions(
     state: PersistedStoreState,
     opts: { now: Date; savedAt: number },
-  ): Promise<void> {
+  ): Promise<{ markersCleared: Promise<void> }> {
     const paths = new Set<string>();
     for (const s of state.sessions) {
       for (const p of s.filePaths) paths.add(p);
@@ -1597,18 +1602,23 @@ export function createAppFull(options: CreateAppOptions = {}) {
     for (const ask of state.pendingAsks) {
       for (const q of ask.questions) paths.add(q.filePath);
     }
-    // Only a path outside the roots is refused. One that cannot be resolved
-    // right now (its folder missing, a volume not mounted yet) is kept: it
-    // may come back, and checkSessionFile still guards every read and write.
+    // A path outside the roots is refused. One that cannot be resolved right
+    // now (its folder missing, a volume not mounted yet) is judged by where it
+    // was: kept if it still sits under a trusted folder, since it may come
+    // back and checkSessionFile still guards every read and write, refused if
+    // not. Saved paths are the canonical ones the check returned when they
+    // joined the session, so comparing them as written is sound.
     const refused = new Set<string>();
     await Promise.all(
       [...paths].map(async (p) => {
         try {
           await checkSessionFile(p);
         } catch (err) {
-          if (err instanceof Error && err.message.includes('outside allowed directories')) {
-            refused.add(p);
-          }
+          const unresolvable = err instanceof Error && err.message.includes('cannot resolve path');
+          const underRoot = allowedRoots.some((root) =>
+            isPathInsideRoot(p, root, caseInsensitivePaths),
+          );
+          if (!unresolvable || !underRoot) refused.add(p);
         }
       }),
     );
@@ -1625,12 +1635,13 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // Those asks are closed now, so their questions in files the server still
     // trusts must stop reading as pending, as when any other ask closes. The
     // refused files are left alone.
-    await clearAskFlagsOnDisk(
+    const markersCleared = clearAskFlagsOnDisk(
       untrustedAsks.map((ask) => ({
         ...ask,
         questions: ask.questions.filter((q) => !refused.has(q.filePath)),
       })),
     );
+    return { markersCleared };
   }
 
   return { app, reviewSessions, baselines, restoreReviewSessions };

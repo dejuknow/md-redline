@@ -5685,7 +5685,11 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
   it('restoring drops the untrusted file and answers the ask, never touching the file', async () => {
     const { after, state, savedAt, sessionId, askId, inside, outside, outsideBefore } =
       await shrunkRestart({ origin: 'agent', answerOutside: false });
-    await after.restoreReviewSessions(state, { now: new Date(), savedAt });
+    const { markersCleared } = await after.restoreReviewSessions(state, {
+      now: new Date(),
+      savedAt,
+    });
+    await markersCleared;
 
     const got = await after.app.request(`/api/review-sessions/${sessionId}`);
     expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
@@ -5720,6 +5724,26 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
     const got = await after.app.request(`/api/review-sessions/${sessionId}`);
     expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
     // The ask is still settled, for its question in the untrusted file.
+    expect(after.reviewSessions.getSettledAsk(sessionId, askId)).toEqual({
+      status: 'no_reply',
+      reason: 'file_untrusted',
+    });
+    after.reviewSessions.dispose();
+  });
+
+  it('refuses a file it cannot resolve when it was outside the trusted folders anyway', async () => {
+    const { after, state, savedAt, sessionId, askId, inside, outside } = await shrunkRestart({
+      origin: 'agent',
+      answerOutside: false,
+    });
+    // The untrusted folder is also unavailable at boot (an unmounted volume).
+    const elsewhereDir = join(outside, '..');
+    await rename(elsewhereDir, `${elsewhereDir}-away`);
+    await after.restoreReviewSessions(state, { now: new Date(), savedAt });
+    await rename(`${elsewhereDir}-away`, elsewhereDir);
+
+    const got = await after.app.request(`/api/review-sessions/${sessionId}`);
+    expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
     expect(after.reviewSessions.getSettledAsk(sessionId, askId)).toEqual({
       status: 'no_reply',
       reason: 'file_untrusted',

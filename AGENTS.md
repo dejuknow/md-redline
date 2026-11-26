@@ -326,13 +326,17 @@ path through the same check as `/api/file`, and `restoreState` takes the ones
 outside the roots out of each session (its files, `fileAddedAt` and queued
 counts; `originalFilePaths` stays whole, since it is only matched for dedupe and
 trimming it would let a smaller request join a session that started larger). A
-path that merely cannot be resolved at boot (its folder missing, a volume not
-mounted yet) is kept. An open session left with no file is not restored, the
+queued batch whose counted files were all taken out is dropped; its comment ids
+name no file, so one with a file left keeps them all. A path that cannot be
+resolved at boot (its folder missing, a volume not mounted yet) is kept only if
+it still sits under a trusted folder. An open session left with no file is not restored, the
 same as one past the window; an ended one is kept, emptied, for its late poll. A
 pending ask with a question outside the roots is settled as
 `no_reply`/`file_untrusted`, so the agent gets an answer instead of a 404, and
 its questions' `expectsReply` flags are cleared in the files still trusted, as
-when any other ask closes; the files outside the roots are left as they are. Separately, every read or
+when any other ask closes; the files outside the roots are left as they are.
+That clearing runs after the request gate opens, so a slow file cannot hold
+every request. Separately, every read or
 write a session drives rather than a request names (inline-reply delivery,
 clearing `expectsReply`, the abort and Done marker cleanup, the ask reply and
 release cleanup) checks the path against the current roots first

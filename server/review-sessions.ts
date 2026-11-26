@@ -1500,6 +1500,21 @@ export class ReviewSessionStore {
 
       const filePaths = persisted.filePaths.filter(isPathAllowed);
       if (persisted.status === 'open' && filePaths.length === 0) continue;
+      // A queued batch keeps only the counts of files still allowed. One whose
+      // counted files were all dropped carries only work in files the server
+      // may no longer show, so it is not delivered. The ids themselves carry
+      // no file, so a batch with some files left keeps all of them.
+      let queuedBatch: InternalSession['queuedBatch'] = null;
+      if (persisted.queuedBatch) {
+        const savedCounts = persisted.queuedBatch.commentCountsByPath;
+        const counts = savedCounts.filter(([path]) => isPathAllowed(path));
+        if (savedCounts.length === 0 || counts.length > 0) {
+          queuedBatch = {
+            commentIds: [...persisted.queuedBatch.commentIds],
+            commentCountsByPath: new Map(counts),
+          };
+        }
+      }
       const fileAddedAt = persisted.fileAddedAt
         ? Object.fromEntries(
             Object.entries(persisted.fileAddedAt).filter(([path]) => isPathAllowed(path)),
@@ -1560,14 +1575,7 @@ export class ReviewSessionStore {
         // Nobody can be parked on a promise that was just recreated.
         parkedWaitCount: 0,
         terminalAt: persisted.terminalAt ? new Date(persisted.terminalAt) : null,
-        queuedBatch: persisted.queuedBatch
-          ? {
-              commentIds: [...persisted.queuedBatch.commentIds],
-              commentCountsByPath: new Map(
-                persisted.queuedBatch.commentCountsByPath.filter(([path]) => isPathAllowed(path)),
-              ),
-            }
-          : null,
+        queuedBatch,
         agentCommentCount: persisted.agentCommentCount,
         sessionDoneAt: persisted.sessionDoneAt ? new Date(persisted.sessionDoneAt) : null,
         terminalReason: persisted.terminalReason,
