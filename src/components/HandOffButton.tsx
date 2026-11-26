@@ -27,6 +27,11 @@ const chevronIcon = (
   </svg>
 );
 
+// Shared by the buttons and the invisible copy that reserves their width.
+const LABELED_CLASS =
+  'h-6 flex items-center gap-1.5 pl-2 pr-2.5 text-[13px] font-medium whitespace-nowrap';
+const CHEVRON_CLASS = 'ml-px px-1.5 self-stretch flex items-center';
+
 interface Props {
   activeFilePath: string;
   commentCounts: Map<string, number>;
@@ -96,17 +101,31 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
   // Tooltip explains how to enable.
   if (disabled) {
     return (
-      <div className="relative flex items-center" data-testid="handoff-group">
-        <Tooltip text="Add comments first to hand off to an agent">
-          <IconButton
-            variant="neutral"
-            disabled
-            title="Add comments first to hand off to an agent"
-            data-testid="handoff-button"
-          >
-            {handOffIcon}
-          </IconButton>
-        </Tooltip>
+      <div className="relative flex items-center justify-end" data-testid="handoff-group">
+        {/* An invisible copy of the labeled button (with a count of 1, and the
+            chevron when another tab already has comments) holds the width the
+            button takes once the first comment lands, so the tabs beside it
+            do not shrink then. */}
+        <span aria-hidden="true" className="invisible flex items-center">
+          <span className={`${LABELED_CLASS} rounded-md`}>
+            <span className="block w-3.5 h-3.5 shrink-0" />
+            <span>Hand off</span>
+            <span className="tabular-nums">1</span>
+          </span>
+          {hasOtherFiles && <span className={CHEVRON_CLASS}>{chevronIcon}</span>}
+        </span>
+        <span className="absolute right-0 inset-y-0 flex items-center">
+          <Tooltip text="Add comments first to hand off to an agent">
+            <IconButton
+              variant="neutral"
+              disabled
+              title="Add comments first to hand off to an agent"
+              data-testid="handoff-button"
+            >
+              {handOffIcon}
+            </IconButton>
+          </Tooltip>
+        </span>
       </div>
     );
   }
@@ -129,7 +148,7 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           onClick={() => onCopyAgentPrompt([activeFilePath])}
           title="Hand off to agent. Copies instructions for this file."
           data-testid="handoff-button"
-          className={`h-6 flex items-center gap-1.5 pl-2 pr-2.5 text-[13px] font-medium whitespace-nowrap ${
+          className={`${LABELED_CLASS} ${
             hasOtherFiles ? 'rounded-l-md' : 'rounded-md'
           } ${segmentClass}`}
         >
@@ -156,7 +175,7 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           aria-haspopup="true"
           aria-expanded={open}
           data-testid="handoff-chevron"
-          className={`ml-px px-1.5 self-stretch flex items-center rounded-r-md ${segmentClass}`}
+          className={`${CHEVRON_CLASS} rounded-r-md ${segmentClass}`}
         >
           {chevronIcon}
         </button>
