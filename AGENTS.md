@@ -164,7 +164,10 @@ and only ever for PLACEMENT, to decide where not to write. Detection keeps its
 regexes. That split is the point: #30 let the parse decide where detection
 looks, and it corrupted documents six ways, since block node boundaries do not
 match the source. Only placement learns from the parse, and a move it makes
-has to land outside detection's ranges too.
+has to land outside detection's ranges too. Read [#30's review
+map](https://github.com/dejuknow/md-redline/issues/30#issuecomment-5259649223)
+before changing this split; the rejected rewrite is archived as tag
+`archive/parse-derived-container-ranges`.
 
 Known limits of the code-block relocation: the same code text twice inside
 one list means a drag onto the second copy records the first copy's context;
@@ -186,9 +189,11 @@ left as literal text: not stripped, not a comment, never deleted by cleanup.
 `getCommentMarkerRanges` exposes the same answer to views that style or strip
 markers (RawView), and Copy document uses `parseComments().cleanMarkdown`.
 
-**Placement alone treats an unclosed fence as running to end of document**
-(`getCodeBlockRanges`'s `unclosedRunsToEof`), because that is how every renderer
-reads one, and without it a marker went into the user's code. Detection is
+**Placement alone treats an unclosed fence as code to the end of its
+container** (the end of the document at top level), because that is how every
+renderer reads one, and without it a marker went into the user's code. The
+regex (`getCodeBlockRanges`) returns no range for a fence with no closer;
+placement learns the real extent from the parse (`getParsedCode`). Detection is
 deliberately NOT told: teaching it would make every marker below such a fence
 vanish from documents that already contain them. The asymmetry only runs one
 way on purpose. Insertion protecting more than detection sees can only push a
