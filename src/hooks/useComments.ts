@@ -41,6 +41,51 @@ import {
 import type { ShowToast } from './useToast';
 import type { UndoEntry, UndoSlot } from './useUndoSlot';
 
+/** How many rendered documents renderDocumentHtml keeps. */
+export const RENDERED_HTML_CACHE_SIZE = 8;
+
+// Keyed by the clean markdown string itself (held by the tab anyway), so
+// nothing is copied into a key. The newest entry is last.
+const renderedHtmlCache = new Map<
+  string,
+  { filePath: string | undefined; optionsKey: string; html: string }
+>();
+
+/**
+ * renderMarkdown for a whole document, remembering the last few. Switching to
+ * a tab, or reopening one just closed, shows a document rendered moments ago:
+ * the pipeline is pure, so the same markdown, path and options give the same
+ * HTML, and on a long document it is a good part of the time the switch takes.
+ */
+export function renderDocumentHtml(
+  cleanMarkdown: string,
+  filePath: string | undefined,
+  options: {
+    keepLineBreaks?: boolean;
+    renderHtmlComments?: boolean;
+    hiddenCommentPrefixes?: string[];
+  },
+): string {
+  const optionsKey = JSON.stringify([
+    options.keepLineBreaks ?? false,
+    options.renderHtmlComments ?? false,
+    options.hiddenCommentPrefixes ?? [],
+  ]);
+  const hit = renderedHtmlCache.get(cleanMarkdown);
+  if (hit && hit.filePath === filePath && hit.optionsKey === optionsKey) {
+    renderedHtmlCache.delete(cleanMarkdown);
+    renderedHtmlCache.set(cleanMarkdown, hit);
+    return hit.html;
+  }
+  const html = renderMarkdown(cleanMarkdown, filePath, options);
+  renderedHtmlCache.delete(cleanMarkdown);
+  renderedHtmlCache.set(cleanMarkdown, { filePath, optionsKey, html });
+  while (renderedHtmlCache.size > RENDERED_HTML_CACHE_SIZE) {
+    renderedHtmlCache.delete(renderedHtmlCache.keys().next().value as string);
+  }
+  return html;
+}
+
 interface TabInfo {
   filePath: string;
   rawMarkdown: string;
@@ -124,7 +169,7 @@ export function useComments(params: UseCommentsParams) {
   const html = useMemo(
     () =>
       cleanMarkdown
-        ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined, {
+        ? renderDocumentHtml(cleanMarkdown, activeFilePath ?? undefined, {
             keepLineBreaks,
             renderHtmlComments,
             hiddenCommentPrefixes,

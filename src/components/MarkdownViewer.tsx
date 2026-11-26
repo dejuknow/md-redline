@@ -537,6 +537,9 @@ export const MarkdownViewer = memo(
       // resolved-only group's trace going unpainted is not reported here,
       // since it has no margin card to withhold in the first place.
       const unpaintedOpenIds = new Set<string>();
+      // Shared by every group's wrapText below, so the pass walks the whole
+      // document about once rather than once per comment.
+      const textIndex = createWrapTextIndex(container);
 
       for (const {
         anchor,
@@ -611,6 +614,8 @@ export const MarkdownViewer = memo(
               ids.join('-'),
             );
           },
+          false,
+          textIndex,
         );
         if (!painted && !allResolved) {
           for (const id of ids) unpaintedOpenIds.add(id);
@@ -930,7 +935,11 @@ export const MarkdownViewer = memo(
  *  Returns whether it actually painted something: true if it wrapped at least
  *  one <mark> or handed a match to `onSvgText`, false on every early "no
  *  match" return. Callers use this to tell a real miss (the text is not in
- *  the render at all) apart from paint timing, which nothing here guesses at. */
+ *  the render at all) apart from paint timing, which nothing here guesses at.
+ *
+ *  `textIndex`, from createWrapTextIndex, lets a run of calls on one container
+ *  (the comment highlight pass) share the walk of the whole document: see
+ *  WrapTextIndex. Every call paints exactly what it would without it. */
 export function wrapText(
   container: HTMLElement,
   text: string,
@@ -940,20 +949,32 @@ export function wrapText(
   contextAfter?: string,
   onSvgText?: (textEl: SVGElement, matchStart: number, matchEnd: number) => void,
   exactHint = false,
+  textIndex?: WrapTextIndex,
 ): boolean {
-  // Collect ALL text nodes — include those inside marks to support overlapping highlights
-  const allTextNodes = collectVisibleTextNodes(container);
-  if (allTextNodes.length === 0) return false;
+  const index = textIndex && textIndex.container === container ? textIndex : undefined;
+  const indexed = index?.segments != null;
 
-  // Build concatenated text with position tracking (all nodes, for offset-based matching)
-  const allNodeInfo: { node: Text; globalStart: number; length: number }[] = [];
-  let allPos = 0;
-  for (const tn of allTextNodes) {
-    const len = tn.textContent?.length || 0;
-    allNodeInfo.push({ node: tn, globalStart: allPos, length: len });
-    allPos += len;
+  // Collect ALL text nodes — include those inside marks to support overlapping highlights.
+  // With an index, the whole text is already known, and only the blocks the
+  // match spans are walked, once the match is found.
+  let allNodeInfo: TextNodeInfo[] = [];
+  let fullText: string;
+  if (indexed) {
+    if (index!.segments!.length === 0) return false;
+    fullText = index!.fullText;
+  } else {
+    const allTextNodes = collectVisibleTextNodes(container);
+    if (allTextNodes.length === 0) return false;
+
+    // Build concatenated text with position tracking (all nodes, for offset-based matching)
+    let allPos = 0;
+    for (const tn of allTextNodes) {
+      const len = tn.textContent?.length || 0;
+      allNodeInfo.push({ node: tn, globalStart: allPos, length: len });
+      allPos += len;
+    }
+    fullText = allTextNodes.map((n) => n.textContent || '').join('');
   }
-  const fullText = allTextNodes.map((n) => n.textContent || '').join('');
 
   // Find the match. The fallback tiers (literal → stripped → Mermaid label →
   // flexibleSearch) are shared between the hint-offset and no-offset paths;
@@ -972,6 +993,8 @@ export function wrapText(
   if (!matchRange) return false;
   const matchStart = matchRange.start;
   const matchEnd = matchRange.end;
+  const touched = indexed ? segmentsInRange(index!.segments!, matchStart, matchEnd) : [];
+  if (indexed) allNodeInfo = textNodesOfSegments(touched);
 
   // Determine which text nodes the match spans and their local offsets
   const wraps: { node: Text; start: number; end: number }[] = [];
@@ -1025,7 +1048,11 @@ export function wrapText(
   }
   // A match entirely inside SVG <text> content has nothing left to wrap in an
   // HTML <mark>, but it was still found and handed off, so it counts as painted.
-  if (visibleWraps.length === 0) return svgTextRanges.size > 0;
+  if (visibleWraps.length === 0) {
+    // The SVG styling may have touched the blocks; nothing is tidied here.
+    if (indexed) settleIndexAfterWrap(index!, touched, false);
+    return svgTextRanges.size > 0;
+  }
 
   // Group wraps by block parent so we merge wraps within the same block
   // (e.g. text nodes split by <strong>) into a single <mark>, while creating
@@ -1141,8 +1168,131 @@ export function wrapText(
     }
   }
 
-  pruneEmptyInlineFormatting(container);
+  if (indexed) {
+    settleIndexAfterWrap(index!, touched);
+  } else {
+    pruneEmptyInlineFormatting(container);
+    if (index) buildWrapTextIndex(index);
+  }
   return true;
+}
+
+type TextNodeInfo = { node: Text; globalStart: number; length: number };
+
+interface WrapTextSegment {
+  /** A direct child of the container. */
+  node: ChildNode;
+  /** Its visible text's span in the container's visible text. */
+  start: number;
+  end: number;
+}
+
+/**
+ * The comment highlight pass calls wrapText once per comment group, and each
+ * call used to walk every text node in the document to find its anchor: on a
+ * long document with many comments that walk was most of the time it took to
+ * show the document. Wrapping never changes the visible text, only how it is
+ * split into nodes, so the pass keeps the text and the span of each top-level
+ * block. A call then matches against the kept text and walks only the blocks
+ * its match spans, and tidies only those.
+ *
+ * The index is built after the first wrap, which tidies the whole container
+ * (empty inline elements go); after that, only the blocks a wrap touched can
+ * change. When a wrap changes the container's own children (a mark at the top
+ * level) or a block's text length (tidying dropped whitespace), the index is
+ * dropped and the next call walks everything again and rebuilds it.
+ */
+export interface WrapTextIndex {
+  container: HTMLElement;
+  fullText: string;
+  /** Null until built, and again whenever a wrap invalidates it. */
+  segments: WrapTextSegment[] | null;
+  childCount: number;
+}
+
+export function createWrapTextIndex(container: HTMLElement): WrapTextIndex {
+  return { container, fullText: '', segments: null, childCount: 0 };
+}
+
+function visibleTextOf(node: ChildNode): string {
+  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data;
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  let text = '';
+  for (const tn of collectVisibleTextNodes(node)) text += tn.data;
+  return text;
+}
+
+function buildWrapTextIndex(index: WrapTextIndex) {
+  const segments: WrapTextSegment[] = [];
+  let fullText = '';
+  for (const node of index.container.childNodes) {
+    const text = visibleTextOf(node);
+    segments.push({ node, start: fullText.length, end: fullText.length + text.length });
+    fullText += text;
+  }
+  index.fullText = fullText;
+  index.segments = segments;
+  index.childCount = index.container.childNodes.length;
+}
+
+/** The segments whose text overlaps [start, end), in order. */
+function segmentsInRange(
+  segments: WrapTextSegment[],
+  start: number,
+  end: number,
+): WrapTextSegment[] {
+  // First segment ending after `start`.
+  let lo = 0;
+  let hi = segments.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (segments[mid].end <= start) lo = mid + 1;
+    else hi = mid;
+  }
+  const out: WrapTextSegment[] = [];
+  for (let i = lo; i < segments.length && segments[i].start < end; i++) {
+    if (segments[i].end > segments[i].start) out.push(segments[i]);
+  }
+  return out;
+}
+
+function textNodesOfSegments(segments: WrapTextSegment[]): TextNodeInfo[] {
+  const out: TextNodeInfo[] = [];
+  for (const seg of segments) {
+    let pos = seg.start;
+    const nodes =
+      seg.node.nodeType === Node.TEXT_NODE ? [seg.node as Text] : collectVisibleTextNodes(seg.node);
+    for (const node of nodes) {
+      out.push({ node, globalStart: pos, length: node.data.length });
+      pos += node.data.length;
+    }
+  }
+  return out;
+}
+
+/**
+ * After an indexed wrap: tidy the blocks it touched, as the full walk tidies
+ * the whole container, and keep the index only if nothing it records moved.
+ */
+function settleIndexAfterWrap(index: WrapTextIndex, touched: WrapTextSegment[], tidy = true) {
+  const { container } = index;
+  let valid = container.childNodes.length === index.childCount;
+  for (const seg of touched) {
+    if (seg.node.parentNode !== container) {
+      valid = false;
+      continue;
+    }
+    if (seg.node.nodeType !== Node.ELEMENT_NODE) continue;
+    const el = seg.node as HTMLElement;
+    if (tidy) pruneEmptyInlineFormatting(el);
+    if (tidy && isPrunableInline(el)) {
+      el.remove();
+      valid = false;
+      continue;
+    }
+    if (visibleTextOf(el).length !== seg.end - seg.start) valid = false;
+  }
+  if (!valid) index.segments = null;
 }
 
 const BLOCK_TAGS = new Set([
@@ -1566,6 +1716,13 @@ function flexibleSearch(
 
 const EMPTY_INLINE_TAGS = new Set(['CODE', 'EM', 'STRONG', 'DEL', 'S', 'SUB', 'SUP', 'SPAN', 'A']);
 
+/** An inline formatting element left with nothing to show, which a wrap can leave behind. */
+function isPrunableInline(el: Element): boolean {
+  if (!EMPTY_INLINE_TAGS.has(el.tagName)) return false;
+  if (el.querySelector('img, svg, input, br, hr, iframe, video, audio, canvas')) return false;
+  return (el.textContent || '').trim().length === 0;
+}
+
 function pruneEmptyInlineFormatting(container: HTMLElement) {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
   const toRemove: HTMLElement[] = [];
@@ -1573,10 +1730,7 @@ function pruneEmptyInlineFormatting(container: HTMLElement) {
 
   while ((node = walker.nextNode())) {
     const el = node as HTMLElement;
-    if (!EMPTY_INLINE_TAGS.has(el.tagName)) continue;
-    if (el.querySelector('img, svg, input, br, hr, iframe, video, audio, canvas')) continue;
-    if ((el.textContent || '').trim().length > 0) continue;
-    toRemove.push(el);
+    if (isPrunableInline(el)) toRemove.push(el);
   }
 
   for (const el of toRemove.reverse()) {

@@ -9,19 +9,41 @@ const HIDDEN_TEXT_ANCESTOR_TAGS = new Set([
   'METADATA',
 ]);
 
-function shouldIgnoreTextNode(node: Text): boolean {
-  let el = node.parentElement;
+function isHiddenTextContainer(el: Element): boolean {
+  // SVG tag names keep their case (`desc`, `defs`), HTML ones are upper case.
+  return HIDDEN_TEXT_ANCESTOR_TAGS.has(el.tagName.toUpperCase());
+}
+
+/** Whether `node` is, or sits inside, an element whose text never shows. */
+function inHiddenTextContainer(node: Node): boolean {
+  let el: Element | null =
+    node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
   while (el) {
-    if (HIDDEN_TEXT_ANCESTOR_TAGS.has(el.tagName.toUpperCase())) return true;
+    if (isHiddenTextContainer(el)) return true;
     el = el.parentElement;
   }
   return false;
 }
 
+/**
+ * Walks the text nodes under `root` a reader can see. A hidden container
+ * (`<style>`, SVG `<defs>`) is rejected as an element, which skips its whole
+ * subtree, so a walk costs one visit per node. Testing each text node's
+ * ancestors instead cost a climb to the root per node, and the comment
+ * highlight pass walks the document once per comment: on a long document with
+ * many comments that climb was most of the time it took to show the document.
+ */
 export function createVisibleTextWalker(root: Node): TreeWalker {
-  return document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) =>
-      shouldIgnoreTextNode(node as Text) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  // Hidden ancestors above the root hide everything in it; checked once.
+  const rootHidden = inHiddenTextContainer(root);
+  return document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      if (rootHidden) return NodeFilter.FILTER_REJECT;
+      if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
+      return isHiddenTextContainer(node as Element)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_SKIP;
+    },
   });
 }
 
