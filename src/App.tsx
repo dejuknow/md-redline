@@ -11,6 +11,9 @@ import { useTabs } from './hooks/useTabs';
 import { useHandoff } from './hooks/useHandoff';
 import { useSelection } from './hooks/useSelection';
 import { useCommentDrafts } from './hooks/useCommentDrafts';
+import { useCardDrafts } from './hooks/useCardDrafts';
+import { CardDraftsContext } from './contexts/CardDraftsContext';
+import { CardDraftNotice } from './components/CardDraftNotice';
 import { useRecentFiles } from './hooks/useRecentFiles';
 import { useFileWatcher } from './hooks/useFileWatcher';
 import { useUnreadReplies } from './hooks/useUnreadReplies';
@@ -118,7 +121,8 @@ import { headingChain } from './lib/heading-chain';
 import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 import { getEnabledHiddenCommentPrefixes } from './lib/settings';
-import { isDesktopApp } from './lib/desktop';
+import { desktopNotificationsSupported, isDesktopApp } from './lib/desktop';
+import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { useDesktopShellHooks } from './hooks/useDesktopShellHooks';
 import { DISMISS_POPUPS_EVENT } from './hooks/useDismiss';
 import {
@@ -126,6 +130,9 @@ import {
   type ShellOverlayAction,
   type ShellOverlayState,
 } from './lib/shell-overlay';
+
+/** How long a notification click waits for its thread to load (#244). */
+const PENDING_THREAD_MS = 10_000;
 
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
@@ -158,7 +165,11 @@ declare global {
      *  file, folder or review session in place instead of navigating the page.
      *  Exactly one field, matching what the shell's build_open_script emits. */
     __mdrOpenTarget?: ((
-      target: { file: string } | { files: string[] } | { dir: string } | { review: string },
+      target:
+        | { file: string; commentId?: string }
+        | { files: string[] }
+        | { dir: string }
+        | { review: string },
     ) => void) & { acceptsFiles?: true };
     /** Set while the app is mounted; called by the desktop shell for its New
      *  Tab shortcut (Cmd+T, Ctrl+T). Does what the tab strip's "+" does: opens
@@ -186,6 +197,8 @@ const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
 // (browsers keep these keys for their own tabs), so the palette shows their
 // keys only there.
 const desktopApp = isDesktopApp();
+// Whether this shell can deliver agent notifications (#244): the macOS app.
+const canNotify = desktopNotificationsSupported();
 const newTabShortcut = desktopApp ? `${modKey}+T` : undefined;
 const closeTabShortcut = desktopApp ? `${modKey}+W` : undefined;
 const reopenTabShortcut = desktopApp ? `${modKey}+Shift+T` : undefined;
@@ -1081,11 +1094,22 @@ export default function App() {
     shownSessions: shownReviewSessions,
     refresh: refreshReviewSessions,
     fetched: reviewSessionsFetched,
+    loaded: reviewSessionsLoaded,
   } = useReviewSession(
     activeFilePath ? [...tabs.map((t) => t.filePath), activeFilePath] : tabs.map((t) => t.filePath),
   );
   // An agent can add files to a review this tab is showing (#117): open them.
   useOpenAddedReviewFiles(shownReviewSessions, openTabInBackground, showToast);
+  // System notifications for agent activity while the window is in the
+  // background (#244). Desktop app only, and only with the setting on.
+  const agentNotificationsOn = canNotify && settings.agentNotifications;
+  const { reportFileChange: reportAgentFileChange, permission: agentNotificationPermission } =
+    useAgentNotifications({
+      enabled: agentNotificationsOn,
+      readerName: author,
+      sessions: reviewSessions,
+      sessionsLoaded: reviewSessionsLoaded,
+    });
   // The review the docked row shows. Its files are what the tab strip marks,
   // so the marks match what the row's Send covers even with other reviews
   // open, and whether it needs the reader sets the row's emphasis.
@@ -2037,6 +2061,24 @@ export default function App() {
     }
   }, [activeFilePath, setDiffEnabled, setActiveCommentId, closeViewerMenu]);
 
+  // Unsent replies and edits on comment cards, per file (#213). After the
+  // effect above, so the card whose editor comes back is selected again
+  // after a tab switch has cleared the selection. With no surface showing
+  // (the drawer closed by the switch, the raw view), one opens to hold it.
+  const {
+    api: cardDraftsApi,
+    setAside: setAsideCardDrafts,
+    discardSetAside: discardSetAsideCardDraft,
+  } = useCardDrafts({
+    file: firstLoadInProgress || (error !== null && !rawMarkdown) ? null : activeFilePath,
+    comments,
+    requestedEditor,
+    onEditorBack: (commentId, reveal) => {
+      setActiveCommentId(commentId);
+      if (reveal && !commentsSurfaceVisible) ensureCommentSurface(commentId);
+    },
+  });
+
   // IDs of the replies present in newContent but not in oldContent. Kept
   // separate from the two things done with them (marking unread, stamping a
   // timestamp) so a caller that has already parsed both sides can pass its own
@@ -2107,6 +2149,9 @@ export default function App() {
       opts: { priorLoaded: boolean; arrivingReplyIds?: ReadonlySet<string> },
     ): { content: string; arrivingReplyIds: ReadonlySet<string> } => {
       if (!opts.priorLoaded) return { content, arrivingReplyIds: NO_REPLY_IDS };
+      // Agent replies and questions notify from here, the one place all
+      // external content passes with a loaded prior to compare against.
+      reportAgentFileChange(path, priorContent, content);
       const arrivingReplyIds = opts.arrivingReplyIds ?? findArrivingReplies(priorContent, content);
       markRepliesUnread(path, arrivingReplyIds);
       return {
@@ -2114,7 +2159,7 @@ export default function App() {
         arrivingReplyIds,
       };
     },
-    [correctReplyTimestamps, findArrivingReplies, markRepliesUnread],
+    [correctReplyTimestamps, findArrivingReplies, markRepliesUnread, reportAgentFileChange],
   );
 
   // Reload fetches on its own inside useTabs, so it reaches the sequence above
@@ -2164,8 +2209,12 @@ export default function App() {
       if (!isActiveTab && !snapshot) return;
       // Once the event turns out to belong to a tab the reader has moved off,
       // it gets the background handler's rules: never overwrite unsaved local
-      // edits, in memory or (via the debounced save below) on disk.
-      if (!isActiveTab && snapshot?.dirty === true) return;
+      // edits, in memory or (via the debounced save below) on disk. An agent's
+      // reply still notifies (#244): detection only reads.
+      if (!isActiveTab && snapshot?.dirty === true) {
+        if (!snapshot.isLoading) reportAgentFileChange(path, snapshot.rawMarkdown, content);
+        return;
+      }
       // The active tab's live content lives in the ref, which is ahead of the
       // snapshot; a background tab has only its snapshot. Either way, content
       // that hasn't loaded yet is not a baseline to diff against.
@@ -2273,6 +2322,7 @@ export default function App() {
       applyExternalContent,
       closeViewerMenu,
       getTabSnapshot,
+      reportAgentFileChange,
       scheduleBackfillWrite,
       setDiffEnabled,
       showToast,
@@ -2285,7 +2335,38 @@ export default function App() {
   const onExternalChangeRef = useRef(onExternalChange);
   onExternalChangeRef.current = onExternalChange;
 
-  useFileWatcher({ filePath: activeFilePath, onExternalChange });
+  // With agent notifications on, the watchers stay connected while the window
+  // is hidden: that is when the agent's replies need noticing. The connection
+  // limit they otherwise close for is a browser's, across its tabs; the
+  // desktop app has one window.
+  // Reads the file after the watcher comes back from a dropped connection,
+  // which the server only answers with "connected".
+  // A tab with unsaved edits keeps them: only an agent's reply is noted.
+  // `isCurrent` turns false once the watcher moved on (a tab switch) or a
+  // newer change arrived, so an older read never lands over it.
+  const onWatcherReconnect = useCallback(
+    (path: string, isCurrent: () => boolean) => {
+      fetch(`/api/file?path=${encodeURIComponent(path)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { content?: string; mtime?: number } | null) => {
+          if (typeof data?.content !== 'string' || !isCurrent()) return;
+          if (data.content === rawMarkdownRef.current) return;
+          if (getTabSnapshot(path)?.dirty === true) {
+            reportAgentFileChange(path, rawMarkdownRef.current, data.content);
+            return;
+          }
+          onExternalChangeRef.current(data.content, data.mtime, path);
+        })
+        .catch(() => {});
+    },
+    [getTabSnapshot, reportAgentFileChange],
+  );
+  useFileWatcher({
+    filePath: activeFilePath,
+    onExternalChange,
+    onReconnect: onWatcherReconnect,
+    keepWhileHidden: agentNotificationsOn,
+  });
 
   // Watch background tabs for external changes so they stay fresh during handoff.
   // The active tab is handled by useFileWatcher above; this covers the rest.
@@ -2295,8 +2376,9 @@ export default function App() {
     .filter((p) => p && p !== activeFilePath)
     .join('\0');
 
+  const watchBackgroundTabs = pageVisible || agentNotificationsOn;
   useEffect(() => {
-    if (!pageVisible) return;
+    if (!watchBackgroundTabs) return;
     const paths = backgroundPathsKey ? backgroundPathsKey.split('\0') : [];
     if (paths.length === 0) return;
 
@@ -2306,46 +2388,85 @@ export default function App() {
     // to the same server don't exhaust the limit.
     const params = paths.map((p) => `path=${encodeURIComponent(p)}`).join('&');
     const es = new EventSource(`/api/watch?${params}`);
+    const applyChange = (content: string, path: string, mtime: number | undefined) => {
+      const snapshot = getTabSnapshot(path);
+      // Skip dirty background tabs. The user has unsaved local edits we'd
+      // otherwise overwrite (in memory AND on disk via the backfill write
+      // below). They should resolve the conflict by switching to the tab and
+      // reloading explicitly. An agent's reply still notifies (#244):
+      // detection only reads.
+      if (snapshot?.dirty === true) {
+        if (!snapshot.isLoading) reportAgentFileChange(path, snapshot.rawMarkdown, content);
+        return;
+      }
+      if (!snapshot) return;
+      // Same sequence the active-tab handler runs (stamp the arriving
+      // replies, mark them unread), minus the toast, since background tabs
+      // aren't visible. The background case is the one that matters most: a
+      // handoff answered on a tab the reader isn't looking at, where the
+      // unread mark is the only thing that survives until they switch to it.
+      const { content: nextContent } = applyExternalContent(
+        path,
+        snapshot.rawMarkdown,
+        content,
+        mtime,
+        { priorLoaded: !snapshot.isLoading },
+      );
+      updateTab(path, {
+        rawMarkdown: nextContent,
+        ...(mtime != null ? { mtime } : {}),
+      });
+      if (nextContent !== content) {
+        scheduleBackfillWrite(path, nextContent, mtime);
+      }
+    };
+    const changesByPath = new Map<string, number>();
     es.addEventListener('change', (e) => {
       try {
         const { content, path, mtime } = JSON.parse(e.data);
-        const snapshot = getTabSnapshot(path);
-        // Skip dirty background tabs entirely. The user has unsaved local
-        // edits we'd otherwise overwrite (in memory AND on disk via the
-        // backfill write below). They should resolve the conflict by switching
-        // to the tab and reloading explicitly.
-        if (snapshot?.dirty === true) return;
-        if (!snapshot) return;
-        // Same sequence the active-tab handler runs (stamp the arriving
-        // replies, mark them unread), minus the toast, since background tabs
-        // aren't visible. The background case is the one that matters most: a
-        // handoff answered on a tab the reader isn't looking at, where the
-        // unread mark is the only thing that survives until they switch to it.
-        const { content: nextContent } = applyExternalContent(
-          path,
-          snapshot.rawMarkdown,
-          content,
-          mtime,
-          { priorLoaded: !snapshot.isLoading },
-        );
-        updateTab(path, {
-          rawMarkdown: nextContent,
-          ...(mtime != null ? { mtime } : {}),
-        });
-        if (nextContent !== content) {
-          scheduleBackfillWrite(path, nextContent, mtime);
-        }
+        changesByPath.set(path, (changesByPath.get(path) ?? 0) + 1);
+        applyChange(content, path, mtime);
+      } catch {
+        // ignore malformed events
+      }
+    });
+    // A dropped connection reconnects by itself, but the server only says
+    // "connected": a change made in the gap would never arrive. Each path
+    // that comes back after an error is read once.
+    // A read is dropped once a newer change for its path arrived, or the
+    // connection closed, so an older read never lands over newer content.
+    let missed = new Set<string>();
+    let closed = false;
+    es.onerror = () => {
+      missed = new Set(paths);
+    };
+    es.addEventListener('connected', (e) => {
+      try {
+        const { path } = JSON.parse(e.data) as { path?: string };
+        if (!path || !missed.delete(path)) return;
+        const seen = changesByPath.get(path) ?? 0;
+        fetch(`/api/file?path=${encodeURIComponent(path)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data: { content?: string; mtime?: number } | null) => {
+            if (closed || (changesByPath.get(path) ?? 0) !== seen) return;
+            if (typeof data?.content === 'string') applyChange(data.content, path, data.mtime);
+          })
+          .catch(() => {});
       } catch {
         // ignore malformed events
       }
     });
 
-    return () => es.close();
+    return () => {
+      closed = true;
+      es.close();
+    };
   }, [
     applyExternalContent,
     backgroundPathsKey,
     getTabSnapshot,
-    pageVisible,
+    reportAgentFileChange,
+    watchBackgroundTabs,
     scheduleBackfillWrite,
     updateTab,
   ]);
@@ -2550,6 +2671,25 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
+  // A thread to focus once its file is the active tab and parsed: a desktop
+  // notification click opens the file and names the thread (#244). Dropped
+  // after PENDING_THREAD_MS (a file that never loads, a comment since gone),
+  // so it can never fire later out of nowhere.
+  const pendingThreadRef = useRef<{ file: string; commentId: string; until: number } | null>(null);
+  const [pendingThreadToken, setPendingThreadToken] = useState(0);
+  useEffect(() => {
+    const pending = pendingThreadRef.current;
+    if (!pending) return;
+    if (Date.now() > pending.until) {
+      pendingThreadRef.current = null;
+      return;
+    }
+    if (activeFilePath !== pending.file) return;
+    if (!comments.some((c) => c.id === pending.commentId)) return;
+    pendingThreadRef.current = null;
+    requestCommentFocus(pending.commentId);
+  }, [pendingThreadToken, activeFilePath, comments, requestCommentFocus]);
+
   // The desktop shell's open entry point: it evals a call to this instead of
   // navigating, so an `mdr foo.md` while the app is open adds a tab in place,
   // with no reload and the open tabs kept. A file open mirrors the ?file boot
@@ -2562,6 +2702,15 @@ export default function App() {
         addRecentFile(target.file);
         const parent = getParentDir(target.file);
         if (parent) setExplorerDir(parent);
+        // A click on an agent notification names the thread too (#244).
+        if (target.commentId) {
+          pendingThreadRef.current = {
+            file: target.file,
+            commentId: target.commentId,
+            until: Date.now() + PENDING_THREAD_MS,
+          };
+          setPendingThreadToken((n) => n + 1);
+        }
       } else if ('files' in target) {
         // Files dropped on the desktop app's window, in the order dropped:
         // all open as tabs, the first one active (background opens never
@@ -3010,10 +3159,14 @@ export default function App() {
 
       // Cmd+Shift+[ / ] : Switch tabs (matches VS Code / Safari). Not from a
       // text field, where a switch would throw away what is being typed,
-      // except the comment form's: its draft is set aside and handed back
-      // (#196). A draft handed back takes the keyboard, so without this the
-      // shortcut would stop for good at the first tab holding one.
-      const inCommentDraft = isInput && target.closest('[data-comment-form]') !== null;
+      // except the comment form's and a comment card's reply and edit fields:
+      // their drafts are set aside and handed back (#196, #213). A draft
+      // handed back takes the keyboard, so without this the shortcut would
+      // stop for good at the first tab holding one.
+      const inCommentDraft =
+        isInput &&
+        (target.closest('[data-comment-form]') !== null ||
+          target.closest('[data-card-editor]') !== null);
       if (mod && e.shiftKey && (!isInput || inCommentDraft) && activeModal !== 'commandPalette') {
         if (e.code === 'BracketLeft') {
           e.preventDefault();
@@ -3818,7 +3971,7 @@ export default function App() {
   // explorer before start-up has chosen its folder.
   const explorerDirKnown = startupTargetKnown || startupCapElapsed;
 
-  return (
+  const page = (
     <div data-app-root className="h-screen flex flex-col bg-frame">
       {/* --window-gutter / --window-gutter-top: a desktop shell sets the
           gutter around the panels so it stays the same on screen at every
@@ -4193,6 +4346,16 @@ export default function App() {
                       // screen, and a row appearing above it would shove it down.
                       isLoading={firstLoadInProgress}
                     />
+                    <CardDraftNotice
+                      setAside={setAsideCardDrafts}
+                      onCopy={(text) =>
+                        void navigator.clipboard.writeText(text).then(
+                          () => showToast('Copied.', 'success'),
+                          () => showToast("Couldn't copy the draft.", 'error'),
+                        )
+                      }
+                      onDiscard={discardSetAsideCardDraft}
+                    />
                     <DiffBar
                       diffEnabled={diffEnabled}
                       referenceLabel={
@@ -4296,10 +4459,17 @@ export default function App() {
                                     : '100%',
                                 }}
                               >
+                                {/* flex-col makes the viewer a flex item, which WebKit
+                                    treats as a selection root. Otherwise the sheet is
+                                    the root (it is positioned), and a drag selection
+                                    paints block fills out to the sheet's edges plus a
+                                    stray bar in the right gutter. Positioning this
+                                    column instead would move the drag handles' and
+                                    popover's containing block off the sheet. */}
                                 <div
                                   ref={proseRef}
                                   data-prose-column
-                                  className={pageWidthTransition}
+                                  className={`flex flex-col ${pageWidthTransition}`}
                                   style={{ marginLeft: PAD_L, width: geometry.colWidth }}
                                 >
                                   {diffEnabled && currentSnapshot != null && diffLines ? (
@@ -4669,6 +4839,8 @@ export default function App() {
             onAuthorChange={setAuthor}
             onOpenShortcuts={() => setActiveModal('shortcuts')}
             initialSection={settingsSection}
+            canNotify={canNotify}
+            notificationPermission={agentNotificationPermission}
           />
           <KeyboardShortcutsPanel
             open={activeModal === 'shortcuts'}
@@ -4703,4 +4875,7 @@ export default function App() {
       </div>
     </div>
   );
+
+  // Every comment card, wherever it is drawn, reads its drafts from here.
+  return <CardDraftsContext.Provider value={cardDraftsApi}>{page}</CardDraftsContext.Provider>;
 }

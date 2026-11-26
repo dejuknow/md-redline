@@ -220,8 +220,12 @@ body {
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #fbbf24;
   --theme-comment-ring: rgba(251, 191, 36, 0.3);
-  --theme-selection-bg: rgba(59, 130, 246, 0.25);
-  --theme-native-selection: rgba(129, 140, 248, 0.4);
+  /* One color for the drag and the painted selection that replaces it on
+     release, so committing a selection doesn't change its look. At 0.25 the
+     painted one barely cleared the page (about 1.4:1); the dark themes now
+     sit near 2.1:1, each in its own palette hue. */
+  --theme-selection-bg: rgba(99, 140, 255, 0.45);
+  --theme-native-selection: rgba(99, 140, 255, 0.45);
   --theme-drag-handle: #f59e0b;
   --theme-drag-handle-hover: #fbbf24;
   --theme-diff-added-bg: rgba(16, 185, 129, 0.15);
@@ -359,8 +363,8 @@ body {
   --theme-comment-underline: #ebcb8b;
   --theme-comment-underline-active: #d08770;
   --theme-comment-ring: rgba(208, 135, 112, 0.3);
-  --theme-selection-bg: rgba(94, 129, 172, 0.25);
-  --theme-native-selection: rgba(136, 192, 208, 0.3);
+  --theme-selection-bg: rgba(129, 161, 193, 0.45);
+  --theme-native-selection: rgba(129, 161, 193, 0.45);
   --theme-drag-handle: #d08770;
   --theme-drag-handle-hover: #ebcb8b;
   --theme-diff-added-bg: rgba(163, 190, 140, 0.15);
@@ -430,8 +434,8 @@ body {
   --theme-comment-underline: #f6c177;
   --theme-comment-underline-active: #ea9d34;
   --theme-comment-ring: rgba(234, 157, 52, 0.3);
-  --theme-selection-bg: rgba(196, 167, 231, 0.2);
-  --theme-native-selection: rgba(196, 167, 231, 0.3);
+  --theme-selection-bg: rgba(196, 167, 231, 0.35);
+  --theme-native-selection: rgba(196, 167, 231, 0.35);
   --theme-drag-handle: #ea9d34;
   --theme-drag-handle-hover: #f6c177;
   --theme-diff-added-bg: rgba(156, 207, 216, 0.15);
@@ -636,8 +640,8 @@ body {
   --theme-comment-underline: #f9e2af;
   --theme-comment-underline-active: #f2c97d;
   --theme-comment-ring: rgba(242, 201, 125, 0.3);
-  --theme-selection-bg: rgba(137, 180, 250, 0.2);
-  --theme-native-selection: rgba(203, 166, 247, 0.3);
+  --theme-selection-bg: rgba(137, 180, 250, 0.35);
+  --theme-native-selection: rgba(137, 180, 250, 0.35);
   --theme-drag-handle: #f2c97d;
   --theme-drag-handle-hover: #f9e2af;
   --theme-diff-added-bg: rgba(166, 227, 161, 0.15);

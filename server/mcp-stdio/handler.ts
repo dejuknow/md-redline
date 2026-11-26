@@ -710,7 +710,6 @@ async function postReviewBatch(
   sessionId: string,
   input: ReviewInput,
   ctx: ToolCallContext,
-  fileList: string,
   nextStep: string,
 ): Promise<ToolCallResult> {
   let postResult: PostReviewResult;
@@ -733,6 +732,9 @@ async function postReviewBatch(
     };
   }
 
+  // Name the files the batch wrote to, never the session's declared list:
+  // "posted N comment(s) to X" must mean the comments went to X (#80).
+  const fileList = batchFilePaths(input).join(', ');
   return {
     content: [
       {
@@ -775,7 +777,6 @@ export async function handleReviewToolCall(
   // rejects any that is not in the named session's own filePaths, which is
   // stricter than the grantAccess roots check the creating form does here.
   if (input.sessionId !== undefined) {
-    const fileList = batchFilePaths(input).join(', ');
     // The caller named the session, so only the caller knows where it came
     // from, and this form cannot tell: /agent-comments returns no origin.
     // Do NOT assume mdr_wait applies. It rejects user-origin sessions with a
@@ -786,7 +787,6 @@ export async function handleReviewToolCall(
       input.sessionId,
       input,
       ctx,
-      fileList,
       `If you opened this session with mdr_comment, call mdr_wait with ` +
         `sessionId "${input.sessionId}" when you have finished posting. If it ` +
         `came from an mdr_request_review handoff, do NOT call mdr_wait; it ` +
@@ -838,7 +838,6 @@ export async function handleReviewToolCall(
     session.sessionId,
     input,
     ctx,
-    input.filePaths.join(', '),
     `When you have finished posting all feedback, call mdr_wait with ` +
       `sessionId "${session.sessionId}" to block until the user has engaged.`,
   );

@@ -14,5 +14,16 @@ tauri = { version = "2", features = [] }
 tauri-plugin-window-state = "=2.4.1"
 url = "2"
 
+# macOS: the About panel (AppKit), and agent notifications (#244):
+# UNUserNotificationCenter, plus the WebKit setting that keeps a hidden page
+# from being suspended while they are on. Same versions wry already pulls in.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSAttributedString", "NSData", "NSRange", "NSURL", "NSGeometry", "NSBundle", "NSError", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSFont", "NSColor", "NSParagraphStyle", "NSText", "NSAttributedString"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKPreferences", "WKWebView", "WKWebViewConfiguration"] }
+
 [profile.release]
 strip = true
