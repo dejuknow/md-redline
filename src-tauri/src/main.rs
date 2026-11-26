@@ -2,14 +2,17 @@
 // local mdr server and points a single webview window at it. All product
 // logic lives in the web app; this binary only handles window lifecycle,
 // the menus and keys browsers keep for themselves, page zoom, the mdr://
-// deep link, .md file associations and files dropped on the window.
+// deep link, .md file associations, files dropped on the window, and
+// delivering the agent notifications the web app words (notify.rs).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod notify;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -217,9 +220,137 @@ const SHELL_CHROME_SCRIPT: &str = r#"(function () {
 /// palette and shortcuts panel only then (`isDesktopApp` in
 /// src/lib/desktop.ts), and its About section shows the app's own version,
 /// which is not the npm package's. One flag, so nothing in the app sniffs
-/// Tauri internals.
-fn desktop_flag_script(app_version: &str) -> String {
-    format!("window.__mdrDesktop = true; window.__mdrDesktopVersion = {};", json_escape(app_version))
+/// Tauri internals. `notifications` adds `__mdrDesktopNotifications`, which
+/// shows the agent notifications setting: only where the shell can deliver
+/// them (notify.rs).
+fn desktop_flag_script(app_version: &str, notifications: bool) -> String {
+    let mut script =
+        format!("window.__mdrDesktop = true; window.__mdrDesktopVersion = {};", json_escape(app_version));
+    if notifications {
+        script.push_str(" window.__mdrDesktopNotifications = true;");
+    }
+    script
+}
+
+/// Whether this build can deliver notifications: macOS, from a `.app`
+/// bundle.
+fn notifications_supported() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        static SUPPORTED: OnceLock<bool> = OnceLock::new();
+        *SUPPORTED.get_or_init(notify::mac::supported)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// Whether the keep-alive policy is set on the current main webview (see
+/// notify::mac::set_keep_alive). Reset when a window is built.
+#[cfg(target_os = "macos")]
+static KEEP_ALIVE: AtomicBool = AtomicBool::new(false);
+/// The take call that is out and has not answered: its generation and when
+/// it went. Takes never stack: a page WebKit has suspended answers nothing
+/// until it resumes. A late answer to one given up on is still posted, but
+/// does not free the slot of the take after it.
+#[cfg(target_os = "macos")]
+static TAKE_SENT: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
+#[cfg(target_os = "macos")]
+static TAKE_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// A take that has not answered after this long is given up on.
+#[cfg(target_os = "macos")]
+const TAKE_STALE: Duration = Duration::from_secs(30);
+/// How often the shell asks the page for notifications.
+#[cfg(target_os = "macos")]
+const TAKE_EVERY: Duration = Duration::from_secs(1);
+/// How often, while notifications are on, the shell re-reads whether the
+/// system allows them (the reader can change it in System Settings).
+#[cfg(target_os = "macos")]
+const PERMISSION_EVERY: Duration = Duration::from_secs(15);
+
+/// Once a second, asks the page for the notifications that are ripe and posts
+/// them (#244). The page decides what notifies and when; the shell only adds
+/// whether its window has focus, so nothing is posted over a window the
+/// reader is looking at.
+#[cfg(target_os = "macos")]
+fn start_notification_poll(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last_permission_check: Option<Instant> = None;
+        let mut enabled_seen = false;
+        loop {
+            std::thread::sleep(TAKE_EVERY);
+            let enabled = take_notifications(&app);
+            if enabled.is_some() {
+                enabled_seen = enabled == Some(true);
+            }
+            if enabled_seen
+                && last_permission_check.is_none_or(|at| at.elapsed() >= PERMISSION_EVERY)
+            {
+                last_permission_check = Some(Instant::now());
+                notify::mac::refresh_permission(true);
+            }
+        }
+    });
+}
+
+/// One take. Returns whether the setting was on as of the last answer that
+/// arrived (None while none has).
+#[cfg(target_os = "macos")]
+fn take_notifications(app: &AppHandle) -> Option<bool> {
+    static LAST_ENABLED: AtomicU8 = AtomicU8::new(0);
+    let last = match LAST_ENABLED.load(Ordering::SeqCst) {
+        1 => Some(true),
+        2 => Some(false),
+        _ => None,
+    };
+    let win = app.get_webview_window("main")?;
+    let generation = TAKE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    {
+        let mut sent = TAKE_SENT.lock().unwrap();
+        if sent.is_some_and(|(_, at)| at.elapsed() < TAKE_STALE) {
+            return last;
+        }
+        *sent = Some((generation, Instant::now()));
+    }
+    let release = move || {
+        let mut sent = TAKE_SENT.lock().unwrap();
+        if sent.is_some_and(|(g, _)| g == generation) {
+            *sent = None;
+        }
+    };
+    let script = notify::take_script(reader_present(&win), notify::mac::permission());
+    let target = win.clone();
+    let asked = win.eval_with_callback(script, move |result| {
+        release();
+        let Some(take) = notify::parse_take(&result) else { return };
+        LAST_ENABLED.store(if take.enabled { 1 } else { 2 }, Ordering::SeqCst);
+        if KEEP_ALIVE.swap(take.enabled, Ordering::SeqCst) != take.enabled {
+            let keep = take.enabled;
+            let _ = target.with_webview(move |webview| unsafe {
+                notify::mac::set_keep_alive(webview.inner(), keep);
+            });
+        }
+        // The reader may have come back while the page answered.
+        if take.items.is_empty() || reader_present(&target) {
+            return;
+        }
+        for item in &take.items {
+            notify::mac::post(item);
+        }
+    });
+    if asked.is_err() {
+        release();
+    }
+    last
+}
+
+/// The reader is looking at the window: shown, not minimized, focused.
+#[cfg(target_os = "macos")]
+fn reader_present(win: &WebviewWindow) -> bool {
+    win.is_visible().unwrap_or(false)
+        && !win.is_minimized().unwrap_or(false)
+        && win.is_focused().unwrap_or(false)
 }
 
 /// Tab keys no app menu can carry: Ctrl+Tab everywhere (WKWebView never hands
@@ -627,6 +758,9 @@ enum Target {
     /// first one active.
     Files(Vec<String>),
     Dir(String),
+    /// A file at one comment thread: a click on an agent notification
+    /// (notify.rs). Never grants access: the file was already open.
+    Thread(String, String),
     /// A review-session id (opaque token, not a path). Emitted by the CLI's
     /// MCP flow so agent-triggered reviews focus the app instead of opening
     /// a browser tab. Never grants filesystem access: the MCP handler
@@ -638,7 +772,7 @@ enum Target {
 impl Target {
     fn value(&self) -> &str {
         match self {
-            Target::File(v) | Target::Dir(v) | Target::Review(v) => v,
+            Target::File(v) | Target::Dir(v) | Target::Review(v) | Target::Thread(v, _) => v,
             Target::Files(v) => v.first().map(String::as_str).unwrap_or(""),
         }
     }
@@ -1016,6 +1150,11 @@ fn build_open_script(target: &Option<Target>, url: &Url) -> String {
         }
         Some(Target::Dir(path)) => format!("{{dir:{}}}", json_escape(path)),
         Some(Target::Review(id)) => format!("{{review:{}}}", json_escape(id)),
+        // A page older than the thread open ignores commentId and just
+        // opens the file.
+        Some(Target::Thread(path, comment)) => {
+            format!("{{file:{},commentId:{}}}", json_escape(path), json_escape(comment))
+        }
         None => "{}".to_string(),
     };
     format!(
@@ -1176,6 +1315,11 @@ fn build_ui_url(ui_port: u16, target: &Option<Target>) -> Url {
         Some(Target::Review(id)) => {
             url.query_pairs_mut().append_pair("review", id);
         }
+        // Only the fallback for a page whose SPA never mounts: the file,
+        // without the thread.
+        Some(Target::Thread(path, _)) => {
+            url.query_pairs_mut().append_pair("file", path);
+        }
         // Only the fallback for a page whose SPA never mounts; the files
         // themselves go through the open hook.
         Some(Target::Files(paths)) => {
@@ -1239,7 +1383,10 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
         .inner_size(1360.0, 940.0)
         .min_inner_size(640.0, 480.0)
         .visible(false)
-        .initialization_script(desktop_flag_script(&app.package_info().version.to_string()))
+        .initialization_script(desktop_flag_script(
+            &app.package_info().version.to_string(),
+            notifications_supported(),
+        ))
         .initialization_script(EXTERNAL_LINK_SCRIPT)
         .initialization_script(tab_key_script());
     // WebView2 zooms on Ctrl+= / Ctrl+- / Ctrl+0 by itself. Elsewhere Tauri's
@@ -1284,6 +1431,10 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
         .build()
         .ok()?;
     let _ = win.set_zoom(zoom);
+    // A new webview starts with WebKit's default (suspend when hidden); the
+    // next take sets the policy again if notifications are on.
+    #[cfg(target_os = "macos")]
+    KEEP_ALIVE.store(false, Ordering::SeqCst);
     place_and_show(&win);
     Some(win)
 }
@@ -1442,7 +1593,7 @@ fn open_target(app: &AppHandle, target: Option<Target>, grant: bool) {
         match &target {
             Some(Target::File(path)) | Some(Target::Dir(path)) => grant_access(path),
             Some(Target::Files(paths)) => paths.iter().for_each(|path| grant_access(path)),
-            Some(Target::Review(_)) | None => {}
+            Some(Target::Review(_)) | Some(Target::Thread(..)) | None => {}
         }
     }
 
@@ -1453,7 +1604,9 @@ fn open_target(app: &AppHandle, target: Option<Target>, grant: bool) {
     let open_script = build_open_script(&target, &url);
     // Several files open through the hook even when the window has to load
     // the app first: a URL carries only one.
-    let multi = matches!(target, Some(Target::Files(_)));
+    // So does a notification's thread: a cold launch would otherwise load
+    // `?file=` and lose which thread to open.
+    let multi = matches!(target, Some(Target::Files(_)) | Some(Target::Thread(..)));
     let root_url = build_ui_url(ui_port, &None);
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
@@ -1830,9 +1983,24 @@ mod tests {
     #[test]
     fn desktop_flag_script_sets_the_flag_and_the_app_version() {
         assert_eq!(
-            desktop_flag_script("0.6.0"),
+            desktop_flag_script("0.6.0", false),
             r#"window.__mdrDesktop = true; window.__mdrDesktopVersion = "0.6.0";"#
         );
+    }
+
+    #[test]
+    fn desktop_flag_script_adds_the_notifications_flag_only_where_supported() {
+        assert!(desktop_flag_script("0.6.0", true).ends_with(" window.__mdrDesktopNotifications = true;"));
+        assert!(!desktop_flag_script("0.6.0", false).contains("Notifications"));
+    }
+
+    #[test]
+    fn a_notification_click_opens_the_thread_and_falls_back_to_the_file() {
+        let target = Some(Target::Thread("/tmp/a.md".into(), "c1".into()));
+        let url = build_ui_url(6373, &target);
+        assert_eq!(url.as_str(), "http://127.0.0.1:6373/?file=%2Ftmp%2Fa.md");
+        let script = build_open_script(&target, &url);
+        assert!(script.contains("})({file:\"/tmp/a.md\",commentId:\"c1\"}, \"http://127.0.0.1:6373/?file="));
     }
 
     #[test]
@@ -1932,6 +2100,31 @@ fn main() {
             // is only turned off when the first window is built.
             #[cfg(target_os = "macos")]
             app.set_menu(build_app_menu(&handle)?)?;
+            // Agent notifications (#244): the delegate goes in before launch
+            // finishes, so a click that launched the app still opens its
+            // thread.
+            #[cfg(target_os = "macos")]
+            if notifications_supported() {
+                let clicks = handle.clone();
+                let present = handle.clone();
+                let on_click = move |target| {
+                    let target = match target {
+                        notify::ClickTarget::Thread { file, comment: Some(comment) } => {
+                            Target::Thread(file, comment)
+                        }
+                        notify::ClickTarget::Thread { file, comment: None } => Target::File(file),
+                        notify::ClickTarget::Review(id) => Target::Review(id),
+                    };
+                    let app = clicks.clone();
+                    std::thread::spawn(move || open_target(&app, Some(target), false));
+                };
+                notify::mac::install(
+                    move || present.get_webview_window("main").is_some_and(|w| reader_present(&w)),
+                    on_click,
+                );
+                notify::mac::refresh_permission(false);
+                start_notification_poll(handle.clone());
+            }
             std::thread::spawn(move || {
                 reconcile_server_at_startup();
                 open_target(&handle, None, false);

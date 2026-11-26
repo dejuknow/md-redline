@@ -16,3 +16,13 @@ url = "2"
 
 [profile.release]
 strip = true
+
+# Agent notifications (#244): UNUserNotificationCenter, and the WebKit setting
+# that keeps a hidden page from being suspended while they are on. Same
+# versions wry already pulls in.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSDictionary", "NSError", "NSObject", "NSString"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKPreferences", "WKWebView", "WKWebViewConfiguration"] }

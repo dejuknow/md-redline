@@ -16,8 +16,9 @@ window at `http://127.0.0.1:PORT`. If nothing is running it starts the stack
 by running `mdr --no-open`.
 
 All product logic lives in the web app. This crate only handles the window,
-the `mdr://` link, the `.md` file association, and sending external links to
-the system browser.
+the `mdr://` link, the `.md` file association, sending external links to
+the system browser, and delivering the agent notifications the web app
+words.
 
 ## Prerequisites
 
@@ -124,6 +125,12 @@ rather than taken for a filename.
 - **Drag and drop**: drop .md files on the window to open them as tabs (the
   first one dropped is shown), or a folder to show it in the explorer. Other
   files are ignored.
+- **Agent notifications**: turn on Settings > General > Agent notifications
+  to get a system notification when an agent replies to a thread, asks a
+  question or finishes a review while the window is in the background (off
+  by default; macOS asks for permission the first time). Clicking one brings
+  the window forward at that thread or review. Several arrivals within a few
+  seconds become one notification per file or review.
 - **MCP reviews**: agent-triggered reviews also prefer the app, through
   `mdr://open?review=<id>` (browser fallback as usual).
 - **Start log**: when the app starts the server, the output goes to
@@ -147,7 +154,8 @@ auto-start.
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.rs` | The whole shell: server discovery, window lifecycle and placement, menus, zoom, link, file-association and drop handling, external-link routing. |
+| `src/main.rs` | The shell: server discovery, window lifecycle and placement, menus, zoom, link, file-association and drop handling, external-link routing. |
+| `src/notify.rs` | Agent notifications: takes what the web app worded and posts it (UNUserNotificationCenter), routes clicks back, keeps a hidden page from being suspended while they are on. |
 | `scripts/tab-keys.js` | Tab keys injected into the page: Ctrl+Tab everywhere, plus Ctrl+T, Ctrl+W, Ctrl+Shift+T and Ctrl+1 to Ctrl+9 on Windows and Linux (macOS uses its menus). |
 | `tauri.conf.json` | Bundle config, identifier (`com.dejuknow.mdr`), file association. The main window is built in code, not declared here, because init scripts and navigation handlers are builder-only. |
 | `Info.plist` | Registers the `mdr://` URL scheme. |
