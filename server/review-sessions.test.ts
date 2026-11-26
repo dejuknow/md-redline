@@ -1773,3 +1773,145 @@ describe('persistence (#116)', () => {
     store.dispose();
   });
 });
+
+describe('agent rounds (#244)', () => {
+  let store: ReviewSessionStore;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-25T12:00:00Z'));
+    store = new ReviewSessionStore();
+  });
+
+  afterEach(() => {
+    store.dispose();
+    vi.useRealTimers();
+  });
+
+  const rounds = (id: string) => store.getSession(id)?.agentRounds;
+
+  it('a user review counts a round when the agent comes back after a batch', () => {
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    expect(rounds(session.id)).toBe(0);
+    // The agent's first poll starts the review: nothing has been handed to it.
+    store.beginWaitPark(session.id);
+    store.waitForSession(session.id);
+    expect(rounds(session.id)).toBe(0);
+    expect(store.sendBatch(session.id, 'batch1', ['c1'])).toBe(true);
+    store.endWaitPark(session.id);
+    expect(rounds(session.id)).toBe(0);
+    // Back for the next batch: one round done.
+    store.waitForSession(session.id);
+    expect(rounds(session.id)).toBe(1);
+    // A re-poll with nothing handed out in between is not another round.
+    store.waitForSession(session.id);
+    expect(rounds(session.id)).toBe(1);
+  });
+
+  it('does not count a round when the sweep clears waitingForAgent', () => {
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.startSweep(1_000);
+    store.beginWaitPark(session.id);
+    store.waitForSession(session.id);
+    store.sendBatch(session.id, 'batch1', ['c1']);
+    store.endWaitPark(session.id);
+    store.heartbeat(session.id);
+    vi.advanceTimersByTime(65_000);
+    store.heartbeat(session.id);
+    expect(store.getSession(session.id)?.waitingForAgent).toBe(false);
+    expect(rounds(session.id)).toBe(0);
+    // The agent's real return still counts once.
+    store.waitForSession(session.id);
+    expect(rounds(session.id)).toBe(1);
+  });
+
+  it('a batch queued while the agent worked goes straight out without a round', async () => {
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(session.id);
+    store.waitForSession(session.id);
+    store.sendBatch(session.id, 'batch1', ['c1']);
+    store.endWaitPark(session.id);
+    store.queueBatch(session.id, ['c2'], new Map([['/tmp/a.md', 2]]));
+    const result = await store.waitForSession(session.id);
+    expect(result.status).toBe('batch');
+    expect(rounds(session.id)).toBe(0);
+    // Back from the queued batch: now a round is done.
+    store.waitForSession(session.id);
+    expect(rounds(session.id)).toBe(1);
+  });
+
+  it('an agent review counts a round when the agent waits after posting', () => {
+    const session = store.createSession({
+      filePaths: ['/tmp/a.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    // Waiting before posting anything is not a finished review.
+    void store.waitForSessionDone(session.id);
+    expect(rounds(session.id)).toBe(0);
+    store.recordAgentComments(session.id, 3);
+    vi.advanceTimersByTime(1_000);
+    void store.waitForSessionDone(session.id);
+    expect(rounds(session.id)).toBe(1);
+    // mdr_wait re-polls every 90s: no new posts, no new round.
+    vi.advanceTimersByTime(90_000);
+    void store.waitForSessionDone(session.id);
+    expect(rounds(session.id)).toBe(1);
+    // More comments, even in the same millisecond, then waiting again: a
+    // second round.
+    store.recordAgentComments(session.id, 1);
+    void store.waitForSessionDone(session.id);
+    expect(rounds(session.id)).toBe(2);
+  });
+
+  it('rounds and a pending return survive a restore', () => {
+    const user = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    store.beginWaitPark(user.id);
+    store.waitForSession(user.id);
+    store.sendBatch(user.id, 'batch1', ['c1']);
+    store.endWaitPark(user.id);
+    store.waitForSession(user.id);
+    store.beginWaitPark(user.id);
+    store.sendBatch(user.id, 'batch2', ['c2']);
+    store.endWaitPark(user.id);
+    const agent = store.createSession({
+      filePaths: ['/tmp/b.md'],
+      enableResolve: false,
+      origin: 'agent',
+    });
+    store.recordAgentComments(agent.id, 1);
+    void store.waitForSessionDone(agent.id);
+
+    const savedAt = Date.now();
+    const state = JSON.parse(JSON.stringify(store.exportState())) as PersistedStoreState;
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    expect(after.getSession(user.id)?.agentRounds).toBe(1);
+    expect(after.getSession(agent.id)?.agentRounds).toBe(1);
+    // The agent was working on batch2 across the restart; its return counts.
+    after.waitForSession(user.id);
+    expect(after.getSession(user.id)?.agentRounds).toBe(2);
+    // The agent review's round was already counted before the restart.
+    void after.waitForSessionDone(agent.id);
+    expect(after.getSession(agent.id)?.agentRounds).toBe(1);
+    after.dispose();
+  });
+
+  it('a save written before rounds existed restores with none', () => {
+    const session = store.createSession({ filePaths: ['/tmp/a.md'], enableResolve: false });
+    const savedAt = Date.now();
+    const state = JSON.parse(JSON.stringify(store.exportState())) as PersistedStoreState;
+    for (const persisted of state.sessions) {
+      delete persisted.agentRounds;
+      delete persisted.awaitingAgentReturn;
+      delete persisted.agentPostSeq;
+      delete persisted.agentPostSeqAtRound;
+    }
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt });
+    expect(after.getSession(session.id)?.agentRounds).toBe(0);
+    after.waitForSession(session.id);
+    expect(after.getSession(session.id)?.agentRounds).toBe(0);
+    after.dispose();
+  });
+});
