@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
-import { existsSync, mkdtempSync, readdirSync, statSync } from 'fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -12,12 +12,14 @@ const DIST_MCP = join(__dirname, '..', 'dist', 'mcp-stdio.js');
 // A tool call that gets as far as opening a review hands it to the browser
 // launcher. A no-op stub there keeps these runs from opening a real browser or
 // the mdr desktop app (which the CLI skips whenever a browser override is set).
+const BROWSER_STUB_DIR = mkdtempSync(join(tmpdir(), 'mdr-mcp-browser-'));
 const MCP_ENV: NodeJS.ProcessEnv = {
   ...process.env,
   NODE_ENV: 'test',
   MDR_BROWSER: '',
-  MD_REDLINE_BROWSER: createBrowserStub(mkdtempSync(join(tmpdir(), 'mdr-mcp-browser-'))),
+  MD_REDLINE_BROWSER: createBrowserStub(BROWSER_STUB_DIR),
 };
+afterAll(() => rmSync(BROWSER_STUB_DIR, { recursive: true, force: true }));
 
 /**
  * Whether the built MCP bundle is current enough to spawn.

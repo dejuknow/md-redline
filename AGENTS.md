@@ -620,11 +620,12 @@ it to prove the CLI agrees with the server and `vite.config.ts`.
 open) first tries the desktop app through `open mdr://open?...` and falls back
 to the browser launcher when that fails, which it does at once and without a
 prompt when no app has registered the scheme. `shouldPreferApp`
-(`bin/app-handoff.js`) allows the attempt only with no browser override, for
+(`bin/app-handoff.js`) allows the attempt only with no browser override, no
+named port (`MD_REDLINE_PORT` or `PORT`, even one inside the app's range), for
 the user's own home, and for a server port inside the app's scan range
 (6373-6382): the link carries only a path or review id, and the app finds its
-server on its own, so any other instance stays on the browser with its exact
-URL. `--browser` skips the app, `--no-open` starts the server and opens
+server on its own (port file, then scan), so any other instance stays on the
+browser with its exact URL. `--browser` skips the app, `--no-open` starts the server and opens
 nothing (the app boots the stack with it). `bin/app-open-cli.test.ts` drives
 the real CLI against a fake `open` on PATH (macOS only).
 
@@ -3201,10 +3202,14 @@ nothing builds or tests it there yet.
   `mdr --no-open` through `$SHELL -lic` (fallback `/bin/zsh`). It must be
   interactive, not just login: nvm puts PATH in `~/.zshrc`, which `-lc`
   never reads, so a Finder or Dock launch could not find an nvm-linked `mdr`.
-  The spawn's output goes to `~/Library/Logs/mdr/server-start.log`. A
-  production server serves `/` itself, so the shell skips the dev-mode wait
-  for a Vite client there. Once per launch it also runs `mdr --no-open` against
-  a running production server so the CLI can swap a stale one after an upgrade.
+  The spawn runs from the user's home: a Finder or Dock launch has `/` as its
+  cwd, and the server trusts the folder it starts in. Its output goes to
+  `~/Library/Logs/mdr/server-start.log`. A production server serves `/`
+  itself, so the shell skips the dev-mode wait for a Vite client there. Once
+  per launch it also runs `mdr --no-open` against a running production server
+  so the CLI can swap a stale one after an upgrade; opens wait for that to
+  finish (`RECONCILING`, then `ENSURE_LOCK`), so a launch-time Finder open is
+  neither loaded from nor granted on a server about to be replaced.
 - A window left on another origin (a dead server, or one on another port)
   is re-navigated on the next open or Dock click instead of eval'ing into it.
 - The `mdr://open?file=...` link (registered via `src-tauri/Info.plist`) and
@@ -3249,9 +3254,12 @@ nothing builds or tests it there yet.
 - External links (`<a target="_blank">` in rendered markdown) open in the
   system browser, not the webview. An injected init script turns an
   external-link click into a top-level navigation, and the window's
-  `on_navigation` handler (`classify_navigation`) sends any non-loopback
-  http(s)/mailto/tel URL to `open` and cancels the in-webview load; loopback
-  and internal schemes (tauri://, about:blank) are allowed through. The main
+  `on_navigation` handler (`classify_navigation`) sends every http(s)/mailto/tel
+  URL to `open` and cancels the in-webview load, except loopback on mdr's own
+  ports (the server's 6373-6382 and the Vite client's 5188-5197); a link to
+  another local service, such as a dev server on `localhost:3000`, would
+  otherwise replace the app. Internal schemes (tauri://, about:blank) are
+  allowed through. The main
   window is built in code (`build_main_window`), not declared in
   tauri.conf.json, because init scripts and nav handlers are builder-only.
 

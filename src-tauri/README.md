@@ -79,9 +79,9 @@ is not installed. Opens land on top of what you already have open: a file adds
 or activates a tab, a folder is shown in the explorer, existing tabs stay. A
 bare `mdr` or a Dock click never navigates away from an open doc.
 
-The CLI keeps the browser when the app would not find the same server: with
+The CLI keeps the browser when the app might not find the same server: with
 `MD_REDLINE_BROWSER` or `MDR_BROWSER` set, with `MD_REDLINE_HOME` pointing at
-another home, or with a port outside 6373-6382 (`MD_REDLINE_PORT` or `PORT`).
+another home, or with a port named by `MD_REDLINE_PORT` or `PORT`.
 
 Finder "Open With mdr" (and double-clicking `.md` files once mdr is the
 default) opens files the same way, without going through the CLI.
@@ -101,8 +101,9 @@ rather than taken for a filename.
 ## Behavior notes
 
 - **External links** in rendered markdown open in the system browser, not the
-  app window. Loopback and internal schemes (`tauri://`, `about:blank`) load
-  in the app; any other `http(s)`, `mailto` or `tel` URL is handed to `open`.
+  app window, and so do links to other local services (a dev server on
+  `localhost:3000`, say). Only mdr's own pages and internal schemes
+  (`tauri://`, `about:blank`) load in the app.
 - **Tabs**: Cmd-W closes the active tab and Shift-Cmd-T reopens the last
   closed one (File menu). Cmd-W with no tab open hides the window, and
   Shift-Cmd-T brings it back with the reopened tab.
@@ -114,7 +115,10 @@ rather than taken for a filename.
 - **MCP reviews**: agent-triggered reviews also prefer the app, through
   `mdr://open?review=<id>` (browser fallback as usual).
 - **Start log**: when the app starts the server, the output goes to
-  `~/Library/Logs/mdr/server-start.log`.
+  `~/Library/Logs/mdr/server-start.log`. The server it starts runs from your
+  home folder, as one started in a terminal would.
+- **Version**: the app has its own version number (About mdr), separate from
+  the npm package's.
 
 ## Dev-mode gotcha
 

@@ -12,9 +12,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 // `open` first on PATH records each call, so the run never reaches a real app
 // or browser. macOS only, since the hand-off is.
 //
-// The stub server listens inside the app's scan range (6373-6382) and serves a
-// scratch HOME, so this is the one setup in which the CLI prefers the app:
-// MD_REDLINE_PORT or MD_REDLINE_HOME would send it straight to the browser.
+// The stub server listens inside the app's scan range (6373-6382), is found
+// through the port file rather than a named port, and serves a scratch HOME:
+// the one setup in which the CLI prefers the app. MD_REDLINE_PORT, PORT or
+// another MD_REDLINE_HOME would send it straight to the browser.
 
 const BIN = join(__dirname, 'md-redline');
 const PKG = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as {

@@ -14,23 +14,32 @@ export const APP_PORT_SCAN = 10;
  * The app finds its server on its own: a server serving the user's home, on a
  * port in FALLBACK_PORT..FALLBACK_PORT+APP_PORT_SCAN. A link carries only a
  * path or a review id, so when this CLI is talking to some other server (a
- * different MD_REDLINE_HOME, or a port outside that range from MD_REDLINE_PORT
- * or PORT), the app would open the target on the wrong instance, or look up a
- * review that server never had. Those runs keep the browser, which gets the
- * exact URL. So does any explicit browser override, which is a request for that
- * browser and is also how tests keep off an installed app.
+ * different MD_REDLINE_HOME, or a port named by MD_REDLINE_PORT or PORT, even
+ * one inside the range: the app ignores those and may settle on another
+ * same-home server), the app would open the target on the wrong instance, or
+ * look up a review that server never had. Those runs keep the browser, which
+ * gets the exact URL. So does any explicit browser override, which is a
+ * request for that browser and is also how tests keep off an installed app.
  *
  * @param {{
  *   platform: string;
  *   browserOverride: string;
  *   resolvedHome: string;
  *   userHome: string;
+ *   namedPort: number | null;
  *   serverPort: number | null;
- * }} input
+ * }} input `namedPort` is the port MD_REDLINE_PORT or PORT names, if any.
  * @returns {boolean}
  */
-export function shouldPreferApp({ platform, browserOverride, resolvedHome, userHome, serverPort }) {
-  if (platform !== 'darwin' || browserOverride) return false;
+export function shouldPreferApp({
+  platform,
+  browserOverride,
+  resolvedHome,
+  userHome,
+  namedPort,
+  serverPort,
+}) {
+  if (platform !== 'darwin' || browserOverride || namedPort !== null) return false;
   if (serverPort === null || serverPort < FALLBACK_PORT) return false;
   if (serverPort >= FALLBACK_PORT + APP_PORT_SCAN) return false;
   return sameDir(resolvedHome, userHome);

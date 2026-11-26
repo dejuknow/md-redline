@@ -837,7 +837,7 @@ function buildDeepLink(file, dir) {
  * the scheme (the app isn't installed), which is the cue to fall back to the
  * browser. shouldPreferApp decides when the app may take the open at all:
  * macOS only, no browser override, and only for the server the app itself
- * would find.
+ * would find (no named port, the user's home, a port in the app's range).
  *
  * @param {string} deepLink
  * @param {number | null} serverPort the API server this CLI resolved
@@ -849,6 +849,7 @@ function tryOpenInApp(deepLink, serverPort) {
     browserOverride: browserOverride(),
     resolvedHome: resolveHomeDir(),
     userHome: homedir(),
+    namedPort: NAMED_SERVER_PORT,
     serverPort,
   });
   if (!preferApp) return Promise.resolve(false);

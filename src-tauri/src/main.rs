@@ -6,7 +6,7 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -232,16 +232,23 @@ const MENU_REOPEN_TAB: &str = "reopen-tab";
 #[cfg(target_os = "macos")]
 const MENU_CLOSE_WINDOW: &str = "close-window";
 
-/// Asks the app to reopen its last closed tab, bringing the window back when
-/// closing the last tab hid it (as browsers do). The app does nothing when no
-/// tab is left to reopen or it is not loaded (loading or error page).
+/// Asks the app to reopen its last closed tab, and brings the window back
+/// when one reopened (closing the last tab hides it), as browsers do. Does
+/// nothing when no tab is left to reopen or the app is not loaded (loading or
+/// error page).
 #[cfg(target_os = "macos")]
 fn reopen_closed_tab(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.eval("window.__mdrReopenClosedTab && window.__mdrReopenClosedTab()");
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
+    let Some(win) = app.get_webview_window("main") else { return };
+    let target = win.clone();
+    let _ = win.eval_with_callback(
+        "window.__mdrReopenClosedTab ? window.__mdrReopenClosedTab() === true : false",
+        move |result| {
+            if result.trim() == "true" {
+                let _ = target.show();
+                let _ = target.set_focus();
+            }
+        },
+    );
 }
 
 /// True once the main window has navigated away from the bundled loading
@@ -251,6 +258,28 @@ static NAVIGATED: AtomicBool = AtomicBool::new(false);
 /// Serializes server discovery/startup so concurrent open events cannot
 /// both conclude "no server" and spawn two of them.
 static ENSURE_LOCK: Mutex<()> = Mutex::new(());
+/// True from launch until the startup reconcile is over. Set before any open
+/// can run, so an open never slips in ahead of the reconcile taking
+/// ENSURE_LOCK.
+static RECONCILING: AtomicBool = AtomicBool::new(true);
+
+/// Clears RECONCILING when the reconcile ends, on every return path.
+struct ReconcileDone;
+
+impl Drop for ReconcileDone {
+    fn drop(&mut self) {
+        RECONCILING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Wait (bounded) for the startup reconcile, so opens use the server it
+/// settles on.
+fn wait_for_reconcile() {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while RECONCILING.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
 
 enum Target {
     File(String),
@@ -421,7 +450,13 @@ fn log_start(line: &str) {
 /// trick editors use to recover a terminal PATH. Costs ~2s of rc startup,
 /// well inside ensure_server_running's 30s budget. Output goes to the start
 /// log (see start_log_path).
-fn spawn_mdr_no_open(reason: &str) {
+///
+/// It runs from the user's home, as a terminal would. A Finder or Dock launch
+/// leaves the app's cwd at `/`, and the server trusts the folder it starts in,
+/// so inheriting that cwd would open the whole disk to it.
+///
+/// Returns the shell, which exits once `mdr --no-open` has a server up.
+fn spawn_mdr_no_open(reason: &str) -> Option<Child> {
     let shell = user_shell(std::env::var("SHELL").ok());
     log_start(&format!("{reason}: {shell} -lic 'mdr --no-open'"));
     let log = start_log_path()
@@ -431,15 +466,32 @@ fn spawn_mdr_no_open(reason: &str) {
         Some((out, err)) => (Stdio::from(out), Stdio::from(err)),
         None => (Stdio::null(), Stdio::null()),
     };
-    let spawned = Command::new(&shell)
-        .args(["-lic", "mdr --no-open"])
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr)
-        .spawn();
-    if let Err(err) = spawned {
-        log_start(&format!("could not run {shell}: {err}"));
+    let mut command = Command::new(&shell);
+    command.args(["-lic", "mdr --no-open"]).stdin(Stdio::null()).stdout(stdout).stderr(stderr);
+    if let Some(home) = own_home().filter(|h| std::path::Path::new(h).is_dir()) {
+        command.current_dir(home);
     }
+    match command.spawn() {
+        Ok(child) => Some(child),
+        Err(err) => {
+            log_start(&format!("could not run {shell}: {err}"));
+            None
+        }
+    }
+}
+
+/// Wait up to `limit` for a spawned `mdr --no-open` shell to exit, which
+/// reaps it. True when it exited in time.
+fn wait_for_exit(child: &mut Child, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => std::thread::sleep(Duration::from_millis(200)),
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// Whether the server at `port` serves the app page itself. A production
@@ -452,21 +504,34 @@ fn serves_page(port: u16) -> bool {
 /// Once per app launch, delegate server-version reconciliation to the CLI:
 /// `mdr --no-open` keeps a same-version server and gracefully swaps a stale
 /// one left over from a previous install. The shell deliberately never
-/// compares versions itself — a Rust-side check would strand a
+/// compares versions itself: a Rust-side check would strand a
 /// not-yet-rebuilt shell after any npm version bump. Without this, a
 /// Finder/Dock-only user could keep a stale server forever, since only CLI
 /// invocations run the upgrade dance.
+///
+/// Opens wait for it (RECONCILING), so a Finder open at launch is neither
+/// loaded from nor granted on a server that is about to be replaced.
 fn reconcile_server_at_startup() {
+    let _guard = ENSURE_LOCK.lock().unwrap();
+    let _done = ReconcileDone;
     let Some(server) = find_server_port() else {
         return; // nothing of ours running; ensure_server_running will spawn
     };
     if find_client_port(server).is_some() {
         return; // dev mode serves live code; nothing to reconcile
     }
-    spawn_mdr_no_open("reconcile");
-    // Hold until the health check is steady so a mid-upgrade dip (old
-    // server dying, new one booting) isn't adopted: 3 consecutive
-    // successes ~400ms apart, capped at 20s.
+    // The CLI exits once the server it keeps or starts is up, so wait for
+    // it rather than probing early, while the old server still answers.
+    if let Some(mut child) = spawn_mdr_no_open("reconcile") {
+        if !wait_for_exit(&mut child, Duration::from_secs(30)) {
+            log_start("reconcile: mdr --no-open still running after 30s");
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+    }
+    // Then hold until the health check is steady: 3 consecutive successes
+    // ~400ms apart, capped at 20s.
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut stable = 0;
     while Instant::now() < deadline && stable < 3 {
@@ -478,12 +543,19 @@ fn reconcile_server_at_startup() {
 /// Returns the port the UI should load: Vite client in dev, server in prod.
 /// Starts the stack via the mdr CLI when no server of ours is running.
 fn ensure_server_running() -> Option<u16> {
+    wait_for_reconcile();
     let _guard = ENSURE_LOCK.lock().unwrap();
     if let Some(port) = find_ui_port() {
         return Some(port);
     }
 
-    spawn_mdr_no_open("no mdr server for this home");
+    if let Some(mut child) = spawn_mdr_no_open("no mdr server for this home") {
+        // Reap the shell whenever it exits; the polling below decides when
+        // the server is usable.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
 
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
@@ -619,15 +691,21 @@ enum NavDecision {
     External,
 }
 
-/// The whole app lives on 127.0.0.1, so any non-loopback web link, plus
-/// mailto:/tel:, is external. Everything else (tauri://, about:blank, and
-/// any other internal scheme) stays in the webview so the shell never
-/// blocks its own chrome.
+/// The app lives on 127.0.0.1, on a port the shell would pick for it (the
+/// server's scan range, or the Vite client's in dev). Any other web link,
+/// including another local service such as a dev server on localhost:3000,
+/// plus mailto:/tel:, is external: loading it here would replace the app.
+/// Everything else (tauri://, about:blank, and any other internal scheme)
+/// stays in the webview so the shell never blocks its own chrome.
 fn classify_navigation(url: &Url) -> NavDecision {
     let host = url.host_str().unwrap_or("");
     let loopback = host == "127.0.0.1" || host == "localhost";
+    let mdr_port = url.port_or_known_default().is_some_and(|p| {
+        (DEFAULT_SERVER_PORT..DEFAULT_SERVER_PORT + MAX_PORT_SCAN).contains(&p)
+            || (DEFAULT_CLIENT_PORT..DEFAULT_CLIENT_PORT + MAX_PORT_SCAN).contains(&p)
+    });
     match url.scheme() {
-        "http" | "https" if loopback => NavDecision::Allow,
+        "http" | "https" if loopback && mdr_port => NavDecision::Allow,
         "http" | "https" | "mailto" | "tel" => NavDecision::External,
         _ => NavDecision::Allow,
     }
@@ -769,7 +847,7 @@ fn target_from_url(url: &Url) -> Option<Target> {
                 _ => {}
             }
         }
-        return None; // bare mdr://open — activate only
+        return None; // bare mdr://open: activate only
     }
     None
 }
@@ -802,6 +880,12 @@ mod tests {
         assert!(!allow("http://example.com"));
         assert!(!allow("mailto:hello@dejuknow.com"));
         assert!(!allow("tel:+15551234567"));
+        // Another local service is external too: it would replace the app.
+        assert!(!allow("http://localhost:3000/"));
+        assert!(!allow("http://127.0.0.1:8080/docs"));
+        assert!(!allow("http://127.0.0.1/"));
+        assert!(allow("http://127.0.0.1:6382/"));
+        assert!(!allow("http://127.0.0.1:6383/"));
     }
 
     #[test]

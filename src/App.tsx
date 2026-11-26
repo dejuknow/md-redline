@@ -2393,12 +2393,17 @@ export default function App() {
 
   // Remember the active document for a reload of this review. Only once the
   // review's own tabs are open: until then activeFilePath can be a file the
-  // CLI or config opened, which would overwrite the reader's choice.
+  // CLI or config opened, which would overwrite the reader's choice. And only
+  // a document of this review: a file opened beside it (another review the
+  // desktop app opened in place, say) would replace the reader's choice with
+  // one a reload ignores.
   useEffect(() => {
     if (!activeFilePath || !reviewTabsOpenedRef.current) return;
     const reviewId = new URLSearchParams(window.location.search).get('review');
-    if (reviewId) saveActiveTab(reviewId, activeFilePath);
-  }, [activeFilePath]);
+    if (!reviewId) return;
+    const session = reviewSessions.find((s) => s.id === reviewId);
+    if (session?.filePaths.includes(activeFilePath)) saveActiveTab(reviewId, activeFilePath);
+  }, [activeFilePath, reviewSessions]);
 
   // Load initial file/dir from URL params, CLI arg, or restored session
   const initialLoadRef = useRef(false);

@@ -19,6 +19,7 @@ const base = {
   browserOverride: '',
   resolvedHome: home,
   userHome: home,
+  namedPort: null,
   serverPort: FALLBACK_PORT,
 };
 
@@ -42,6 +43,13 @@ describe('shouldPreferApp', () => {
     expect(shouldPreferApp({ ...base, serverPort: FALLBACK_PORT - 1 })).toBe(false);
     expect(shouldPreferApp({ ...base, serverPort: FALLBACK_PORT + APP_PORT_SCAN })).toBe(false);
     expect(shouldPreferApp({ ...base, serverPort: 7100 })).toBe(false);
+  });
+
+  it('keeps the browser for a named port, even inside the range', () => {
+    // MD_REDLINE_PORT=6375 picks that server for the CLI, but the app ignores
+    // the variable and may settle on another same-home server on 6373.
+    expect(shouldPreferApp({ ...base, namedPort: 6375, serverPort: 6375 })).toBe(false);
+    expect(shouldPreferApp({ ...base, namedPort: 3000, serverPort: 3000 })).toBe(false);
   });
 
   it('keeps the browser for another home (MD_REDLINE_HOME)', () => {
