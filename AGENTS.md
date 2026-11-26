@@ -907,10 +907,20 @@ badge, resolved mark, error dot) instead hides them on hover and shows the close
 button in their place. The active tab's top lines up with the sidebar's.
 A tab's `title` is the file's full path, the only place the path shows. When two
 open files share a name, each tab shows a muted folder label after it
-(`[data-tab-folder]`, from `tabDisambiguators` in `path-utils.ts`): the nearest
-parent folder, or as many folders as it takes to tell them apart
-(`one/docs`, `two/docs`), VS Code style. The "Show all open tabs" list shows the
-same labels. The strip is
+(`[data-tab-folder]`, from `tabDisambiguators` in `path-utils.ts`): the folder
+that differs, not the run of shared folders under it (`acme` and `globex` for
+`acme/specs/docs/README.md` and `globex/specs/docs/README.md`). Where two labels
+would still match, each adds the folder nearest the file that tells them apart,
+with `…` over the shared folders between (`north/…/design`). A label never names
+only a folder another same-named tab also sits in (`w/a` beside `w/b`, not `w`).
+Labels do not repeat in any realistic group (a group of hundreds of tabs can
+outrun the space; the tooltip still has the path), and each is at most `TAB_FOLDER_LABEL_CHARS` (14), shortened
+around the part that differs rather than off the end (labels that fit are left whole), because dated folders
+(`2026-01-05-alpha-rollout`) share long prefixes. The file name is the last
+thing a tab gives up: the label shrinks first (`shrink-[100]`). The rule was
+picked by a three-model council and checked against 5,000 realistic same-name
+groups; keep its tests (`path-utils.test.ts`) when changing it. The "Show all
+open tabs" list shows the same labels. The strip is
 not inside an `overflow-clip` ancestor (only the page card below it clips),
 which is what lets the "Show all open tabs" menu (`tab-list-menu`) hang below it
 unclipped.
