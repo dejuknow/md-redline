@@ -16,6 +16,7 @@ import { SettingsProvider } from '../contexts/SettingsContext';
 import { CardDraftsContext } from '../contexts/CardDraftsContext';
 import { useCardDrafts, type CardDraftsApi } from '../hooks/useCardDrafts';
 import { CommentCard } from './CommentCard';
+import { ThreadCard } from './ThreadCard';
 import type { MdComment } from '../types';
 
 class ResizeObserverStub {
@@ -56,7 +57,7 @@ function Harness({ file, comment, shown }: { file: string; comment: MdComment; s
     file,
     comments: [comment],
     requestedEditor: null,
-    setActiveCommentId: () => {},
+    onEditorBack: () => {},
   });
   useEffect(() => {
     held.store = api;
@@ -185,5 +186,61 @@ describe('CommentCard with the card draft store (#213)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByDisplayValue('Changed elsewhere')).toBeTruthy();
+  });
+
+  it('an editor shown again on a card that stayed mounted does not take the keyboard from another field', () => {
+    const view = setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Write a reply...' }));
+    fireEvent.change(replyField(), { target: { value: 'kept through a resolve' } });
+    // Resolved elsewhere: the editor goes, the card stays.
+    act(() => view.show(true, { ...note, status: 'resolved' }));
+    expect(screen.queryByPlaceholderText('Write a reply...')).toBeNull();
+
+    const other = document.createElement('input');
+    document.body.appendChild(other);
+    other.focus();
+    // Reopened: the editor comes back on its draft, and leaves focus alone.
+    act(() => view.show(true, note));
+    expect(replyField().value).toBe('kept through a resolve');
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
+  it('a card keeping its own editor (popover, Mermaid panel) leaves the store alone', () => {
+    function PopoverLike() {
+      const { api } = useCardDrafts({
+        file: 'a.md',
+        comments: [note],
+        requestedEditor: null,
+        onEditorBack: () => {},
+      });
+      useEffect(() => {
+        held.store = api;
+      });
+      return createElement(
+        SettingsProvider,
+        null,
+        createElement(
+          CardDraftsContext.Provider,
+          { value: api },
+          createElement(ThreadCard, {
+            thread: note,
+            active: true,
+            onSelect: vi.fn(),
+            onReply: vi.fn(),
+            onDelete: vi.fn(),
+            onEdit: vi.fn(),
+            onEditReply: vi.fn(),
+            onDeleteReply: vi.fn(),
+          }),
+        ),
+      );
+    }
+    render(createElement(PopoverLike));
+    fireEvent.click(screen.getByRole('button', { name: 'Write a reply...' }));
+    fireEvent.change(replyField(), { target: { value: 'popover text' } });
+    expect(held.store?.readDraft({ mode: 'reply-compose', commentId: 'c1' })).toBeNull();
+    // Nothing reopens this editor after a switch, so the tab shortcut stays off in it.
+    expect(replyField().hasAttribute('data-card-editor')).toBe(false);
   });
 });

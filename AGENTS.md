@@ -1485,13 +1485,18 @@ its text, as before.
   re-renders only when a draft appears or goes, or the editor changes.
 - **Handed back.** Coming back to the file, the same editor opens on the same
   text and its card is selected again (the store runs after the tab-switch
-  effect that clears the selection). A card mounting with its editor already
-  open starts its field on the draft and puts the caret back. It takes the
-  keyboard as the comment form's handed-back draft does, but not from another
-  text field or a dialog, so the comment form wins when both come back, and it
-  retries for a few frames because the anchored rail keeps a card
-  `visibility: hidden` until it is placed. An editor with nothing typed closes
-  when its file is left, as an empty comment form does.
+  effect that clears the selection, and calls `onEditorBack`). With no comment
+  surface showing, `App` opens one for it (`ensureCommentSurface`): the drawer
+  in the raw view or a narrow window, which is also what the desktop shell's
+  tab switch closes on the way out. A card mounting with its editor already
+  open starts its field on the draft and puts the caret back. Only an editor
+  the reader just opened takes the keyboard outright (`takeFreshOpen`, true
+  once per `setEditor`). One the store shows again, after a tab switch, a
+  Reopen or an undo, takes it only if no other text field or dialog has it,
+  so the comment form wins when both come back. It retries for a few frames,
+  because the anchored rail keeps a card `visibility: hidden` until it is
+  placed. An editor with nothing typed closes when its file is left, as an
+  empty comment form does.
 - **Two cards.** Only one card editor is open at a time, as before, but
   opening another card's editor no longer loses the first one's text: its
   draft is kept and comes back when that editor is opened again.
@@ -1513,9 +1518,11 @@ its text, as before.
   and going, or the prose changing around the anchor leave a reply draft
   alone: unlike a new comment (above), a reply has no anchor to place, only a
   comment id.
-- The popover's and the Mermaid thread panel's cards keep their own editor as
-  before, but their text goes through the same store, so reopening the field
-  brings it back.
+- Not covered: the highlight popover's and the Mermaid thread panel's cards.
+  They keep their own editor (`ThreadCard` without an `editor` prop), which
+  nothing reopens after a switch, so `ThreadCard` hands their card a null
+  store. Their text stays the card's own, as before, and their fields carry no
+  `data-card-editor`, so the tab shortcut stays off in them.
 
 ### Right-clicking a selection
 

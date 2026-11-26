@@ -97,7 +97,11 @@ interface Params {
   comments: readonly MdComment[];
   /** An editor asked for from outside the cards (the context menu's Edit and Reply). */
   requestedEditor: SidebarCommentEditorState;
-  setActiveCommentId: (id: string | null) => void;
+  /**
+   * The file came back with a card editor that can show again: select its
+   * card, and make sure a surface is there to show it.
+   */
+  onEditorBack: (commentId: string) => void;
 }
 
 /**
@@ -121,7 +125,7 @@ interface Params {
  * Kept in memory like the comment form's drafts: closing a tab keeps them,
  * a page reload drops them.
  */
-export function useCardDrafts({ file, comments, requestedEditor, setActiveCommentId }: Params) {
+export function useCardDrafts({ file, comments, requestedEditor, onEditorBack }: Params) {
   const filesRef = useRef(new Map<string, FileDrafts>());
   // Drafts live in a ref so typing does not re-render the app. This changes
   // whenever something a render reads does: a draft added or removed, or an
@@ -131,6 +135,10 @@ export function useCardDrafts({ file, comments, requestedEditor, setActiveCommen
 
   const fileRef = useRef(file);
   fileRef.current = file;
+  // The token of an editor just opened by the reader, until its card has
+  // focused it. An editor shown again later (the file coming back, its
+  // thread reopened) is not fresh, and takes focus only if nothing has it.
+  const freshTokenRef = useRef<number | null>(null);
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const detachedSeqRef = useRef(0);
@@ -151,6 +159,7 @@ export function useCardDrafts({ file, comments, requestedEditor, setActiveCommen
       const files = entry(path);
       if (files.editor === editor) return;
       files.editor = editor;
+      freshTokenRef.current = editor?.token ?? null;
       // Opening an editor whose kept draft cannot go back in (the text it
       // edits changed) starts it afresh. The draft stays offered, apart from
       // it, or it would keep the editor from showing at all.
@@ -198,7 +207,7 @@ export function useCardDrafts({ file, comments, requestedEditor, setActiveCommen
       if (back) {
         const target = editorTarget(back);
         const draft = filesRef.current.get(file)?.drafts.get(cardDraftKey(target));
-        if (judgeCardTarget(target, draft, comments) === null) setActiveCommentId(back.commentId);
+        if (judgeCardTarget(target, draft, comments) === null) onEditorBack(back.commentId);
       }
     }
     // Only on a change of file; comments are read as they are then.
@@ -228,6 +237,12 @@ export function useCardDrafts({ file, comments, requestedEditor, setActiveCommen
     },
     [entry, bump],
   );
+
+  const takeFreshOpen = useCallback((token: number) => {
+    if (freshTokenRef.current !== token) return false;
+    freshTokenRef.current = null;
+    return true;
+  }, []);
 
   const setCaret = useCallback((target: CardEditorTarget, caret: [number, number]) => {
     const path = fileRef.current;
@@ -295,8 +310,8 @@ export function useCardDrafts({ file, comments, requestedEditor, setActiveCommen
     () =>
       file === null
         ? null
-        : { file, editor, setEditor, readDraft, writeDraft, setCaret, discardDraft },
-    [file, editor, setEditor, readDraft, writeDraft, setCaret, discardDraft],
+        : { file, editor, setEditor, takeFreshOpen, readDraft, writeDraft, setCaret, discardDraft },
+    [file, editor, setEditor, takeFreshOpen, readDraft, writeDraft, setCaret, discardDraft],
   );
 
   return {
@@ -314,6 +329,11 @@ export interface CardDraftsApi {
   /** The open card editor in that file, while its comment can take it. */
   editor: SidebarCommentEditorState;
   setEditor: (editor: SidebarCommentEditorState) => void;
+  /**
+   * Whether the editor with this token was just opened by the reader, and has
+   * not taken focus yet. True once per open.
+   */
+  takeFreshOpen: (token: number) => boolean;
   /** The draft kept for a target, if any, whether or not it can go back in. */
   readDraft: (target: CardEditorTarget) => CardDraft | null;
   /** Record the field's text; text not worth keeping drops the draft. */

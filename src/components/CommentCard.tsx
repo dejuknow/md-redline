@@ -183,11 +183,9 @@ export const CommentCard = memo(function CommentCard({
     const kept = draftsRef.current?.readDraft(target);
     return kept && kept.base === base ? kept : null;
   };
-  // An editor already open when the card mounts was opened before: the card
-  // is coming back after a tab or view switch with its draft. Fresh opens
-  // change the token. The text starts as the draft, so the caret can be put
+  // A card mounting with its editor already open is coming back after a tab
+  // or view switch. Its text starts as the draft, so the caret can be put
   // back where it was when the field takes focus.
-  const mountTokenRef = useRef(editor ? editorToken : null);
   const [editText, setEditText] = useState(() =>
     isEditing ? (usableDraft(commentEditTarget, comment.text)?.text ?? comment.text) : comment.text,
   );
@@ -254,7 +252,10 @@ export const CommentCard = memo(function CommentCard({
       target: CardEditorTarget,
       defaultCaret: 'end' | 'none',
     ): (() => void) | undefined => {
-      const restoring = mountTokenRef.current === editorToken;
+      // Only an editor the reader just opened takes the keyboard outright.
+      // One the store shows again (the file coming back, a thread reopened,
+      // a deleted comment undone) takes it only if nothing else has it.
+      const restoring = drafts ? !drafts.takeFreshOpen(editorToken) : false;
       const take = () => {
         el.focus({ preventScroll: restoring });
         if (document.activeElement !== el) return false;
@@ -284,7 +285,7 @@ export const CommentCard = memo(function CommentCard({
       attempt();
       return () => cancelAnimationFrame(frame);
     },
-    [editorToken],
+    [editorToken, drafts],
   );
 
   useEffect(() => {
@@ -602,7 +603,7 @@ export const CommentCard = memo(function CommentCard({
             )}
             <textarea
               ref={textareaRef}
-              data-card-editor
+              data-card-editor={drafts ? true : undefined}
               value={editText}
               onChange={(e) => {
                 setEditText(e.target.value);
@@ -769,7 +770,7 @@ export const CommentCard = memo(function CommentCard({
                     )}
                     <textarea
                       ref={editReplyRef}
-                      data-card-editor
+                      data-card-editor={drafts ? true : undefined}
                       value={editReplyText}
                       onChange={(e) => {
                         setEditReplyText(e.target.value);
@@ -927,7 +928,7 @@ export const CommentCard = memo(function CommentCard({
         <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
           <textarea
             ref={replyRef}
-            data-card-editor
+            data-card-editor={drafts ? true : undefined}
             value={replyText}
             onChange={(e) => {
               setReplyText(e.target.value);
@@ -1034,6 +1035,8 @@ export const CommentCard = memo(function CommentCard({
 function canTakeFocusBack(): boolean {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement) || active === document.body) return true;
+  // Already its own (an effect run twice in development).
+  if (active.matches('[data-card-editor]')) return true;
   if (active.closest('[role="dialog"]')) return false;
   return !(
     active instanceof HTMLInputElement ||

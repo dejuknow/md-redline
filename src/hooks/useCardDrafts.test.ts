@@ -36,12 +36,12 @@ interface Props {
 }
 
 function setup(initial: Props) {
-  const setActiveCommentId = vi.fn();
+  const onEditorBack = vi.fn();
   const view = renderHook(
-    (props: Props) => useCardDrafts({ requestedEditor: null, ...props, setActiveCommentId }),
+    (props: Props) => useCardDrafts({ requestedEditor: null, ...props, onEditorBack }),
     { initialProps: initial },
   );
-  return { ...view, setActiveCommentId };
+  return { ...view, onEditorBack };
 }
 
 describe('judgeCardTarget', () => {
@@ -96,7 +96,7 @@ describe('useCardDrafts', () => {
       caret: [4, 4],
     });
     // Its card is selected again.
-    expect(view.setActiveCommentId).toHaveBeenLastCalledWith('a1');
+    expect(view.onEditorBack).toHaveBeenLastCalledWith('a1');
   });
 
   it('closes an editor with nothing typed when its file is left', () => {
@@ -107,7 +107,7 @@ describe('useCardDrafts', () => {
     view.rerender({ file: 'b.md', comments: B_COMMENTS });
     view.rerender({ file: 'a.md', comments: A_COMMENTS });
     expect(view.result.current.api!.editor).toBeNull();
-    expect(view.setActiveCommentId).not.toHaveBeenCalled();
+    expect(view.onEditorBack).not.toHaveBeenCalled();
   });
 
   it('keeps every draft while no file can show (loading), and the editor with it', () => {
@@ -219,7 +219,7 @@ describe('useCardDrafts', () => {
     act(() => view.result.current.api!.writeDraft(reply('a1'), 'orphan', '', [6, 6]));
     view.rerender({ file: 'b.md', comments: B_COMMENTS });
     view.rerender({ file: 'a.md', comments: [comment('a2')] });
-    expect(view.setActiveCommentId).not.toHaveBeenCalled();
+    expect(view.onEditorBack).not.toHaveBeenCalled();
     expect(view.result.current.setAside).toHaveLength(1);
   });
 

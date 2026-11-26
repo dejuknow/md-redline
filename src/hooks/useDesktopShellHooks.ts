@@ -115,7 +115,8 @@ export function useDesktopShellHooks(actions: DesktopShellActions): void {
     };
     // A key with no other tab to go to does nothing at all: the overlays
     // close only for a switch that will happen. Nor does one while typing
-    // (only the document's comment form hands its draft back), or while the
+    // (only the comment form and the cards' reply and edit fields hand their
+    // drafts back), or while the
     // Mermaid fullscreen view is open: its composer keeps no draft, so closing
     // the view could throw away a comment being written, wherever focus is.
     // The page's own Cmd+Shift+[ / ] does nothing there either.

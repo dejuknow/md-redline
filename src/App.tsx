@@ -2037,7 +2037,8 @@ export default function App() {
 
   // Unsent replies and edits on comment cards, per file (#213). After the
   // effect above, so the card whose editor comes back is selected again
-  // after a tab switch has cleared the selection.
+  // after a tab switch has cleared the selection. With no surface showing
+  // (the drawer closed by the switch, the raw view), one opens to hold it.
   const {
     api: cardDraftsApi,
     setAside: setAsideCardDrafts,
@@ -2046,7 +2047,10 @@ export default function App() {
     file: firstLoadInProgress || (error !== null && !rawMarkdown) ? null : activeFilePath,
     comments,
     requestedEditor,
-    setActiveCommentId,
+    onEditorBack: (commentId) => {
+      setActiveCommentId(commentId);
+      if (!commentsSurfaceVisible) ensureCommentSurface(commentId);
+    },
   });
 
   // IDs of the replies present in newContent but not in oldContent. Kept

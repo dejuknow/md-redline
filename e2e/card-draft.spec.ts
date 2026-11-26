@@ -319,4 +319,28 @@ test.describe('An unsent edit on a comment card', () => {
       page.locator('[data-comments-drawer]').locator('textarea:not([placeholder])'),
     ).toHaveValue('Reworded before checking the source', { timeout: 5000 });
   });
+
+  test('opens the drawer again for a draft written in it when its file comes back', async ({
+    page,
+  }) => {
+    await openBothFiles(page);
+    await page.locator('button[title="View raw markdown"]').click();
+    await expect(page.locator('.raw-view-table')).toBeVisible();
+    await openCommentsDrawer(page);
+    const drawer = page.locator('[data-comments-drawer]');
+    const card = drawer.locator('.group.rounded-lg', { hasText: 'First note' });
+    await card.getByText('First note').first().click();
+    await card.getByRole('button', { name: 'Write a reply...' }).click();
+    await drawer.getByPlaceholder('Write a reply...').fill('Written in the drawer');
+    // The desktop shell closes the drawer before it switches tabs.
+    await page.getByRole('button', { name: 'Close comments drawer' }).click();
+    await expect(drawer).toHaveCount(0);
+
+    await tab(page, 'card-draft-b.md').click();
+    await expect(headingB(page)).toBeVisible();
+    await tab(page, 'card-draft-a.md').click();
+    await expect(drawer.getByPlaceholder('Write a reply...')).toHaveValue('Written in the drawer', {
+      timeout: 5000,
+    });
+  });
 });
