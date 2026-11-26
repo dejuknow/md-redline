@@ -92,6 +92,8 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return
 - `src/hooks/useCardDrafts.ts`: unsent reply and edit drafts on comment cards, and each file's open card editor, kept per file across tab and view switches; `src/contexts/CardDraftsContext.tsx` hands them to the cards and their surfaces, and `src/components/CardDraftNotice.tsx` offers a draft whose card cannot take it back
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
+- `src/lib/agent-notifications.ts`: the desktop app's agent notifications (#244): what counts as an event, batching, dedupe and wording (see Desktop shell hooks)
+- `src/hooks/useAgentNotifications.ts`: feeds it from external file changes and review sessions, and registers `window.__mdrTakeAgentNotifications`
 - `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
 - `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the change count in the diff bar (`DiffBar`) and the strip's View options menu (`DocStrip`)
 - `bin/cli.js`: auto-start CLI and browser opener (prefers the desktop app on macOS, see Desktop app)
@@ -240,7 +242,7 @@ chooses, not about every byte that can reach disk during a request.
 **Review sessions**
 
 - `POST /api/review-sessions` — create a session (`{ filePaths, enableResolve?, origin?: 'user' | 'agent', clientId? }`). `enableResolve` defaults to the READER's saved setting, falling back to `DEFAULT_ENABLE_RESOLVE` in `src/lib/settings.ts` (currently resolve mode) when none is saved; an explicit boolean from the caller still wins. The two used to be independent, which let the sidebar show Open/Resolved while the agent had been handed remove-mode instructions telling it to delete every marker it addressed, destroying any comment that was a question. `origin` defaults to `'user'`; the `mdr_comment` MCP tool passes `'agent'` to enable agent-specific banner states and GC behavior. `clientId` is an opaque caller identity that scopes dedupe: two different agents on the same files get distinct sessions, while the same agent batching successive calls reuses its own. Reuse needs an exact match on the requested file set, compared against both the session's current files and the files it started with, so a session widened by `mdr_add_files` is found again when its original files are asked for (#117). A larger session is never joined for a smaller request, since one Done would then end both reviews. The MCP client sends a process-scoped UUID, or `MD_REDLINE_CLIENT_ID` when set (`resolveClientId` in `server/mcp-stdio/client.ts`), for clients that start a fresh `mdr mcp` per tool call and would otherwise never match their own session. It must be at most 256 characters, checked when `mdr mcp` starts.
-- `GET /api/review-sessions` — list open sessions. Each carries `hasQueuedBatch`, true while a batch sent during a busy agent waits for delivery (a finish folds it in).
+- `GET /api/review-sessions` — list open sessions. Each carries `hasQueuedBatch`, true while a batch sent during a busy agent waits for delivery (a finish folds it in), and `agentRounds`, the rounds of work the agent has finished and handed back to the reader (#244): on a user-origin session +1 each time the agent comes back to `/wait` after a batch was handed to it (not when a queued batch goes straight back out, and not when the 60s sweep clears `waitingForAgent`, which happens whether or not the agent is back); on an agent-origin session +1 each time `/agent-wait` is called with an agent post (any `recordAgentComments`, counted, not timed; a rolled-back post, `unrecordAgentComments`, does not count) since the last count, checked only after the request's `timeout` was accepted. Persisted with the session.
 - `GET /api/review-sessions/:id` — get session details
 - `POST /api/review-sessions/:id/batch` — send a batch of comments to the waiting agent. When the agent is busy with the previous batch, or no `/wait` poll is parked, the batch is queued instead (`{ ok: true, queued: true }`): its ids count as sent right away, and the next `/wait` delivers it with a prompt rebuilt from `commentCounts`. Optional `commentCounts` (`{ [filePath]: n }`) keeps the per-file counts in that prompt accurate; keys outside the session's files are ignored. Optional `replyIds` (array of strings, else 400) names the reviewer replies the batch carries, one per thread being sent that has a reviewer reply last. Each entry is a reply id plus a hash of the reply text (`replyKey` in `src/lib/answered-comments.ts`), so an edited reply, which keeps its id, counts as new; the server treats entries as opaque. They are recorded, deduplicated, in the session's `sentReplyIds` next to `sentCommentIds`, and never join `commentIds`, which the agent's prompt is built from verbatim. The banner uses `sentReplyIds` to stop offering a reply that already went out.
 - `POST /api/review-sessions/:id/finish` — send final batch and close session (`{ prompt?, commentIds?, replyIds?, commentCounts? }`). A batch still queued is delivered with the finishing result, not dropped: the terminal prompt is rebuilt for the queued ids plus `commentIds`, with `commentCounts` taking precedence over the counts recorded at queue time, and replaces any `prompt` sent. With nothing queued the `prompt` passes through unchanged. `replyIds` is validated and recorded exactly as on `/batch`. Pending asks do not block finish: inline replies found in the markers are delivered to the agent first, and remaining unanswered asks close as `done_without_reply` with their markers preserved (flags cleared).
@@ -2918,6 +2920,56 @@ Keep them when restyling or refactoring:
   explorer (`revealDirInExplorer`), and a review id opens that session's files
   through the same code as the `?review=` boot open. Only the boot open marks
   the URL's review as opened.
+- `window.__mdrOpenTarget({ file, commentId })`: a click on an agent
+  notification. Opens the file as above, then focuses that thread once the file
+  is the active tab and the comment is parsed (dropped after 10s if it never
+  is). A page older than the shell ignores `commentId` and just opens the file.
+- `window.__mdrDesktopNotifications`: set to `true` by the same init script as
+  `__mdrDesktop`, only where the shell can deliver notifications (the macOS
+  app run from its `.app` bundle). `desktopNotificationsSupported()`
+  (`src/lib/desktop.ts`) reads it; the agent notifications setting shows only
+  then.
+- `window.__mdrTakeAgentNotifications({ focused, permission })`: set by
+  `useAgentNotifications` while App is mounted; the shell calls it about once a
+  second (#244). `focused` is whether the app window has focus, `permission`
+  what macOS last said (`'unknown' | 'granted' | 'denied'`, shown in Settings).
+  Returns `{ enabled, items }`: whether the setting is on, and the
+  notifications that are ripe (`{ id, title, body, group, target }`, `target`
+  being `{ file, commentId? }` or `{ review }`), each handed over once. What
+  notifies: an agent reply new in an open file (`agent: true`, or unstamped and
+  not under the reader's author name), an agent question (`agentInitiated` and
+  `expectsReply`, new in the file), and a review whose `agentRounds` went up.
+  Never plain edits, fire-and-forget agent comments one by one, resolves or
+  counts. File events come from `applyExternalContent`, so a tab's first load
+  never counts its history (a dirty tab, which keeps its draft and takes no
+  disk change, still reports them); rounds take the first sessions list a
+  poll answers with after a load as a baseline (`useReviewSession`'s
+  `loaded`, not the empty placeholder, which made every open review look
+  new). Every event is marked seen the moment it arrives (a capped
+  list in localStorage, `md-redline-agent-notified`), so one the reader saw on
+  screen, or that a reload, reconnect or restart replays, never notifies; it
+  is queued only while the reader is away: the page hidden or unfocused, or
+  the shell's last take saying its window was (the page's own focus can lag a
+  switch away by a moment); the take, with the shell's current answer, drops
+  what is pending if the reader is back. A batch
+  goes out once nothing new has arrived for 3s, or 12s after its first event;
+  the shell's call is the clock, since a hidden page's timers are throttled.
+  One batch is one notification per file for questions (first), one per
+  review for finished rounds (taking in the replies on that review's files),
+  then one per file for the remaining replies; more than three become one
+  summary. A round takes in only its own agent's replies (same author) on its
+  files. While the setting is on, the file watchers (active and background)
+  stay connected when the page is hidden. Both watchers read a file again
+  when their connection comes back from an error, since the server answers a
+  reconnect with `connected` only and a change made in the gap never arrived
+  (the setting does not matter for this); a tab with unsaved edits keeps them
+  and only reports agent replies, and a read that answers after a newer change
+  for that path, or after the watcher closed, is dropped. Round counts are a
+  high-water mark, so an out-of-order poll answer never makes a round look
+  new again. Known limits: a take hands items
+  over once, so one lost between the page and macOS (a reload inside the 3s
+  window, a dropped eval answer) is gone; a file not open in a tab, or one
+  whose agent edit landed before its first load, does not notify.
 - `window.__mdrDesktop`: set to `true` by the shell's init script on every
   platform, before the app's scripts run. It is the one signal that the page
   runs inside the desktop app: `isDesktopApp()` (`src/lib/desktop.ts`) reads
@@ -3035,6 +3087,7 @@ stable. The active tab's top lines up with the sidebar's, with or without a revi
 - **Prose typeface**: `'serif'` or `'sans'`, default `'sans'`. Controls the rendered document body font (`[data-prose-font]` attribute plus `.prose` font-family in `src/index.css`). Set from the General tab.
 - **Document width**: `'narrow' | 'default' | 'wide'` (520/672/860px column caps, `DOC_WIDTH_COLS` in `src/lib/page-geometry.ts`), default `'default'`. Feeds the page geometry's `colMax`; also settable from the command palette ("Document width: ..."). The rail threshold (888px) is width-setting independent since `COL_MIN` governs it.
 - **Prose size**: `'small' | 'default' | 'large'` (14px/16px/18px), default `'default'`. Controls the rendered document body font size (`[data-prose-size]` attribute plus `.prose` font-size rules in `src/index.css`); the typography plugin's em-based spacing scales proportionally with it. Set from the General tab; also settable from the command palette ("Prose size: ...").
+- **Agent notifications**: boolean, default `false`, shown only in the desktop app where it can deliver them (`desktopNotificationsSupported()`). A system notification when an agent replies to a thread, asks a question or finishes a review while the window is in the background (see `__mdrTakeAgentNotifications` under Desktop shell hooks). With it on, a line under it says where to turn them on when macOS refuses notifications for mdr, or when its prompt has not been answered yet (the shell reports `'unknown'`). Sits after Quick comment in the General tab.
 - **Keep line breaks**: boolean, default `false`. When on, `remark-breaks` (in `src/markdown/pipeline.ts`, via the `keepLineBreaks` render option) turns each single newline inside a paragraph into a `<br>`, the way Obsidian and GitHub comments render. Off follows CommonMark, where a soft break renders as a space, which is also what GitHub's file view does. The DOM text does not change (remark-rehype emits a `<br>` followed by a `"\n"` text node), so comment anchoring behaves the same either way. Applies to the rendered view and the rendered diff; fenced code is untouched. Set from the General tab; also togglable from the command palette ("Keep line breaks: On/Off").
 - **About** (last tab, `data-settings-about`): the mdr version from `GET /api/version`, fetched only while the tab shows ("Unknown" when it fails), the desktop app's own version when `desktopAppVersion()` has one, and links to GitHub, new issues and releases (`target="_blank"`, which the desktop app hands to the system browser). The palette's "About mdr" and `__mdrOpenSettings('about')` open Settings on it (`initialSection`, applied each time the dialog opens; without it the dialog keeps the last tab shown).
 
@@ -3511,6 +3564,38 @@ nothing builds or tests it there yet.
   the same hooks; Ctrl-W with no tab open does nothing. On every platform an
   init script sets `window.__mdrDesktop` and `window.__mdrDesktopVersion` (see
   Desktop shell hooks).
+- Agent notifications (#244, `src-tauri/src/notify.rs`): core words them and
+  the shell only delivers. About once a second the shell calls
+  `window.__mdrTakeAgentNotifications` with whether its window has focus (no
+  call stacks on one that has not answered) and posts what comes back through
+  UNUserNotificationCenter, grouped by file or review (`threadIdentifier`),
+  with the click target in `userInfo`, so a click still lands after a
+  relaunch. A click opens that file at that thread, or the review, through
+  `open_target` (`Target::Thread`, never a grant), which brings the window
+  forward; on a launch the click itself caused, the thread goes through the
+  open hook after the app root loads (as several dropped files do), since
+  `?file=` cannot carry it. The delegate is set in `setup`, before launch
+  finishes. Focus is checked again when the page answers and once more in
+  the delegate's `willPresent` (the app frontmost): a reader back at the
+  window gets nothing. Takes carry a generation: a late answer to one given
+  up on (30s) changes nothing once a newer take is out. The permission check
+  runs in an autorelease pool, on the shell's own polling thread. It asks for permission
+  the first time the setting is seen on (the prompt at most once per launch,
+  and again after the setting is switched off and on),
+  re-reads it every 15s while on, and hands it to core. Only from a `.app` bundle: the center throws
+  for a bare binary (`cargo run`), and in testing refused a bundle run from
+  `/private/tmp` ("Failed to find or validate client"), so put test copies
+  somewhere under the home folder.
+  Measured in the app: a hidden window's page keeps running with its timers
+  throttled to 2s, and after about four minutes hidden WebKit suspends it
+  outright (no timers, fetches or SSE until the window shows again), which
+  would stall detection. While the setting is on the shell sets
+  `WKPreferences.inactiveSchedulingPolicy` to throttle instead, and back to
+  suspend when it goes off. That setting is macOS 14+; on older systems the
+  setting still shows and works while the window is open, and a closed
+  window stops notifying after about four minutes. No Dock badge: open comments include
+  old threads that need nothing. Windows and Linux never set
+  `__mdrDesktopNotifications`, so the setting does not show there.
 - Zoom: the shell owns it. Tauri's zoom hotkeys are a page script that calls
   a webview command the loopback page is not granted, so before the View
   menu `Cmd-=` / `Cmd--` / `Cmd-0` did nothing and the page stayed at

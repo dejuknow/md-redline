@@ -34,6 +34,7 @@ interface SettingsContextValue {
   updateKeepLineBreaks: (keep: boolean) => void;
   updateRenderHtmlComments: (render: boolean) => void;
   updateHiddenComments: (hiddenComments: HiddenCommentSettings) => void;
+  updateAgentNotifications: (on: boolean) => void;
   resetTemplates: () => void;
   resetAll: () => void;
 }
@@ -149,6 +150,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
+  const updateAgentNotifications = useCallback(
+    (agentNotifications: boolean) => update({ agentNotifications }),
+    [update],
+  );
+
   const resetTemplates = useCallback(() => update({ templates: DEFAULT_TEMPLATES }), [update]);
 
   const resetAll = useCallback(() => {
@@ -178,6 +184,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateKeepLineBreaks,
         updateRenderHtmlComments,
         updateHiddenComments,
+        updateAgentNotifications,
         resetTemplates,
         resetAll,
       }}

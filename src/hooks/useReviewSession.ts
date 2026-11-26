@@ -14,6 +14,12 @@ export interface ReviewSession {
   sentReplyIds?: string[];
   waitingForAgent: boolean;
   /**
+   * Rounds of work the agent has finished and handed back to the reader; the
+   * desktop app's notifications watch it go up (#244). Absent from a server
+   * that predates it, which never notifies a finished round.
+   */
+  agentRounds?: number;
+  /**
    * A batch sent while the agent was busy waits on the server; a finish
    * folds it in. Absent from a server that predates the field.
    */
@@ -44,6 +50,7 @@ function sessionsEqual(a: ReviewSession[], b: ReviewSession[]): boolean {
       x.status !== y.status ||
       x.enableResolve !== y.enableResolve ||
       x.waitingForAgent !== y.waitingForAgent ||
+      x.agentRounds !== y.agentRounds ||
       x.hasQueuedBatch !== y.hasQueuedBatch ||
       x.lastAgentActivityAt !== y.lastAgentActivityAt ||
       x.author !== y.author ||
@@ -79,6 +86,10 @@ export function useReviewSession(openFilePaths: readonly string[]) {
   // The first poll has answered, successfully or not. Until then an empty
   // `sessions` means "not asked yet", not "no review is open".
   const [fetched, setFetched] = useState(false);
+  // A poll has answered with a list. Unlike `fetched`, a failed poll does not
+  // count: agent notifications take their baseline from the first real list
+  // (#244), and an empty placeholder would make every open review look new.
+  const [loaded, setLoaded] = useState(false);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -90,6 +101,7 @@ export function useReviewSession(openFilePaths: readonly string[]) {
       // consumers (MarkdownViewer's useLayoutEffect, sentCommentIds useMemo)
       // don't re-run and blow away in-progress text selections mid-drag.
       setSessions((prev) => (sessionsEqual(prev, open) ? prev : open));
+      setLoaded(true);
     } catch {
       /* ignore — next poll will retry */
     } finally {
@@ -177,7 +189,7 @@ export function useReviewSession(openFilePaths: readonly string[]) {
 
   const refresh = useCallback(() => void fetchSessions(), [fetchSessions]);
 
-  return { sessions, shownSessions, refresh, fetched };
+  return { sessions, shownSessions, refresh, fetched, loaded };
 }
 
 /**

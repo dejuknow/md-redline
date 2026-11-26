@@ -56,6 +56,11 @@ const WAITING_FOR_AGENT_TIMEOUT_MS = 60_000;
  */
 const AGENT_SILENT_TIMEOUT_MS = 5 * 60 * 1000;
 
+/** A saved counter, or 0 for one that is missing or not a non-negative integer. */
+function countOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
+}
+
 export type ReviewResult =
   | { status: 'batch'; prompt: string; commentIds: string[] }
   | { status: 'done'; prompt?: string }
@@ -154,6 +159,15 @@ export interface ReviewSession {
   sentReplyIds: string[];
   waitingForAgent: boolean;
   /**
+   * How many rounds of work the agent has finished and handed back to the
+   * reader: on a user-origin session, each time the agent comes back for the
+   * next batch after working on one; on an agent-origin session, each time it
+   * starts waiting (mdr_wait) after posting. The desktop app's notifications
+   * watch it go up (#244). `waitingForAgent` cannot stand in: the sweep clears
+   * it after 60s whether or not the agent is back.
+   */
+  agentRounds: number;
+  /**
    * A batch the reviewer sent while the agent was busy is waiting to go out.
    * A finish folds it into the final prompt, so the browser checks that the
    * files have saved before finishing whenever one is queued.
@@ -177,6 +191,19 @@ export type SessionTerminalReason =
 
 // hasQueuedBatch is derived from queuedBatch in toPublic, never stored.
 interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt' | 'hasQueuedBatch'> {
+  /**
+   * User-origin: a batch went to the agent and it has not come back to /wait
+   * since. Its return is what finishes a round (agentRounds).
+   */
+  awaitingAgentReturn: boolean;
+  /**
+   * Agent posts so far (every recordAgentComments call), and how many there
+   * had been when the last agent-origin round was counted. A round needs a
+   * post after the last one, so mdr_wait's 90s re-polls do not count again.
+   * Counts, not times: two posts in one millisecond are still two.
+   */
+  agentPostSeq: number;
+  agentPostSeqAtRound: number;
   /** The files the session was created with, before any addFiles (#117). */
   originalFilePaths: string[];
   resolver: (result: ReviewResult) => void;
@@ -314,6 +341,11 @@ export interface PersistedSession {
    * before it existed restore with none.
    */
   livenessShiftMs?: number;
+  /** Optional: files written before agent rounds were counted restore with 0 (#244). */
+  agentRounds?: number;
+  awaitingAgentReturn?: boolean;
+  agentPostSeq?: number;
+  agentPostSeqAtRound?: number;
 }
 
 /**
@@ -401,6 +433,10 @@ export class ReviewSessionStore {
       doneWaiter: null,
       terminalResult: null,
       livenessShiftMs: 0,
+      agentRounds: 0,
+      awaitingAgentReturn: false,
+      agentPostSeq: 0,
+      agentPostSeqAtRound: 0,
     };
 
     this.sessions.set(id, session);
@@ -518,6 +554,11 @@ export class ReviewSessionStore {
     }
     s.waitingForAgent = false;
     s.waitingForAgentSince = null;
+    // The agent is back from a batch. That ends a round, unless a batch the
+    // reviewer queued meanwhile goes straight out below: then it is busy
+    // again and nothing waits on the reader.
+    const returned = s.awaitingAgentReturn;
+    s.awaitingAgentReturn = false;
 
     // If a batch was queued while the agent was busy, deliver it now by
     // resolving the current waiter and returning it before replacing it.
@@ -535,10 +576,12 @@ export class ReviewSessionStore {
       s.resolver = resolver;
       s.waitingForAgent = true;
       s.waitingForAgentSince = new Date();
+      s.awaitingAgentReturn = true;
       this.onChange?.();
       return resolvedWaiter;
     }
 
+    if (returned) s.agentRounds++;
     this.onChange?.();
     return s.waiter;
   }
@@ -692,6 +735,13 @@ export class ReviewSessionStore {
     if (!s) throw new Error(`Session not found: ${id}`);
     // Already done — resolve immediately
     if (s.sessionDoneAt) return Promise.resolve();
+    // The agent posted and now waits on the reader: a round is over. Its
+    // 90s re-polls with nothing posted in between do not count again.
+    if (s.agentPostSeq > s.agentPostSeqAtRound) {
+      s.agentRounds++;
+      s.agentPostSeqAtRound = s.agentPostSeq;
+      this.onChange?.();
+    }
     // Lazily create the waiter
     if (!s.doneWaiter) {
       s.doneWaiter = new Promise<void>((resolve) => {
@@ -727,6 +777,7 @@ export class ReviewSessionStore {
     s.resolver = resolver;
     s.waitingForAgent = true;
     s.waitingForAgentSince = new Date();
+    s.awaitingAgentReturn = true;
 
     this.onChange?.();
     return true;
@@ -1107,6 +1158,7 @@ export class ReviewSessionStore {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     s.agentCommentCount += count;
+    s.agentPostSeq++;
     const now = new Date();
     s.lastAgentActivityAt = now;
     // Real activity starts the silence clock over, so any downtime credit
@@ -1154,6 +1206,8 @@ export class ReviewSessionStore {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     s.agentCommentCount = Math.max(0, s.agentCommentCount - count);
+    // A rolled-back post is not one a finished round can stand on (#244).
+    s.agentPostSeq = Math.max(s.agentPostSeqAtRound, s.agentPostSeq - 1);
     this.onChange?.();
   }
 
@@ -1339,6 +1393,10 @@ export class ReviewSessionStore {
         waitingForAgentSince: s.waitingForAgentSince ? s.waitingForAgentSince.toISOString() : null,
         agentCommentCount: s.agentCommentCount,
         livenessShiftMs: s.livenessShiftMs,
+        agentRounds: s.agentRounds,
+        awaitingAgentReturn: s.awaitingAgentReturn,
+        agentPostSeq: s.agentPostSeq,
+        agentPostSeqAtRound: s.agentPostSeqAtRound,
         sessionDoneAt: s.sessionDoneAt ? s.sessionDoneAt.toISOString() : null,
         terminalReason: s.terminalReason,
         terminalAt: s.terminalAt ? s.terminalAt.toISOString() : null,
@@ -1487,6 +1545,10 @@ export class ReviewSessionStore {
         livenessShiftMs:
           (Number.isFinite(persisted.livenessShiftMs) ? (persisted.livenessShiftMs as number) : 0) +
           downtimeMs,
+        agentRounds: countOrZero(persisted.agentRounds),
+        awaitingAgentReturn: persisted.awaitingAgentReturn === true,
+        agentPostSeq: countOrZero(persisted.agentPostSeq),
+        agentPostSeqAtRound: countOrZero(persisted.agentPostSeqAtRound),
       };
 
       this.sessions.set(session.id, session);
@@ -1542,6 +1604,7 @@ export class ReviewSessionStore {
       sentCommentIds: [...s.sentCommentIds],
       sentReplyIds: [...s.sentReplyIds],
       waitingForAgent: s.waitingForAgent,
+      agentRounds: s.agentRounds,
       hasQueuedBatch: s.queuedBatch !== null,
     };
   }
