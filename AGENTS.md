@@ -86,6 +86,7 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/components/DiffBar.tsx`: row under the tab strip with the change count, Show/Hide diff, diff reference label, prev/next change and Mark reviewed
 - `src/components/AccessRequest.tsx`: the folder-permission ask shown when a path is outside the allowed roots
 - `src/components/NoFileOpen.tsx`: what the page shows with no file open (the app logo, an Open file button with its shortcut, Command palette and Keyboard shortcuts buttons with theirs, the five most recent files); with no file open the strip also drops its document controls (`DocStrip`'s `hasDocument`)
+- `src/components/FileOpener.tsx`: the `Cmd+O` opener: a System file picker row, then recent files filtered by name or path (most recent first). A typed path (`/`, `~/`, `./`, `../`, a drive letter or a UNC prefix) opens directly on Enter. Otherwise every edit to the query re-selects: the first matching recent file when there is one, so Enter opens it, or the System file picker row when the query is empty or matches nothing. Arrow keys and the mouse move selection until the next edit
 - `src/components/Tooltip.tsx`: portal-based tooltip with snappy delay + scrubbing grace period
 - `src/hooks/useComments.ts`: comment actions, handoff prompt generation, workflow logic
 - `src/hooks/useCommentDrafts.ts`: one unsent comment draft per file, set aside on a tab or view switch and handed back on return

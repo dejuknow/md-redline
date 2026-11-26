@@ -133,6 +133,45 @@ test.describe('Recent files', () => {
     await expect(opener.getByText('test-doc.md').first()).toBeVisible({ timeout: 5000 });
     await expect(opener.getByText('test-doc-2.md').first()).toBeVisible({ timeout: 5000 });
   });
+
+  test('typing a recent file name and pressing Enter opens it', async ({ page }) => {
+    await openFixture(page, FIXTURE_1);
+
+    // Wait until the first file is recorded in recent files.
+    await page.locator('button[title="Open file"]').click();
+    let opener = fileOpener(page);
+    await expect(opener.getByText('test-doc.md').first()).toBeVisible({ timeout: 5000 });
+    await page.keyboard.press('Escape');
+    await expect(opener).not.toBeVisible();
+
+    // Open the second file, so it becomes the active tab.
+    await page.locator('button[title="Open file"]').click();
+    await page.getByPlaceholder('File path or name...').fill(FIXTURE_2);
+    await page.getByPlaceholder('File path or name...').press('Enter');
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // A name query that matches a recent file selects it, so Enter opens it
+    // instead of the system file picker. The picker route is stubbed so a
+    // regression fails here rather than opening a native dialog.
+    let pickerCalls = 0;
+    await page.route('**/api/pick-file', (route) => {
+      pickerCalls += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+    await page.locator('button[title="Open file"]').click();
+    opener = fileOpener(page);
+    const input = page.getByPlaceholder('File path or name...');
+    await input.fill('test-doc.md');
+    await expect(opener.locator('[data-selected="true"]')).toContainText('test-doc.md');
+    await input.press('Enter');
+    await expect(opener).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Test Document', exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    expect(pickerCalls).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

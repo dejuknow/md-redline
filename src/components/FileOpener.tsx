@@ -30,6 +30,29 @@ function looksLikeDirectPath(value: string): boolean {
   );
 }
 
+function filterRecent(recentFiles: RecentFile[], query: string): RecentFile[] {
+  if (!query) return recentFiles;
+  const q = query.toLowerCase();
+  return recentFiles.filter(
+    (f) => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q),
+  );
+}
+
+// Items: "System file picker..." at 0, then the filtered recent files.
+const SYSTEM_INDEX = 0;
+
+/**
+ * Where selection lands after the query changes. A name query that matches
+ * recent files selects the first match (the most recent one), so Enter opens
+ * it. An empty query, a query with no match, or a typed path keeps the system
+ * picker row selected; a typed path opens directly on Enter anyway.
+ */
+function initialIndexFor(recentFiles: RecentFile[], query: string): number {
+  const trimmed = query.trim();
+  if (!trimmed || looksLikeDirectPath(trimmed)) return SYSTEM_INDEX;
+  return filterRecent(recentFiles, query).length > 0 ? SYSTEM_INDEX + 1 : SYSTEM_INDEX;
+}
+
 export function FileOpener({
   open,
   onClose,
@@ -44,16 +67,7 @@ export function FileOpener({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const filtered = query
-    ? recentFiles.filter(
-        (f) =>
-          f.name.toLowerCase().includes(query.toLowerCase()) ||
-          f.path.toLowerCase().includes(query.toLowerCase()),
-      )
-    : recentFiles;
-
-  // Items: "System file picker..." + recent files
-  const SYSTEM_INDEX = 0;
+  const filtered = filterRecent(recentFiles, query);
   const itemCount = filtered.length + 1;
 
   useEffect(() => {
@@ -111,7 +125,7 @@ export function FileOpener({
         handleOpen(filtered[index - 1].path);
       }
     },
-    [filtered, SYSTEM_INDEX, handleOpen, handleSystemPicker],
+    [filtered, handleOpen, handleSystemPicker],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -169,8 +183,10 @@ export function FileOpener({
             ref={inputRef}
             value={query}
             onChange={(e) => {
+              // Every edit re-selects the best match, even after the arrow
+              // keys or the mouse moved selection somewhere else.
               setQuery(e.target.value);
-              setSelectedIndex(0);
+              setSelectedIndex(initialIndexFor(recentFiles, e.target.value));
             }}
             onKeyDown={handleKeyDown}
             placeholder="File path or name..."
