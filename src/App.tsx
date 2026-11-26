@@ -117,6 +117,13 @@ import { headingChain } from './lib/heading-chain';
 import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 import { getEnabledHiddenCommentPrefixes } from './lib/settings';
+import { isDesktopApp } from './lib/desktop';
+import { DISMISS_POPUPS_EVENT } from './hooks/useDismiss';
+import {
+  shellOverlayAction,
+  type ShellOverlayAction,
+  type ShellOverlayState,
+} from './lib/shell-overlay';
 
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
@@ -149,10 +156,16 @@ declare global {
      *  file, folder or review session in place instead of navigating the page.
      *  Exactly one field, matching what the shell's build_open_script emits. */
     __mdrOpenTarget?: (target: { file: string } | { dir: string } | { review: string }) => void;
+    /** Set while the app is mounted; called by the desktop shell for its New
+     *  Tab shortcut (Cmd+T, Ctrl+T). Does what the tab strip's "+" does: opens
+     *  the file picker. */
+    __mdrNewTab?: () => void;
     /** Set while the app is mounted; called by the desktop shell for its
-     *  Close Tab shortcut (Cmd+W, Ctrl+W). Closes the active tab, through the
-     *  unsaved-changes guard, and returns true; returns false when no tab is
-     *  open, so the shell can close the window instead. */
+     *  Close Tab shortcut (Cmd+W, Ctrl+W). With an overlay open it acts on
+     *  the overlay instead (see shellOverlayAction) and returns true.
+     *  Otherwise closes the active tab, through the unsaved-changes guard,
+     *  and returns true; returns false when no tab is open, so the shell can
+     *  close the window instead. */
     __mdrCloseActiveTab?: () => boolean;
     /** Set while the app is mounted; called by the desktop shell for its
      *  Reopen Closed Tab shortcut (Cmd+Shift+T). Reopens the most recently
@@ -165,6 +178,13 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(na
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
 const nextTabShortcut = isMac ? '\u2318\u21e7]' : 'Ctrl+Shift+]';
+// New Tab, Close Tab and Reopen Closed Tab are bound only by the desktop app
+// (browsers keep these keys for their own tabs), so the palette shows their
+// keys only there.
+const desktopApp = isDesktopApp();
+const newTabShortcut = desktopApp ? `${modKey}+T` : undefined;
+const closeTabShortcut = desktopApp ? `${modKey}+W` : undefined;
+const reopenTabShortcut = desktopApp ? `${modKey}+Shift+T` : undefined;
 
 /**
  * What an unsent draft's selection reads against: the file's markdown without
@@ -219,6 +239,7 @@ export default function App() {
     closeTabsToRight: closeTabsToRightDirect,
     reopenClosedTab,
     canReopenClosedTab,
+    hasClosedTab,
     switchTab,
     saveFile,
     getSaveState,
@@ -272,9 +293,19 @@ export default function App() {
     closeTabsToRightDirect,
   ]);
 
+  // While the unsaved-changes dialog is up, it answers for one close, and a
+  // second request must not take its place: the dialog's message names no
+  // file, so the reader would confirm discarding a tab they had not asked
+  // about. The palette can open over the dialog, and its Close tab reaches
+  // these wrappers. Read through a ref so a request in the same commit sees it.
+  const pendingCloseRef = useRef(pendingClose);
+  pendingCloseRef.current = pendingClose;
+
   const closeTab = useCallback(
     (path: string) => {
+      if (pendingCloseRef.current) return;
       if (isTabDirty(path)) {
+        pendingCloseRef.current = { type: 'single', path };
         setPendingClose({ type: 'single', path });
         return;
       }
@@ -285,8 +316,10 @@ export default function App() {
 
   const closeOtherTabs = useCallback(
     (keepPath: string) => {
+      if (pendingCloseRef.current) return;
       const hasDirty = tabs.some((t) => t.filePath !== keepPath && isTabDirty(t.filePath));
       if (hasDirty) {
+        pendingCloseRef.current = { type: 'others', path: keepPath };
         setPendingClose({ type: 'others', path: keepPath });
         return;
       }
@@ -296,8 +329,10 @@ export default function App() {
   );
 
   const closeAllTabs = useCallback(() => {
+    if (pendingCloseRef.current) return;
     const hasDirty = tabs.some((t) => isTabDirty(t.filePath));
     if (hasDirty) {
+      pendingCloseRef.current = { type: 'all' };
       setPendingClose({ type: 'all' });
       return;
     }
@@ -306,9 +341,11 @@ export default function App() {
 
   const closeTabsToRight = useCallback(
     (path: string) => {
+      if (pendingCloseRef.current) return;
       const idx = tabs.findIndex((t) => t.filePath === path);
       const hasDirty = tabs.slice(idx + 1).some((t) => isTabDirty(t.filePath));
       if (hasDirty) {
+        pendingCloseRef.current = { type: 'right', path };
         setPendingClose({ type: 'right', path });
         return;
       }
@@ -2504,10 +2541,120 @@ export default function App() {
     };
   }, [openTab, addRecentFile, setExplorerDir, revealDirInExplorer, openReviewSessionTabs]);
 
+  // What is on top of the document when a desktop shell shortcut arrives.
+  // Read through a ref so the window hooks below need not re-register on
+  // every overlay change. The rail's and the list's own confirm dialogs, and
+  // menus App does not own, are found in the DOM, as the Escape guard does.
+  const shellOverlayStateRef = useRef<() => ShellOverlayState | null>(() => null);
+  shellOverlayStateRef.current = () => ({
+    confirmOpen:
+      pendingClose !== null ||
+      confirmDeleteAll ||
+      document.querySelector('[role="alertdialog"]') !== null,
+    mermaidFullscreenOpen: mermaidFullscreen.isOpen,
+    activeModal,
+    drawerOpen,
+    contextMenuOpen:
+      viewerCtxMenu.isOpen || explorerCtxMenu.isOpen || tabCtxMenu.isOpen || sidebarCtxMenu.isOpen,
+    popupOpen:
+      document.querySelector(
+        '[role="menu"], [data-review-popover], [data-testid="tab-list-menu"]',
+      ) !== null,
+    commentPopoverOpen: document.querySelector('[data-comment-popover]') !== null,
+  });
+  const shellOverlayActionRef = useRef<() => ShellOverlayAction>(() => null);
+  shellOverlayActionRef.current = () => {
+    const state = shellOverlayStateRef.current();
+    return state ? shellOverlayAction(state) : null;
+  };
+  const mermaidFullscreenClose = mermaidFullscreen.close;
+  const closeShellOverlay = useCallback(
+    (action: Exclude<ShellOverlayAction, null>) => {
+      switch (action) {
+        case 'blocked':
+          return;
+        case 'close-mermaid':
+          mermaidFullscreenClose();
+          return;
+        case 'close-modal':
+          setActiveModal(null);
+          return;
+        case 'close-comment-popover':
+          setPopoverCommentId(null);
+          return;
+        case 'close-drawer':
+          setDrawerOpen(false);
+          return;
+        case 'close-context-menu':
+          closeViewerMenu();
+          closeExplorerMenu();
+          closeTabMenu();
+          closeSidebarMenu();
+          return;
+        case 'dismiss-popup':
+          // Menus App does not own close through useDismiss, which listens
+          // for this; nothing else sees it.
+          window.dispatchEvent(new Event(DISMISS_POPUPS_EVENT));
+          return;
+      }
+    },
+    [
+      mermaidFullscreenClose,
+      setActiveModal,
+      closeViewerMenu,
+      closeExplorerMenu,
+      closeTabMenu,
+      closeSidebarMenu,
+    ],
+  );
+
+  // Closes every overlay but a confirm dialog, for the shell's New Tab and
+  // Reopen Closed Tab, which bring a document forward: a menu opened over the
+  // drawer and the drawer both go. Returns false when a confirm dialog is up,
+  // which they wait for. Read once: the closes below land on the next render.
+  const clearOverlaysForShell = useCallback((): boolean => {
+    const state = shellOverlayStateRef.current();
+    if (!state) return true;
+    if (shellOverlayAction(state) === 'blocked') return false;
+    if (state.mermaidFullscreenOpen || state.activeModal === 'mermaidFullscreen') {
+      closeShellOverlay('close-mermaid');
+    }
+    if (state.activeModal !== null && state.activeModal !== 'search') {
+      closeShellOverlay('close-modal');
+    }
+    if (state.contextMenuOpen) closeShellOverlay('close-context-menu');
+    if (state.popupOpen) closeShellOverlay('dismiss-popup');
+    if (state.commentPopoverOpen) closeShellOverlay('close-comment-popover');
+    if (state.drawerOpen) closeShellOverlay('close-drawer');
+    return true;
+  }, [closeShellOverlay]);
+
+  // The desktop shell's New Tab (Cmd+T, Ctrl+T): the tab strip's "+", which
+  // opens the file picker. Browsers keep the key for their own tabs, so only
+  // the shell calls this. A confirm dialog waits for its answer first; any
+  // other overlay closes, so nothing is left open behind the picker (a modal
+  // the picker replaces anyway).
+  useEffect(() => {
+    window.__mdrNewTab = () => {
+      if (!clearOverlaysForShell()) return;
+      openFilePicker();
+    };
+    return () => {
+      delete window.__mdrNewTab;
+    };
+  }, [openFilePicker, clearOverlaysForShell]);
+
   // The desktop shell's Close Tab (Cmd+W, Ctrl+W): browsers keep that key for
-  // their own tabs, so only the shell calls this.
+  // their own tabs, so only the shell calls this. With an overlay open it
+  // closes the overlay, not the document behind it, and leaves a confirm
+  // dialog alone (shellOverlayAction).
   useEffect(() => {
     window.__mdrCloseActiveTab = () => {
+      const action = shellOverlayActionRef.current();
+      if (action !== null) {
+        closeShellOverlay(action);
+        return true;
+      }
       if (!activeFilePath) return false;
       closeTab(activeFilePath);
       return true;
@@ -2515,16 +2662,24 @@ export default function App() {
     return () => {
       delete window.__mdrCloseActiveTab;
     };
-  }, [activeFilePath, closeTab]);
+  }, [activeFilePath, closeTab, closeShellOverlay]);
 
   // The desktop shell's Reopen Closed Tab (Cmd+Shift+T), which browsers also
   // keep for their own tabs. The palette and the tab menu reach it in a browser.
+  // Like New Tab, it waits for a confirm dialog (returning false, so the shell
+  // does nothing) and closes any other overlay before the tab comes back.
   useEffect(() => {
-    window.__mdrReopenClosedTab = reopenClosedTab;
+    window.__mdrReopenClosedTab = () => {
+      // Nothing to reopen is a no-op: the overlays stay as they are. Read
+      // live, since a Cmd+W just before can land before this hook re-renders.
+      if (!hasClosedTab()) return false;
+      if (!clearOverlaysForShell()) return false;
+      return reopenClosedTab();
+    };
     return () => {
       delete window.__mdrReopenClosedTab;
     };
-  }, [reopenClosedTab]);
+  }, [hasClosedTab, reopenClosedTab, clearOverlaysForShell]);
 
   const revealInFinder = useCallback(
     (path: string) => {
@@ -3005,11 +3160,30 @@ export default function App() {
         },
       },
     ];
-    // No shortcut: browsers keep Cmd+Shift+T, so only the desktop shell binds it.
+    // The keys for these three are the desktop app's (browsers keep them for
+    // their own tabs), so they show only there. The commands work anywhere.
+    cmds.push({
+      id: 'new-tab',
+      label: 'New tab',
+      shortcut: newTabShortcut,
+      section: 'Tabs',
+      onExecute: openFilePicker,
+    });
+    if (activeFilePath) {
+      cmds.push({
+        id: 'close-tab',
+        label: 'Close tab',
+        shortcut: closeTabShortcut,
+        section: 'Tabs',
+        // Through the same unsaved-changes guard as the tab's x.
+        onExecute: () => closeTab(activeFilePath),
+      });
+    }
     if (canReopenClosedTab) {
       cmds.push({
         id: 'reopen-closed-tab',
         label: 'Reopen closed tab',
+        shortcut: reopenTabShortcut,
         section: 'Tabs',
         onExecute: () => {
           reopenClosedTab();
@@ -3023,6 +3197,9 @@ export default function App() {
     switchTabByOffset,
     setActiveModal,
     setSearchFocusTrigger,
+    openFilePicker,
+    activeFilePath,
+    closeTab,
     canReopenClosedTab,
     reopenClosedTab,
   ]);

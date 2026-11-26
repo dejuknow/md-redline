@@ -41,6 +41,55 @@ import {
 import type { ShowToast } from './useToast';
 import type { UndoEntry, UndoSlot } from './useUndoSlot';
 
+/** How many rendered documents renderDocumentHtml keeps. */
+export const RENDERED_HTML_CACHE_SIZE = 8;
+
+// Keyed by the clean markdown string itself (held by the tab anyway), so no
+// copy of a long document is made for a key; each entry holds the HTML per
+// path and render options, since two copies of one document in different
+// folders resolve their links apart. The newest document is last.
+const renderedHtmlCache = new Map<string, Map<string, string>>();
+/** Path and option variants kept per document. */
+const VARIANTS_PER_DOCUMENT = 4;
+
+/**
+ * renderMarkdown for a whole document, remembering the last few. Switching to
+ * a tab, or reopening one just closed, shows a document rendered moments ago:
+ * the pipeline is pure, so the same markdown, path and options give the same
+ * HTML, and on a long document it is a good part of the time the switch takes.
+ */
+export function renderDocumentHtml(
+  cleanMarkdown: string,
+  filePath: string | undefined,
+  options: {
+    keepLineBreaks?: boolean;
+    renderHtmlComments?: boolean;
+    hiddenCommentPrefixes?: string[];
+  },
+): string {
+  const variantKey = JSON.stringify([
+    filePath ?? null,
+    options.keepLineBreaks ?? false,
+    options.renderHtmlComments ?? false,
+    options.hiddenCommentPrefixes ?? [],
+  ]);
+  const variants = renderedHtmlCache.get(cleanMarkdown) ?? new Map<string, string>();
+  renderedHtmlCache.delete(cleanMarkdown);
+  renderedHtmlCache.set(cleanMarkdown, variants);
+  let html = variants.get(variantKey);
+  if (html === undefined) {
+    html = renderMarkdown(cleanMarkdown, filePath, options);
+    variants.set(variantKey, html);
+    while (variants.size > VARIANTS_PER_DOCUMENT) {
+      variants.delete(variants.keys().next().value as string);
+    }
+  }
+  while (renderedHtmlCache.size > RENDERED_HTML_CACHE_SIZE) {
+    renderedHtmlCache.delete(renderedHtmlCache.keys().next().value as string);
+  }
+  return html;
+}
+
 interface TabInfo {
   filePath: string;
   rawMarkdown: string;
@@ -124,7 +173,7 @@ export function useComments(params: UseCommentsParams) {
   const html = useMemo(
     () =>
       cleanMarkdown
-        ? renderMarkdown(cleanMarkdown, activeFilePath ?? undefined, {
+        ? renderDocumentHtml(cleanMarkdown, activeFilePath ?? undefined, {
             keepLineBreaks,
             renderHtmlComments,
             hiddenCommentPrefixes,

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { isDesktopApp } from '../lib/desktop';
 import { isApplePlatform } from '../lib/platform';
 import { StyledShortcut } from '../lib/shortcut-label';
 
@@ -20,6 +21,8 @@ interface Shortcut {
 interface Section {
   title: string;
   shortcuts: Shortcut[];
+  /** Listed only inside the desktop app, which binds keys browsers keep for their own tabs. */
+  desktopOnly?: boolean;
 }
 
 const sections: Section[] = [
@@ -32,6 +35,15 @@ const sections: Section[] = [
       { keys: `${mod}K`, label: 'Command palette' },
       { keys: `${mod}${shift}[`, label: 'Previous tab' },
       { keys: `${mod}${shift}]`, label: 'Next tab' },
+    ],
+  },
+  {
+    title: 'Tabs',
+    desktopOnly: true,
+    shortcuts: [
+      { keys: `${mod}T`, label: 'New tab' },
+      { keys: `${mod}W`, label: 'Close tab' },
+      { keys: `${mod}${shift}T`, label: 'Reopen closed tab' },
     ],
   },
   {
@@ -78,9 +90,15 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
   }, [open, onClose]);
 
   if (!open) return null;
+  const desktopApp = isDesktopApp();
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onClose}>
+    <div
+      // Tells an open menu (useDismiss) that Escape is this panel's.
+      data-overlay
+      className="fixed inset-0 z-[100] flex items-center justify-center"
+      onClick={onClose}
+    >
       <div className="absolute inset-0 bg-black/40 overlay-backdrop-enter" />
       <div
         className="relative w-full max-w-lg bg-surface-raised rounded-xl shadow-2xl border border-border overflow-hidden overlay-panel-enter"
@@ -108,6 +126,7 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
         {/* Body */}
         <div className="px-5 py-4 max-h-[70vh] overflow-y-auto space-y-5">
           {sections.map((section) => {
+            if (section.desktopOnly && !desktopApp) return null;
             const visibleShortcuts = section.shortcuts.filter(
               (s) => !s.condition || (s.condition === 'resolve' && resolveEnabled),
             );
