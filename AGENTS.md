@@ -567,7 +567,9 @@ value counts as set.
 Two further sets are deliberately outside the rule. `MD_REDLINE_INTERNAL_BROWSER_*` are
 set by `bin/cli.js` and expanded by the Windows `cmd` it spawns, never read
 through `process.env`, so a `process.env` grep will not find them: they are an
-argument-passing mechanism rather than configuration. `RELEASE_SKIP_CI_CHECK` and
+argument-passing mechanism rather than configuration. `MD_REDLINE_INTERNAL_NO_CWD_TRUST`
+is set by the desktop app when it starts the server (see the desktop section) and
+is not for users. `RELEASE_SKIP_CI_CHECK` and
 `RELEASE_SKIP_CLAUDE` are local to `scripts/release.mjs`.
 
 **Ports and loopback discipline** — the API server binds IPv4 loopback only
@@ -3319,8 +3321,14 @@ nothing builds or tests it there yet.
   never reads, so a Finder or Dock launch could not find an nvm-linked `mdr`.
   The spawn runs from the user's home (made absolute, and passed on as
   `MD_REDLINE_HOME` when that is set): a Finder or Dock launch has `/` as its
-  cwd, and the server trusts the folder it starts in. In restricted mode that
-  still trusts the home, as `mdr` run from there would. Its output goes to
+  cwd. A server trusts the folder it starts in, so the spawn also sets
+  `MD_REDLINE_INTERNAL_NO_CWD_TRUST=1` (`mdr_no_open_command`); the CLI hands
+  its environment to the server it starts, and the server's `trustCwd: false`
+  leaves its start folder out of `allowedRoots`. The home is then trusted only
+  when the persisted roots say so (the default seed does), so restricted mode
+  (`mdr --restrict`) holds (#239). With no folder asked for, the explorer
+  browses the start folder; a refusal there names it (`dir` in the 403), and
+  the explorer offers the Allow-access card for it. Its output goes to
   `~/Library/Logs/mdr/server-start.log`. A production server serves `/`
   itself, so the shell skips the dev-mode wait for a Vite client there. Once
   per launch it also runs `mdr --no-open` against a running production server

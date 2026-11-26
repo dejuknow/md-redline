@@ -801,6 +801,19 @@ fn log_start(line: &str) {
 /// so inheriting that cwd would open the whole disk to it.
 ///
 /// Returns the shell, which exits once `mdr --no-open` has a server up.
+/// The login shell that runs `mdr --no-open`. It runs from the home folder
+/// (set by the caller), which a server trusts as its start folder unless told
+/// otherwise. The user never chose that folder, so trusting it would undo
+/// restricted mode (`mdr --restrict`, #239); the env var tells the server not
+/// to, and the CLI passes its environment on to the server it starts. The
+/// home folder stays trusted when the user's trusted folders include it, as
+/// they do by default.
+fn mdr_no_open_command(shell: &str) -> Command {
+    let mut command = Command::new(shell);
+    command.args(["-lic", "mdr --no-open"]).env("MD_REDLINE_INTERNAL_NO_CWD_TRUST", "1");
+    command
+}
+
 fn spawn_mdr_no_open(reason: &str) -> Option<Child> {
     let shell = user_shell(std::env::var("SHELL").ok());
     log_start(&format!("{reason}: {shell} -lic 'mdr --no-open'"));
@@ -811,8 +824,8 @@ fn spawn_mdr_no_open(reason: &str) -> Option<Child> {
         Some((out, err)) => (Stdio::from(out), Stdio::from(err)),
         None => (Stdio::null(), Stdio::null()),
     };
-    let mut command = Command::new(&shell);
-    command.args(["-lic", "mdr --no-open"]).stdin(Stdio::null()).stdout(stdout).stderr(stderr);
+    let mut command = mdr_no_open_command(&shell);
+    command.stdin(Stdio::null()).stdout(stdout).stderr(stderr);
     // The home as an absolute path: a relative MD_REDLINE_HOME would
     // otherwise be resolved again inside the new cwd.
     if let Some(home) = own_home().and_then(|h| std::path::absolute(h).ok()) {
@@ -1564,6 +1577,19 @@ mod tests {
         assert_eq!(on("http://127.0.0.1:5188/?file=a.md", 5188), NavDecision::Allow);
         // Before a port is picked, no loopback page loads.
         assert_eq!(on("http://127.0.0.1:6373/", 0), NavDecision::External);
+    }
+
+    #[test]
+    fn mdr_no_open_command_tells_the_server_not_to_trust_its_start_folder() {
+        let command = mdr_no_open_command("/bin/zsh");
+        assert_eq!(command.get_program(), "/bin/zsh");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["-lic", "mdr --no-open"]);
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs.contains(&(
+            std::ffi::OsStr::new("MD_REDLINE_INTERNAL_NO_CWD_TRUST"),
+            Some(std::ffi::OsStr::new("1"))
+        )));
     }
 
     #[test]

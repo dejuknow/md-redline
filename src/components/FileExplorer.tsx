@@ -125,11 +125,15 @@ export function FileExplorer({
     setError(null);
     setErrorKind(null);
     setAccessDeniedDir(null);
+    // With no folder asked for, the server browses the folder it started in,
+    // and a refusal names that folder so the card below can offer to trust it.
+    let refusedDir = dir ?? '';
     try {
       const params = dir ? `?dir=${encodeURIComponent(dir)}` : '';
       const res = await fetch(`/api/browse${params}`, { signal: controller.signal });
       const result = await readJsonResponse<BrowseResponse>(res);
       if (!res.ok || !result) {
+        if (!dir && typeof result?.dir === 'string') refusedDir = result.dir;
         throw new Error(getApiErrorMessage(res, result, 'Failed to browse'));
       }
       setData(result);
@@ -140,7 +144,7 @@ export function FileExplorer({
       setError(msg);
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         setErrorKind('access-denied');
-        setAccessDeniedDir(dir ?? '');
+        setAccessDeniedDir(refusedDir);
       } else {
         setErrorKind('generic');
       }

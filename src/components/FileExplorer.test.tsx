@@ -456,3 +456,35 @@ describe('FileExplorer: loading indicator', () => {
     expect(screen.queryByText('Loading...')).toBeNull();
   });
 });
+
+describe('FileExplorer: refused start folder', () => {
+  it('offers to allow the start folder the server names when browsing with no folder', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            error: 'Access denied: path outside allowed directories',
+            dir: '/Users/reader',
+          }),
+        ),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onTrustFolder = vi.fn().mockResolvedValue(false);
+
+    render(
+      <FileExplorer
+        activeFilePath={null}
+        onOpenFile={vi.fn()}
+        onClose={vi.fn()}
+        onTrustFolder={onTrustFolder}
+      />,
+    );
+
+    const allow = await screen.findByRole('button', { name: /Allow this folder/ });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/browse');
+    act(() => allow.click());
+    await waitFor(() => expect(onTrustFolder).toHaveBeenCalledWith('/Users/reader'));
+  });
+});
