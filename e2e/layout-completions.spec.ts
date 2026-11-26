@@ -132,7 +132,7 @@ test.describe('Merged chrome', () => {
     // de-duped with hasText: the bare "test-doc.md" text also matches the
     // tab's nested close control and the explorer's file-list entry outside
     // this row.
-    const tab = page.locator('.h-11 button', { hasText: 'test-doc.md' }).first();
+    const tab = page.locator('[data-doc-strip] button', { hasText: 'test-doc.md' }).first();
     const commentsToggle = page.locator('button[title*="Toggle comments rail"]');
     const tabBox = await tab.boundingBox();
     const toggleBox = await commentsToggle.boundingBox();

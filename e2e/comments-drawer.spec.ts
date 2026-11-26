@@ -49,6 +49,9 @@ async function openFixture(page: Page) {
 }
 
 async function switchToRaw(page: Page) {
+  // At this window width the tab strip is narrow, so view, diff and copy sit
+  // in its View menu. Same control, one menu deeper.
+  await page.getByRole('button', { name: 'View options' }).click();
   await page.locator('button[title="View raw markdown"]').click();
   await expect(page.locator('.raw-view-table')).toBeVisible();
 }

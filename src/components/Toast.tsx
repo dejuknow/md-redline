@@ -127,7 +127,7 @@ export function Toast({ message, visible, onDismiss, action, kind = 'info', toas
       ref={containerRef}
       role="status"
       aria-live="polite"
-      className={`fixed bottom-12 right-4 z-50 transition-all duration-200 ${
+      className={`fixed bottom-[calc(3rem+var(--review-dock-offset,0px))] right-4 z-50 transition-all duration-200 ${
         show ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
       }`}
       onMouseEnter={() => {

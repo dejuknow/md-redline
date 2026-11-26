@@ -112,6 +112,8 @@ export function CommandPalette({ commands, open, onClose }: Props) {
 
   return (
     <div
+      // Tells an open menu (useDismiss) that Escape is the palette's.
+      data-overlay
       className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]"
       onClick={onClose}
     >

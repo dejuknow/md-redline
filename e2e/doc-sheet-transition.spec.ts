@@ -158,7 +158,7 @@ test('reloading a review lays the main column out once, at its final place', asy
       (window as unknown as { __layouts: string[] }).__layouts = layouts;
       const tick = () => {
         const sheet = document.querySelector('[data-doc-page]');
-        const main = sheet?.closest('.flex-1.min-w-0.flex.flex-col');
+        const main = sheet?.closest('[data-main-column]');
         if (sheet && main && getComputedStyle(main).visibility === 'visible') {
           const rows = [...main.children].map((c) => {
             const r = c.getBoundingClientRect();
@@ -218,9 +218,7 @@ test('reloading a review lists only its own folder in the explorer, once the pag
         if (labels.includes('e2e')) seen.cwdListing = true;
       }).observe(document, { childList: true, subtree: true });
       const tick = () => {
-        const main = document
-          .querySelector('[data-doc-page]')
-          ?.closest('.flex-1.min-w-0.flex.flex-col');
+        const main = document.querySelector('[data-doc-page]')?.closest('[data-main-column]');
         const mainShown = main && getComputedStyle(main).visibility === 'visible';
         if (!mainShown) {
           // Text nodes, not elements: the explorer's file row is a button
@@ -276,9 +274,8 @@ test('an overlay opened during start-up is shown and takes typing', async ({ pag
   await page.locator('[data-doc-page]').waitFor({ state: 'attached', timeout: 10_000 });
   const mainVisibility = await page.evaluate(
     () =>
-      getComputedStyle(
-        document.querySelector('[data-doc-page]')!.closest('.flex-1.min-w-0.flex.flex-col')!,
-      ).visibility,
+      getComputedStyle(document.querySelector('[data-doc-page]')!.closest('[data-main-column]')!)
+        .visibility,
   );
   expect(mainVisibility, 'still starting up').toBe('hidden');
 
@@ -315,9 +312,7 @@ test('a review opened in a new tab is shown once its document has loaded', async
       const frames: string[] = [];
       (window as unknown as { __shown: string[] }).__shown = frames;
       const tick = () => {
-        const main = document
-          .querySelector('[data-doc-page]')
-          ?.closest('.flex-1.min-w-0.flex.flex-col');
+        const main = document.querySelector('[data-doc-page]')?.closest('[data-main-column]');
         if (main && getComputedStyle(main).visibility === 'visible') {
           const text =
             (document.querySelector('[data-doc-page] .prose')?.childElementCount ?? 0) > 0;

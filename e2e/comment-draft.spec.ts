@@ -30,7 +30,8 @@ test.afterAll(() => {
 const form = (page: Page) => page.locator('[data-comment-form]');
 const draftField = (page: Page) => page.getByPlaceholder('Add your comment...');
 const selectionMark = (page: Page) => page.locator('mark.selection-highlight');
-const tab = (page: Page, name: string) => page.locator('.h-11 button', { hasText: name }).first();
+const tab = (page: Page, name: string) =>
+  page.locator('[data-doc-strip] button', { hasText: name }).first();
 
 async function openFixture(page: Page) {
   await page.goto(`/?file=${FIXTURE_1}`);

@@ -5,14 +5,14 @@ export interface ThemeDef {
 }
 
 export const LIGHT_THEMES: ThemeDef[] = [
-  { key: 'light', label: 'Light', colors: ['#f4f2ed', '#b42b23', '#f59e0b'] },
+  { key: 'light', label: 'Light', colors: ['#f7f7f8', '#9a2d27', '#f59e0b'] },
   { key: 'sepia', label: 'Sepia', colors: ['#faf6f1', '#8b5e3c', '#d4a04a'] },
   { key: 'solarized', label: 'Solarized', colors: ['#fdf6e3', '#268bd2', '#b58900'] },
   { key: 'github', label: 'GitHub', colors: ['#ffffff', '#0969da', '#bf8700'] },
 ];
 
 export const DARK_THEMES: ThemeDef[] = [
-  { key: 'dark', label: 'Dark', colors: ['#0f0e0d', '#e0584f', '#f59e0b'] },
+  { key: 'dark', label: 'Dark', colors: ['#1a1a1d', '#be4d45', '#f59e0b'] },
   { key: 'nord', label: 'Nord', colors: ['#2e3440', '#88c0d0', '#ebcb8b'] },
   { key: 'rose-pine', label: 'Rosé Pine', colors: ['#191724', '#c4a7e7', '#f6c177'] },
   { key: 'catppuccin', label: 'Catppuccin', colors: ['#1e1e2e', '#cba6f7', '#f9e2af'] },

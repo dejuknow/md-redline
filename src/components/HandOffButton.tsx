@@ -111,13 +111,14 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
     );
   }
 
-  // Enabled rendering: labeled accent-tinted CTA. When other tabs also have
-  // comments, a chevron segment opens the multi-file picker. Both segments
-  // go strong together while the picker is open or the chevron is hovered,
-  // so the split still reads as one control.
+  // Enabled rendering: the header's filled crimson primary, like a review's
+  // Send N comments. When other tabs also have comments, a chevron segment
+  // opens the multi-file picker. Both segments darken together while the
+  // picker is open or the chevron is hovered, so the split still reads as
+  // one control.
   const pressed = open || chevronHover;
-  const segmentClass = `text-primary-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-    pressed ? 'bg-primary-bg-strong' : 'bg-primary-bg hover:bg-primary-bg-strong'
+  const segmentClass = `text-on-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+    pressed ? 'bg-primary-hover' : 'bg-primary hover:bg-primary-hover'
   }`;
 
   return (
@@ -128,8 +129,8 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           onClick={() => onCopyAgentPrompt([activeFilePath])}
           title="Hand off to agent. Copies instructions for this file."
           data-testid="handoff-button"
-          className={`flex items-center gap-1.5 pl-1.5 pr-2 py-1 text-xs font-medium whitespace-nowrap ${
-            hasOtherFiles ? 'rounded-l' : 'rounded'
+          className={`h-6 flex items-center gap-1.5 pl-2 pr-2.5 text-[13px] font-medium whitespace-nowrap ${
+            hasOtherFiles ? 'rounded-l-md' : 'rounded-md'
           } ${segmentClass}`}
         >
           <span className="block w-3.5 h-3.5 shrink-0">{handOffIcon}</span>
@@ -155,7 +156,7 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
           aria-haspopup="true"
           aria-expanded={open}
           data-testid="handoff-chevron"
-          className={`ml-px px-1 self-stretch flex items-center rounded-r ${segmentClass}`}
+          className={`ml-px px-1.5 self-stretch flex items-center rounded-r-md ${segmentClass}`}
         >
           {chevronIcon}
         </button>

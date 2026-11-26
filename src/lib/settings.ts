@@ -331,7 +331,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableResolve: DEFAULT_ENABLE_RESOLVE,
   quickComment: false,
   mermaidFullscreenPanelCollapsed: false,
-  proseFont: 'serif',
+  proseFont: 'sans',
   docWidth: 'default',
   proseSize: 'default',
   keepLineBreaks: false,

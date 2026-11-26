@@ -6,6 +6,7 @@ import { addComment } from './helpers/comments';
 import { TEST_DOC_2_BASELINE, TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
 import { resetTestAppState } from './helpers/test-state';
+import { openViewMenu } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
@@ -407,7 +408,8 @@ test.describe('Handoff + snapshot', () => {
     // Switch to raw view and verify diff toggle is visible (snapshot was created)
     await page.locator('button[title="View raw markdown"]').click();
     await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('button[title*="diff"]')).toBeVisible();
+    // The diff item in the strip's menu is enabled once a snapshot exists.
+    await expect((await openViewMenu(page)).getByRole('menuitemcheckbox')).toBeEnabled();
   });
 
   test('multi-file handoff creates snapshots for all selected files', async ({ page, context }) => {
@@ -439,7 +441,8 @@ test.describe('Handoff + snapshot', () => {
     // File 2 (active tab) should have a snapshot → switch to raw view and verify diff toggle visible
     await page.locator('button[title="View raw markdown"]').click();
     await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('button[title*="diff"]')).toBeVisible();
+    // The diff item in the strip's menu is enabled once a snapshot exists.
+    await expect((await openViewMenu(page)).getByRole('menuitemcheckbox')).toBeEnabled();
 
     // Note: Both files' references are verified by the "tracking changes" toast during handoff
   });

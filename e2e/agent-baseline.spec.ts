@@ -31,10 +31,9 @@ async function openFixture(page: Page) {
   await page.locator('.prose').waitFor({ timeout: 10_000 });
 }
 
+/** The diff bar's toggle: the bar comes up once there are changes to show. */
 function diffToggle(page: Page) {
-  return page
-    .locator('.raw-toolbar')
-    .locator('button[title^="Show diff"], button[title^="Hide diff"]');
+  return page.locator('[data-diff-bar-toggle]');
 }
 
 test.describe('agent before copy (mdr_baseline)', () => {
@@ -80,7 +79,7 @@ test.describe('agent before copy (mdr_baseline)', () => {
     await expect(page.getByTestId('diff-reference-label')).toContainText("Before Claude's edits");
 
     // The reviewer catches up: the reference advances and the diff empties.
-    await page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' }).click();
+    await page.locator('[data-diff-bar] button', { hasText: 'Mark reviewed' }).click();
     await expect(page.getByTestId('diff-reference-label')).toHaveCount(0);
 
     // The reviewer's own edit lands after Mark reviewed, then the agent

@@ -30,24 +30,25 @@ async function proseFontFamily(page: Page): Promise<string> {
 }
 
 test.describe('Prose typeface setting', () => {
-  test('defaults to serif and toggles to sans and back', async ({ page }) => {
+  test('defaults to sans and toggles to serif and back', async ({ page }) => {
     await openFixture(page);
+
+    expect(await proseFontFamily(page)).not.toContain('Source Serif 4');
+    expect(await proseFontFamily(page)).toContain('Inter');
+
+    // Open settings and switch to Serif.
+    await page.locator('button[title*="Settings"]').click();
+    await page.getByRole('button', { name: 'Serif', exact: true }).click();
+    await page.keyboard.press('Escape');
 
     expect(await proseFontFamily(page)).toContain('Source Serif 4');
 
-    // Open settings and switch to Sans.
+    // Switch back to Sans.
     await page.locator('button[title*="Settings"]').click();
     await page.getByRole('button', { name: 'Sans', exact: true }).click();
     await page.keyboard.press('Escape');
 
     expect(await proseFontFamily(page)).not.toContain('Source Serif 4');
     expect(await proseFontFamily(page)).toContain('Inter');
-
-    // Switch back to Serif.
-    await page.locator('button[title*="Settings"]').click();
-    await page.getByRole('button', { name: 'Serif', exact: true }).click();
-    await page.keyboard.press('Escape');
-
-    expect(await proseFontFamily(page)).toContain('Source Serif 4');
   });
 });

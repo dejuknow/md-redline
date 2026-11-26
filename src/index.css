@@ -9,6 +9,7 @@
   --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Surfaces */
+  --color-frame: var(--theme-frame);
   --color-surface: var(--theme-bg);
   --color-surface-secondary: var(--theme-bg-secondary);
   --color-surface-raised: var(--theme-bg-raised);
@@ -81,7 +82,7 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Prose typeface. Sans is inherited from body; serif is opt-out via settings. */
+/* Prose typeface. Sans is inherited from body and is the default; serif is a setting. */
 [data-prose-font='serif'] .prose {
   font-family: var(--font-serif);
 }
@@ -98,23 +99,24 @@ body {
 /* ========== Light Theme (default) ========== */
 :root, [data-theme="light"] {
   color-scheme: light;
+  --theme-frame: #ebebee;
   --theme-bg: #ffffff;
-  --theme-bg-secondary: #f4f2ed;
+  --theme-bg-secondary: #f7f7f8;
   --theme-bg-raised: #ffffff;
-  --theme-bg-inset: #edeae2;
-  --theme-border: #e3dfd6;
-  --theme-border-subtle: #edeae2;
-  --theme-text: #24211c;
-  --theme-text-secondary: #57534a;
-  --theme-text-muted: #6f6a5e;
-  --theme-text-faint: #b5afa2;
-  --theme-accent: #b42b23;
-  --theme-accent-hover: #9c241d;
-  --theme-accent-bg: rgba(180, 43, 35, 0.07);
-  --theme-accent-bg-strong: rgba(180, 43, 35, 0.14);
-  --theme-accent-text: #a8281f;
-  --theme-accent-border: rgba(180, 43, 35, 0.35);
-  --theme-accent-ring: rgba(180, 43, 35, 0.25);
+  --theme-bg-inset: #f0f0f2;
+  --theme-border: #e4e4e7;
+  --theme-border-subtle: #ededef;
+  --theme-text: #18181b;
+  --theme-text-secondary: #3f3f46;
+  --theme-text-muted: #6b6b74;
+  --theme-text-faint: #a1a1aa;
+  --theme-accent: #9a2d27;
+  --theme-accent-hover: #842520;
+  --theme-accent-bg: rgba(154, 45, 39, 0.07);
+  --theme-accent-bg-strong: rgba(154, 45, 39, 0.13);
+  --theme-accent-text: #902a24;
+  --theme-accent-border: rgba(154, 45, 39, 0.32);
+  --theme-accent-ring: rgba(154, 45, 39, 0.24);
   --theme-on-accent: #ffffff;
   --theme-danger: #ef4444;
   --theme-danger-bg: #fef2f2;
@@ -132,8 +134,8 @@ body {
   --theme-status-open-text: #2563eb;
   --theme-status-resolved-bg: #dcfce7;
   --theme-status-resolved-text: #16a34a;
-  --theme-tint: rgba(0, 0, 0, 0.1);
-  --theme-tint-primary: rgba(180, 43, 35, 0.15);
+  --theme-tint: rgba(0, 0, 0, 0.07);
+  --theme-tint-primary: rgba(154, 45, 39, 0.13);
   --theme-tint-success: rgba(16, 185, 129, 0.18);
   --theme-tint-danger: rgba(239, 68, 68, 0.15);
   --theme-comment-bg: #fef3c7;
@@ -153,44 +155,45 @@ body {
   --theme-diff-added-text: #065f46;
   --theme-diff-removed-bg: #fef2f2;
   --theme-diff-removed-text: #991b1b;
-  --theme-gradient-from: #f4f2ed;
-  --theme-gradient-to: rgba(180, 43, 35, 0.04);
+  --theme-gradient-from: #f7f7f8;
+  --theme-gradient-to: rgba(154, 45, 39, 0.03);
   --theme-search-bg: rgba(74, 222, 128, 0.3);
   --theme-search-active-bg: #f97316;
   --theme-search-active-text: #ffffff;
-  --theme-scrollbar-thumb: #cdc7ba;
-  --theme-scrollbar-thumb-hover: #b3ac9d;
-  --theme-scrollbar-track: #edeae2;
-  --theme-sheet-shadow: 0 1px 2px rgba(35, 30, 24, 0.05), 0 6px 20px rgba(35, 30, 24, 0.06);
+  --theme-scrollbar-thumb: #d4d4d8;
+  --theme-scrollbar-thumb-hover: #a1a1aa;
+  --theme-scrollbar-track: #f0f0f2;
+  --theme-sheet-shadow: none;
 }
 
 /* ========== Dark Theme ========== */
 [data-theme="dark"] {
   color-scheme: dark;
-  --theme-bg: #1d1b18;
-  --theme-bg-secondary: #0f0e0d;
-  --theme-bg-raised: #26231e;
-  --theme-bg-inset: #16140f;
-  --theme-border: #35312a;
-  --theme-border-subtle: #292622;
-  --theme-text: #ebe7df;
-  --theme-text-secondary: #b3ac9f;
-  --theme-text-muted: #8d877b;
-  --theme-text-faint: #57524a;
+  --theme-frame: #141416;
+  --theme-bg: #1f1f22;
+  --theme-bg-secondary: #1a1a1d;
+  --theme-bg-raised: #27272b;
+  --theme-bg-inset: #141416;
+  --theme-border: #323237;
+  --theme-border-subtle: #2a2a2f;
+  --theme-text: #ececef;
+  --theme-text-secondary: #b4b4bc;
+  --theme-text-muted: #92929b;
+  --theme-text-faint: #52525b;
   /* Bold ink sits a step above --theme-text so body can hold full strength.
      The weights compensate for halation; see the prose section for the reasoning. */
-  --theme-prose-bold: #f7f4ee;
+  --theme-prose-bold: #f7f7f9;
   --theme-prose-body-weight: 350;
   --theme-prose-bold-weight: 780;
   --theme-raw-bold-weight: 700;
-  --theme-accent: #e0584f;
-  --theme-accent-hover: #e97a72;
-  --theme-accent-bg: rgba(224, 88, 79, 0.12);
-  --theme-accent-bg-strong: rgba(224, 88, 79, 0.22);
-  --theme-accent-text: #e8837b;
-  --theme-accent-border: rgba(224, 88, 79, 0.4);
-  --theme-accent-ring: rgba(224, 88, 79, 0.3);
-  --theme-on-accent: #1d1512;
+  --theme-accent: #be4d45;
+  --theme-accent-hover: #ad433c;
+  --theme-accent-bg: rgba(190, 77, 69, 0.12);
+  --theme-accent-bg-strong: rgba(190, 77, 69, 0.22);
+  --theme-accent-text: #e07d75;
+  --theme-accent-border: rgba(190, 77, 69, 0.4);
+  --theme-accent-ring: rgba(190, 77, 69, 0.3);
+  --theme-on-accent: #ffffff;
   --theme-danger: #f87171;
   --theme-danger-bg: rgba(239, 68, 68, 0.15);
   --theme-danger-text: #f87171;
@@ -207,12 +210,12 @@ body {
   --theme-status-open-text: #93c5fd;
   --theme-status-resolved-bg: rgba(34, 197, 94, 0.2);
   --theme-status-resolved-text: #86efac;
-  --theme-tint: rgba(235, 231, 223, 0.12);
-  --theme-tint-primary: rgba(224, 88, 79, 0.25);
+  --theme-tint: rgba(236, 236, 239, 0.1);
+  --theme-tint-primary: rgba(190, 77, 69, 0.25);
   --theme-tint-success: rgba(52, 211, 153, 0.25);
   --theme-tint-danger: rgba(248, 113, 113, 0.2);
   --theme-comment-bg: rgba(245, 158, 11, 0.32);
-  --theme-comment-bg-opaque: #624514;
+  --theme-comment-bg-opaque: #64481b;
   --theme-comment-bg-hover: rgba(245, 158, 11, 0.42);
   --theme-comment-underline: #f59e0b;
   --theme-comment-underline-active: #fbbf24;
@@ -225,20 +228,21 @@ body {
   --theme-diff-added-text: #6ee7b7;
   --theme-diff-removed-bg: rgba(239, 68, 68, 0.15);
   --theme-diff-removed-text: #fca5a5;
-  --theme-gradient-from: #0f0e0d;
-  --theme-gradient-to: rgba(224, 88, 79, 0.06);
+  --theme-gradient-from: #1a1a1d;
+  --theme-gradient-to: rgba(190, 77, 69, 0.05);
   --theme-search-bg: rgba(74, 222, 128, 0.2);
   --theme-search-active-bg: rgba(249, 115, 22, 0.7);
   --theme-search-active-text: #ffffff;
-  --theme-scrollbar-thumb: #45403a;
-  --theme-scrollbar-thumb-hover: #57524a;
-  --theme-scrollbar-track: #1d1b18;
-  --theme-sheet-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 26px rgba(0, 0, 0, 0.42);
+  --theme-scrollbar-thumb: #3f3f46;
+  --theme-scrollbar-thumb-hover: #52525b;
+  --theme-scrollbar-track: #1f1f22;
+  --theme-sheet-shadow: none;
 }
 
 /* ========== Sepia Theme ========== */
 [data-theme="sepia"] {
   color-scheme: light;
+  --theme-frame: #e8dfd0;
   --theme-bg: #faf6f1;
   --theme-bg-secondary: #f5efe6;
   --theme-bg-raised: #faf6f1;
@@ -305,6 +309,7 @@ body {
 /* ========== Nord Theme ========== */
 [data-theme="nord"] {
   color-scheme: dark;
+  --theme-frame: #2b303b;
   --theme-bg: #2e3440;
   --theme-bg-secondary: #3b4252;
   --theme-bg-raised: #3b4252;
@@ -376,6 +381,7 @@ body {
 /* ========== Rosé Pine Theme ========== */
 [data-theme="rose-pine"] {
   color-scheme: dark;
+  --theme-frame: #16141f;
   --theme-bg: #191724;
   --theme-bg-secondary: #1f1d2e;
   --theme-bg-raised: #26233a;
@@ -446,6 +452,7 @@ body {
 /* ========== Solarized Light Theme ========== */
 [data-theme="solarized"] {
   color-scheme: light;
+  --theme-frame: #e1dbc5;
   --theme-bg: #fdf6e3;
   --theme-bg-secondary: #eee8d5;
   --theme-bg-raised: #fdf6e3;
@@ -512,6 +519,7 @@ body {
 /* ========== GitHub Theme ========== */
 [data-theme="github"] {
   color-scheme: light;
+  --theme-frame: #e6e9ed;
   --theme-bg: #ffffff;
   --theme-bg-secondary: #f6f8fa;
   --theme-bg-raised: #ffffff;
@@ -578,6 +586,7 @@ body {
 /* ========== Catppuccin Mocha Theme ========== */
 [data-theme="catppuccin"] {
   color-scheme: dark;
+  --theme-frame: #262637;
   --theme-bg: #1e1e2e;
   --theme-bg-secondary: #313244;
   --theme-bg-raised: #313244;
@@ -1347,6 +1356,11 @@ body {
   overflow: clip;
 }
 
+[data-doc-panel] .doc-sheet {
+  border: 0;
+  border-radius: 0;
+}
+
 /* ========== Overlay Enter Motion ========== */
 /* One motion spec for all modal surfaces: 140ms enter, instant exit. */
 @media (prefers-reduced-motion: no-preference) {
@@ -1496,26 +1510,6 @@ body {
 .prose .rendered-diff-added > :last-child,
 .prose .rendered-diff-removed > :last-child {
   margin-bottom: 0;
-}
-
-/* Panel toolbar: a slim utility strip below the title row */
-.raw-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 2rem;
-  padding-left: 0.5rem;
-  padding-right: 0.5rem;
-  border-bottom: 1px solid var(--theme-border-subtle);
-  background-color: var(--theme-bg);
-  flex-shrink: 0;
-}
-
-.raw-toolbar-left,
-.raw-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
 }
 
 /* --- Syntax highlighting --- */
@@ -1672,4 +1666,24 @@ body {
   border-left-color: var(--theme-border);
   background: var(--theme-bg-inset);
   color: var(--theme-text-muted);
+}
+
+/* The active first tab stands flush on the page's left edge (TabBar's
+   data-tab-flush), so the page squares that corner and the tab's left side
+   runs straight down into the page's. */
+[data-doc-panel]:has([data-tab-flush]) [data-doc-page-surface] {
+  border-top-left-radius: 0;
+}
+
+/* The docked review row slides up as it mounts, so a review that starts while
+   the reader is mid-document is noticed. */
+@keyframes review-dock-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
 }

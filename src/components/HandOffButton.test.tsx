@@ -70,3 +70,43 @@ describe('HandOffButton picker', () => {
     expect(screen.getByText('Copy handoff for 2 files')).toBeTruthy();
   });
 });
+
+describe('HandOffButton look', () => {
+  it('is the filled crimson primary at 13px when enabled, both segments alike', () => {
+    render(
+      <HandOffButton
+        activeFilePath="/a.md"
+        commentCounts={
+          new Map([
+            ['/a.md', 1],
+            ['/b.md', 1],
+          ])
+        }
+        onCopyAgentPrompt={vi.fn()}
+      />,
+    );
+    for (const el of [
+      screen.getByTestId('handoff-button'),
+      screen.getByTestId('handoff-chevron'),
+    ]) {
+      expect(el.className).toMatch(/\bbg-primary\b/);
+      expect(el.className).toMatch(/\btext-on-primary\b/);
+      expect(el.className).not.toMatch(/\bbg-primary-bg\b/);
+    }
+    expect(screen.getByTestId('handoff-button').className).toMatch(/\btext-\[13px\]/);
+  });
+
+  it('stays the quiet icon button when disabled', () => {
+    render(
+      <HandOffButton
+        activeFilePath="/a.md"
+        commentCounts={new Map([['/a.md', 0]])}
+        onCopyAgentPrompt={vi.fn()}
+      />,
+    );
+    const button = screen.getByTestId('handoff-button');
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.className).not.toMatch(/\bbg-primary\b/);
+    expect(button.textContent).not.toContain('Hand off');
+  });
+});

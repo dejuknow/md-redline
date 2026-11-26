@@ -6,6 +6,7 @@ import { clickCardAction, getCard } from './helpers/comments';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { withMod } from './helpers/shortcuts';
 import { clearPersistedPreferences, resetTestAppState } from './helpers/test-state';
+import { setRailDensity } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -77,7 +78,7 @@ async function addComment(page: Page, anchorText: string, commentText: string) {
  * anchor to) and live on the List surface instead; switch density to see them.
  */
 async function switchToListDensity(page: Page) {
-  await page.locator('[data-rail-header] button', { hasText: 'List' }).click();
+  await setRailDensity(page, 'list');
 }
 
 /** Enable a boolean setting via the Settings panel toggle */
@@ -260,11 +261,11 @@ test.describe('Quick comment mode', () => {
     await selectText(page, 'valid credentials');
     await expect(page.getByPlaceholder('Add your comment...')).toBeVisible({ timeout: 5000 });
 
-    // Click on an area outside the form and outside the prose (the toolbar logo).
+    // Click on an area outside the form and outside the prose (the status bar's path).
     // The logo is pointer-events-none and sits over the sidebar panel header, so
     // force the click past the actionability check (the app dismisses on the
     // document-level mousedown regardless of the exact target).
-    await page.locator('span[title="md-redline"]').click({ force: true });
+    await page.locator('[data-status-path]').click({ force: true });
 
     // Form should be dismissed
     await expect(page.getByPlaceholder('Add your comment...')).not.toBeVisible();
@@ -281,7 +282,7 @@ test.describe('Quick comment mode', () => {
     await textarea.fill('Important feedback');
 
     // Click outside (see note above: force past the pointer-events-none logo).
-    await page.locator('span[title="md-redline"]').click({ force: true });
+    await page.locator('[data-status-path]').click({ force: true });
 
     // Form should still be visible since it has text
     await expect(textarea).toBeVisible();
@@ -347,7 +348,7 @@ test.describe('Middle-click tab close', () => {
     });
 
     // Both tabs visible
-    const tabBar = page.locator('.h-11');
+    const tabBar = page.locator('[data-doc-strip]');
     const tab1 = tabBar.locator('button', { hasText: 'test-doc.md' }).first();
     const tab2 = tabBar.locator('button', { hasText: 'test-doc-2.md' });
     await expect(tab1).toBeVisible();

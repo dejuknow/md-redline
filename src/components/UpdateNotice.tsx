@@ -28,7 +28,7 @@ export function UpdateNotice({ latest, reloadReady, onDismiss, showToast }: Prop
         role="status"
         aria-live="polite"
         data-reload-notice
-        className="fixed bottom-24 right-4 z-50"
+        className="fixed bottom-[calc(6rem+var(--review-dock-offset,0px))] right-4 z-50"
       >
         <div
           className="flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium"
@@ -62,7 +62,7 @@ export function UpdateNotice({ latest, reloadReady, onDismiss, showToast }: Prop
       role="status"
       aria-live="polite"
       data-update-notice
-      className="fixed bottom-24 right-4 z-50"
+      className="fixed bottom-[calc(6rem+var(--review-dock-offset,0px))] right-4 z-50"
     >
       <div
         className="flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium"

@@ -391,9 +391,9 @@ describe('parseSettings legacy template migration', () => {
 });
 
 describe('parseSettings proseFont', () => {
-  it('defaults to serif when absent', () => {
-    expect(parseSettings({}).proseFont).toBe('serif');
-    expect(DEFAULT_SETTINGS.proseFont).toBe('serif');
+  it('defaults to sans when absent', () => {
+    expect(parseSettings({}).proseFont).toBe('sans');
+    expect(DEFAULT_SETTINGS.proseFont).toBe('sans');
   });
 
   it('accepts sans and serif', () => {
@@ -401,9 +401,9 @@ describe('parseSettings proseFont', () => {
     expect(parseSettings({ proseFont: 'serif' }).proseFont).toBe('serif');
   });
 
-  it('falls back to serif on invalid values', () => {
-    expect(parseSettings({ proseFont: 'comic-sans' }).proseFont).toBe('serif');
-    expect(parseSettings({ proseFont: 42 }).proseFont).toBe('serif');
+  it('falls back to sans on invalid values', () => {
+    expect(parseSettings({ proseFont: 'comic-sans' }).proseFont).toBe('sans');
+    expect(parseSettings({ proseFont: 42 }).proseFont).toBe('sans');
   });
 });
 

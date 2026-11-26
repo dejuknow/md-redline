@@ -6,6 +6,7 @@ import { addComment, clickCardAction, openCommentsDrawer } from './helpers/comme
 import { withMod } from './helpers/shortcuts';
 import { TEST_DOC_BASELINE } from './helpers/fixture-baselines';
 import { resetTestAppState } from './helpers/test-state';
+import { openViewMenu, toggleDiffFromMenu } from './helpers/strip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(__dirname, 'fixtures/test-doc.md');
@@ -43,24 +44,34 @@ async function switchToRaw(page: Page) {
   await expect(page.locator('.raw-view')).toBeVisible({ timeout: 5_000 });
 }
 
-/** Locate a toolbar toggle by its title attribute. */
-function toggleBtn(page: Page, titlePattern: string): Locator {
-  return page.locator(`.raw-toolbar button[title*="${titlePattern}"]`);
+/**
+ * The diff toggle in the diff bar. The bar comes up once there are changes
+ * (or while the overlay is on); before that, the strip's View options menu
+ * is the way in (see helpers/strip).
+ */
+function diffBarToggle(page: Page): Locator {
+  return page.locator('[data-diff-bar-toggle]');
+}
+
+/** The diff bar's change count; present only while there are changes. */
+function diffCount(page: Page): Locator {
+  return page.locator('[data-diff-count]');
 }
 
 /** Locate a toolbar text button by its label. */
 function toolbarBtn(page: Page, label: string): Locator {
-  return page.locator('.raw-toolbar button', { hasText: label });
+  return page.locator('[data-diff-bar] button', { hasText: label });
 }
 
-/** Assert that a toolbar toggle button is in its active state. */
+// The pressed fill is a bare bg-tint class; hover:bg-tint is not it.
+/** Assert that the diff overlay is on. */
 async function expectActive(btn: Locator) {
-  await expect(btn).toHaveClass(/bg-primary-bg/);
+  await expect(btn).toHaveAttribute('aria-pressed', 'true');
 }
 
-/** Assert that a toolbar toggle button is NOT in its active state. */
+/** Assert that the diff overlay is off: its toggle reads off, or the bar is gone. */
 async function expectInactive(btn: Locator) {
-  await expect(btn).not.toHaveClass(/bg-primary-bg/);
+  await expect(btn.and(btn.page().locator('[aria-pressed="true"]'))).toHaveCount(0);
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +87,8 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    await expect(toggleBtn(page, 'diff')).toBeVisible();
+    const menu = await openViewMenu(page);
+    await expect(menu.getByRole('menuitemcheckbox')).toBeEnabled();
   });
 
   test('diff stays closed on raw entry when there are no changes', async ({ page, context }) => {
@@ -85,7 +97,7 @@ test.describe('Diff overlay', () => {
     await switchToRaw(page);
 
     // No content changed since the reference, so the overlay must NOT auto-open.
-    await expectInactive(toggleBtn(page, 'diff'));
+    await expectInactive(diffBarToggle(page));
     await expect(page.getByText('No changes yet')).not.toBeVisible();
   });
 
@@ -114,7 +126,7 @@ test.describe('Diff overlay', () => {
     // the overlay so we stay where the user already is — usually rendered.)
     await viewDiffBtn.click();
     await expect(page.locator('.raw-view')).not.toBeVisible();
-    await expectActive(toggleBtn(page, 'diff'));
+    await expectActive(diffBarToggle(page));
   });
 
   test('diff button shows pending badge after external change', async ({ page, context }) => {
@@ -131,8 +143,10 @@ test.describe('Diff overlay', () => {
 
     // The pending pulse now lives on the diff button (since the diff overlay
     // works in any view) — the view-mode toggle no longer carries the dot.
-    const diffBtn = toggleBtn(page, 'diff');
-    const badge = diffBtn.locator('.animate-pulse');
+    const badge = page
+      .locator('[data-doc-strip]')
+      .getByRole('button', { name: 'View options' })
+      .locator('.animate-pulse');
     await expect(badge).toBeVisible();
   });
 
@@ -141,14 +155,13 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    const diffBtn = toggleBtn(page, 'diff');
+    const diffBtn = diffBarToggle(page);
 
     // Manually open the (empty) diff, then toggle it off. With zero changes
     // the toggle stays visually quiet even while enabled, so confirm the
     // overlay actually opened via the "No changes yet" placeholder instead
     // of the active class.
-    await diffBtn.click();
-    await expectInactive(diffBtn);
+    await toggleDiffFromMenu(page);
     await expect(page.getByText('No changes yet')).toBeVisible();
 
     await diffBtn.click();
@@ -166,11 +179,10 @@ test.describe('Diff overlay', () => {
     writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
     await switchToRaw(page);
 
-    const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 15_000 });
 
     await toolbarBtn(page, 'Mark reviewed').click();
-    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect(diffCount(page)).not.toBeVisible();
   });
 
   test('Cmd+Z after Mark reviewed undoes the reset, not an earlier delete', async ({
@@ -189,18 +201,17 @@ test.describe('Diff overlay', () => {
     const original = readFileSync(FIXTURE, 'utf-8');
     writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
     await switchToRaw(page);
-    const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 15_000 });
 
     await toolbarBtn(page, 'Mark reviewed').click();
-    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect(diffCount(page)).not.toBeVisible();
     const resetToast = page.getByRole('status').filter({ hasText: 'Diff reset.' });
     await resetToast.getByRole('button', { name: 'Dismiss notification' }).click();
     await expect(resetToast).toHaveCount(0);
 
     // The last thing offered for undo was the reset, so that is what comes back.
     await page.keyboard.press(withMod('z'));
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 5_000 });
     await expect(page.getByRole('status').filter({ hasText: 'Diff restored.' })).toBeVisible();
     expect(readFileSync(FIXTURE, 'utf-8')).not.toContain('Mention cost factor');
   });
@@ -212,11 +223,10 @@ test.describe('Diff overlay', () => {
     const original = readFileSync(FIXTURE, 'utf-8');
     writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
     await switchToRaw(page);
-    const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 15_000 });
 
     await toolbarBtn(page, 'Mark reviewed').click();
-    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect(diffCount(page)).not.toBeVisible();
     // A handoff takes a new reference of its own, with no toast. The first
     // handoff's comment is still open, so the button is there in raw view.
     await page.getByTestId('handoff-button').click();
@@ -228,14 +238,14 @@ test.describe('Diff overlay', () => {
         .getByRole('status')
         .filter({ hasText: "Couldn't undo. The diff changed after the reset." }),
     ).toBeVisible();
-    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect(diffCount(page)).not.toBeVisible();
   });
 
   test('diff toggle is visible-but-disabled before taking a snapshot', async ({ page }) => {
     await openFixture(page);
     await switchToRaw(page);
 
-    const diffBtn = toggleBtn(page, 'diff');
+    const diffBtn = (await openViewMenu(page)).getByRole('menuitemcheckbox');
     await expect(diffBtn).toBeVisible();
     await expect(diffBtn).toBeDisabled();
     await expect(diffBtn).toHaveAttribute('title', /^Show diff\. Available after a handoff/);
@@ -263,15 +273,15 @@ test.describe('Diff overlay', () => {
 
     await switchToRaw(page);
 
-    const diffBtn = toggleBtn(page, 'diff');
+    const diffBtn = diffBarToggle(page);
     await expect(diffBtn).toBeVisible();
 
     // Diff auto-enables on raw mode entry — count badge should be visible.
     await expectActive(diffBtn);
-    const countBadge = diffBtn.locator('span.tabular-nums');
+    const countBadge = diffCount(page);
     await expect(countBadge).toBeVisible();
     const countWhenOn = await countBadge.textContent();
-    expect(countWhenOn).toMatch(/^\d+$/);
+    expect(countWhenOn).toMatch(/^\d+ changes?$/);
 
     // Toggle the overlay OFF — the count badge must still be visible
     // (this is the bug fix: previously the badge only showed when overlay was on).
@@ -289,8 +299,8 @@ test.describe('Diff overlay', () => {
     await takeSnapshotViaHandoff(page, context);
     await switchToRaw(page);
 
-    const diffBtn = toggleBtn(page, 'diff');
-    const countBadge = diffBtn.locator('span.tabular-nums');
+    const diffBtn = diffBarToggle(page);
+    const countBadge = diffCount(page);
 
     // No content changed since the reference, so raw entry leaves the overlay
     // closed and the badge hidden. The overlay only auto-opens when there are
@@ -308,7 +318,7 @@ test.describe('Diff overlay', () => {
     await expectInactive(diffBtn);
     await expect(countBadge).toBeVisible();
     const firstCount = await countBadge.textContent();
-    expect(firstCount).toMatch(/^\d+$/);
+    expect(firstCount).toMatch(/^\d+ changes?$/);
 
     // Second external edit changes a different region — count should update,
     // overlay still off.
@@ -342,8 +352,8 @@ test.describe('Diff overlay', () => {
     writeFileSync(FIXTURE, edited);
 
     // Wait for the diff to register the new chunk via the panel toolbar badge.
-    const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    const diffBtn = diffBarToggle(page);
+    await expect(diffCount(page)).toBeVisible({ timeout: 15_000 });
 
     // There were no changes at raw entry, so the overlay stayed closed.
     // Open it manually now that there is something to show.
@@ -377,8 +387,7 @@ test.describe('Diff overlay', () => {
     const original = readFileSync(FIXTURE, 'utf-8');
     writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
     await switchToRaw(page);
-    const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 15_000 });
 
     // Raw + diff view can't fit the comments rail, so the card lives in the
     // comments drawer instead.
@@ -395,11 +404,11 @@ test.describe('Diff overlay', () => {
     await expect(page.getByText('All comments resolved. Diff reset.')).toBeVisible({
       timeout: 5_000,
     });
-    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect(diffCount(page)).not.toBeVisible();
 
     // Undo brings the diff back.
     await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 5_000 });
   });
 
   test('deleting the last open comment resets the diff, and one undo brings both back', async ({
@@ -416,8 +425,7 @@ test.describe('Diff overlay', () => {
     const original = readFileSync(FIXTURE, 'utf-8');
     writeFileSync(FIXTURE, original.replace('## Section Two', '## Updated Section Two'));
     await switchToRaw(page);
-    const diffBtn = toggleBtn(page, 'diff');
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 15_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 15_000 });
 
     // The handoff's placeholder is the only open comment. Deleting it empties
     // the open count, which resets the diff the way resolving it would.
@@ -426,7 +434,7 @@ test.describe('Diff overlay', () => {
     await page.keyboard.press('d');
     const toast = page.getByRole('status').filter({ hasText: 'Comment deleted. Diff reset.' });
     await expect(toast).toBeVisible({ timeout: 5_000 });
-    await expect(diffBtn.locator('span.tabular-nums')).not.toBeVisible();
+    await expect(diffCount(page)).not.toBeVisible();
     await expect
       .poll(() => readFileSync(FIXTURE, 'utf-8'), { timeout: 10_000 })
       .not.toContain('placeholder');
@@ -435,7 +443,7 @@ test.describe('Diff overlay', () => {
     await page.keyboard.press(withMod('z'));
 
     await expect(page.getByRole('status').filter({ hasText: 'Comment restored.' })).toBeVisible();
-    await expect(diffBtn.locator('span.tabular-nums')).toBeVisible({ timeout: 5_000 });
+    await expect(diffCount(page)).toBeVisible({ timeout: 5_000 });
     await expect
       .poll(() => readFileSync(FIXTURE, 'utf-8'), { timeout: 10_000 })
       .toContain('placeholder');
@@ -456,7 +464,7 @@ test.describe('Diff overlay', () => {
       timeout: 15_000,
     });
     await switchToRaw(page);
-    await expect(toggleBtn(page, 'diff').locator('span.tabular-nums')).toBeVisible({
+    await expect(diffCount(page)).toBeVisible({
       timeout: 15_000,
     });
 
@@ -482,9 +490,7 @@ test.describe('Diff overlay', () => {
 
 /** Diff toggle button inside the rendered view's secondary toolbar. */
 function renderedDiffBtn(page: Page): Locator {
-  return page
-    .locator('.raw-toolbar button[title="Show diff"], .raw-toolbar button[title="Hide diff"]')
-    .first();
+  return page.locator('[data-diff-bar-toggle]');
 }
 
 test.describe('Rendered diff overlay', () => {
@@ -494,7 +500,7 @@ test.describe('Rendered diff overlay', () => {
 
     // Should still be in rendered view after handoff
     await expect(page.locator('.prose')).toBeVisible();
-    await expect(renderedDiffBtn(page)).toBeVisible();
+    await expect((await openViewMenu(page)).getByRole('menuitemcheckbox')).toBeEnabled();
   });
 
   test('toggling diff in rendered view stays in rendered view and shows added/removed blocks', async ({
@@ -655,7 +661,7 @@ test.describe('Rendered diff overlay', () => {
 
     // Enter raw view (diff auto-enables)
     await switchToRaw(page);
-    await expectActive(toggleBtn(page, 'diff'));
+    await expectActive(diffBarToggle(page));
 
     // Switch back to rendered — diff should still be enabled and visible
     await page.locator('button[title="Switch to rendered view"]').click();
@@ -676,7 +682,9 @@ test.describe('Rendered diff overlay', () => {
     writeFileSync(FIXTURE, modified);
     await expect(page.getByText(/stops scraping bots/)).toBeVisible({ timeout: 15_000 });
 
-    await page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' }).first().click();
-    await expect(page.locator('.raw-toolbar button', { hasText: 'Mark reviewed' })).toHaveCount(0);
+    await page.locator('[data-diff-bar] button', { hasText: 'Mark reviewed' }).first().click();
+    await expect(page.locator('[data-diff-bar] button', { hasText: 'Mark reviewed' })).toHaveCount(
+      0,
+    );
   });
 });

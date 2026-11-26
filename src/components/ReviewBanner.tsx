@@ -1,9 +1,12 @@
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { getPathBasename } from '../lib/path-utils';
 import { buildAddressCommentsPrompt } from '../lib/agent-prompts';
 import { isCommentSent } from '../lib/answered-comments';
+import { pickHeaderSessions } from '../lib/header-session';
 import type { ReviewSession } from '../hooks/useReviewSession';
 import type { ShowToast } from '../hooks/useToast';
+import { OtherReviews } from './ReviewHeaderMenus';
+import { AgentSessionRow, PendingAskChip, SessionRow } from './ReviewRow';
 
 /**
  * What this tab has just sent, before a session refresh reports it: comment
@@ -52,10 +55,35 @@ interface ReviewBannerProps {
   pendingAskCountsBySession?: Map<string, number>;
   /** Scroll/focus the session's first pending agent question. */
   onJumpToAsk?: (sessionId: string) => void;
+  /**
+   * `'banner'` (the default) is a bar of its own with one row per review.
+   * `'header'` sits inside the app header: no bar styling, one row for the
+   * review that needs the reviewer most (`pickHeaderSessions`), and a "+N"
+   * button that lists the others in a popover with their full actions.
+   */
+  layout?: 'banner' | 'header';
+  /**
+   * Moves each row's quiet and secondary actions into a "More review
+   * actions" menu. The primary action and the pending-question jump stay out.
+   */
+  compact?: boolean;
+  /**
+   * Header layout only: told which review the row shows, and whether it needs
+   * the reader now (an agent question, or a review waiting on their comments)
+   * rather than waiting on the agent. Null once no review is shown.
+   */
+  onShownChange?: (shown: ShownReview | null) => void;
+}
+
+/** The review the header row shows (see `onShownChange`). */
+export interface ShownReview {
+  filePaths: string[];
+  needsReader: boolean;
 }
 
 const NO_REPLIES: ReadonlyMap<string, string> = new Map();
 const NO_OPTIMISTIC: OptimisticSent = { commentIds: new Set(), replyKeys: new Set() };
+const NO_ASKS: Map<string, number> = new Map();
 
 // A session is ready to send only when we have an authoritative comment count
 // for every file it references. Tabs load asynchronously after `?review=<id>`
@@ -136,8 +164,61 @@ export function ReviewBanner({
   userRepliedLast = NO_REPLIES,
   pendingAskCountsBySession,
   onJumpToAsk,
+  layout = 'banner',
+  compact = false,
+  onShownChange,
 }: ReviewBannerProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The review the header shows in its row. While the row is held (see
+  // `pickHeaderSessions`) it stays there, so a click never lands on another
+  // review's button that took its place.
+  const [shownId, setShownId] = useState<string | null>(null);
+  // While the pointer is over the header's row, the row holds still.
+  const [rowHovered, setRowHovered] = useState(false);
+  // The held review ended under the pointer, so the row now shows another
+  // review whose actions take no clicks until the pointer leaves.
+  const [rowInert, setRowInert] = useState(false);
+  // The row also holds while the Other reviews popover or the More review
+  // actions menu is open, or keyboard focus is inside it: a re-rank would
+  // unmount the open menu or the focused button.
+  const [othersOpen, setOthersOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [rowFocused, setRowFocused] = useState(false);
+  const headerRowRef = useRef<HTMLDivElement>(null);
+  // Set between a press in the row and its release: focus that arrives then
+  // came from the mouse, which the pointer hold already covers. Holding for
+  // it too would keep a clicked button's row from ever re-ranking.
+  const pressingRef = useRef(false);
+  // A focused button removed from the page takes focus with it without a
+  // blur, so check after each render that focus is still in the row.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs every render by design; the guarded set ends the chain
+  useEffect(() => {
+    if (rowFocused && !headerRowRef.current?.contains(document.activeElement)) {
+      setRowFocused(false);
+    }
+  });
+  // What the header row shows, set while rendering it and reported once it
+  // changes, before paint so the dock and the tab marks never lag a frame.
+  const shownReviewRef = useRef<ShownReview | null>(null);
+  const reportedShownRef = useRef<string | undefined>(undefined);
+  // Clear the report on unmount, and forget it, so a remount (StrictMode
+  // replays mounts in development) reports afresh. Declared before the report
+  // so a mount runs this no-op first.
+  useLayoutEffect(
+    () => () => {
+      reportedShownRef.current = undefined;
+      onShownChange?.(null);
+    },
+    [onShownChange],
+  );
+  useLayoutEffect(() => {
+    if (!onShownChange) return;
+    const shown = shownReviewRef.current;
+    const key = shown ? `${shown.needsReader}|${shown.filePaths.join('\n')}` : '';
+    if (key === reportedShownRef.current) return;
+    reportedShownRef.current = key;
+    onShownChange(shown);
+  });
   // Sessions with a send in flight, claimed synchronously at the click,
   // before any await: a second click landing while the first waits on a save
   // must not post the same batch. Keyed by session, so another review's
@@ -384,253 +465,206 @@ export function ReviewBanner({
     [onResolved, showToast],
   );
 
-  if (sessions.length === 0) return null;
+  if (sessions.length === 0) {
+    // The row unmounts without a pointerleave, so the next review's row must
+    // not start out held.
+    if (rowHovered) setRowHovered(false);
+    if (rowInert) setRowInert(false);
+    if (othersOpen) setOthersOpen(false);
+    return null;
+  }
+
+  // One review's row. `inline` is the header's single line, whose status
+  // truncates; elsewhere (the standalone banner, the Other reviews popover)
+  // a row may wrap.
+  const renderRow = (
+    s: ReviewSession,
+    opts: {
+      compact: boolean;
+      inline: boolean;
+      leading?: React.ReactNode;
+      actionsInert?: boolean;
+      onMenuOpenChange?: (open: boolean) => void;
+    },
+  ) => {
+    // Unified agent-reviewing row: covers both wait-mode (pending ask) and
+    // fire-and-forget. Shape is always the same; only the status differs.
+    if (s.origin === 'agent') {
+      // Stored on the session by the server (#113), so it does not depend
+      // on which files are open or whether the agent only replied.
+      const agentName = s.author ?? 'Agent';
+      const agentCommentCount = s.filePaths.reduce(
+        (sum, p) => sum + (agentCommentCounts?.get(p) ?? 0),
+        0,
+      );
+      return (
+        <AgentSessionRow
+          key={s.id}
+          session={s}
+          agentName={agentName}
+          agentCommentCount={agentCommentCount}
+          pendingAskCount={pendingAskCountsBySession?.get(s.id) ?? 0}
+          busy={busyId === s.id}
+          onDone={handleDone}
+          onJumpToAsk={onJumpToAsk}
+          compact={opts.compact}
+          inline={opts.inline}
+          leading={opts.leading}
+          actionsInert={opts.actionsInert}
+          onMenuOpenChange={opts.onMenuOpenChange}
+        />
+      );
+    }
+
+    const ready = sessionIsReady(s, commentCounts);
+    const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
+    const disabled = busyId === s.id || !ready;
+    const userSessionAskCount = pendingAskCountsBySession?.get(s.id) ?? 0;
+    return (
+      <SessionRow
+        key={s.id}
+        compact={opts.compact}
+        inline={opts.inline}
+        leading={opts.leading}
+        actionsInert={opts.actionsInert}
+        onMenuOpenChange={opts.onMenuOpenChange}
+        indicator={<span className="inline-block h-2 w-2 rounded-full bg-warning" aria-hidden />}
+        status={
+          <>
+            <strong>Agent is waiting on your review</strong> of{' '}
+            {s.filePaths.map((p, i) => (
+              <span key={p}>
+                {i > 0 && ', '}
+                <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
+              </span>
+            ))}
+            .
+          </>
+        }
+        chip={
+          userSessionAskCount > 0 && (
+            <PendingAskChip
+              count={userSessionAskCount}
+              onJump={onJumpToAsk ? () => onJumpToAsk(s.id) : undefined}
+            />
+          )
+        }
+        quiet={{
+          label: 'Cancel review',
+          onClick: () => void handleCancel(s),
+          disabled: busyId === s.id,
+        }}
+        secondary={{
+          label: !ready
+            ? 'Loading\u2026'
+            : unsentIds.length > 0
+              ? `Send ${unsentIds.length} & finish`
+              : 'Finish review',
+          onClick: () => void handleSendAndFinish(s),
+          disabled: busyId === s.id || !ready,
+        }}
+        primary={{
+          label: s.waitingForAgent
+            ? 'Waiting for agent\u2026'
+            : !ready
+              ? 'Loading\u2026'
+              : `Send ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}`,
+          onClick: () => void handleSendBatch(s),
+          disabled: disabled || s.waitingForAgent || unsentIds.length === 0,
+          title: s.waitingForAgent
+            ? 'Agent is processing previous batch'
+            : !ready
+              ? 'Loading file contents\u2026'
+              : unsentIds.length === 0
+                ? 'No new comments to send'
+                : undefined,
+        }}
+      />
+    );
+  };
+
+  if (layout === 'header') {
+    const asks = pendingAskCountsBySession ?? NO_ASKS;
+    const { primary, others, heldEnded } = pickHeaderSessions(
+      sessions,
+      asks,
+      (s) =>
+        sessionIsReady(s, commentCounts) &&
+        !s.waitingForAgent &&
+        unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent).length > 0,
+      {
+        id: shownId,
+        hold:
+          rowHovered ||
+          othersOpen ||
+          menuOpen ||
+          rowFocused ||
+          (busyId !== null && busyId === shownId),
+      },
+    );
+    const primaryId = primary?.id ?? null;
+    shownReviewRef.current = primary
+      ? {
+          filePaths: primary.filePaths,
+          needsReader:
+            (asks.get(primary.id) ?? 0) > 0 ||
+            (primary.origin !== 'agent' && !primary.waitingForAgent),
+        }
+      : null;
+    // Remember what the row shows, so the next render can hold it.
+    if (primaryId !== shownId) setShownId(primaryId);
+    // The held review ended with the pointer on its row: whatever took its
+    // place must not take the click meant for it.
+    if (heldEnded && rowHovered && !rowInert) setRowInert(true);
+    const othersWithQuestions = others.filter((s) => (asks.get(s.id) ?? 0) > 0).length;
+    // The popover went with the last other review.
+    if (others.length === 0 && othersOpen) setOthersOpen(false);
+    const othersButton = others.length > 0 && (
+      <OtherReviews
+        count={others.length}
+        withQuestions={othersWithQuestions}
+        open={othersOpen}
+        onOpenChange={setOthersOpen}
+      >
+        {others.map((s) => renderRow(s, { compact: false, inline: false }))}
+      </OtherReviews>
+    );
+    return (
+      <div
+        ref={headerRowRef}
+        data-testid="review-banner"
+        className="relative min-w-0 flex-1 flex items-center text-content"
+        onPointerEnter={() => setRowHovered(true)}
+        onPointerLeave={() => {
+          setRowHovered(false);
+          setRowInert(false);
+          pressingRef.current = false;
+        }}
+        onPointerDownCapture={() => (pressingRef.current = true)}
+        onPointerUpCapture={() => (pressingRef.current = false)}
+        onFocus={() => setRowFocused(!pressingRef.current)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setRowFocused(false);
+        }}
+      >
+        {primary &&
+          renderRow(primary, {
+            compact,
+            inline: true,
+            leading: othersButton,
+            actionsInert: rowInert || (heldEnded && rowHovered),
+            onMenuOpenChange: setMenuOpen,
+          })}
+      </div>
+    );
+  }
 
   return (
     <div
       className="sticky top-0 z-40 border-b border-border bg-surface-secondary px-4 py-2 text-content"
       data-testid="review-banner"
     >
-      {sessions.map((s) => {
-        // Unified agent-reviewing banner: covers both wait-mode (pending ask) and
-        // fire-and-forget. Shape is always the same; only the button label differs.
-        if (s.origin === 'agent') {
-          // Stored on the session by the server (#113), so it does not depend
-          // on which files are open or whether the agent only replied.
-          const agentName = s.author ?? 'Agent';
-          const agentCommentCount = s.filePaths.reduce(
-            (sum, p) => sum + (agentCommentCounts?.get(p) ?? 0),
-            0,
-          );
-          return (
-            <AgentSessionRow
-              key={s.id}
-              session={s}
-              agentName={agentName}
-              agentCommentCount={agentCommentCount}
-              pendingAskCount={pendingAskCountsBySession?.get(s.id) ?? 0}
-              busy={busyId === s.id}
-              onDone={handleDone}
-              onJumpToAsk={onJumpToAsk}
-            />
-          );
-        }
-
-        const ready = sessionIsReady(s, commentCounts);
-        const unsentIds = unsentCommentIds(s, commentIdsByFile, userRepliedLast, optimisticSent);
-        const disabled = busyId === s.id || !ready;
-        const userSessionAskCount = pendingAskCountsBySession?.get(s.id) ?? 0;
-        return (
-          <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
-            <span className="text-sm">
-              <span
-                className="mr-2 inline-block h-2 w-2 rounded-full bg-success align-middle"
-                aria-hidden
-              />
-              <strong>Agent is waiting on your review</strong> of{' '}
-              {s.filePaths.map((p, i) => (
-                <span key={p}>
-                  {i > 0 && ', '}
-                  <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
-                </span>
-              ))}
-              .
-              {userSessionAskCount > 0 && (
-                <PendingAskChip
-                  count={userSessionAskCount}
-                  onJump={onJumpToAsk ? () => onJumpToAsk(s.id) : undefined}
-                />
-              )}
-            </span>
-            <span className="flex gap-2">
-              <button
-                type="button"
-                className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-40"
-                onClick={() => void handleSendBatch(s)}
-                disabled={disabled || s.waitingForAgent || unsentIds.length === 0}
-                title={
-                  s.waitingForAgent
-                    ? 'Agent is processing previous batch'
-                    : !ready
-                      ? 'Loading file contents\u2026'
-                      : unsentIds.length === 0
-                        ? 'No new comments to send'
-                        : undefined
-                }
-              >
-                {s.waitingForAgent
-                  ? 'Waiting for agent\u2026'
-                  : !ready
-                    ? 'Loading\u2026'
-                    : `Send ${unsentIds.length} comment${unsentIds.length === 1 ? '' : 's'}`}
-              </button>
-              <button
-                type="button"
-                className="rounded border border-border bg-surface text-content-secondary px-3 py-1 text-sm font-medium hover:bg-tint hover:text-content transition-colors disabled:opacity-40"
-                onClick={() => void handleSendAndFinish(s)}
-                disabled={busyId === s.id || !ready}
-              >
-                {!ready
-                  ? 'Loading\u2026'
-                  : unsentIds.length > 0
-                    ? `Send ${unsentIds.length} & finish`
-                    : 'Finish review'}
-              </button>
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-sm text-content-secondary hover:text-content hover:bg-tint transition-colors disabled:opacity-50"
-                onClick={() => void handleCancel(s)}
-                disabled={busyId === s.id}
-              >
-                Cancel review
-              </button>
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-interface AgentSessionRowProps {
-  session: ReviewSession;
-  agentName: string;
-  agentCommentCount: number;
-  pendingAskCount: number;
-  busy: boolean;
-  onDone: (s: ReviewSession) => void;
-  onJumpToAsk?: (sessionId: string) => void;
-}
-
-const AGENT_ACTIVE_WINDOW_MS = 30_000;
-const AGENT_TICK_MS = 5_000;
-
-/**
- * Warning-palette chip surfacing "the agent is blocked on your answer."
- * Rendered in both banner row variants; this is the persistent cue that
- * outlives the toast.
- */
-function PendingAskChip({ count, onJump }: { count: number; onJump?: () => void }) {
-  const label = `${count} question${count === 1 ? '' : 's'} awaiting your reply`;
-  if (!onJump) {
-    return (
-      <span className="ml-2 rounded bg-warning-bg px-2 py-0.5 text-xs font-semibold text-warning-text">
-        {label}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className="ml-2 rounded bg-warning-bg px-2 py-0.5 text-xs font-semibold text-warning-text hover:underline"
-      onClick={onJump}
-      aria-label={`${label}. Jump to the first question.`}
-    >
-      {label} &rarr;
-    </button>
-  );
-}
-
-/**
- * Agent-origin banner row. Owns its own 5s ticking timer so the spinner-vs-dot
- * transition stays correct without forcing a re-render of every other banner.
- * Mounting this component is the gate that creates the timer — when no
- * agent-origin sessions are open, no timer runs.
- */
-function AgentSessionRow({
-  session,
-  agentName,
-  agentCommentCount,
-  pendingAskCount,
-  busy,
-  onDone,
-  onJumpToAsk,
-}: AgentSessionRowProps) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), AGENT_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  // A session with no agent activity yet is one the agent just opened and is
-  // about to post into — show the spinner, not the idle dot. The idle dot
-  // means "the agent posted a while ago and has gone quiet."
-  const isAgentActive = session.lastAgentActivityAt
-    ? now - new Date(session.lastAgentActivityAt).getTime() < AGENT_ACTIVE_WINDOW_MS
-    : true;
-  const awaitingReply = pendingAskCount > 0;
-
-  const handleEndReview = () => {
-    if (awaitingReply) {
-      const confirmed = window.confirm(
-        `${agentName} has ${pendingAskCount} unanswered question${pendingAskCount === 1 ? '' : 's'}. ` +
-          'End the review anyway? Unanswered questions will be reported back as unanswered.',
-      );
-      if (!confirmed) return;
-    }
-    onDone(session);
-  };
-
-  const fileList = (
-    <>
-      {session.filePaths.map((p, i) => (
-        <span key={p}>
-          {i > 0 && ', '}
-          <code className="rounded bg-current/10 px-1">{getPathBasename(p)}</code>
-        </span>
-      ))}
-    </>
-  );
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 py-1">
-      <span className="text-sm flex items-center">
-        {awaitingReply ? (
-          <span
-            className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-warning align-middle"
-            aria-hidden
-          />
-        ) : isAgentActive ? (
-          <span
-            role="status"
-            className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent align-middle"
-            aria-label="Agent is active"
-          />
-        ) : (
-          <span
-            className="mr-2 inline-block h-2 w-2 rounded-full bg-primary align-middle"
-            aria-hidden
-          />
-        )}
-        {awaitingReply ? (
-          <strong>{agentName} is waiting on your reply.</strong>
-        ) : (
-          <strong>
-            {agentName} is reviewing {fileList}.
-          </strong>
-        )}
-        {awaitingReply ? (
-          <PendingAskChip
-            count={pendingAskCount}
-            onJump={onJumpToAsk ? () => onJumpToAsk(session.id) : undefined}
-          />
-        ) : (
-          agentCommentCount > 0 && (
-            <span className="ml-2 text-content-secondary">
-              ({agentCommentCount} comment{agentCommentCount === 1 ? '' : 's'})
-            </span>
-          )
-        )}
-      </span>
-      <button
-        type="button"
-        className="rounded bg-primary text-on-primary px-3 py-1 text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-40"
-        onClick={handleEndReview}
-        disabled={busy}
-        aria-label={`End review with ${agentName}`}
-      >
-        End review
-      </button>
+      {sessions.map((s) => renderRow(s, { compact, inline: false }))}
     </div>
   );
 }

@@ -190,7 +190,7 @@ test.describe('Review session banner', () => {
 test.describe('Reloading a review', () => {
   const SECOND_PATH = resolve(__dirname, 'fixtures/review-session-second.md');
   const tabFor = (page: import('@playwright/test').Page, path: string) =>
-    page.locator(`[title="${path}"].rounded-t-md`);
+    page.locator(`[data-doc-strip] button.group[title="${path}"]`);
 
   test.beforeEach(async ({ request, baseURL }) => {
     await abortAllSessions(baseURL!, request);
@@ -275,7 +275,7 @@ test.describe('Adding a file to an open review', () => {
   // The tab bar's own element: Explorer rows carry the same title but not
   // this class, and the Explorer lists the file whether or not a tab opened.
   const tabFor = (page: import('@playwright/test').Page, path: string) =>
-    page.locator(`[title="${path}"].rounded-t-md`);
+    page.locator(`[data-doc-strip] button.group[title="${path}"]`);
 
   test.beforeEach(async ({ request, baseURL }) => {
     await abortAllSessions(baseURL!, request);

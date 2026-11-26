@@ -64,33 +64,76 @@ interface Props {
   activeFilePath: string | null;
   commentCounts: Map<string, number>;
   resolvedCommentCounts?: Map<string, number>;
+  /** Files in a shown review; their tabs carry a crimson line along the top. */
+  reviewFilePaths?: Set<string>;
   onSwitchTab: (path: string) => void;
   onCloseTab: (path: string) => void;
   onOpenFile: () => void;
   onTabContextMenu?: (info: TabContextMenuInfo) => void;
-  embedded?: boolean;
 }
 
-const tabControlButtonClass =
-  'flex h-full w-8 items-center justify-center shrink-0 border-l border-border text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
+const tabControlButtonClassStrip =
+  'self-center flex h-[26px] w-[26px] items-center justify-center shrink-0 rounded-md text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
 
-// w-9 (36px) is load-bearing: it has to stay in step with the scrollport's
-// scroll-pr-10 below, which is what keeps a tab from scrolling under this
-// button.
-const tabActionButtonClass =
-  'sticky right-0 z-10 flex h-full w-9 items-center justify-center bg-surface-secondary shrink-0 rounded-t-md text-content-muted transition-colors hover:bg-tint hover:text-content';
+// Drawn inside the document panel's top row; the row background and its
+// bottom rule belong to the strip, not to this component. It sits after the
+// tabs' scrollport rather than inside it, so a tab can never scroll under it.
+// The button stops 1px short of the bottom so the strip's rule keeps running
+// under it; the hover fill is on an inner chip.
+// A short hairline at a tab's left edge. Inactive tabs have no fill, so
+// these mark where each one ends, and the open-file button reads as the cell
+// after the last tab rather than a control floating on the frame. None touches
+// the active tab, whose border already draws its edges.
+const tabSeparatorClass =
+  'before:absolute before:-left-px before:top-1/2 before:-translate-y-1/2 before:h-4 before:w-px before:bg-content-muted/35';
+
+// A review's tabs: a short crimson line inside the tab's top edge, inset from
+// its rounded corners so it reads as a straight mark, not a bent rail.
+const tabInReviewClass =
+  'after:absolute after:top-0 after:left-2.5 after:right-2.5 after:h-0.5 after:rounded-b-full after:bg-primary';
+
+const tabActionButtonClassStrip =
+  'group/open flex self-stretch mb-px w-9 items-center justify-center shrink-0 text-content-muted transition-colors hover:text-content';
 
 export function TabBar({
   tabs,
   activeFilePath,
   commentCounts,
   resolvedCommentCounts,
+  reviewFilePaths,
   onSwitchTab,
   onCloseTab,
   onOpenFile,
   onTabContextMenu,
-  embedded = false,
 }: Props) {
+  const tabControlButtonClass = tabControlButtonClassStrip;
+  const badgeTextClass = 'text-[12px] px-1.5';
+  // Unseen, it sits over the badge or the name's end. With a mouse the
+  // pointer hovers it into view on the way; on a touch screen there is no
+  // hover, so it takes no taps there and a tap on the badge switches tabs
+  // (close by middle-click or the tab's menu instead).
+  const renderClose = (tab: Tab, position: string) => (
+    <span
+      role="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCloseTab(tab.filePath);
+      }}
+      className={`${position} rounded opacity-0 [@media(hover:none)]:pointer-events-none group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:text-content`}
+      aria-label={`Close ${getPathBasename(tab.filePath)}`}
+      tabIndex={-1}
+    >
+      <svg
+        className="w-3 h-3"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </span>
+  );
   const tabsViewportRef = useRef<HTMLDivElement>(null);
   const tabsContentRef = useRef<HTMLDivElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -115,9 +158,9 @@ export function TabBar({
     setCanScrollRight(viewport.scrollLeft < maxScrollLeft - 1);
   }, []);
 
-  // Bring the active tab into view. The scrollport's scroll-padding is what
-  // holds it clear of the sticky open-file button pinned to the right edge;
-  // without that padding the browser parks the tab's tail underneath it.
+  // Bring the active tab into view. The open-file button sits after the
+  // scrollport, not inside it, so nothing in the scrollport can cover a tab
+  // and it needs no scroll-padding.
   // Reports whether there was a tab to align, so a caller that tracks state
   // across calls can tell an alignment from a no-op.
   const scrollActiveTabIntoView = useCallback(() => {
@@ -227,11 +270,9 @@ export function TabBar({
 
   return (
     <div
-      className={
-        embedded
-          ? 'h-full flex items-stretch min-w-0'
-          : 'h-9 bg-surface-secondary border-b border-border flex items-stretch shrink-0'
-      }
+      // -mb-px lays the row over the strip's bottom rule, so the active
+      // tab can cover it and join the page below.
+      className="flex-1 self-stretch -mb-px flex items-stretch min-w-0"
     >
       <div className="min-w-0 flex-1 flex items-stretch">
         {isOverflowing && (
@@ -239,7 +280,7 @@ export function TabBar({
             type="button"
             onClick={() => scrollTabsBy('left')}
             disabled={!canScrollLeft}
-            className={`${tabControlButtonClass} border-r border-l-0`}
+            className={tabControlButtonClass}
             title="Scroll tabs left"
             aria-label="Scroll tabs left"
           >
@@ -255,19 +296,18 @@ export function TabBar({
           </button>
         )}
 
-        {/* scroll-pr-10 is what keeps scrollIntoView from tucking a tab under
-            the sticky open-file button, so it has to stay >= that button's
-            w-9. The extra 4px is breathing room, not a second constraint. */}
-        <div
-          ref={tabsViewportRef}
-          className="min-w-0 flex-1 h-full overflow-x-auto no-scrollbar scroll-pr-10"
-        >
-          <div ref={tabsContentRef} className="flex h-full items-stretch min-w-max gap-1">
-            {tabs.map((tab) => {
+        {/* Sized to the tabs' natural widths (flex-basis auto) and allowed to
+            shrink: the tabs then shrink toward their floors before anything
+            scrolls, and overflow past the floors is what scrolls. */}
+        <div ref={tabsViewportRef} className="min-w-0 h-full overflow-x-auto no-scrollbar">
+          <div ref={tabsContentRef} className="flex h-full items-end gap-0.5">
+            {tabs.map((tab, index) => {
               const isActive = tab.filePath === activeFilePath;
               const fileName = getPathBasename(tab.filePath) || tab.filePath;
               const count = commentCounts.get(tab.filePath) ?? 0;
               const resolvedCount = resolvedCommentCounts?.get(tab.filePath) ?? 0;
+              const hasMarks = count > 0 || resolvedCount > 0 || !!tab.error;
+              const inReview = reviewFilePaths?.has(tab.filePath) ?? false;
               return (
                 <button
                   key={tab.filePath}
@@ -288,76 +328,99 @@ export function TabBar({
                       onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
                     }
                   }}
-                  className={`group flex h-full items-center gap-1.5 px-3 text-xs leading-none border-b-2 rounded-t-md shrink-0 max-w-[200px] transition-colors ${
+                  className={`group relative flex items-center gap-1.5 px-3 leading-none max-w-[200px] text-[13px] rounded-t-lg transition-colors ${
+                    index > 0 && !isActive && tabs[index - 1].filePath !== activeFilePath
+                      ? tabSeparatorClass
+                      : ''
+                  } ${inReview ? tabInReviewClass : ''} ${
                     isActive
-                      ? embedded
-                        ? 'bg-surface text-content font-medium border-b-transparent'
-                        : 'bg-surface text-content font-medium border-b-primary'
-                      : 'border-b-transparent text-content-secondary hover:text-content hover:bg-tint'
+                      ? 'h-[35px] shrink-0 min-w-[112px] bg-surface border border-border border-b-0 text-content font-medium'
+                      : 'h-[34px] shrink min-w-[112px] border border-transparent border-b-0 text-content-muted hover:text-content'
                   }`}
                   title={tabTitle(tab)}
+                  data-tab-in-review={inReview ? '' : undefined}
+                  // The active first tab stands on the page's left edge, so the
+                  // page squares that corner (index.css) and the two read as one.
+                  data-tab-flush={isActive && index === 0 && !isOverflowing ? '' : undefined}
                 >
-                  <span className="truncate">{fileName}</span>
-                  {count > 0 && (
-                    <span
-                      className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
-                        isActive
-                          ? 'bg-primary-bg-strong text-primary-text'
-                          : 'bg-surface-inset text-content-secondary'
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  )}
-                  {resolvedCount > 0 && <ResolvedMark count={resolvedCount} />}
-                  {tab.error && (
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`} />
-                  )}
+                  {/* The name always takes its medium-weight width (an invisible
+                      copy drawn by ::after), so a tab is the same size active
+                      or not. */}
                   <span
-                    role="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseTab(tab.filePath);
-                    }}
-                    className={`ml-1 p-0.5 rounded hover:bg-tint shrink-0 transition-opacity ${
-                      isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                    aria-label={`Close ${getPathBasename(tab.filePath)}`}
-                    tabIndex={-1}
+                    data-label={fileName}
+                    className="min-w-0 flex flex-col after:content-[attr(data-label)] after:h-0 after:overflow-hidden after:invisible after:font-medium after:whitespace-nowrap"
                   >
-                    <svg
-                      className="w-3 h-3"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <span className="truncate">{fileName}</span>
                   </span>
+                  {hasMarks ? (
+                    // A tab with marks swaps them for its close button on
+                    // hover, so the x never lands on half a badge.
+                    <span className="relative shrink-0 flex items-center">
+                      <span className="flex items-center gap-1.5 group-hover:invisible">
+                        {count > 0 && (
+                          <span
+                            className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
+                              isActive
+                                ? 'bg-primary-bg-strong text-primary-text'
+                                : 'bg-surface-inset text-content-secondary'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        )}
+                        {resolvedCount > 0 && <ResolvedMark count={resolvedCount} />}
+                        {tab.error && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${errorDotClass(tab)}`}
+                          />
+                        )}
+                      </span>
+                      {renderClose(tab, 'absolute inset-0 flex items-center justify-center')}
+                    </span>
+                  ) : (
+                    // No tab keeps room for its close button: on hover it
+                    // appears over the name's end, on a patch of the tab's own
+                    // fill that fades into the text. Active or not, a tab is
+                    // then the width of its name, so switching tabs never
+                    // resizes one or moves its neighbours.
+                    renderClose(
+                      tab,
+                      `absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 ${
+                        isActive
+                          ? 'bg-surface shadow-[-10px_0_8px_-2px_var(--color-surface)]'
+                          : 'bg-frame shadow-[-10px_0_8px_-2px_var(--color-frame)]'
+                      }`,
+                    )
+                  )}
                 </button>
               );
             })}
-
-            <button
-              type="button"
-              onClick={onOpenFile}
-              className={tabActionButtonClass}
-              title="Open file"
-              aria-label="Open file"
-            >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-            </button>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={onOpenFile}
+          className={`${tabActionButtonClassStrip} relative ${
+            tabs.length > 0 && tabs[tabs.length - 1].filePath !== activeFilePath
+              ? tabSeparatorClass
+              : ''
+          }`}
+          title="Open file"
+          aria-label="Open file"
+        >
+          <span className="flex h-[26px] w-[26px] items-center justify-center rounded-md transition-colors group-hover/open:bg-tint">
+            <svg
+              className="w-4 h-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </span>
+        </button>
 
         {isOverflowing && (
           <>
@@ -441,7 +504,7 @@ export function TabBar({
                         </span>
                         {count > 0 && (
                           <span
-                            className={`text-[10px] font-medium px-1 min-w-[16px] text-center rounded-full shrink-0 ${
+                            className={`${badgeTextClass} font-medium min-w-[16px] text-center rounded-full shrink-0 ${
                               isActive
                                 ? 'bg-primary-bg-strong text-primary-text'
                                 : 'bg-surface-inset text-content-secondary'

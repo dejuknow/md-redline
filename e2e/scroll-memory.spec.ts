@@ -36,7 +36,8 @@ async function abortAllSessions(
   }
 }
 
-const tabFor = (page: Page, path: string) => page.locator(`[title="${path}"].rounded-t-md`);
+const tabFor = (page: Page, path: string) =>
+  page.locator(`[data-doc-strip] button.group[title="${path}"]`);
 
 /** The scroll container the documents share. */
 function scrollerTop(page: Page): Promise<number> {
@@ -163,8 +164,9 @@ async function agentEditsNearTheTop(
   );
 }
 
+/** The diff bar's toggle, which the agent's changes bring up. */
 const diffToggle = (page: Page, state: 'Show' | 'Hide') =>
-  page.locator(`.raw-toolbar button[title^="${state} diff"]`);
+  page.locator(`[data-diff-bar-toggle][title="${state} diff"]`);
 
 test.describe('Reading position across tabs', () => {
   let fixtureDir = '';

@@ -5,9 +5,6 @@ import type { RailDensity } from '../hooks/usePaneLayout';
 import type { SidebarCommentEditorState } from '../lib/comment-editor-state';
 import { GAP, RAIL, PAD_R } from '../lib/page-geometry';
 import { ThreadCard } from './ThreadCard';
-import { ConfirmDialog } from './ConfirmDialog';
-import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
-import { Tooltip } from './Tooltip';
 import {
   CommentListSurface,
   type SidebarContextMenuInfo,
@@ -51,6 +48,10 @@ interface CommentsRailProps {
    * anchored density can show one without showing its text, so only its cards
    * need it. */
   unreadReplyIds?: ReadonlySet<string>;
+  /** Anchored density with no cards: show a note in the gutter instead of
+   * nothing. App reserves the gutter for it only when the reader asked for
+   * the rail (see toggleCommentsSurface), not on every comment-free file. */
+  showEmptyState?: boolean;
 }
 
 /**
@@ -85,6 +86,12 @@ export function CommentsRail(props: CommentsRailProps) {
     const panel = listPanelRef.current;
     if (!el || !panel) return;
     const measure = () => {
+      // The container's top padding would push the panel down by as much and
+      // its bottom past the page's edge. Pulling it up by that padding (in
+      // flow and when stuck) makes it cover the container's visible height.
+      const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+      panel.style.marginTop = `${-padTop}px`;
+      panel.style.top = `${-padTop}px`;
       panel.style.height = `${el.clientHeight}px`;
     };
     const ro = new ResizeObserver(measure);
@@ -97,11 +104,16 @@ export function CommentsRail(props: CommentsRailProps) {
     <div
       data-comments-rail
       className={`absolute inset-y-0${anchoredEmpty ? ' pointer-events-none' : ''}`}
-      style={{ right: PAD_R, width: RAIL }}
+      // List runs to the page's right edge as a column behind one divider,
+      // rather than a card inside the page.
+      style={density === 'list' ? { right: 0, width: RAIL + PAD_R } : { right: PAD_R, width: RAIL }}
     >
       {density === 'list' ? (
-        <div ref={listPanelRef} className="sticky top-0 flex flex-col py-2">
-          <div className="flex-1 min-h-0 bg-surface-raised border border-border rounded-lg overflow-hidden">
+        <div
+          ref={listPanelRef}
+          className="sticky top-0 flex flex-col border-l border-border-subtle"
+        >
+          <div className="flex-1 min-h-0 overflow-hidden">
             <CommentListSurface
               comments={props.allComments}
               activeCommentId={props.activeCommentId}
@@ -130,198 +142,20 @@ export function CommentsRail(props: CommentsRailProps) {
             />
           </div>
         </div>
+      ) : anchoredEmpty && props.showEmptyState ? (
+        <div
+          data-rail-empty
+          className="mt-11 px-4 py-4 border border-dashed border-border rounded-lg flex flex-col gap-1 text-center text-[13px]"
+        >
+          <span className="font-medium text-content-secondary">No comments yet</span>
+          <span className="text-content-muted leading-relaxed">
+            Select text in the document to add one. Comments line up next to the text they&rsquo;re
+            about.
+          </span>
+        </div>
       ) : (
         <AnchoredCards {...props} />
       )}
-    </div>
-  );
-}
-
-const navButtonClass =
-  'p-1 rounded transition-colors text-content-muted enabled:hover:text-content-secondary ' +
-  'enabled:hover:bg-tint disabled:opacity-40 disabled:cursor-default ' +
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring';
-
-/**
- * Comment cluster for the rail, rendered in the panel toolbar's right group
- * (not inside the rail: a header floating over the anchored cards occluded
- * them). Holds prev/next navigation, the density toggle, the open count, and
- * an overflow menu with the bulk actions.
- *
- * The bulk actions also live in CommentListSurface's footer, but that footer
- * only exists in List density and the drawer. Putting them here too is the
- * one place they are reachable regardless of density.
- */
-export function RailDensityControl({
-  density,
-  onDensityChange,
-  openCount,
-  resolvedCount,
-  totalCount,
-  resolveEnabled,
-  onJumpPrev,
-  onJumpNext,
-  onBulkResolve,
-  onBulkDeleteResolved,
-  onBulkDelete,
-}: {
-  density: RailDensity;
-  onDensityChange: (d: RailDensity) => void;
-  openCount: number;
-  resolvedCount: number;
-  totalCount: number;
-  resolveEnabled: boolean;
-  onJumpPrev: () => void;
-  onJumpNext: () => void;
-  onBulkResolve?: () => void;
-  onBulkDeleteResolved?: () => void;
-  onBulkDelete: () => void;
-}) {
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
-
-  // The comments can go away without any click of ours: a file-watcher reload
-  // or an agent rewriting the document both drop the count to zero. The kebab
-  // unmounts with them, but the menu and dialog are fixed-position siblings
-  // that would otherwise keep floating with nothing left to act on (and
-  // ContextMenu only self-closes on an outside mousedown or window blur).
-  useEffect(() => {
-    if (totalCount === 0) {
-      setMenuPos(null);
-      setConfirmDeleteAll(false);
-    }
-  }, [totalCount]);
-
-  const menuItems: ContextMenuEntry[] = [];
-  if (resolveEnabled && openCount > 0 && onBulkResolve) {
-    menuItems.push({ label: 'Resolve all open', onClick: onBulkResolve });
-  }
-  // Either mode: a file can carry resolved markers with the workflow off (#159).
-  if (resolvedCount > 0 && onBulkDeleteResolved) {
-    menuItems.push({ label: 'Clear resolved', onClick: onBulkDeleteResolved });
-  }
-  if (menuItems.length > 0) menuItems.push({ type: 'divider' });
-  menuItems.push({
-    label: 'Delete all comments…',
-    danger: true,
-    onClick: () => setConfirmDeleteAll(true),
-  });
-
-  return (
-    <div data-rail-header className="flex items-center gap-2 mr-1">
-      <div className="flex items-center">
-        <Tooltip text="Previous comment (P)">
-          <button
-            type="button"
-            data-rail-prev
-            className={navButtonClass}
-            onClick={onJumpPrev}
-            disabled={totalCount === 0}
-            aria-label="Previous comment"
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-            </svg>
-          </button>
-        </Tooltip>
-        <Tooltip text="Next comment (N)">
-          <button
-            type="button"
-            data-rail-next
-            className={navButtonClass}
-            onClick={onJumpNext}
-            disabled={totalCount === 0}
-            aria-label="Next comment"
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-            </svg>
-          </button>
-        </Tooltip>
-      </div>
-
-      <div
-        role="group"
-        aria-label="Comment layout density"
-        className="flex rounded-md border border-border-subtle overflow-hidden"
-      >
-        {(['anchored', 'list'] as const).map((d) => (
-          <button
-            key={d}
-            onClick={() => onDensityChange(d)}
-            aria-pressed={density === d}
-            className={`text-[10px] px-2 py-1 font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-ring ${
-              density === d
-                ? 'bg-primary-bg-strong text-primary-text'
-                : 'text-content-secondary hover:bg-tint'
-            }`}
-          >
-            {d === 'anchored' ? 'Anchored' : 'List'}
-          </button>
-        ))}
-      </div>
-      <span className="text-[10px] text-content-muted tabular-nums whitespace-nowrap">
-        {openCount} open
-      </span>
-
-      {/* Overflow menu: hidden with no comments, since every item needs one.
-          The tooltip is suppressed while the menu is open — the pointer is
-          still over the trigger, so it would sit behind the menu it just
-          spawned. */}
-      {totalCount > 0 && (
-        <Tooltip text={menuPos ? null : 'Comment actions'}>
-          <button
-            type="button"
-            data-rail-actions
-            className={navButtonClass}
-            aria-label="Comment actions"
-            aria-haspopup="menu"
-            aria-expanded={menuPos !== null}
-            onClick={(e) => {
-              if (menuPos) {
-                setMenuPos(null);
-                return;
-              }
-              const rect = e.currentTarget.getBoundingClientRect();
-              setMenuPos({ x: rect.right - 180, y: rect.bottom + 4 });
-            }}
-          >
-            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-              <circle cx="5" cy="12" r="1.75" />
-              <circle cx="12" cy="12" r="1.75" />
-              <circle cx="19" cy="12" r="1.75" />
-            </svg>
-          </button>
-        </Tooltip>
-      )}
-
-      {menuPos && (
-        <ContextMenu items={menuItems} position={menuPos} onClose={() => setMenuPos(null)} />
-      )}
-
-      <ConfirmDialog
-        open={confirmDeleteAll}
-        title="Delete all comments"
-        message="This will permanently delete all comments. This cannot be undone."
-        confirmLabel="Delete All"
-        onConfirm={() => {
-          setConfirmDeleteAll(false);
-          onBulkDelete();
-        }}
-        onCancel={() => setConfirmDeleteAll(false)}
-      />
     </div>
   );
 }

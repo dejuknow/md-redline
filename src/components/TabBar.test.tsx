@@ -254,3 +254,56 @@ describe('TabBar: comment count badges', () => {
     }
   });
 });
+
+describe('TabBar: the strip look', () => {
+  function renderStrip() {
+    const onSwitchTab = vi.fn();
+    const onCloseTab = vi.fn();
+    const onOpenFile = vi.fn();
+    const result = render(
+      <TabBar
+        tabs={TABS}
+        activeFilePath="/docs/two.md"
+        commentCounts={new Map([['/docs/two.md', 2]])}
+        onSwitchTab={onSwitchTab}
+        onCloseTab={onCloseTab}
+        onOpenFile={onOpenFile}
+      />,
+    );
+    const tab = (name: string) => result.getByTitle(`/docs/${name}`);
+    return { ...result, tab, onSwitchTab, onCloseTab, onOpenFile };
+  }
+
+  it('draws the active tab as a folder tab joined to the page, with no underline', () => {
+    const { container, tab } = renderStrip();
+    // The row overlaps the strip's bottom rule so the active tab can cover it.
+    expect((container.firstElementChild as HTMLElement).className).toContain('-mb-px');
+
+    const active = tab('two.md');
+    for (const cls of ['bg-surface', 'border-b-0', 'rounded-t-lg', 'h-[35px]']) {
+      expect(active.className).toContain(cls);
+    }
+    expect(active.className).not.toContain('border-b-primary');
+
+    const inactive = tab('one.md');
+    expect(inactive.className).toContain('h-[34px]');
+    expect(inactive.className).not.toContain('bg-surface');
+    expect(inactive.className).not.toContain('border-b-primary');
+  });
+
+  it('keeps the tab controls: switching, closing, opening a file and the count badge', () => {
+    const { getByLabelText, getByTitle, tab, onSwitchTab, onCloseTab, onOpenFile } = renderStrip();
+
+    fireEvent.click(tab('three.md'));
+    expect(onSwitchTab).toHaveBeenCalledWith('/docs/three.md');
+
+    fireEvent.click(getByLabelText('Close one.md'));
+    expect(onCloseTab).toHaveBeenCalledWith('/docs/one.md');
+    expect(onSwitchTab).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(getByTitle('Open file'));
+    expect(onOpenFile).toHaveBeenCalledTimes(1);
+
+    expect(within(tab('two.md')).getByText('2')).toBeTruthy();
+  });
+});

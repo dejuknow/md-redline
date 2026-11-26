@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { ViewMode } from '../components/Toolbar';
+import type { ViewMode } from '../lib/view-mode';
 
 export type LeftPanelView = 'explorer' | 'outline';
 export type RailDensity = 'anchored' | 'list';
