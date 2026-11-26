@@ -46,7 +46,10 @@ async function pickTestPort(): Promise<number> {
 }
 
 function scratch(prefix: string): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  // The real long path: on Windows runners tmpdir() is an 8.3 short form
+  // (RUNNER~1), which the server's async realpath expands and plain
+  // realpathSync does not, so roots written in the short form never match.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   scratchDirs.push(dir);
   return dir;
 }
