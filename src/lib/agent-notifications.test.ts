@@ -126,6 +126,16 @@ describe('detectRoundEvents', () => {
     ]);
   });
 
+  it('keeps the highest count seen, so an out-of-order poll repeats nothing', () => {
+    const base = detectRoundEvents(INITIAL_ROUND_STATE, [session(2)]);
+    const stale = detectRoundEvents(base.state, [session(1)]);
+    expect(stale.events).toEqual([]);
+    expect(detectRoundEvents(stale.state, [session(2)]).events).toEqual([]);
+    expect(detectRoundEvents(stale.state, [session(3)]).events.map((e) => e.key)).toEqual([
+      'f:rev_1:3',
+    ]);
+  });
+
   it('counts a session that appears after the baseline from zero', () => {
     const base = detectRoundEvents(INITIAL_ROUND_STATE, []);
     const result = detectRoundEvents(base.state, [session(1, { id: 'rev_new', origin: 'agent' })]);

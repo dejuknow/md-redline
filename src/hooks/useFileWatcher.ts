@@ -19,8 +19,10 @@ interface Options {
   /**
    * The connection dropped and came back. The server answers a reconnect
    * with "connected" only, so a change made in the gap has to be read.
+   * `isCurrent` turns false once a newer change arrives or the watcher is
+   * closed: a read that answers after that must not be applied.
    */
-  onReconnect?: (path: string) => void;
+  onReconnect?: (path: string, isCurrent: () => boolean) => void;
 }
 
 /**
@@ -51,7 +53,10 @@ export function useFileWatcher({
     const url = `/api/watch?path=${encodeURIComponent(filePath)}`;
     const es = new EventSource(url);
 
+    let changes = 0;
+    let closed = false;
     es.addEventListener('change', (e) => {
+      changes++;
       try {
         const { content, mtime, path } = JSON.parse(e.data);
         callbackRef.current(content, mtime, typeof path === 'string' ? path : filePath);
@@ -69,10 +74,12 @@ export function useFileWatcher({
     es.addEventListener('connected', () => {
       if (!dropped) return;
       dropped = false;
-      reconnectRef.current?.(filePath);
+      const seen = changes;
+      reconnectRef.current?.(filePath, () => !closed && changes === seen);
     });
 
     return () => {
+      closed = true;
       es.close();
     };
   }, [filePath, connected]);

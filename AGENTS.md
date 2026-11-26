@@ -2891,7 +2891,10 @@ Keep them when restyling or refactoring:
   when their connection comes back from an error, since the server answers a
   reconnect with `connected` only and a change made in the gap never arrived
   (the setting does not matter for this); a tab with unsaved edits keeps them
-  and only reports agent replies. Known limits: a take hands items
+  and only reports agent replies, and a read that answers after a newer change
+  for that path, or after the watcher closed, is dropped. Round counts are a
+  high-water mark, so an out-of-order poll answer never makes a round look
+  new again. Known limits: a take hands items
   over once, so one lost between the page and macOS (a reload inside the 3s
   window, a dropped eval answer) is gone; a file not open in a tab, or one
   whose agent edit landed before its first load, does not notify.
@@ -3489,8 +3492,9 @@ nothing builds or tests it there yet.
   `?file=` cannot carry it. The delegate is set in `setup`, before launch
   finishes. Focus is checked again when the page answers and once more in
   the delegate's `willPresent` (the app frontmost): a reader back at the
-  window gets nothing. Takes carry a generation, so a late answer to one
-  given up on (30s) never frees the next one's slot. It asks for permission
+  window gets nothing. Takes carry a generation: a late answer to one given
+  up on (30s) changes nothing once a newer take is out. The permission check
+  runs in an autorelease pool, on the shell's own polling thread. It asks for permission
   the first time the setting is seen on (the prompt at most once per launch,
   and again after the setting is switched off and on),
   re-reads it every 15s while on, and hands it to core. Only from a `.app` bundle: the center throws

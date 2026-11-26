@@ -2316,12 +2316,14 @@ export default function App() {
   // Reads the file after the watcher comes back from a dropped connection,
   // which the server only answers with "connected".
   // A tab with unsaved edits keeps them: only an agent's reply is noted.
+  // `isCurrent` turns false once the watcher moved on (a tab switch) or a
+  // newer change arrived, so an older read never lands over it.
   const onWatcherReconnect = useCallback(
-    (path: string) => {
+    (path: string, isCurrent: () => boolean) => {
       fetch(`/api/file?path=${encodeURIComponent(path)}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data: { content?: string; mtime?: number } | null) => {
-          if (typeof data?.content !== 'string') return;
+          if (typeof data?.content !== 'string' || !isCurrent()) return;
           if (data.content === rawMarkdownRef.current) return;
           if (getTabSnapshot(path)?.dirty === true) {
             reportAgentFileChange(path, rawMarkdownRef.current, data.content);
@@ -2392,9 +2394,11 @@ export default function App() {
         scheduleBackfillWrite(path, nextContent, mtime);
       }
     };
+    const changesByPath = new Map<string, number>();
     es.addEventListener('change', (e) => {
       try {
         const { content, path, mtime } = JSON.parse(e.data);
+        changesByPath.set(path, (changesByPath.get(path) ?? 0) + 1);
         applyChange(content, path, mtime);
       } catch {
         // ignore malformed events
@@ -2403,7 +2407,10 @@ export default function App() {
     // A dropped connection reconnects by itself, but the server only says
     // "connected": a change made in the gap would never arrive. Each path
     // that comes back after an error is read once.
+    // A read is dropped once a newer change for its path arrived, or the
+    // connection closed, so an older read never lands over newer content.
     let missed = new Set<string>();
+    let closed = false;
     es.onerror = () => {
       missed = new Set(paths);
     };
@@ -2411,9 +2418,11 @@ export default function App() {
       try {
         const { path } = JSON.parse(e.data) as { path?: string };
         if (!path || !missed.delete(path)) return;
+        const seen = changesByPath.get(path) ?? 0;
         fetch(`/api/file?path=${encodeURIComponent(path)}`)
           .then((res) => (res.ok ? res.json() : null))
           .then((data: { content?: string; mtime?: number } | null) => {
+            if (closed || (changesByPath.get(path) ?? 0) !== seen) return;
             if (typeof data?.content === 'string') applyChange(data.content, path, data.mtime);
           })
           .catch(() => {});
@@ -2422,7 +2431,10 @@ export default function App() {
       }
     });
 
-    return () => es.close();
+    return () => {
+      closed = true;
+      es.close();
+    };
   }, [
     applyExternalContent,
     backgroundPathsKey,

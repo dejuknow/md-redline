@@ -6,13 +6,16 @@
 // delivering the agent notifications the web app words (notify.rs).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(any(target_os = "macos", test))]
 mod notify;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicU8;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -292,7 +295,8 @@ fn start_notification_poll(app: AppHandle) {
                 && last_permission_check.is_none_or(|at| at.elapsed() >= PERMISSION_EVERY)
             {
                 last_permission_check = Some(Instant::now());
-                notify::mac::refresh_permission(true);
+                // A long-lived thread has no autorelease pool of its own.
+                objc2::rc::autoreleasepool(|_| notify::mac::refresh_permission(true));
             }
         }
     });
@@ -309,12 +313,13 @@ fn take_notifications(app: &AppHandle) -> Option<bool> {
         _ => None,
     };
     let win = app.get_webview_window("main")?;
-    let generation = TAKE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let generation;
     {
         let mut sent = TAKE_SENT.lock().unwrap();
         if sent.is_some_and(|(_, at)| at.elapsed() < TAKE_STALE) {
             return last;
         }
+        generation = TAKE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         *sent = Some((generation, Instant::now()));
     }
     let release = move || {
@@ -327,6 +332,11 @@ fn take_notifications(app: &AppHandle) -> Option<bool> {
     let target = win.clone();
     let asked = win.eval_with_callback(script, move |result| {
         release();
+        // An answer to a take given up on, with a newer one already out: its
+        // setting and focus are stale, so it changes nothing.
+        if TAKE_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
         let Some(take) = notify::parse_take(&result) else { return };
         LAST_ENABLED.store(if take.enabled { 1 } else { 2 }, Ordering::SeqCst);
         if KEEP_ALIVE.swap(take.enabled, Ordering::SeqCst) != take.enabled {

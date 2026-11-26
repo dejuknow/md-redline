@@ -306,10 +306,17 @@ test.describe('Agent notifications (desktop app)', () => {
     });
     await request.get(`${baseURL}/api/review-sessions/${sessionId}/agent-wait?timeout=1`);
 
-    // Loaded (or reloaded, or the app restarted) after the round ended.
+    const listed = await request.get(`${baseURL}/api/review-sessions/${sessionId}`);
+    expect(((await listed.json()) as { agentRounds?: number }).agentRounds).toBe(1);
+
+    // Loaded (or reloaded, or the app restarted) after the round ended, with
+    // the window in the background from the first script on, so a wrong
+    // baseline would queue rather than be dropped as seen.
+    await page.addInitScript(() => {
+      (window as unknown as { __e2eFocused?: boolean }).__e2eFocused = false;
+    });
     await page.goto(`/?review=${encodeURIComponent(sessionId)}`);
     await expect(page.getByTestId('review-banner')).toBeVisible({ timeout: 12_000 });
-    await setFocused(page, false);
     await page.waitForTimeout(7_000);
     expect((await take(page, false))?.items).toEqual([]);
 

@@ -144,9 +144,11 @@ export function detectRoundEvents(
   for (const session of sessions) {
     const count = session.agentRounds;
     if (typeof count !== 'number' || !Number.isFinite(count)) continue;
-    rounds.set(session.id, count);
-    if (!state.initialized) continue;
     const seen = state.rounds.get(session.id) ?? 0;
+    // A high-water mark: a late answer to an older poll can carry a lower
+    // count, and must not make the next one look new.
+    rounds.set(session.id, Math.max(count, seen));
+    if (!state.initialized) continue;
     if (count > seen) {
       events.push({
         kind: 'round',
