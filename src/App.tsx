@@ -3817,7 +3817,12 @@ export default function App() {
 
   return (
     <div data-app-root className="h-screen flex flex-col bg-frame">
-      <div className="flex-1 min-h-0 flex p-2">
+      {/* --window-offset-top: a desktop shell moves the top rows by this much
+          so they stay centered on its window controls at every zoom. */}
+      <div
+        className="flex-1 min-h-0 flex p-2"
+        style={{ paddingTop: 'calc(0.5rem + var(--window-offset-top, 0px))' }}
+      >
         <ReadingPositionCapture
           path={activeFilePath}
           view={readingView}

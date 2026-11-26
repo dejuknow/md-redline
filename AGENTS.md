@@ -2835,6 +2835,10 @@ Keep them when restyling or refactoring:
   child is the padded row of panels.
 - `data-review-band`: the review row docked at the bottom of the page card, present only
   while a review is shown (see Review band above).
+- `--window-offset-top`: a CSS variable a desktop shell sets on
+  `data-app-root` to move the padded row of panels down (or, to at most -8px,
+  up), so the top rows stay centered on window controls that do not scale
+  with the page zoom (#253). The row's top padding adds it.
 - `--window-inset-top`: a CSS variable a desktop shell sets when its window
   controls sit over the collapsed rail's top; the rail's top padding adds it,
   pushing its icons below the controls. (There is no `data-sidebar-logo` any
@@ -3452,7 +3456,12 @@ nothing builds or tests it there yet.
   on the top row, centered at DEFAULT_ZOOM (125%). They stay at fixed window
   points while the page zooms, so the init script converts the room they need
   to CSS px at the current zoom: the shell calls its `__mdrShellZoom(z)` on
-  every zoom change and every page load. It sets the
+  every zoom change and every page load. Tauri cannot move the lights after
+  the window is built (tao re-applies their position on every redraw), so the
+  page follows them instead: `--window-offset-top` on `data-app-root` shifts
+  the top rows so their center stays on the lights' center (clamped at -8px,
+  the window's top edge, which leaves the lights 1.5px above center at 200%).
+  It also sets the
   app's `--window-inset-left` / `--window-inset-top` hooks for the open
   sidebar, the collapsed rail plus tab strip, and focus mode, drops them in
   native full screen, and makes the top 44px drag the window (double-click

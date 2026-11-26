@@ -158,20 +158,32 @@ const SHELL_CHROME_SCRIPT: &str = r#"(function () {
   // (outerWidth / innerWidth stays 1), so the shell passes it: the zoom at
   // window build fills in __MDR_ZOOM__, and the shell calls __mdrShellZoom
   // again on every zoom change and every page load.
-  var LIGHTS_RIGHT_PT = 98, LIGHTS_BOTTOM_PT = 43;
+  //
+  // The lights cannot move with the zoom (Tauri sets their position only when
+  // the window is built, and tao re-applies it on every redraw), so the page
+  // moves instead (#253): --mdr-lights-dy shifts the top rows so their center
+  // (25px down at no offset) lands on the lights' center, 31.25pt down. It
+  // stops at -8px, where the rows reach the window's top edge; at 200% that
+  // leaves the lights 1.5px above center.
+  var LIGHTS_RIGHT_PT = 98, LIGHTS_BOTTOM_PT = 43, LIGHTS_CENTER_PT = 31.25, ROW_CENTER_PX = 25;
   window.__mdrShellZoom = function (Z) {
     if (!(Z > 0)) return;
     root.style.setProperty('--mdr-lights-r', (LIGHTS_RIGHT_PT / Z).toFixed(1) + 'px');
     root.style.setProperty('--mdr-lights-b', (LIGHTS_BOTTOM_PT / Z).toFixed(1) + 'px');
+    var dy = Math.max(-8, LIGHTS_CENTER_PT / Z - ROW_CENTER_PX);
+    root.style.setProperty('--mdr-lights-dy', dy.toFixed(1) + 'px');
   };
   window.__mdrShellZoom(__MDR_ZOOM__);
   var on = 'html[data-shell="mac"]:not([data-fullscreen]) ';
   var css = [
+    // Every top row follows the lights' center (see --mdr-lights-dy above).
+    on + '[data-app-root] { --window-offset-top: var(--mdr-lights-dy); }',
     // Sidebar open: its top row starts at 8px and pads 4px past the inset.
     on + '[data-sidebar-top] { --window-inset-left: calc(var(--mdr-lights-r) - 12px); }',
     // Sidebar collapsed: the rail's icons drop below the lights (rail top
-    // 8px, plus its own 5px), and the tab strip (from 56px) clears them.
-    on + '[data-sidebar-rail] { --window-inset-top: calc(var(--mdr-lights-b) - 13px); }',
+    // 8px plus the offset, plus its own 5px), and the tab strip (from 56px)
+    // clears them.
+    on + '[data-sidebar-rail] { --window-inset-top: calc(var(--mdr-lights-b) - 13px - var(--mdr-lights-dy)); }',
     on + '[data-app-root]:has([data-sidebar-rail]) [data-doc-strip] { --window-inset-left: max(0px, calc(var(--mdr-lights-r) - 56px)); }',
     // No sidebar (focus mode): the tab strip starts at 8px.
     on + '[data-app-root]:not(:has([data-sidebar-rail], [data-sidebar-panel])) [data-doc-strip] { --window-inset-left: calc(var(--mdr-lights-r) - 8px); }'
