@@ -400,7 +400,10 @@ export function DocStrip({
             </>
           )}
 
-          <div className="w-px h-[18px] mx-1 bg-border" aria-hidden="true" />
+          {/* No rule here: the outlined comments button and Hand off mark
+              where the view tools end. An empty cell doubles the row's gap
+              (4px to 8px) so the two groups still read apart. */}
+          <span aria-hidden="true" />
           {comments}
           {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
         </div>
