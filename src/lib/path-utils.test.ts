@@ -3,6 +3,7 @@ import {
   getParentDir,
   getPathBasename,
   middleTruncatePath,
+  TAB_FOLDER_LABEL_CHARS,
   tabDisambiguators,
   tildeShortenPath,
 } from './path-utils';
@@ -159,42 +160,135 @@ describe('getParentDir', () => {
 });
 
 describe('tabDisambiguators', () => {
+  const labels = (paths: string[]) => {
+    const m = tabDisambiguators(paths);
+    return paths.map((p) => m.get(p));
+  };
+
   it('leaves unique names alone', () => {
     expect(tabDisambiguators(['/a/spec.md', '/b/plan.md']).size).toBe(0);
   });
 
-  it('labels colliding names with their nearest folder', () => {
-    const labels = tabDisambiguators(['/p/docs/README.md', '/p/README.md', '/p/plan.md']);
-    expect(labels.get('/p/docs/README.md')).toBe('docs');
-    expect(labels.get('/p/README.md')).toBe('p');
-    expect(labels.has('/p/plan.md')).toBe(false);
+  it('labels colliding names with their nearest folder when that tells them apart', () => {
+    expect(labels(['/p/docs/README.md', '/p/README.md', '/p/plan.md'])).toEqual([
+      'docs',
+      'p',
+      undefined,
+    ]);
   });
 
-  it('walks up until the folders differ', () => {
-    const labels = tabDisambiguators(['/one/docs/README.md', '/two/docs/README.md']);
-    expect(labels.get('/one/docs/README.md')).toBe('one/docs');
-    expect(labels.get('/two/docs/README.md')).toBe('two/docs');
+  it('shows only the folder that differs, not the shared folders under it', () => {
+    expect(
+      labels(['/work/acme/specs/docs/README.md', '/work/globex/specs/docs/README.md']),
+    ).toEqual(['acme', 'globex']);
   });
 
   it('only walks as far as each path needs', () => {
-    const labels = tabDisambiguators([
-      '/one/docs/README.md',
-      '/two/docs/README.md',
-      '/three/specs/README.md',
-    ]);
-    expect(labels.get('/three/specs/README.md')).toBe('specs');
-    expect(labels.get('/one/docs/README.md')).toBe('one/docs');
+    expect(
+      labels(['/one/docs/README.md', '/two/docs/README.md', '/three/specs/README.md']),
+    ).toEqual(['one', 'two', 'specs']);
   });
 
-  it('shows every folder a shorter path has', () => {
-    const labels = tabDisambiguators(['/a/README.md', '/x/a/README.md']);
-    expect(labels.get('/a/README.md')).toBe('a');
-    expect(labels.get('/x/a/README.md')).toBe('x/a');
+  it('adds the folder that tells two labels apart when the first ones match', () => {
+    // The folders that differ first are m, n and m; the two m tabs then
+    // differ one folder down.
+    expect(labels(['/m/k/d/R.md', '/n/k/d/R.md', '/k/m/d/R.md'])).toEqual(['m/k', 'n', 'm']);
+  });
+
+  it('elides shared folders between the two that differ', () => {
+    expect(
+      labels([
+        '/w/north/spec/feature/design/R.md',
+        '/w/north/spec/feature/plan/R.md',
+        '/w/south/spec/feature/design/R.md',
+        '/w/south/spec/feature/plan/R.md',
+      ]),
+    ).toEqual(['north/…/design', 'north/…/plan', 'south/…/design', 'south/…/plan']);
+  });
+
+  it('never repeats a label in a group', () => {
+    const paths = [
+      '/a/README.md',
+      '/x/a/README.md',
+      '/m/k/d/README.md',
+      '/n/k/d/README.md',
+      '/k/m/d/README.md',
+      '/m/kz/d/README.md',
+    ];
+    const shown = labels(paths);
+    expect(new Set(shown).size).toBe(paths.length);
+  });
+
+  it('shortens long labels around the part that differs, not off the end', () => {
+    // Dated folders share a long prefix, so cutting the end would leave
+    // every label reading "2026-01-05-al…".
+    const shown = labels([
+      '/specs/2026-01-05-alpha-rollout/plan.md',
+      '/specs/2026-01-05-alpha-rollout-notes/plan.md',
+      '/specs/2026-01-05-beta-signup/plan.md',
+    ]);
+    for (const text of shown) expect(text!.length).toBeLessThanOrEqual(TAB_FOLDER_LABEL_CHARS);
+    expect(new Set(shown).size).toBe(3);
+    // The date every label shares goes first; it tells none of them apart.
+    expect(shown.some((text) => text!.startsWith('2026'))).toBe(false);
+    // And no label reads as the cut-off start of another.
+    for (const a of shown)
+      for (const b of shown)
+        if (a !== b && a!.endsWith('…')) expect(b!.startsWith(a!.slice(0, -1))).toBe(false);
+  });
+
+  it('keeps labels that fit whole, even when they share words', () => {
+    expect(labels(['/a/dev-front/R.md', '/a/dev-back/R.md'])).toEqual(['dev-front', 'dev-back']);
+  });
+
+  it('keeps shortened multi-folder labels distinct', () => {
+    const shown = labels([
+      '/w/.local/skills/frontend-patterns/rules/R.md',
+      '/w/shared-skills/skills/frontend-patterns/rules/R.md',
+      '/w/shared-skills/skills/backend-patterns/rules/R.md',
+      '/w/.local/skills/backend-patterns/rules/R.md',
+    ]);
+    for (const text of shown) expect(text!.length).toBeLessThanOrEqual(TAB_FOLDER_LABEL_CHARS);
+    expect(new Set(shown).size).toBe(4);
+  });
+
+  it('drops shared words when folders differ only in the middle of their names', () => {
+    const shown = labels([
+      '/w/.local/skills/dev-frontend-patterns/guides/R.md',
+      '/w/shared-skills/skills/dev-frontend-patterns/guides/R.md',
+      '/w/shared-skills/skills/dev-backend-patterns/guides/R.md',
+      '/w/.local/skills/dev-backend-patterns/guides/R.md',
+    ]);
+    for (const text of shown) expect(text!.length).toBeLessThanOrEqual(TAB_FOLDER_LABEL_CHARS);
+    expect(new Set(shown).size).toBe(4);
+    expect(shown.some((text) => text!.includes('front'))).toBe(true);
+  });
+
+  it('names the file, not a folder another tab also sits in', () => {
+    // /w/b/R.md is in w too, so "w" alone would not say which file this is.
+    expect(labels(['/w/a/R.md', '/w/b/R.md', '/x/a/R.md'])).toEqual(['w/a', 'b', 'x']);
+  });
+
+  it('trims shared words from the long labels even when a short one shares none', () => {
+    const paths = [
+      '/a/project-alpha-workspace-one/R.md',
+      '/a/project-alpha-workspace-two/R.md',
+      '/a/project-beta-workspace-one/R.md',
+      '/a/project-beta-workspace-two/R.md',
+      '/b/project-alpha-workspace-one/R.md',
+    ];
+    const shown = labels(paths);
+    expect(new Set(shown).size).toBe(paths.length);
+    for (const text of shown) expect(text!.length).toBeLessThanOrEqual(TAB_FOLDER_LABEL_CHARS);
+  });
+
+  it('leaves labels that fit alone when another in the group is shortened', () => {
+    const shown = labels(['/a/dev-front/R.md', '/a/dev-backend-services-extra/R.md']);
+    expect(shown[0]).toBe('dev-front');
+    expect(shown[1]!.length).toBeLessThanOrEqual(TAB_FOLDER_LABEL_CHARS);
   });
 
   it('reads Windows separators', () => {
-    const labels = tabDisambiguators(['C:\\one\\spec.md', 'C:\\two\\spec.md']);
-    expect(labels.get('C:\\one\\spec.md')).toBe('one');
-    expect(labels.get('C:\\two\\spec.md')).toBe('two');
+    expect(labels(['C:\\one\\spec.md', 'C:\\two\\spec.md'])).toEqual(['one', 'two']);
   });
 });

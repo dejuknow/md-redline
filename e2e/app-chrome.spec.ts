@@ -671,6 +671,35 @@ test.describe('Settings, empty rail and desktop shell hooks', () => {
     );
   });
 
+  test('deep same-named tabs keep their whole file names, labelled by the folder that differs', async ({
+    page,
+  }) => {
+    const shared = ['specs', 'docs'];
+    const twins = ['north-project-workspace', 'south-project-workspace'].map((top) => {
+      const dir = resolve(fixtureDir, top, ...shared);
+      mkdirSync(dir, { recursive: true });
+      const file = resolve(dir, 'test-doc.md');
+      copyFileSync(FIXTURE, file);
+      return file;
+    });
+    await page.goto(`/?file=${encodeURIComponent(twins[0])}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+    await page.locator('button[title="Open file"]').click();
+    await page.getByPlaceholder('File path or name...').fill(twins[1]);
+    await page.getByPlaceholder('File path or name...').press('Enter');
+
+    const labels = strip(page).locator('[data-tab-folder]');
+    await expect(labels).toHaveCount(2);
+    const texts = await labels.allTextContents();
+    // Long names that share a suffix: shortened, but never to the same text.
+    expect(new Set(texts).size).toBe(2);
+    expect(texts.every((t) => t.startsWith('north') || t.startsWith('south'))).toBe(true);
+    for (const file of twins) {
+      const name = strip(page).locator(`button[title="${file}"] .truncate`).first();
+      expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    }
+  });
+
   test('with no comments in Anchored, the comments toggle brings up a "No comments yet" note', async ({
     page,
   }) => {

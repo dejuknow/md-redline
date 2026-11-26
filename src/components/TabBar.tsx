@@ -356,9 +356,12 @@ export function TabBar({
                     <span className="truncate">{fileName}</span>
                   </span>
                   {folderLabels.has(tab.filePath) && (
+                    // Already short (tabDisambiguators keeps it to about 96px),
+                    // and it gives way long before the name does: a tab is
+                    // found by its file name, so that is the last thing to go.
                     <span
                       data-tab-folder
-                      className="min-w-0 max-w-[96px] -ml-0.5 truncate text-[12px] font-normal text-content-muted"
+                      className="min-w-0 max-w-[96px] shrink-[100] -ml-0.5 truncate text-[12px] font-normal text-content-muted"
                     >
                       {folderLabels.get(tab.filePath)}
                     </span>
