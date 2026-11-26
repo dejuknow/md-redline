@@ -14,5 +14,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-window-state = "=2.4.1"
 url = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSAttributedString", "NSData", "NSRange", "NSURL", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSFont", "NSColor", "NSParagraphStyle", "NSText", "NSAttributedString"] }
+
 [profile.release]
 strip = true
