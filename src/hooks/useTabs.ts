@@ -243,6 +243,12 @@ export function useTabs(options?: {
   // Writes queued or in flight per path, for getSaveState. Counted rather
   // than flagged because the queue can hold several writes for one file.
   const pendingSavesRef = useRef(new Map<string, number>());
+  // Mtime moves made by this tab's own writes, per path, kept only while a
+  // write for that path is queued: from the mtime a write checked against to
+  // the one it produced. A queued write follows these from the mtime its
+  // content was read at, and nothing else, so a change on disk from anywhere
+  // else leaves it on its old mtime and the server refuses it.
+  const ownWritesRef = useRef(new Map<string, Map<number | undefined, number>>());
 
   const setTabDataState = useCallback(
     (updater: Map<string, TabState> | ((prev: Map<string, TabState>) => Map<string, TabState>)) => {
@@ -666,17 +672,63 @@ export function useTabs(options?: {
     [updateTab],
   );
 
+  /**
+   * Takes the mtime a write of the tab's own content produced: `fromMtime` is
+   * the one the write was checked against, `toMtime` the one it left. Only
+   * writes that keep the tab's content belong here, since a queued save
+   * carries that content plus its own edits and may follow the move.
+   *
+   * The tab takes the new mtime only while it still holds `fromMtime`. A
+   * change that reached the tab while the write was out (an agent's edit,
+   * through the watcher) is newer than the write, and its mtime goes with the
+   * text the tab now shows.
+   */
+  const noteOwnWrite = useCallback(
+    (path: string, fromMtime: number | undefined, toMtime: number) => {
+      setTabDataState((prev) => {
+        const tabKey = findTabKey(prev, path);
+        const existing = tabKey ? prev.get(tabKey) : undefined;
+        // A write sent without an mtime was never checked, so there is no
+        // older state of the tab for it to be stale against.
+        const tabMovedOn = fromMtime !== undefined && existing?.mtime !== fromMtime;
+        if (!existing || tabMovedOn || existing.mtime === toMtime) return prev;
+        const next = new Map(prev);
+        next.set(tabKey!, { ...existing, mtime: toMtime });
+        return next;
+      });
+      if (fromMtime === toMtime) return;
+      // Nothing queued for the file means nothing holds an older mtime: the
+      // next save reads the tab's.
+      if (!pendingSavesRef.current.get(path)) return;
+      let moves = ownWritesRef.current.get(path);
+      if (!moves) {
+        moves = new Map();
+        ownWritesRef.current.set(path, moves);
+      }
+      moves.set(fromMtime, toMtime);
+    },
+    [setTabDataState],
+  );
+
   const saveFileAt = useCallback(
     (path: string, content: string) => {
       // Queue saves so rapid edits don't race: each save waits for the
-      // previous one to finish. Reading mtime from tabDataRef at execution time
-      // is correct because the queue serializes saves, so save1's returned mtime
-      // is already written to the ref before save2 runs. Saves to different
-      // files share the same queue, which is fine — they don't race anyway.
+      // previous one to finish. Saves to different files share the queue, so
+      // a save can wait behind another file's, and the file can change on
+      // disk in that time (#263). The mtime is read now, with the content it
+      // goes with, and followed at run time only through this tab's own
+      // writes. Read at run time instead, it could be the mtime of an agent's
+      // edit, and this save would overwrite that edit without a conflict.
+      const baseMtime = tabDataRef.current.get(path)?.mtime;
       const pending = pendingSavesRef.current;
       pending.set(path, (pending.get(path) ?? 0) + 1);
       saveQueueRef.current = saveQueueRef.current.then(async () => {
-        const currentMtime = tabDataRef.current.get(path)?.mtime;
+        let currentMtime = baseMtime;
+        const moves = ownWritesRef.current.get(path);
+        // Bounded by the number of moves, in case two ever loop.
+        for (let i = moves?.size ?? 0; i > 0 && moves!.has(currentMtime); i--) {
+          currentMtime = moves!.get(currentMtime);
+        }
         try {
           const res = await fetch('/api/file', {
             method: 'PUT',
@@ -703,10 +755,10 @@ export function useTabs(options?: {
           // lands. Clearing it here let a failure of the newer write read as
           // saved, since a failure only sets `error`.
           const newerWriteQueued = (pending.get(path) ?? 0) > 1;
+          if (data.mtime != null) noteOwnWrite(path, currentMtime, data.mtime);
           updateTab(path, {
             lastSaved: new Date(),
             error: null,
-            mtime: data.mtime,
             ...(newerWriteQueued ? {} : { dirty: false }),
           });
         } catch (err) {
@@ -716,11 +768,14 @@ export function useTabs(options?: {
         } finally {
           const left = (pending.get(path) ?? 1) - 1;
           if (left > 0) pending.set(path, left);
-          else pending.delete(path);
+          else {
+            pending.delete(path);
+            ownWritesRef.current.delete(path);
+          }
         }
       });
     },
-    [updateTab, onSaveError],
+    [updateTab, onSaveError, noteOwnWrite],
   );
 
   const saveFile = useCallback(
@@ -849,6 +904,7 @@ export function useTabs(options?: {
     switchTab,
     saveFile,
     saveFileAt,
+    noteOwnWrite,
     getSaveState,
     whenSaved,
     getTabSnapshot,

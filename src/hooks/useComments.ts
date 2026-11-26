@@ -359,7 +359,8 @@ export function useComments(params: UseCommentsParams) {
             return;
           }
           // The path check above means this delete-time writer still targets
-          // the open file, and saveFileAt reads the file's mtime when it runs.
+          // the open file, and saveFileAt takes the mtime the tab holds now,
+          // which goes with `after`.
           updateAndSave(before);
           onRestored?.();
           showToast(restoredMessage, 'info');

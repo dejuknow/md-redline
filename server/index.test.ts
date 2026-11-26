@@ -63,11 +63,49 @@ const saveFault = vi.hoisted(() => ({
   target: null as string | null,
 }));
 
+// Lets a test land a second save between a save's write and the stat that
+// reports its mtime. Armed with the file's path, the first stat of that file
+// after a save lands on it waits (up to `waitMs`) for `renamesBeforeStat`
+// saves to have landed,
+// and every rename onto it after the first pushes its mtime 5s ahead, so the
+// two writes can never share an mtime. Off by default.
+const saveStatGate = vi.hoisted(() => ({
+  target: null as string | null,
+  renames: 0,
+  renamesBeforeStat: 0,
+  waitMs: 0,
+}));
+
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
   return {
     ...actual,
+    stat: async (...args: Parameters<typeof actual.stat>) => {
+      const gate = saveStatGate;
+      if (
+        gate.target !== null &&
+        String(args[0]) === gate.target &&
+        gate.waitMs > 0 &&
+        gate.renames > 0
+      ) {
+        const deadline = Date.now() + gate.waitMs;
+        gate.waitMs = 0;
+        while (gate.renames < gate.renamesBeforeStat && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      }
+      return actual.stat(...args);
+    },
     rename: async (from: string, to: string) => {
+      if (saveStatGate.target !== null && String(to) === saveStatGate.target) {
+        await actual.rename(from, to);
+        saveStatGate.renames += 1;
+        if (saveStatGate.renames > 1) {
+          const later = new Date(Date.now() + 5000);
+          await actual.utimes(to, later, later);
+        }
+        return;
+      }
       if (!String(from).endsWith('.tmp')) return actual.rename(from, to);
       if (saveFault.target !== null && !String(to).endsWith(saveFault.target)) {
         return actual.rename(from, to);
@@ -5193,6 +5231,32 @@ describe('save path under filesystem faults', () => {
     expect((await readdir(dir)).filter((e) => e.endsWith('.tmp'))).toEqual([]);
 
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reports the mtime of its own write when another save lands right after it', async () => {
+    // The editor checks its next queued save against this mtime (#263). Read
+    // after the file lock is released, it can belong to whatever wrote next,
+    // and a save checked against that write's mtime would overwrite it
+    // without a conflict.
+    saveStatGate.target = await realpath(faultFile);
+    saveStatGate.renames = 0;
+    saveStatGate.renamesBeforeStat = 2;
+    saveStatGate.waitMs = 300;
+    try {
+      const [first, second] = await Promise.all([
+        save(faultFile, '# First\n'),
+        save(faultFile, '# Second\n'),
+      ]);
+      expect(first.response.status).toBe(200);
+      expect(second.response.status).toBe(200);
+      // The second write's mtime is 5s ahead, so the two can only match if
+      // the first save reported the second one's.
+      const mtimeOf = (res: { body: unknown }) => (res.body as { mtime: number }).mtime;
+      expect(Math.abs(mtimeOf(second) - mtimeOf(first))).toBeGreaterThan(1000);
+    } finally {
+      saveStatGate.target = null;
+      saveStatGate.waitMs = 0;
+    }
   });
 });
 
