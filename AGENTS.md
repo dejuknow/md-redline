@@ -944,7 +944,29 @@ lands back in its old slot. The entry points are the palette's **Reopen closed
 tab** (listed only while there is something to reopen) and the tab menu's
 **Reopen Closed Tab** (disabled when there is nothing). There is no browser
 shortcut: browsers keep `Cmd+Shift+T`, so the desktop shell binds it through
-`window.__mdrReopenClosedTab` (see Desktop shell hooks).
+`window.__mdrReopenClosedTab` (see Desktop shell hooks). The palette's **New
+tab** (the open-file button's action, the file picker) and **Close tab** (the
+active tab, through the same unsaved-changes guard as its x) sit beside it.
+All three work in a browser; their keys (`Cmd+T`, `Cmd+W`, `Cmd+Shift+T`)
+are the desktop app's, so the palette shows them only there.
+
+A reopened tab is fetched again, which takes a few milliseconds; what a reader
+waits for is the document being rendered and painted, the same work a switch
+to an open tab does. Two things keep that short on long documents with many
+comments. `renderDocumentHtml` (`useComments.ts`) keeps the HTML of the last 8
+documents rendered (keyed by the clean markdown, path and render options; the
+pipeline is pure), so a switch or a reopen skips the markdown pipeline. And the
+comment highlight pass shares one `WrapTextIndex` (`MarkdownViewer.tsx`) across
+its `wrapText` calls: wrapping never changes the visible text, so after the
+first wrap the pass keeps the document's text and each top-level block's span,
+and a call walks only the blocks its match spans instead of every text node in
+the document. A wrap that changes the container's own children or a block's
+text length drops the index, and the next call walks everything and rebuilds
+it, so every call paints what it would without it (`wrapTextIndex.test.ts`).
+The visible-text walker (`src/lib/visible-text.ts`) skips a hidden container
+(`<style>`, SVG `<defs>`) as a whole subtree rather than climbing every text
+node's ancestors. On a 134 KB document with 180 comments, a production build
+went from about 430 ms to about 110 ms for a reopen or a switch.
 
 The controls group on the right (`data-testid="panel-toolbar"`) is kept short
 so the tabs keep the width. In order:
@@ -2810,8 +2832,24 @@ Keep them when restyling or refactoring:
   `?file=`), a folder is shown in the explorer (`revealDirInExplorer`), and a
   review id opens that session's files through the same code as the `?review=`
   boot open. Only the boot open marks the URL's review as opened.
+- `window.__mdrDesktop`: set to `true` by the shell's init script on every
+  platform, before the app's scripts run. It is the one signal that the page
+  runs inside the desktop app: `isDesktopApp()` (`src/lib/desktop.ts`) reads
+  it, and the palette's tab keys and the shortcuts panel's Tabs group show only
+  when it is set. Nothing else in the app looks at Tauri's own globals.
+- `window.__mdrNewTab()`: set by `App.tsx` while mounted, for the shell's New
+  Tab (`Cmd+T`, `Ctrl+T`). Does what the tab strip's open-file button does:
+  opens the file picker. A confirm dialog makes it wait (nothing happens); the
+  Mermaid fullscreen view closes first.
 - `window.__mdrCloseActiveTab()`: set by `App.tsx` while mounted, for the
-  shell's Close Tab (`Cmd+W`, `Ctrl+W`). Closes the active tab through the
+  shell's Close Tab (`Cmd+W`, `Ctrl+W`). With something open on top of the
+  document it acts on that instead and returns true (`shellOverlayAction`,
+  `src/lib/shell-overlay.ts`, top down): a confirm dialog (unsaved changes,
+  delete all, the rail's own) is left waiting for its answer; the Mermaid
+  fullscreen view, a modal (palette, file opener, settings, shortcuts), the
+  comments drawer and App's context menus close; other menus and popovers
+  (the View menu, the tab list, a review popover) get an Escape. The find bar
+  does not count. Otherwise it closes the active tab through the
   unsaved-changes guard and returns true; returns false with no tab open, so
   the shell can close the window instead.
 - `window.__mdrReopenClosedTab()`: set by `App.tsx` while mounted, for the
@@ -2854,6 +2892,9 @@ stable. The active tab's top lines up with the sidebar's, with or without a revi
 | `Cmd+O`             | Open file                                                                             |
 | `Cmd+,`             | Open settings                                                                         |
 | `Cmd+Shift+[` / `]` | Previous / next tab (outside text fields, and from the comment form's field)          |
+| `Cmd+T`             | New tab: the file picker (desktop app only)                                           |
+| `Cmd+W`             | Close tab, or the overlay on top of it (desktop app only)                             |
+| `Cmd+Shift+T`       | Reopen closed tab (desktop app only)                                                  |
 | `?`                 | Keyboard shortcuts help                                                               |
 | `Esc`               | Close fullscreen modal (Mermaid diagrams)                                             |
 | `+` / `-`           | Zoom in / out (Mermaid fullscreen)                                                    |
@@ -3036,7 +3077,8 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 
 `Cmd+K`, or the empty page's Command palette button, opens the palette; both run App's
 `openCommandPalette()`. Commands include: navigation (next/prev comment, find),
-tabs (prev/next, reopen closed tab while one is left), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
+tabs (prev/next, new tab, close tab while one is open, reopen closed tab while one is left; their
+desktop keys show only inside the desktop app), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
 file ops (reload, open, mark reviewed), settings, keyboard help, undo (Undo delete /
 Undo diff reset, while the open file has one), all themes,
@@ -3260,8 +3302,10 @@ nothing builds or tests it there yet.
   sending them; a hostile or hand-typed link to an untrusted path lands on the
   SPA's access-denied tab state.
 - Window lifecycle on macOS: closing the window hides it, a Dock click reopens
-  it, Cmd-Q quits. The menu is Tauri's default with File > Close Tab (Cmd-W),
-  Reopen Closed Tab (Shift-Cmd-T) and Close Window (Shift-Cmd-W). Close Tab
+  it, Cmd-Q quits. The menu is Tauri's default with File > New Tab (Cmd-T),
+  Close Tab (Cmd-W), Reopen Closed Tab (Shift-Cmd-T) and Close Window
+  (Shift-Cmd-W). New Tab evals `window.__mdrNewTab()` and shows the window if
+  closing the last tab hid it. Close Tab
   evals `window.__mdrCloseActiveTab()` and hides the window when it returns
   false or the hook is absent; Reopen Closed Tab evals
   `window.__mdrReopenClosedTab()` (a no-op when there is nothing to reopen)
@@ -3271,8 +3315,10 @@ nothing builds or tests it there yet.
   Bar shortcut and automatic window tabbing is only turned off when the first
   window is built. On Windows and Linux there is no Dock to bring a hidden window back,
   so closing the window quits the app, and `src-tauri/scripts/tab-keys.js`
-  (an init script, tested in jsdom by `tab-keys.test.ts`) maps Ctrl-W and
-  Ctrl-Shift-T to the same hooks; Ctrl-W with no tab open does nothing.
+  (an init script, tested in jsdom by `tab-keys.test.ts`) maps Ctrl-T, Ctrl-W
+  and Ctrl-Shift-T to the same hooks; Ctrl-W with no tab open does nothing.
+  On every platform a one-line init script sets `window.__mdrDesktop` (see
+  Desktop shell hooks).
 - Overlay title bar (macOS): no native title strip; the traffic lights sit
   on the top row, centered at DEFAULT_ZOOM (125%). An init script sets the
   app's `--window-inset-left` / `--window-inset-top` hooks for the open

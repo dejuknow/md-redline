@@ -120,9 +120,15 @@ const SHELL_CHROME_SCRIPT: &str = r#"(function () {
   });
 })();"#;
 
-/// Close Tab (Ctrl+W) and Reopen Closed Tab (Ctrl+Shift+T) for Windows and
-/// Linux, which have no app menu to carry the shortcuts. See the script for
-/// the rules; macOS uses the File menu instead.
+/// Tells the web app it runs inside the desktop app, on every platform and
+/// before any of its scripts: it lists the desktop-only tab shortcuts in its
+/// palette and shortcuts panel only then (`isDesktopApp` in
+/// src/lib/desktop.ts). One flag, so nothing in the app sniffs Tauri internals.
+const DESKTOP_FLAG_SCRIPT: &str = "window.__mdrDesktop = true;";
+
+/// New Tab (Ctrl+T), Close Tab (Ctrl+W) and Reopen Closed Tab (Ctrl+Shift+T)
+/// for Windows and Linux, which have no app menu to carry the shortcuts. See
+/// the script for the rules; macOS uses the File menu instead.
 #[cfg(not(target_os = "macos"))]
 const TAB_KEY_SCRIPT: &str = include_str!("../scripts/tab-keys.js");
 
@@ -145,7 +151,8 @@ fn close_tab_or_window(app: &AppHandle) {
     }
 }
 
-/// The default macOS menu, except that Cmd+W closes the active tab, Close
+/// The default macOS menu, except that Cmd+T opens a new tab (the file
+/// picker, as the tab strip's "+" does), Cmd+W closes the active tab, Close
 /// Window moves to Shift+Cmd+W and Shift+Cmd+T reopens the last closed tab (as
 /// in browsers).
 #[cfg(target_os = "macos")]
@@ -180,6 +187,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
                 "File",
                 true,
                 &[
+                    &MenuItem::with_id(app, MENU_NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
                     &MenuItem::with_id(app, MENU_CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
                     &MenuItem::with_id(
                         app,
@@ -226,11 +234,31 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
 }
 
 #[cfg(target_os = "macos")]
+const MENU_NEW_TAB: &str = "new-tab";
+#[cfg(target_os = "macos")]
 const MENU_CLOSE_TAB: &str = "close-tab";
 #[cfg(target_os = "macos")]
 const MENU_REOPEN_TAB: &str = "reopen-tab";
 #[cfg(target_os = "macos")]
 const MENU_CLOSE_WINDOW: &str = "close-window";
+
+/// Asks the app for a new tab (it opens the file picker), bringing the window
+/// back first if closing the last tab hid it, so the picker is seen. Does
+/// nothing when the app is not loaded (loading or error page).
+#[cfg(target_os = "macos")]
+fn new_tab(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("main") else { return };
+    let target = win.clone();
+    let _ = win.eval_with_callback(
+        "window.__mdrNewTab ? (window.__mdrNewTab(), true) : false",
+        move |result| {
+            if result.trim() == "true" {
+                let _ = target.show();
+                let _ = target.set_focus();
+            }
+        },
+    );
+}
 
 /// Asks the app to reopen its last closed tab, and brings the window back
 /// when one reopened (closing the last tab hides it), as browsers do. Does
@@ -740,6 +768,7 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
         .inner_size(1360.0, 940.0)
         .min_inner_size(640.0, 480.0)
         .zoom_hotkeys_enabled(true)
+        .initialization_script(DESKTOP_FLAG_SCRIPT)
         .initialization_script(EXTERNAL_LINK_SCRIPT);
     // Traffic lights centered on the 34px top row (sidebar switch, tabs)
     // at DEFAULT_ZOOM: (8 + 17) * 1.25 = 31pt down. Tao's y is the title bar
@@ -1057,6 +1086,7 @@ fn main() {
         .on_menu_event(|app, event| {
             #[cfg(target_os = "macos")]
             match event.id().as_ref() {
+                MENU_NEW_TAB => new_tab(app),
                 MENU_CLOSE_TAB => close_tab_or_window(app),
                 MENU_REOPEN_TAB => reopen_closed_tab(app),
                 MENU_CLOSE_WINDOW => {

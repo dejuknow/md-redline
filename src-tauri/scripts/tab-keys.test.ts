@@ -14,6 +14,7 @@ function press(init: KeyboardEventInit): KeyboardEvent {
 }
 
 describe('desktop shell tab keys (Windows, Linux)', () => {
+  const newTab = vi.fn();
   const close = vi.fn(() => true);
   const reopen = vi.fn(() => true);
 
@@ -22,16 +23,28 @@ describe('desktop shell tab keys (Windows, Linux)', () => {
   });
 
   afterEach(() => {
+    newTab.mockClear();
     close.mockClear();
     reopen.mockClear();
+    delete window.__mdrNewTab;
     delete window.__mdrCloseActiveTab;
     delete window.__mdrReopenClosedTab;
   });
 
   function withHooks() {
+    window.__mdrNewTab = newTab;
     window.__mdrCloseActiveTab = close;
     window.__mdrReopenClosedTab = reopen;
   }
+
+  it('Ctrl+T opens a new tab', () => {
+    withHooks();
+    const event = press({ key: 't', ctrlKey: true });
+    expect(newTab).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+    expect(reopen).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
 
   it('Ctrl+W closes the active tab', () => {
     withHooks();
@@ -46,13 +59,15 @@ describe('desktop shell tab keys (Windows, Linux)', () => {
     const event = press({ key: 'T', ctrlKey: true, shiftKey: true });
     expect(reopen).toHaveBeenCalledOnce();
     expect(close).not.toHaveBeenCalled();
+    expect(newTab).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(true);
   });
 
   it('leaves other combinations alone', () => {
     withHooks();
     for (const init of [
-      { key: 't', ctrlKey: true },
+      { key: 't', metaKey: true },
+      { key: 't', ctrlKey: true, altKey: true },
       { key: 'W', ctrlKey: true, shiftKey: true },
       { key: 'w', metaKey: true },
       { key: 'w', ctrlKey: true, altKey: true },
@@ -61,11 +76,13 @@ describe('desktop shell tab keys (Windows, Linux)', () => {
     ]) {
       expect(press(init).defaultPrevented).toBe(false);
     }
+    expect(newTab).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
     expect(reopen).not.toHaveBeenCalled();
   });
 
   it('does not throw while the app is not loaded', () => {
+    expect(() => press({ key: 't', ctrlKey: true })).not.toThrow();
     expect(() => press({ key: 'w', ctrlKey: true })).not.toThrow();
     expect(() => press({ key: 'T', ctrlKey: true, shiftKey: true })).not.toThrow();
   });
