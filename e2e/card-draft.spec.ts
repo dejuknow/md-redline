@@ -82,16 +82,27 @@ async function goAwayAndBack(page: Page) {
   await expect(headingA(page)).toBeVisible();
 }
 
-/** Write the file while its tab is in the background. The server debounces
- * watch events by 150ms and the background tab takes the new content from
- * them, so a second away is enough for it to land before coming back. */
-async function rewriteWhileAway(page: Page, content: string) {
+/** Write the file while its tab is in the background, then come back once
+ * `landed` sees the change on screen. A watch event can go missing, so the
+ * write is repeated until it lands, as comment-draft.spec does; a repeat
+ * then lands while the file is on screen, which the rules treat the same. */
+async function rewriteWhileAway(page: Page, content: string, landed: () => Promise<void>) {
   await tab(page, 'card-draft-b.md').click();
   await expect(headingB(page)).toBeVisible();
   writeFileSync(DOC_A, content);
+  // The server debounces watch events by 150ms; a second is plenty for the
+  // background tab to take the new content before coming back.
   await page.waitForTimeout(1000);
   await tab(page, 'card-draft-a.md').click();
   await expect(headingA(page)).toBeVisible();
+  await expect(async () => {
+    try {
+      await landed();
+    } catch (err) {
+      writeFileSync(DOC_A, content);
+      throw err;
+    }
+  }).toPass({ timeout: 15_000 });
 }
 
 test.describe('An unsent reply on a comment card', () => {
@@ -171,7 +182,9 @@ test.describe('An unsent reply on a comment card', () => {
       '"replies":[]} -->valid',
       '"replies":[{"id":"r-agent","text":"Agent answer","author":"Agent","timestamp":"2026-03-22T00:01:00.000Z","agent":true}]} -->valid',
     );
-    await rewriteWhileAway(page, answered);
+    await rewriteWhileAway(page, answered, () =>
+      expect(getCard(page, 'First note')).toContainText('Agent answer', { timeout: 2000 }),
+    );
 
     await expect(replyField(page, 'First note')).toHaveValue(draft, { timeout: 5000 });
     await expect(getCard(page, 'First note')).toContainText('Agent answer');
@@ -182,7 +195,11 @@ test.describe('An unsent reply on a comment card', () => {
     const draft = 'Still about the same comment';
     await startReply(page, 'First note', draft);
 
-    await rewriteWhileAway(page, DOC_A_TEXT.replace('## Section Two', '## Section Two, revised'));
+    await rewriteWhileAway(
+      page,
+      DOC_A_TEXT.replace('## Section Two', '## Section Two, revised'),
+      () => expect(page.locator('.prose')).toContainText('Section Two, revised', { timeout: 2000 }),
+    );
 
     await expect(page.locator('.prose')).toContainText('Section Two, revised');
     await expect(replyField(page, 'First note')).toHaveValue(draft, { timeout: 5000 });
@@ -196,7 +213,9 @@ test.describe('An unsent reply on a comment card', () => {
     await startReply(page, 'First note', draft);
 
     const withoutFirst = DOC_A_TEXT.replace(marker('cd-1', 'valid credentials', 'First note'), '');
-    await rewriteWhileAway(page, withoutFirst);
+    await rewriteWhileAway(page, withoutFirst, () =>
+      expect(getCard(page, 'First note')).toHaveCount(0, { timeout: 2000 }),
+    );
 
     await expect(getCard(page, 'First note')).toHaveCount(0);
     await expect(page.getByPlaceholder('Write a reply...')).toHaveCount(0);
@@ -225,7 +244,9 @@ test.describe('An unsent reply on a comment card', () => {
       marker('cd-2', 'brute force attacks', 'Second note'),
       marker('cd-2', 'brute force attacks', 'Second note', ',"status":"resolved"'),
     );
-    await rewriteWhileAway(page, resolved);
+    await rewriteWhileAway(page, resolved, () =>
+      expect(notice(page)).toContainText('resolved', { timeout: 2000 }),
+    );
 
     await expect(page.getByPlaceholder('Write a reply...')).toHaveCount(0);
     await expect(notice(page)).toContainText('resolved', { timeout: 5000 });
@@ -312,6 +333,7 @@ test.describe('An unsent edit on a comment card', () => {
     await rewriteWhileAway(
       page,
       DOC_A_TEXT.replace('"text":"First note"', '"text":"First note, edited elsewhere"'),
+      () => expect(getCard(page, 'First note, edited elsewhere')).toHaveCount(1, { timeout: 2000 }),
     );
 
     // Saving the draft would overwrite the other edit, so the editor stays
