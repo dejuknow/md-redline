@@ -34,7 +34,7 @@ export function UpdateNotice({ latest, reloadReady, onDismiss, showToast }: Prop
           className="flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium"
           style={{ background: TOAST_BG, color: TOAST_FG }}
         >
-          <span>mdr was updated. Reload to get the new version.</span>
+          <span>md-redline was updated. Reload to get the new version.</span>
           <button
             onClick={() => location.reload()}
             className="px-2 py-0.5 rounded text-xs font-semibold bg-current/10 hover:bg-current/20 transition-colors"
@@ -68,7 +68,7 @@ export function UpdateNotice({ latest, reloadReady, onDismiss, showToast }: Prop
         className="flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium"
         style={{ background: TOAST_BG, color: TOAST_FG }}
       >
-        <span>mdr {latest} is available</span>
+        <span>md-redline {latest} is available</span>
         <code className="px-2 py-0.5 rounded text-xs bg-current/10">{UPGRADE_COMMAND}</code>
         <button
           onClick={() => void copyCommand()}

@@ -14,7 +14,7 @@ With the built-in MCP server, review runs in both directions. Your agent can req
 
 https://github.com/user-attachments/assets/cedccbc9-2458-45f0-9e05-3c3a01ce0d5a
 
-Works with [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and any other MCP client that supports stdio servers. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. `mdr` gives that workflow review tooling closer to code review.
+Works with [Claude Code](https://claude.com/claude-code), Claude Desktop, [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), and any other MCP client that supports stdio servers. As Sean Grove argues in [specs are the new code](https://www.youtube.com/watch?v=8rABwKRsec4), specs are becoming the primary unit of work in agentic development. md-redline gives that workflow review tooling closer to code review.
 
 ## Quick start
 
@@ -42,7 +42,7 @@ That gives you the viewer and commenting. The agent integration (reviews in both
 
 ## Updating
 
-mdr checks npm once a day (from its local server, never blocking anything)
+md-redline checks npm once a day (from its local server, never blocking anything)
 and shows a small notice in the viewer and the terminal when a new version
 is out. Upgrading is one command:
 
@@ -79,7 +79,7 @@ codex mcp add md-redline -- mdr mcp
 gemini mcp add --scope user md-redline mdr mcp
 ```
 
-The `--scope user` flag is important. Gemini defaults to per-project scope, which only registers mdr for the current directory.
+The `--scope user` flag is important. Gemini defaults to per-project scope, which only registers md-redline for the current directory.
 
 ### Other MCP clients
 
@@ -117,7 +117,7 @@ The common flow right after an agent drafts a document. Tell the agent:
 
 > "Let me review docs/specs/feature-x.md in mdr before you continue."
 
-The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlight text and leave comments, then click **Send N comments**. The agent receives your feedback as a structured prompt and starts addressing your comments. You can keep sending follow-up batches while it works; **Send N & finish** sends the last batch and closes the loop. The review is opt-in per request. The agent only pauses when you ask for it. If the agent edits the document before asking you to review it, it calls `mdr_baseline` first, so the diff shows its changes on the first round.
+The agent calls `mdr_request_review` and pauses. md-redline opens the file, you highlight text and leave comments, then click **Send N comments**. The agent receives your feedback as a structured prompt and starts addressing your comments. You can keep sending follow-up batches while it works; **Send N & finish** sends the last batch and closes the loop. The review is opt-in per request. The agent only pauses when you ask for it. If the agent edits the document before asking you to review it, it calls `mdr_baseline` first, so the diff shows its changes on the first round.
 
 **Automatic before copies.** A capable agent calls `mdr_baseline` on its own, but a smaller or hurried one skips it, and then the diff button is greyed out on the round you most want it. A hook makes it automatic. Add this to `~/.claude/settings.json`:
 
@@ -134,7 +134,7 @@ The agent calls `mdr_request_review` and pauses. mdr opens the file, you highlig
 }
 ```
 
-It acts only on markdown files. It keeps the first copy it takes of a file rather than replacing it on every edit, so the diff covers the whole editing session. It starts mdr if nothing is running. Add `--no-start` to the command if you would rather it skip the capture than start one, for when you do not want a markdown edit anywhere on your machine to boot mdr. Either way it never blocks an edit: every failure gets out of the way quietly.
+It acts only on markdown files. It keeps the first copy it takes of a file rather than replacing it on every edit, so the diff covers the whole editing session. It starts md-redline if nothing is running. Add `--no-start` to the command if you would rather it skip the capture than start one, for when you do not want a markdown edit anywhere on your machine to boot md-redline. Either way it never blocks an edit: every failure gets out of the way quietly.
 
 ### 2. The agent reviews your doc
 

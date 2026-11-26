@@ -1,10 +1,10 @@
-# mdr desktop app
+# md-redline desktop app
 
 An optional macOS app around the same local `mdr` server. Instead of every
 `mdr foo.md` opening another browser tab you can lose among dozens, docs open
 in one app window that comes forward on demand.
 
-The npm package stays the way to install mdr. The app needs it: it does not
+The npm package stays the way to install md-redline. The app needs it: it does not
 bundle a server, and it is not part of the npm package. For now you build it
 from source.
 
@@ -42,20 +42,22 @@ npm run app:build          # optimized release .app bundle
 npx tauri build --debug    # faster debug .app bundle
 ```
 
-The debug bundle lands at `src-tauri/target/debug/bundle/macos/mdr.app`, the
-release bundle at `src-tauri/target/release/bundle/macos/mdr.app` (under
+The debug bundle lands at `src-tauri/target/debug/bundle/macos/md-redline.app`, the
+release bundle at `src-tauri/target/release/bundle/macos/md-redline.app` (under
 `$CARGO_TARGET_DIR` instead when that is set). To install, copy the bundle to
-`/Applications`, which also makes it visible to Spotlight and Raycast.
+`/Applications`, which also makes it visible to Spotlight and Raycast. Earlier
+builds were named `mdr.app`: quit and delete that copy first, since both
+share the `com.dejuknow.mdr` identifier and macOS may open either one.
 
 Launch the built app once so macOS registers its `mdr://` scheme and `.md`
 file association:
 
 ```bash
-open src-tauri/target/debug/bundle/macos/mdr.app
+open src-tauri/target/debug/bundle/macos/md-redline.app
 ```
 
 To make it the default app for Markdown files, use Finder: Get Info on any
-`.md` file, choose mdr under "Open with", then "Change All...".
+`.md` file, choose md-redline under "Open with", then "Change All...".
 
 Rust tests: `cargo test` in this directory.
 
@@ -84,7 +86,7 @@ The CLI keeps the browser when the app might not find the same server: with
 `MD_REDLINE_BROWSER` or `MDR_BROWSER` set, with `MD_REDLINE_HOME` pointing at
 another home, or with a port named by `MD_REDLINE_PORT` or `PORT`.
 
-Finder "Open With mdr" (and double-clicking `.md` files once mdr is the
+Finder "Open With md-redline" (and double-clicking `.md` files once md-redline is the
 default) opens files the same way, without going through the CLI.
 
 ## CLI options
@@ -103,7 +105,7 @@ rather than taken for a filename.
 
 - **External links** in rendered markdown open in the system browser, not the
   app window, and so do links to other local services (a dev server on
-  `localhost:3000`, say). Only mdr's own pages and internal schemes
+  `localhost:3000`, say). Only md-redline's own pages and internal schemes
   (`tauri://`, `about:blank`) load in the app.
 - **Tabs**: Cmd-T opens a file in a new tab, Cmd-W closes the active tab and
   Shift-Cmd-T reopens the last closed one (File menu). Cmd-W with no tab open
@@ -139,7 +141,7 @@ rather than taken for a filename.
   (`mdr --restrict`) holds; it trusts the folders you have allowed, which by
   default include your home. This needs an `mdr` at least as new as the app:
   an older one ignores the app's request and trusts the home folder.
-- **Version**: the app has its own version number (About mdr), separate from
+- **Version**: the app has its own version number (About md-redline), separate from
   the npm package's.
 
 ## Dev-mode gotcha
@@ -162,7 +164,7 @@ auto-start.
 | `Info.plist` | Registers the `mdr://` URL scheme. |
 | `loading/index.html` | The spinner shown at launch while the server is found. |
 | `capabilities/default.json` | Baseline permissions for the loading window. |
-| `capabilities/window-drag.json` | Lets the loopback mdr page drag and zoom its own window (the overlay title bar), nothing else. |
+| `capabilities/window-drag.json` | Lets the loopback md-redline page drag and zoom its own window (the overlay title bar), nothing else. |
 | `icons/` | App icon set (committed). |
 
 For the agent-facing version of this documentation, see the "Desktop app"

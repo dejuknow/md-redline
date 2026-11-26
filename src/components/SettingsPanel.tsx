@@ -803,7 +803,7 @@ export function SettingsPanel({
                       <div>
                         <h3 className="text-sm font-semibold text-content">Agent notifications</h3>
                         <p className="text-xs text-content-muted mt-0.5">
-                          When mdr is in the background, notify me when an agent replies to a
+                          When md-redline is in the background, notify me when an agent replies to a
                           thread, asks a question or finishes a review.
                         </p>
                       </div>
@@ -824,8 +824,8 @@ export function SettingsPanel({
                     </label>
                     {settings.agentNotifications && notificationPermission === 'denied' && (
                       <p className="text-xs text-content-secondary mt-1.5" data-notification-denied>
-                        macOS has notifications for mdr turned off. Turn them on in System Settings,
-                        under Notifications.
+                        macOS has notifications for md-redline turned off. Turn them on in System
+                        Settings, under Notifications.
                       </p>
                     )}
                     {settings.agentNotifications && notificationPermission === 'unknown' && (
@@ -833,8 +833,8 @@ export function SettingsPanel({
                         className="text-xs text-content-secondary mt-1.5"
                         data-notification-unanswered
                       >
-                        macOS is waiting for you to allow notifications from mdr. Allow them in its
-                        prompt, or in System Settings, under Notifications.
+                        macOS is waiting for you to allow notifications from md-redline. Allow them
+                        in its prompt, or in System Settings, under Notifications.
                       </p>
                     )}
                   </div>
@@ -1314,9 +1314,9 @@ export function SettingsPanel({
             {activeSection === 'about' && (
               <div className="space-y-6" data-settings-about>
                 <div>
-                  <h3 className="text-sm font-semibold text-content">mdr</h3>
+                  <h3 className="text-sm font-semibold text-content">md-redline</h3>
                   <p className="text-xs text-content-muted mt-0.5">
-                    md-redline: review markdown with comments your AI agent can read.
+                    Review markdown with comments your AI agent can read.
                   </p>
                 </div>
 

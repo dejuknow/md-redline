@@ -75,14 +75,16 @@ function printHelp() {
   console.log('       mdr --stop');
   console.log('       mdr --restrict');
   console.log('');
-  console.log('Opens a markdown file or folder in mdr for inline commenting.');
+  console.log('Opens a markdown file or folder in md-redline for inline commenting.');
   console.log('Starts the app automatically if it is not already running.');
   console.log('Supported platforms: macOS, Linux, and Windows.');
   console.log('');
   console.log('Options:');
-  console.log('  --stop          Stop the running mdr server');
+  console.log('  --stop          Stop the running md-redline server');
   console.log('  --restrict      Disable the default home-directory trust');
-  console.log('  --browser       Open in the browser even if the mdr desktop app is installed');
+  console.log(
+    '  --browser       Open in the browser even if the md-redline desktop app is installed',
+  );
   console.log(
     '  --no-open       Start the server without opening anything (used by the desktop app)',
   );

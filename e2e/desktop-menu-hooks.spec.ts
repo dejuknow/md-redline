@@ -218,11 +218,11 @@ test.describe('About and Show in Finder', () => {
     for (const name of links) await expect(about.getByRole('link', { name })).toBeVisible();
   });
 
-  test("the palette's About mdr opens the About section", async ({ page }) => {
+  test("the palette's About md-redline opens the About section", async ({ page }) => {
     await openOne(page);
     await openPalette(page);
     await page.getByPlaceholder('Type a command...').fill('about');
-    await paletteItem(page, 'About mdr').click();
+    await paletteItem(page, 'About md-redline').click();
     await expect(page.locator('[data-settings-about]')).toBeVisible();
   });
 
@@ -230,7 +230,7 @@ test.describe('About and Show in Finder', () => {
     await page.goto('/');
     await openPalette(page);
     await page.getByPlaceholder('Type a command...').fill('show in');
-    await expect(paletteItem(page, 'About mdr')).toHaveCount(0);
+    await expect(paletteItem(page, 'About md-redline')).toHaveCount(0);
     await expect(page.locator('[data-overlay] button', { hasText: REVEAL })).toHaveCount(0);
     await page.keyboard.press('Escape');
 
