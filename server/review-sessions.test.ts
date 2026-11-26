@@ -1975,9 +1975,23 @@ describe('restoring against the current trusted folders (#255)', () => {
     expect(session?.filePaths).toEqual([TRUSTED]);
     expect(session?.fileAddedAt ?? {}).toEqual({});
     expect(after.getQueuedBatch(id)?.commentCountsByPath).toEqual(new Map([[TRUSTED, 1]]));
-    // Dedupe must not match the session on its old file set either.
-    expect(after.findOpenSession([TRUSTED, UNTRUSTED], 'user')).toBeUndefined();
-    expect(after.findOpenSession([TRUSTED], 'user')?.id).toBe(id);
+    after.dispose();
+  });
+
+  it('a session that grew is not joined for a smaller request after a file is dropped', () => {
+    let id = '';
+    const state = saved((store) => {
+      id = store.createSession({ filePaths: [UNTRUSTED, TRUSTED], enableResolve: false }).id;
+      store.addFiles(id, ['/trusted/c.md']);
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getSession(id)?.filePaths).toEqual([TRUSTED, '/trusted/c.md']);
+    // It started on two files and grew to three; asking for one of them
+    // alone must open a new session, as it would have before the restart.
+    expect(after.findOpenSession([TRUSTED], 'user')).toBeUndefined();
+    expect(after.findOpenSession([TRUSTED, '/trusted/c.md'], 'user')?.id).toBe(id);
     after.dispose();
   });
 
@@ -2025,7 +2039,14 @@ describe('restoring against the current trusted folders (#255)', () => {
     });
 
     const after = new ReviewSessionStore();
-    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    const { untrustedAsks } = after.restoreState(state, {
+      now: new Date(),
+      savedAt: Date.now(),
+      isPathAllowed,
+    });
+    // Returned so the server can clear the flag on q1, in the trusted file.
+    expect(untrustedAsks.map((a) => a.askId)).toEqual([askId]);
+    expect(untrustedAsks[0].questions.map((q) => q.commentId)).toEqual(['q1', 'q2']);
     expect(after.getPendingAsks(id)).toEqual([]);
     expect(after.getSettledAsk(id, askId)).toEqual({
       status: 'no_reply',

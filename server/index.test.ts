@@ -5,6 +5,7 @@ import {
   readdir,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   utimes,
@@ -5690,12 +5691,39 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
     expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
     const wait = await after.app.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
     expect(await wait.json()).toEqual({ status: 'no_reply', reason: 'file_untrusted' });
+    // The ask is closed, so its question in the trusted file stops reading as
+    // pending; the one in the untrusted file is left as it was.
+    const insideMarker = parseComments(await readFile(inside, 'utf8')).comments[0];
+    expect(insideMarker.expectsReply).toBeUndefined();
+    expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
 
     expect((await post(after.app, `/api/review-sessions/${sessionId}/agent-done`)).status).toBe(
       200,
     );
     await settle();
     expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
+    after.reviewSessions.dispose();
+  });
+
+  it('keeps a file it cannot resolve right now, since that is not a trust change', async () => {
+    const { after, state, savedAt, sessionId, askId, inside } = await shrunkRestart({
+      origin: 'agent',
+      answerOutside: false,
+    });
+    // The trusted file's folder is gone at boot (renamed, or a volume not
+    // mounted yet). The server still trusts where it was.
+    const trustedDir = join(inside, '..');
+    await rename(trustedDir, `${trustedDir}-away`);
+    await after.restoreReviewSessions(state, { now: new Date(), savedAt });
+    await rename(`${trustedDir}-away`, trustedDir);
+
+    const got = await after.app.request(`/api/review-sessions/${sessionId}`);
+    expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
+    // The ask is still settled, for its question in the untrusted file.
+    expect(after.reviewSessions.getSettledAsk(sessionId, askId)).toEqual({
+      status: 'no_reply',
+      reason: 'file_untrusted',
+    });
     after.reviewSessions.dispose();
   });
 

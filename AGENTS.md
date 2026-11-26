@@ -313,7 +313,8 @@ restart is not revived with a fresh timeout. The server listens before it
 knows its port, so every request is held until the restore finishes
 (`holdRequestsUntilOpen` in `server/session-persistence.ts`), or an early
 heartbeat or reconnecting poll would 404 on a session about to exist. Nothing
-edits a markdown file at load. `ReviewSessionStore.exportState`/`restoreState`
+edits a markdown file at load, except clearing the flags of an ask the
+trusted-folder check below closes. `ReviewSessionStore.exportState`/`restoreState`
 hold the serialization; `setOnChange` fires on every saved-state change
 except heartbeats and wait-park bookkeeping. `MD_REDLINE_PERSIST_SESSIONS=0`
 turns it off (the Playwright web server sets it, so one run never restores
@@ -321,13 +322,17 @@ into the next). The restore is checked against the folders the server trusts
 now, not the ones it trusted when it saved (#255): they can shrink across a
 restart (a server started from another folder, or a desktop-app server in
 restricted mode). `restoreReviewSessions` in `server/index.ts` runs every saved
-path through the same check as `/api/file`, and `restoreState` takes the
-refused ones out of each session (its files, original files, `fileAddedAt` and
-queued counts). An open session left with no file is not restored, the same as
-one past the window; an ended one is kept, emptied, for its late poll. A pending
-ask with a question in a refused file is settled as `no_reply`/`file_untrusted`,
-so the agent gets an answer instead of a 404; its markers in that file are left
-as they are, since the server may not write there. Separately, every read or
+path through the same check as `/api/file`, and `restoreState` takes the ones
+outside the roots out of each session (its files, `fileAddedAt` and queued
+counts; `originalFilePaths` stays whole, since it is only matched for dedupe and
+trimming it would let a smaller request join a session that started larger). A
+path that merely cannot be resolved at boot (its folder missing, a volume not
+mounted yet) is kept. An open session left with no file is not restored, the
+same as one past the window; an ended one is kept, emptied, for its late poll. A
+pending ask with a question outside the roots is settled as
+`no_reply`/`file_untrusted`, so the agent gets an answer instead of a 404, and
+its questions' `expectsReply` flags are cleared in the files still trusted, as
+when any other ask closes; the files outside the roots are left as they are. Separately, every read or
 write a session drives rather than a request names (inline-reply delivery,
 clearing `expectsReply`, the abort and Done marker cleanup, the ask reply and
 release cleanup) checks the path against the current roots first

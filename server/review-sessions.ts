@@ -1467,12 +1467,16 @@ export class ReviewSessionStore {
    * its result (an ended session never touches its files again). A pending
    * ask with a question in such a file is settled as no_reply/file_untrusted
    * rather than dropped, so the agent waiting on it gets an answer instead of
-   * a 404. Omitted, every path is kept.
+   * a 404; those asks are returned so the caller can clear their flags in the
+   * files it still trusts. originalFilePaths is left whole: it is never read
+   * or written, only matched by findOpenSession, and trimming it would let a
+   * smaller request join a session that started larger. Omitted, every path
+   * is kept.
    */
   restoreState(
     state: PersistedStoreState,
     opts: { now: Date; savedAt: number; isPathAllowed?: (path: string) => boolean },
-  ): void {
+  ): { untrustedAsks: PendingAsk[] } {
     if (this.sessions.size > 0 || this.pendingAsks.size > 0) {
       throw new Error('restoreState must be called on a store that has not created a session yet');
     }
@@ -1523,7 +1527,7 @@ export class ReviewSessionStore {
       const session: InternalSession = {
         id: persisted.id,
         filePaths,
-        originalFilePaths: persisted.originalFilePaths.filter(isPathAllowed),
+        originalFilePaths: [...persisted.originalFilePaths],
         fileAddedAt,
         enableResolve: persisted.enableResolve,
         origin: persisted.origin,
@@ -1582,15 +1586,16 @@ export class ReviewSessionStore {
       this.sessions.set(session.id, session);
     }
 
+    const untrustedAsks: PendingAsk[] = [];
     for (const ask of state.pendingAsks) {
       // Checked before the session: an ask whose session was dropped for the
       // same reason still owes its agent an answer (getSettledAsk is read
       // before the session lookup on /asks/:askId/wait).
       if (ask.questions.some((q) => !isPathAllowed(q.filePath))) {
-        this.settledAsks.set(ask.askId, {
+        untrustedAsks.push({
+          askId: ask.askId,
           sessionId: ask.sessionId,
-          result: { status: 'no_reply', reason: 'file_untrusted' },
-          at: now.getTime(),
+          questions: [...ask.questions],
         });
         continue;
       }
@@ -1625,6 +1630,15 @@ export class ReviewSessionStore {
         at: settled.at,
       });
     }
+    // After the saved results: they are the newest, and the map evicts in
+    // insertion order once it reaches its cap.
+    for (const ask of untrustedAsks) {
+      this.rememberSettledAsk(ask.askId, ask.sessionId, {
+        status: 'no_reply',
+        reason: 'file_untrusted',
+      });
+    }
+    return { untrustedAsks };
   }
 
   private toPublic(s: InternalSession): ReviewSession {

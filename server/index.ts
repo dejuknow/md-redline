@@ -477,15 +477,15 @@ export function createAppFull(options: CreateAppOptions = {}) {
    * the trusted folders can be narrower now: a session restored after a
    * restart can still name a file this server no longer trusts (#255). Every
    * read or write a session drives goes through this first, the same check
-   * /api/file applies. Throws the same 'Access denied' error.
+   * /api/file applies, and does its I/O on the real path that check
+   * returns, as /api/file does. Throws the same 'Access denied' error.
    */
-  async function checkSessionFile(path: string): Promise<void> {
-    await resolveAndValidate(path);
+  async function checkSessionFile(path: string): Promise<string> {
+    return resolveAndValidate(path);
   }
 
   async function readSessionFile(path: string): Promise<string> {
-    await checkSessionFile(path);
-    return fsPromises.readFile(path, 'utf8');
+    return fsPromises.readFile(await checkSessionFile(path), 'utf8');
   }
 
   const lastWrittenContent = new Map<string, string>();
@@ -520,6 +520,12 @@ export function createAppFull(options: CreateAppOptions = {}) {
   // expectsReply flag so the on-disk JSON accurately reflects "asked,
   // closed without reply" rather than "still pending."
   reviewSessions.setOnAsksClosedOnDone((_sessionId, asks) => {
+    void clearAskFlagsOnDisk(asks);
+  });
+
+  /** Clear expectsReply on the asks' question markers, keeping the markers.
+   * Best-effort per file: a failure, a refused path included, is logged. */
+  async function clearAskFlagsOnDisk(asks: PendingAsk[]): Promise<void> {
     const byFile = new Map<string, string[]>();
     for (const ask of asks) {
       for (const q of ask.questions) {
@@ -528,13 +534,13 @@ export function createAppFull(options: CreateAppOptions = {}) {
         byFile.set(q.filePath, ids);
       }
     }
-    void Promise.all(
+    await Promise.all(
       Array.from(byFile, async ([filePath, commentIds]) => {
         try {
-          await checkSessionFile(filePath);
+          const real = await checkSessionFile(filePath);
           const targetIds = new Set(commentIds);
-          const result = await withFileLock(filePath, async () => {
-            const original = await fsPromises.readFile(filePath, 'utf8');
+          const result = await withFileLock(real, async () => {
+            const original = await fsPromises.readFile(real, 'utf8');
             const updated = transformCommentMarkers(original, (c) => {
               if (!c?.id || !targetIds.has(c.id)) return { type: 'keep' };
               if (!c.expectsReply) return { type: 'keep' };
@@ -542,7 +548,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
               delete next.expectsReply;
               return { type: 'replace', comment: next };
             });
-            if (updated !== original) await atomicWriteFile(filePath, updated);
+            if (updated !== original) await atomicWriteFile(real, updated);
             return { original, updated };
           });
           if (result.updated !== result.original) notifyFileChanged(filePath);
@@ -550,10 +556,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
           console.warn(`[review-session] clear expectsReply failed for ${filePath}:`, err);
         }
       }),
-    ).catch(() => {
-      /* per-file errors already logged */
-    });
-  });
+    );
+  }
 
   async function cleanupAgentMarkers(asks: PendingAsk[]): Promise<void> {
     const byFile = new Map<string, string[]>();
@@ -566,17 +570,17 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     for (const [filePath, commentIds] of byFile) {
       try {
-        await checkSessionFile(filePath);
+        const real = await checkSessionFile(filePath);
         // Route through the per-file writeLock + atomic temp+rename so the
         // cleanup serializes with concurrent user edits and the agent-comments
         // route. Without this, a Done-while-ask cleanup can clobber a user
         // edit landed via PUT /api/file under writeLocks.
-        const result = await withFileLock(filePath, async () => {
-          const original = await fsPromises.readFile(filePath, 'utf8');
+        const result = await withFileLock(real, async () => {
+          const original = await fsPromises.readFile(real, 'utf8');
           let updated = original;
           for (const id of commentIds) updated = removeComment(updated, id);
           if (updated !== original) {
-            await atomicWriteFile(filePath, updated);
+            await atomicWriteFile(real, updated);
           }
           return { original, updated };
         });
@@ -713,9 +717,9 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // corruption on a malformed marker), wrap with the path so the route
     // sees a typed error rather than a generic 500 with no context.
     transformFile: async (resolved, transform) => {
-      await checkSessionFile(resolved);
-      return withFileLock(resolved, async () => {
-        const original = await fsPromises.readFile(resolved, 'utf8');
+      const real = await checkSessionFile(resolved);
+      return withFileLock(real, async () => {
+        const original = await fsPromises.readFile(real, 'utf8');
         let updated: string | null;
         try {
           updated = transform(original);
@@ -724,7 +728,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
           throw new Error(`transformFile callback failed for ${resolved}: ${msg}`);
         }
         if (updated !== null && updated !== original) {
-          await atomicWriteFile(resolved, updated);
+          await atomicWriteFile(real, updated);
         }
         return { original, updated };
       });
@@ -732,8 +736,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // Used by the reply-cleanup path which is best-effort and racing-tolerant.
     readFileText: readSessionFile,
     writeFileText: async (p, content) => {
-      await checkSessionFile(p);
-      await withFileLock(p, () => atomicWriteFile(p, content));
+      const real = await checkSessionFile(p);
+      await withFileLock(real, () => atomicWriteFile(real, content));
     },
     notifyFileChanged,
   });
@@ -1593,24 +1597,40 @@ export function createAppFull(options: CreateAppOptions = {}) {
     for (const ask of state.pendingAsks) {
       for (const q of ask.questions) paths.add(q.filePath);
     }
-    const allowed = new Set<string>();
+    // Only a path outside the roots is refused. One that cannot be resolved
+    // right now (its folder missing, a volume not mounted yet) is kept: it
+    // may come back, and checkSessionFile still guards every read and write.
+    const refused = new Set<string>();
     await Promise.all(
       [...paths].map(async (p) => {
         try {
           await checkSessionFile(p);
-          allowed.add(p);
-        } catch {
-          // Outside the trusted folders now, or unresolvable: not restored.
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('outside allowed directories')) {
+            refused.add(p);
+          }
         }
       }),
     );
-    if (allowed.size < paths.size) {
+    if (refused.size > 0) {
       console.warn(
-        `[sessions] not restoring ${paths.size - allowed.size} file(s) from saved review ` +
-          'sessions: they are outside the folders this server trusts',
+        `[sessions] not restoring ${refused.size} file(s) from saved review sessions: ` +
+          'they are outside the folders this server trusts',
       );
     }
-    reviewSessions.restoreState(state, { ...opts, isPathAllowed: (p) => allowed.has(p) });
+    const { untrustedAsks } = reviewSessions.restoreState(state, {
+      ...opts,
+      isPathAllowed: (p) => !refused.has(p),
+    });
+    // Those asks are closed now, so their questions in files the server still
+    // trusts must stop reading as pending, as when any other ask closes. The
+    // refused files are left alone.
+    await clearAskFlagsOnDisk(
+      untrustedAsks.map((ask) => ({
+        ...ask,
+        questions: ask.questions.filter((q) => !refused.has(q.filePath)),
+      })),
+    );
   }
 
   return { app, reviewSessions, baselines, restoreReviewSessions };
