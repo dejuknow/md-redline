@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tooltip } from './Tooltip';
 import { useElementNarrowerThan } from '../hooks/useElementNarrowerThan';
 import { useDismiss } from '../hooks/useDismiss';
-import { getPrimaryModifierLabel } from '../lib/platform';
+import { getPrimaryModifierLabel, isApplePlatform } from '../lib/platform';
 import type { ViewMode } from '../lib/view-mode';
 
 export interface DocStripProps {
@@ -31,6 +31,9 @@ export interface DocStripProps {
    * open one (NoFileOpen).
    */
   hasDocument?: boolean;
+  /** While focus mode is on, the strip's last control is the way out. */
+  focusMode?: boolean;
+  onExitFocus?: () => void;
 }
 
 /** Under this strip width, the view switch folds into the menu with diff and copy. */
@@ -151,6 +154,8 @@ export function DocStrip({
   comments,
   handOff,
   hasDocument = true,
+  focusMode = false,
+  onExitFocus,
 }: DocStripProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   // Not measured yet counts as wide: render the wide layout until we know better.
@@ -407,6 +412,28 @@ export function DocStrip({
           {comments}
           {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
         </div>
+      )}
+
+      {/* Outside the document's controls, so it is there with no file open
+          too: focus mode hides both panels, and this is the only button that
+          says how to get them back. */}
+      {focusMode && onExitFocus && (
+        <button
+          type="button"
+          data-focus-chip
+          onClick={onExitFocus}
+          aria-label="Exit focus"
+          title="Exit focus mode"
+          className="self-center ml-1 h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-md border border-border text-[12px] font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          Exit focus
+          <kbd
+            aria-hidden="true"
+            className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-muted"
+          >
+            {isApplePlatform() ? '⌘.' : 'Ctrl+.'}
+          </kbd>
+        </button>
       )}
     </div>
   );

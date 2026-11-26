@@ -36,7 +36,7 @@ import { CommentPopover } from './components/CommentPopover';
 import { computeAnsweredCommentIds, effectiveSentCommentIds } from './lib/answered-comments';
 import { CommentForm } from './components/CommentForm';
 import { ReviewBand } from './components/ReviewBand';
-import { StatusBar } from './components/StatusBar';
+import { PageNotice } from './components/PageNotice';
 import { CommentsButton } from './components/CommentsButton';
 import { TabBar } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
@@ -98,7 +98,7 @@ import {
   rangeFromPaintedSelection,
   resolveSelectionMarkdown,
 } from './lib/copy-as-markdown';
-import { getParentDir, tildeShortenPath } from './lib/path-utils';
+import { getParentDir } from './lib/path-utils';
 import { useReviewSession, findActiveSessionForFile } from './hooks/useReviewSession';
 import { useOpenAddedReviewFiles } from './hooks/useOpenAddedReviewFiles';
 import { ReviewBanner, type ShownReview } from './components/ReviewBanner';
@@ -3495,7 +3495,7 @@ export default function App() {
 
   return (
     <div data-app-root className="h-screen flex flex-col bg-frame">
-      <div className="flex-1 min-h-0 flex p-2 pb-0">
+      <div className="flex-1 min-h-0 flex p-2">
         <ReadingPositionCapture
           path={activeFilePath}
           view={readingView}
@@ -3764,6 +3764,8 @@ export default function App() {
               >
                 <DocStrip
                   hasDocument={!!activeFilePath}
+                  focusMode={focusMode}
+                  onExitFocus={exitFocusMode}
                   tabs={
                     <TabBar
                       tabs={tabs}
@@ -3846,6 +3848,15 @@ export default function App() {
                       review row's menus can hang past the card's edges. The
                       radius follows the card's (squared when a tab is flush). */}
                   <div className="flex-1 min-h-0 flex flex-col overflow-clip rounded-[inherit]">
+                    <PageNotice
+                      error={error}
+                      errorKind={errorKind}
+                      accessRequestShown={showAccessRequest}
+                      onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
+                      // A first load only: a reload keeps the document on
+                      // screen, and a row appearing above it would shove it down.
+                      isLoading={firstLoadInProgress}
+                    />
                     <DiffBar
                       diffEnabled={diffEnabled}
                       referenceLabel={
@@ -3883,6 +3894,8 @@ export default function App() {
                             explorerShown={explorerVisible}
                             onOpenPicker={openFilePicker}
                             onOpenRecent={handleOpenFile}
+                            onOpenPalette={openCommandPalette}
+                            onOpenShortcuts={() => setActiveModal('shortcuts')}
                           />
                         )}
                         {showAccessRequest && (
@@ -4318,6 +4331,7 @@ export default function App() {
             onClose={() => setActiveModal(null)}
             author={author}
             onAuthorChange={setAuthor}
+            onOpenShortcuts={() => setActiveModal('shortcuts')}
           />
           <KeyboardShortcutsPanel
             open={activeModal === 'shortcuts'}
@@ -4350,21 +4364,6 @@ export default function App() {
           />
         </div>
       </div>
-      <StatusBar
-        filePath={
-          activeFilePath ? tildeShortenPath(activeFilePath, homeDir) || activeFilePath : null
-        }
-        error={error}
-        errorKind={errorKind}
-        accessRequestShown={showAccessRequest}
-        onTrustFolder={() => handleTrustFolder(accessDeniedDir)}
-        isLoading={isLoading}
-        focusMode={focusMode}
-        onExitFocus={exitFocusMode}
-        onOpenPalette={openCommandPalette}
-        onOpenShortcuts={() => setActiveModal('shortcuts')}
-        hidden={!startupLaidOut}
-      />
     </div>
   );
 }

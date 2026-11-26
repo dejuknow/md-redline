@@ -159,7 +159,6 @@ test.describe('Document panel strip', () => {
 });
 
 const band = (page: Page) => page.locator('[data-review-band]');
-const statusBar = (page: Page) => page.locator('[data-status-bar]');
 
 async function openFixture(page: Page, path = FIXTURE) {
   await page.goto(`/?file=${encodeURIComponent(path)}`);
@@ -190,48 +189,36 @@ const COMMENTED_DOC = TEST_DOC_BASELINE.replace(
   '<!-- @comment{"id":"hdr-c1","anchor":"valid credentials","text":"A note","author":"Seth","timestamp":"2026-09-28T00:00:00.000Z"} -->valid credentials',
 );
 
-test.describe('Review band and status bar', () => {
-  test('the Commands hint opens the command palette', async ({ page }) => {
-    await openFixture(page);
-    await statusBar(page).getByRole('button', { name: 'Command palette' }).click();
+test.describe('Review band and window chrome', () => {
+  test('the empty page teaches the command palette and the shortcuts, and both open', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const empty = page.getByTestId('no-file-open');
+    await expect(empty).toBeVisible({ timeout: 10_000 });
+    await empty.getByRole('button', { name: /Command palette/ }).click();
     const input = page.getByPlaceholder('Type a command...');
     await expect(input).toBeVisible();
     await expect(input).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(input).toHaveCount(0);
+
+    await empty.getByRole('button', { name: /Keyboard shortcuts/ }).click();
+    await expect(page.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeVisible();
   });
 
-  test('select text, click the Commands hint: "Copy selection as markdown" is offered and copies that selection', async ({
-    page,
-    context,
-  }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  test('the sidebar footer holds only Settings and the author', async ({ page }) => {
     await openFixture(page);
-    await page.evaluate(() => navigator.clipboard.writeText(''));
-    // A mouse selection, committed and painted, the way a drag leaves one.
-    await page.evaluate(() => {
-      const el = [...document.querySelectorAll('.prose p')].find((p) =>
-        p.textContent?.includes('authentication system'),
-      );
-      if (!el) throw new Error('paragraph not found');
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const selection = window.getSelection()!;
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    });
-    await expect(page.locator('mark.selection-highlight').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-palette-hint]')).toHaveCount(0);
+    await page.keyboard.press(withMod('b'));
+    await expect(page.locator('[data-sidebar-rail]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Command palette' })).toHaveCount(0);
+  });
 
-    await statusBar(page).getByRole('button', { name: 'Command palette' }).click();
-    await page.getByPlaceholder('Type a command...').fill('copy selection');
-    await page
-      .locator('button[data-selected]', { hasText: 'Copy selection as markdown' })
-      .click({ timeout: 5000 });
-
-    await expect
-      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toBe(
-        'The authentication system supports email and password login. Users must provide valid credentials to access the application. The system validates all inputs before processing.',
-      );
+  test('the window has no status bar', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('footer')).toHaveCount(0);
+    await expect(page.locator('[data-status-bar]')).toHaveCount(0);
   });
 
   test('hand off is hidden during a review and back after it ends', async ({
@@ -259,7 +246,7 @@ test.describe('Review band and status bar', () => {
     }
   });
 
-  test('a long file path truncates in the status bar and its hints stay in the window', async ({
+  test("a long file name truncates in its tab, which carries the full path, and the strip's controls stay in the window", async ({
     page,
   }) => {
     const longName = `${'long-file-name-'.repeat(12)}.md`;
@@ -267,20 +254,17 @@ test.describe('Review band and status bar', () => {
     copyFileSync(FIXTURE, longPath);
     await openFixture(page, longPath);
 
-    const path = statusBar(page).locator('[data-status-path]');
-    await expect(path).toBeVisible();
-    await expect(path).toHaveAttribute('title', /long-file-name-/);
-    const chip = statusBar(page).getByRole('button', { name: 'Command palette' });
-    await expect(chip).toBeVisible();
-    await expect(strip(page).getByTestId('handoff-button')).toBeVisible();
+    const tab = strip(page).locator(`button[title="${longPath}"]`);
+    await expect(tab).toBeVisible();
+    const name = tab.getByText(longName, { exact: true });
+    // The name gave way rather than the controls: it is clipped, not wrapped.
+    expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
 
+    const handoff = strip(page).getByTestId('handoff-button');
+    await expect(handoff).toBeVisible();
     const viewport = page.viewportSize()!;
-    const chipBox = (await chip.boundingBox())!;
-    expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(viewport.width);
-    const pathBox = (await path.boundingBox())!;
-    expect(pathBox.x + pathBox.width).toBeLessThanOrEqual(chipBox.x);
-    // The path gave way rather than the hints: it is clipped, not wrapped.
-    expect(await path.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    const box = (await handoff.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
   });
 
   test('with no review the document panel lines up with the sidebar; a review docks its band along the bottom of the page', async ({
@@ -382,7 +366,7 @@ test.describe('Review band and status bar', () => {
       });
 
       // A second file that fails to load with a long message, which the
-      // status bar shows as a notice while that tab is active.
+      // page shows as a notice while that tab is active.
       const broken = OVERFLOW_FIXTURES[1];
       const longError = `Failed to load file: ${'the disk refused the read again '.repeat(8)}`;
       await page.route(
@@ -397,21 +381,17 @@ test.describe('Review band and status bar', () => {
       await page.locator('button[title="Open file"]').click();
       await page.getByPlaceholder('File path or name...').fill(broken);
       await page.getByPlaceholder('File path or name...').press('Enter');
-      await expect(statusBar(page).locator('[data-status-notices]')).toBeVisible({
+      await expect(page.locator('[data-page-notices]')).toBeVisible({
         timeout: 5_000,
       });
       await expect(banner.getByRole('button', { name: /awaiting your reply/ })).toBeVisible();
 
       await page.keyboard.press(withMod('.'));
-      const exit = statusBar(page).locator('[data-focus-chip]');
+      const exit = strip(page).locator('[data-focus-chip]');
       await expect(exit).toBeVisible();
 
       const viewport = page.viewportSize()!;
-      for (const el of [
-        statusBar(page).getByRole('button', { name: 'Command palette' }),
-        exit,
-        banner.locator('[data-row-actions]').first(),
-      ]) {
+      for (const el of [exit, banner.locator('[data-row-actions]').first()]) {
         const box = (await el.boundingBox())!;
         expect(box.x).toBeGreaterThanOrEqual(0);
         expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
@@ -422,7 +402,9 @@ test.describe('Review band and status bar', () => {
     }
   });
 
-  test('exit focus lives in the status bar and restores a mixed pane state', async ({ page }) => {
+  test('exit focus lives at the end of the tab strip and restores a mixed pane state', async ({
+    page,
+  }) => {
     // Explorer open, comments rail hidden: not the default pair, so a restore
     // that falls back to defaults would show the rail.
     await page.evaluate(() =>
@@ -442,7 +424,7 @@ test.describe('Review band and status bar', () => {
     await page.keyboard.press(withMod('.'));
     await expect(explorer).toHaveCount(0);
     await expect(page.locator('[data-sidebar-rail]')).toHaveCount(0);
-    const exit = statusBar(page).locator('[data-focus-chip]');
+    const exit = strip(page).locator('[data-focus-chip]');
     await expect(exit).toBeVisible();
     await expect(page.locator('[data-focus-chip]')).toHaveCount(1);
 
@@ -501,7 +483,7 @@ test.describe('Review band and status bar', () => {
 
     // Focus mode: no sidebar at all.
     await page.keyboard.press(withMod('.'));
-    await expect(statusBar(page).locator('[data-focus-chip]')).toBeVisible();
+    await expect(strip(page).locator('[data-focus-chip]')).toBeVisible();
     expect(await firstChildOffset()).toBeGreaterThanOrEqual(72);
   });
 });
@@ -662,12 +644,31 @@ test.describe('Hand off beside a review', () => {
   });
 });
 
-test.describe('Status bar, empty rail and desktop shell hooks', () => {
-  test('the status bar shows the file path, Commands and Shortcuts', async ({ page }) => {
+test.describe('Settings, empty rail and desktop shell hooks', () => {
+  test('Settings links to the keyboard shortcuts', async ({ page }) => {
     await openFixture(page);
-    await expect(statusBar(page).locator('[data-status-path]')).toContainText('test-doc.md');
-    await statusBar(page).getByRole('button', { name: 'Keyboard shortcuts' }).click();
+    await page
+      .locator('[data-sidebar-panel]')
+      .getByTitle(/^Settings/)
+      .click();
+    await page.getByTestId('settings-open-shortcuts').click();
     await expect(page.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+  });
+
+  test('same-named tabs show the folder that tells them apart', async ({ page }) => {
+    const dir = resolve(fixtureDir, 'twin-dir');
+    mkdirSync(dir, { recursive: true });
+    const twin = resolve(dir, 'test-doc.md');
+    copyFileSync(FIXTURE, twin);
+    await openFixture(page);
+    await page.locator('button[title="Open file"]').click();
+    await page.getByPlaceholder('File path or name...').fill(twin);
+    await page.getByPlaceholder('File path or name...').press('Enter');
+    await expect(strip(page).locator('[data-tab-folder]')).toHaveCount(2);
+    await expect(strip(page).locator(`button[title="${twin}"] [data-tab-folder]`)).toHaveText(
+      'twin-dir',
+    );
   });
 
   test('with no comments in Anchored, the comments toggle brings up a "No comments yet" note', async ({

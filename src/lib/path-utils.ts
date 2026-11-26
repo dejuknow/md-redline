@@ -85,3 +85,47 @@ export function getParentDir(path: string): string {
   const parent = trimmed.slice(0, lastSep);
   return /^[A-Za-z]:$/.test(parent) ? parent + trimmed[lastSep] : parent;
 }
+
+/**
+ * For open tabs whose file names collide, the shortest run of parent folders
+ * that tells each one apart (VS Code style): `docs` for `~/a/docs/README.md`
+ * beside `~/a/README.md`'s `a`, or `x/docs` when two paths share the nearest
+ * folder too. Paths whose names are unique get no entry. A path that runs out
+ * of folders before the others stop matching shows all it has.
+ */
+export function tabDisambiguators(paths: string[]): Map<string, string> {
+  const result = new Map<string, string>();
+  const byName = new Map<string, string[]>();
+  for (const path of paths) {
+    const name = getPathBasename(path) || path;
+    const group = byName.get(name);
+    if (group) group.push(path);
+    else byName.set(name, [path]);
+  }
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+    // Each path's folders, nearest first.
+    const folders = group.map((path) =>
+      path
+        .replace(/[\\/]+$/, '')
+        .split(/[\\/]/)
+        .slice(0, -1)
+        .filter(Boolean)
+        .reverse(),
+    );
+    const label = (i: number, depth: number) => folders[i].slice(0, depth).reverse().join('/');
+    const maxDepth = Math.max(...folders.map((f) => f.length));
+    group.forEach((path, i) => {
+      let depth = 1;
+      while (
+        depth < maxDepth &&
+        group.some((_, j) => j !== i && label(j, depth) === label(i, depth))
+      ) {
+        depth += 1;
+      }
+      const text = label(i, depth);
+      if (text) result.set(path, text);
+    });
+  }
+  return result;
+}
