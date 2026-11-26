@@ -1927,3 +1927,161 @@ describe('agent rounds (#244)', () => {
     after.dispose();
   });
 });
+
+describe('restoring against the current trusted folders (#255)', () => {
+  // Trusted folders can shrink across a restart (a server started from
+  // another folder, or a restricted desktop-app server). A restored session
+  // must not keep a file the server no longer trusts.
+  const TRUSTED = '/trusted/a.md';
+  const UNTRUSTED = '/elsewhere/b.md';
+  const isPathAllowed = (p: string) => p.startsWith('/trusted/');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-26T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function saved(build: (store: ReviewSessionStore) => void): PersistedStoreState {
+    const before = new ReviewSessionStore();
+    build(before);
+    const state = JSON.parse(JSON.stringify(before.exportState())) as PersistedStoreState;
+    before.dispose();
+    return state;
+  }
+
+  it('drops untrusted files from a session that still has a trusted one', () => {
+    let id = '';
+    const state = saved((store) => {
+      id = store.createSession({ filePaths: [TRUSTED, UNTRUSTED], enableResolve: false }).id;
+      store.addFiles(id, ['/elsewhere/c.md']);
+      store.queueBatch(
+        id,
+        ['c1'],
+        new Map([
+          [TRUSTED, 1],
+          [UNTRUSTED, 2],
+        ]),
+      );
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    const session = after.getSession(id);
+    expect(session?.status).toBe('open');
+    expect(session?.filePaths).toEqual([TRUSTED]);
+    expect(session?.fileAddedAt ?? {}).toEqual({});
+    expect(after.getQueuedBatch(id)?.commentCountsByPath).toEqual(new Map([[TRUSTED, 1]]));
+    // Dedupe must not match the session on its old file set either.
+    expect(after.findOpenSession([TRUSTED, UNTRUSTED], 'user')).toBeUndefined();
+    expect(after.findOpenSession([TRUSTED], 'user')?.id).toBe(id);
+    after.dispose();
+  });
+
+  it('does not restore an open session left with no trusted file', () => {
+    let id = '';
+    const state = saved((store) => {
+      id = store.createSession({ filePaths: [UNTRUSTED], enableResolve: false }).id;
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getSession(id)).toBeUndefined();
+    expect(after.listOpenSessions()).toEqual([]);
+    after.dispose();
+  });
+
+  it('keeps an ended session for its late poll, without the untrusted paths', async () => {
+    let id = '';
+    const state = saved((store) => {
+      id = store.createSession({ filePaths: [UNTRUSTED], enableResolve: false }).id;
+      store.finish(id, 'final words');
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getSession(id)?.filePaths).toEqual([]);
+    expect(await after.waitForSession(id)).toEqual({ status: 'done', prompt: 'final words' });
+    after.dispose();
+  });
+
+  it('settles an ask with a question in an untrusted file, so the agent gets an answer', () => {
+    let id = '';
+    let askId = '';
+    const state = saved((store) => {
+      id = store.createSession({
+        filePaths: [TRUSTED, UNTRUSTED],
+        enableResolve: false,
+        origin: 'agent',
+      }).id;
+      store.recordAgentComments(id, 2);
+      askId = store.addAsk(id, [
+        { commentId: 'q1', filePath: TRUSTED, anchor: 'a', text: 'one?' },
+        { commentId: 'q2', filePath: UNTRUSTED, anchor: 'b', text: 'two?' },
+      ]).askId;
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getPendingAsks(id)).toEqual([]);
+    expect(after.getSettledAsk(id, askId)).toEqual({
+      status: 'no_reply',
+      reason: 'file_untrusted',
+    });
+    // The session itself lives on with its trusted file, and can ask again.
+    expect(after.getSession(id)?.filePaths).toEqual([TRUSTED]);
+    expect(() =>
+      after.addAsk(id, [{ commentId: 'q3', filePath: TRUSTED, anchor: 'a', text: 'three?' }]),
+    ).not.toThrow();
+    after.dispose();
+  });
+
+  it('settles the ask even when its session is dropped with it', () => {
+    let id = '';
+    let askId = '';
+    const state = saved((store) => {
+      id = store.createSession({
+        filePaths: [UNTRUSTED],
+        enableResolve: false,
+        origin: 'agent',
+      }).id;
+      store.recordAgentComments(id, 1);
+      askId = store.addAsk(id, [
+        { commentId: 'q1', filePath: UNTRUSTED, anchor: 'b', text: 'two?' },
+      ]).askId;
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getSession(id)).toBeUndefined();
+    expect(after.getSettledAsk(id, askId)).toEqual({
+      status: 'no_reply',
+      reason: 'file_untrusted',
+    });
+    after.dispose();
+  });
+
+  it('keeps an ask whose questions are all in trusted files', () => {
+    let id = '';
+    let askId = '';
+    const state = saved((store) => {
+      id = store.createSession({
+        filePaths: [TRUSTED, UNTRUSTED],
+        enableResolve: false,
+        origin: 'agent',
+      }).id;
+      store.recordAgentComments(id, 1);
+      askId = store.addAsk(id, [
+        { commentId: 'q1', filePath: TRUSTED, anchor: 'a', text: 'one?' },
+      ]).askId;
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.getPendingAsks(id).map((a) => a.askId)).toEqual([askId]);
+    after.dispose();
+  });
+});

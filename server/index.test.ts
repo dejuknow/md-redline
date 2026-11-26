@@ -5612,3 +5612,174 @@ describe('review session author (#113)', () => {
     expect(await author()).toBe('Claude');
   });
 });
+
+describe('review sessions restored after the trusted folders shrank (#255)', () => {
+  // Server A trusts a parent folder holding both files; server B, the one
+  // after the restart, trusts only `trusted/`. The session and its ask were
+  // created legitimately on A and are carried to B through the same saved
+  // state a real restart uses.
+  async function shrunkRestart(opts: { origin: 'agent' | 'user'; answerOutside: boolean }) {
+    const parent = await realpath(await mkdtemp(join(tmpdir(), 'mdr-shrink-')));
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-shrink-home-')));
+    const trustedDir = join(parent, 'trusted');
+    const elsewhereDir = join(parent, 'elsewhere');
+    await mkdir(trustedDir);
+    await mkdir(elsewhereDir);
+    const inside = join(trustedDir, 'a.md');
+    const outside = join(elsewhereDir, 'b.md');
+    await writeFile(inside, '# A\n\nInside text here.\n', 'utf8');
+    await writeFile(outside, '# B\n\nOutside text here.\n', 'utf8');
+
+    const before = createAppFull({ cwd: parent, homeDir: home, platformName: 'linux' });
+    const create = await before.app.request('/api/review-sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [inside, outside], origin: opts.origin }),
+    });
+    expect(create.status).toBe(201);
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const ask = await before.app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [
+          { filePath: inside, anchor: 'Inside text', text: 'inside?' },
+          { filePath: outside, anchor: 'Outside text', text: 'outside?' },
+        ],
+      }),
+    });
+    expect(ask.status).toBe(201);
+    const { askId } = (await ask.json()) as { askId: string };
+    const state = JSON.parse(JSON.stringify(before.reviewSessions.exportState()));
+    const savedAt = Date.now();
+    before.reviewSessions.dispose();
+
+    // Answered: the user replied in the file while the server was down, so a
+    // read of it would have a reply to deliver. Unanswered: the marker still
+    // carries expectsReply, so any cleanup would have a flag to clear.
+    if (opts.answerOutside) {
+      const outsideComment = parseComments(await readFile(outside, 'utf8')).comments[0];
+      await writeFile(
+        outside,
+        addReply(await readFile(outside, 'utf8'), outsideComment.id, 'secret answer'),
+        'utf8',
+      );
+    }
+    const outsideBefore = await readFile(outside, 'utf8');
+
+    const after = createAppFull({ cwd: trustedDir, homeDir: home, platformName: 'linux' });
+    return { after, state, savedAt, sessionId, askId, inside, outside, outsideBefore };
+  }
+
+  const post = (app: { request: typeof fetch | ((...a: never[]) => unknown) }, path: string) =>
+    (app as { request: (p: string, init: RequestInit) => Promise<Response> }).request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+  // Cleanup after Done and abort runs fire-and-forget; give it time to land.
+  const settle = () => new Promise((r) => setTimeout(r, 100));
+
+  it('restoring drops the untrusted file and answers the ask, never touching the file', async () => {
+    const { after, state, savedAt, sessionId, askId, inside, outside, outsideBefore } =
+      await shrunkRestart({ origin: 'agent', answerOutside: false });
+    await after.restoreReviewSessions(state, { now: new Date(), savedAt });
+
+    const got = await after.app.request(`/api/review-sessions/${sessionId}`);
+    expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
+    const wait = await after.app.request(`/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    expect(await wait.json()).toEqual({ status: 'no_reply', reason: 'file_untrusted' });
+
+    expect((await post(after.app, `/api/review-sessions/${sessionId}/agent-done`)).status).toBe(
+      200,
+    );
+    await settle();
+    expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
+    after.reviewSessions.dispose();
+  });
+
+  describe('a session that still names an untrusted file never reads or writes it', () => {
+    // Restored without the filter, as if a path slipped past it: the cleanup
+    // reads and writes must refuse the file on their own.
+    async function unfiltered(origin: 'agent' | 'user', answerOutside = false) {
+      const ctx = await shrunkRestart({ origin, answerOutside });
+      ctx.after.reviewSessions.restoreState(ctx.state, { now: new Date(), savedAt: ctx.savedAt });
+      return ctx;
+    }
+
+    it.each([
+      ['End review', 'agent', 'agent-done'],
+      ['Finish review', 'user', 'finish'],
+    ] as const)('%s', async (_name, origin, route) => {
+      const { after, sessionId, outside, outsideBefore } = await unfiltered(origin);
+      const res = await post(after.app, `/api/review-sessions/${sessionId}/${route}`);
+      expect(res.status).toBe(200);
+      await settle();
+      expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
+      after.reviewSessions.dispose();
+    });
+
+    it.each([
+      ['End review', 'agent', 'agent-done'],
+      ['Finish review', 'user', 'finish'],
+    ] as const)('%s delivers no reply read from the untrusted file', async (_n, origin, route) => {
+      const { after, sessionId, askId } = await unfiltered(origin, true);
+      const res = await post(after.app, `/api/review-sessions/${sessionId}/${route}`);
+      expect(res.status).toBe(200);
+      await settle();
+      const result = after.reviewSessions.getSettledAsk(sessionId, askId);
+      expect(JSON.stringify(result)).not.toContain('secret answer');
+      after.reviewSessions.dispose();
+    });
+
+    it('cancelling the review', async () => {
+      const { after, sessionId, outside, outsideBefore } = await unfiltered('agent');
+      const res = await post(after.app, `/api/review-sessions/${sessionId}/abort`);
+      expect(res.status).toBe(200);
+      await settle();
+      expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
+      after.reviewSessions.dispose();
+    });
+
+    it('releasing the ask', async () => {
+      const { after, sessionId, askId, outside, outsideBefore } = await unfiltered('agent');
+      const res = await post(after.app, `/api/review-sessions/${sessionId}/asks/${askId}/release`);
+      expect(res.status).toBe(200);
+      await settle();
+      expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
+      after.reviewSessions.dispose();
+    });
+
+    it('a structured reply to the ask', async () => {
+      const { after, sessionId, askId, outside, outsideBefore } = await unfiltered('agent');
+      const res = await after.app.request(`/api/review-sessions/${sessionId}/asks/${askId}/reply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replies: [] }),
+      });
+      expect(res.status).toBe(200);
+      await settle();
+      expect(await readFile(outside, 'utf8')).toBe(outsideBefore);
+      after.reviewSessions.dispose();
+    });
+
+    it('saving the trusted file does not read the untrusted one to deliver its reply', async () => {
+      const { after, sessionId, askId, inside } = await unfiltered('agent', true);
+      const insideComment = parseComments(await readFile(inside, 'utf8')).comments[0];
+      const res = await after.app.request('/api/file', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          path: inside,
+          content: addReply(await readFile(inside, 'utf8'), insideComment.id, 'inside answer'),
+        }),
+      });
+      expect(res.status).toBe(200);
+      // Every question has a reply on disk, but one of them sits in a file
+      // the server may not read, so the ask is not delivered from it.
+      expect(after.reviewSessions.getSettledAsk(sessionId, askId)).toBeUndefined();
+      after.reviewSessions.dispose();
+    });
+  });
+});

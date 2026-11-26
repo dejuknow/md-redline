@@ -23,7 +23,7 @@ import {
 // needs to see the marker arrive; the user-edit handler sets the entry inline.
 import { atomicWriteFile } from './fs-retry';
 import { injectSvgDimensions } from './svg-dimensions';
-import { ReviewSessionStore, type PendingAsk } from './review-sessions';
+import { ReviewSessionStore, type PendingAsk, type PersistedStoreState } from './review-sessions';
 import { deliverInlineAskReplies, registerReviewSessionRoutes } from './routes/review-sessions';
 import { BaselineStore } from './baselines';
 import { registerBaselineRoutes } from './routes/baselines';
@@ -471,6 +471,23 @@ export function createAppFull(options: CreateAppOptions = {}) {
     return real;
   }
 
+  /**
+   * The roots check for a file a review session holds, rather than one a
+   * request names. A session's files were checked when they joined it, but
+   * the trusted folders can be narrower now: a session restored after a
+   * restart can still name a file this server no longer trusts (#255). Every
+   * read or write a session drives goes through this first, the same check
+   * /api/file applies. Throws the same 'Access denied' error.
+   */
+  async function checkSessionFile(path: string): Promise<void> {
+    await resolveAndValidate(path);
+  }
+
+  async function readSessionFile(path: string): Promise<string> {
+    await checkSessionFile(path);
+    return fsPromises.readFile(path, 'utf8');
+  }
+
   const lastWrittenContent = new Map<string, string>();
   const writeLocks = new Map<string, Promise<void>>();
   const fileWatchers = new Map<
@@ -514,6 +531,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     void Promise.all(
       Array.from(byFile, async ([filePath, commentIds]) => {
         try {
+          await checkSessionFile(filePath);
           const targetIds = new Set(commentIds);
           const result = await withFileLock(filePath, async () => {
             const original = await fsPromises.readFile(filePath, 'utf8');
@@ -548,6 +566,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     for (const [filePath, commentIds] of byFile) {
       try {
+        await checkSessionFile(filePath);
         // Route through the per-file writeLock + atomic temp+rename so the
         // cleanup serializes with concurrent user edits and the agent-comments
         // route. Without this, a Done-while-ask cleanup can clobber a user
@@ -693,8 +712,9 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // condition the caller will handle). If `transform` throws (e.g. parser
     // corruption on a malformed marker), wrap with the path so the route
     // sees a typed error rather than a generic 500 with no context.
-    transformFile: (resolved, transform) =>
-      withFileLock(resolved, async () => {
+    transformFile: async (resolved, transform) => {
+      await checkSessionFile(resolved);
+      return withFileLock(resolved, async () => {
         const original = await fsPromises.readFile(resolved, 'utf8');
         let updated: string | null;
         try {
@@ -707,10 +727,14 @@ export function createAppFull(options: CreateAppOptions = {}) {
           await atomicWriteFile(resolved, updated);
         }
         return { original, updated };
-      }),
+      });
+    },
     // Used by the reply-cleanup path which is best-effort and racing-tolerant.
-    readFileText: (p) => fsPromises.readFile(p, 'utf8'),
-    writeFileText: (p, content) => withFileLock(p, () => atomicWriteFile(p, content)),
+    readFileText: readSessionFile,
+    writeFileText: async (p, content) => {
+      await checkSessionFile(p);
+      await withFileLock(p, () => atomicWriteFile(p, content));
+    },
     notifyFileChanged,
   });
 
@@ -931,7 +955,9 @@ export function createAppFull(options: CreateAppOptions = {}) {
       try {
         await deliverInlineAskReplies({
           reviewSessions,
-          readFileText: (p) => readFile(p, 'utf-8'),
+          // The ask can have questions in other files too, which this save's
+          // path check did not cover.
+          readFileText: readSessionFile,
           filePath: resolved,
           knownContent: new Map([[resolved, body.content]]),
           requireComplete: true,
@@ -1545,7 +1571,49 @@ export function createAppFull(options: CreateAppOptions = {}) {
     });
   }
 
-  return { app, reviewSessions, baselines };
+  /**
+   * Restore saved review sessions (#116) against the folders this server
+   * trusts now, not the ones it trusted when it saved them (#255): the
+   * trusted folders can shrink across a restart (a server started from
+   * another folder, or a desktop-app server in restricted mode). Each saved
+   * path gets the same check as /api/file, and restoreState leaves out what
+   * fails it.
+   */
+  async function restoreReviewSessions(
+    state: PersistedStoreState,
+    opts: { now: Date; savedAt: number },
+  ): Promise<void> {
+    const paths = new Set<string>();
+    for (const s of state.sessions) {
+      for (const p of s.filePaths) paths.add(p);
+      for (const p of s.originalFilePaths) paths.add(p);
+      for (const p of Object.keys(s.fileAddedAt ?? {})) paths.add(p);
+      for (const [p] of s.queuedBatch?.commentCountsByPath ?? []) paths.add(p);
+    }
+    for (const ask of state.pendingAsks) {
+      for (const q of ask.questions) paths.add(q.filePath);
+    }
+    const allowed = new Set<string>();
+    await Promise.all(
+      [...paths].map(async (p) => {
+        try {
+          await checkSessionFile(p);
+          allowed.add(p);
+        } catch {
+          // Outside the trusted folders now, or unresolvable: not restored.
+        }
+      }),
+    );
+    if (allowed.size < paths.size) {
+      console.warn(
+        `[sessions] not restoring ${paths.size - allowed.size} file(s) from saved review ` +
+          'sessions: they are outside the folders this server trusts',
+      );
+    }
+    reviewSessions.restoreState(state, { ...opts, isPathAllowed: (p) => allowed.has(p) });
+  }
+
+  return { app, reviewSessions, baselines, restoreReviewSessions };
 }
 
 /**
@@ -1601,7 +1669,7 @@ const updateChecker = createUpdateChecker({
 // createApp/createAppFull directly (never through this module-scope call, and
 // never through the isMainModule block that follows), so persistence stays
 // opt-in to a real server process.
-const { app, reviewSessions, baselines } = createAppFull({
+const { app, reviewSessions, baselines, restoreReviewSessions } = createAppFull({
   staticDir: detectStaticDir(),
   defaultTrustHome: true,
   trustCwd: process.env.MD_REDLINE_INTERNAL_NO_CWD_TRUST !== '1',
@@ -1724,7 +1792,7 @@ if (isMainModule) {
         let restored = false;
         if (loaded) {
           try {
-            reviewSessions.restoreState(loaded.state, { now: new Date(), savedAt: loaded.savedAt });
+            await restoreReviewSessions(loaded.state, { now: new Date(), savedAt: loaded.savedAt });
             restored = true;
           } catch (err) {
             // A file that passed the shape check but still can't be

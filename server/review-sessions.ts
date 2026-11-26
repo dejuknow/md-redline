@@ -87,6 +87,9 @@ export interface AskQuestion {
  *   was pending (they ended the session intentionally without replying)
  * - timeout: reserved for future session-timeout mechanism (not yet emitted)
  * - agent_silent: agent session created but no comments posted in time (see Task 16, not yet emitted)
+ * - file_untrusted: the server restarted trusting fewer folders, and a question
+ *   sits in a file outside them, so the server may no longer read or clear it
+ *   (#255). Set only by restoreState.
  */
 export type AskNoReplyReason =
   | 'released'
@@ -94,7 +97,8 @@ export type AskNoReplyReason =
   | 'cancelled'
   | 'done_without_reply'
   | 'timeout'
-  | 'agent_silent';
+  | 'agent_silent'
+  | 'file_untrusted';
 
 export type AskResult =
   | {
@@ -1454,12 +1458,26 @@ export class ReviewSessionStore {
    * ended. Never touches a markdown file and never fires onSessionAborted /
    * onAsksClosedOnDone: those callbacks exist to keep a file's markers in
    * sync with a session ending just now, and nothing ended just now here.
+   *
+   * `isPathAllowed` is the server's trusted-folder check as of this boot
+   * (#255). The folders can shrink across a restart, so a file the server no
+   * longer trusts is taken out of every session that names it. An open
+   * session left with no file is not restored, the same as one past the
+   * restore window; an ended one is kept, emptied, so a late poll still gets
+   * its result (an ended session never touches its files again). A pending
+   * ask with a question in such a file is settled as no_reply/file_untrusted
+   * rather than dropped, so the agent waiting on it gets an answer instead of
+   * a 404. Omitted, every path is kept.
    */
-  restoreState(state: PersistedStoreState, opts: { now: Date; savedAt: number }): void {
+  restoreState(
+    state: PersistedStoreState,
+    opts: { now: Date; savedAt: number; isPathAllowed?: (path: string) => boolean },
+  ): void {
     if (this.sessions.size > 0 || this.pendingAsks.size > 0) {
       throw new Error('restoreState must be called on a store that has not created a session yet');
     }
     const { now, savedAt } = opts;
+    const isPathAllowed = opts.isPathAllowed ?? (() => true);
     // Floored at 0: loadPersistedState already rejects a savedAt in the
     // future before this ever runs, so a negative value here would only mean
     // a caller passed inconsistent now/savedAt values directly (as a test
@@ -1475,6 +1493,14 @@ export class ReviewSessionStore {
       ) {
         continue; // too old to still matter; nobody can still be polling for it
       }
+
+      const filePaths = persisted.filePaths.filter(isPathAllowed);
+      if (persisted.status === 'open' && filePaths.length === 0) continue;
+      const fileAddedAt = persisted.fileAddedAt
+        ? Object.fromEntries(
+            Object.entries(persisted.fileAddedAt).filter(([path]) => isPathAllowed(path)),
+          )
+        : undefined;
 
       let resolver!: (result: ReviewResult) => void;
       const waiter = new Promise<ReviewResult>((resolve) => {
@@ -1496,9 +1522,9 @@ export class ReviewSessionStore {
 
       const session: InternalSession = {
         id: persisted.id,
-        filePaths: [...persisted.filePaths],
-        originalFilePaths: [...persisted.originalFilePaths],
-        fileAddedAt: persisted.fileAddedAt ? { ...persisted.fileAddedAt } : undefined,
+        filePaths,
+        originalFilePaths: persisted.originalFilePaths.filter(isPathAllowed),
+        fileAddedAt,
         enableResolve: persisted.enableResolve,
         origin: persisted.origin,
         clientId: persisted.clientId,
@@ -1533,7 +1559,9 @@ export class ReviewSessionStore {
         queuedBatch: persisted.queuedBatch
           ? {
               commentIds: [...persisted.queuedBatch.commentIds],
-              commentCountsByPath: new Map(persisted.queuedBatch.commentCountsByPath),
+              commentCountsByPath: new Map(
+                persisted.queuedBatch.commentCountsByPath.filter(([path]) => isPathAllowed(path)),
+              ),
             }
           : null,
         agentCommentCount: persisted.agentCommentCount,
@@ -1555,6 +1583,17 @@ export class ReviewSessionStore {
     }
 
     for (const ask of state.pendingAsks) {
+      // Checked before the session: an ask whose session was dropped for the
+      // same reason still owes its agent an answer (getSettledAsk is read
+      // before the session lookup on /asks/:askId/wait).
+      if (ask.questions.some((q) => !isPathAllowed(q.filePath))) {
+        this.settledAsks.set(ask.askId, {
+          sessionId: ask.sessionId,
+          result: { status: 'no_reply', reason: 'file_untrusted' },
+          at: now.getTime(),
+        });
+        continue;
+      }
       const session = this.sessions.get(ask.sessionId);
       // A session that didn't survive restore (dropped above, or never
       // existed) or that already ended can't still be waiting on a reply.
