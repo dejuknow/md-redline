@@ -2831,17 +2831,23 @@ Keep them when restyling or refactoring:
   controls sit over the collapsed rail's top; the rail's top padding adds it,
   pushing its icons below the controls. (There is no `data-sidebar-logo` any
   more: the rail has no logo.)
-- `window.__mdrOpenTarget({ file } | { dir } | { review })`: set by `App.tsx`
-  while mounted, for opens that arrive while the page is loaded. A file opens
-  as a tab on top of the open ones (the explorer moves to its folder, as with
-  `?file=`), a folder is shown in the explorer (`revealDirInExplorer`), and a
-  review id opens that session's files through the same code as the `?review=`
-  boot open. Only the boot open marks the URL's review as opened.
+- `window.__mdrOpenTarget({ file } | { files } | { dir } | { review })`: set
+  by `App.tsx` while mounted, for opens that arrive while the page is loaded.
+  A file opens as a tab on top of the open ones (the explorer moves to its
+  folder, as with `?file=`); `files` (several files dropped on the desktop
+  window) opens them all in order, the first one active and the rest in the
+  background, with the explorer beside the first; a folder is shown in the
+  explorer (`revealDirInExplorer`), and a review id opens that session's files
+  through the same code as the `?review=` boot open. Only the boot open marks
+  the URL's review as opened.
 - `window.__mdrDesktop`: set to `true` by the shell's init script on every
   platform, before the app's scripts run. It is the one signal that the page
   runs inside the desktop app: `isDesktopApp()` (`src/lib/desktop.ts`) reads
   it, and the palette's tab keys and the shortcuts panel's Tabs group show only
-  when it is set. Nothing else in the app looks at Tauri's own globals.
+  when it is set (its Zoom group only in the macOS app). Nothing else in the
+  app looks at Tauri's own globals. The same script sets
+  `window.__mdrDesktopVersion` to the app's own version (not the npm
+  package's), which Settings > About shows (`desktopAppVersion()`).
 - `window.__mdrNewTab()`: set by `App.tsx` while mounted, for the shell's New
   Tab (`Cmd+T`, `Ctrl+T`). Does what the tab strip's open-file button does:
   opens the file picker. A confirm dialog makes it wait (nothing happens);
@@ -2866,6 +2872,29 @@ Keep them when restyling or refactoring:
   tab and returns true; returns false when none is left (see the tab strip
   above), leaving any overlay as it is, or while a confirm dialog is up.
   Otherwise any other overlay closes first, as for New Tab.
+- The menu and tab-key hooks, all set by `useDesktopShellHooks`
+  (`src/hooks/useDesktopShellHooks.ts`) while App is mounted, each returning
+  whether it acted:
+  - `__mdrSwitchTab(1 | -1)` (Next / Previous Tab, `Ctrl+Tab` /
+    `Ctrl+Shift+Tab`) and `__mdrSelectTab(n)` (`Cmd+1` to `Cmd+8` pick that
+    tab, `Cmd+9` the last; `Ctrl+` on Windows and Linux; past the last tab
+    nothing happens). Both keep the page's `Cmd+Shift+[` / `]` rule: nothing
+    while typing in a text field other than the comment form's (whose draft is
+    handed back). A confirm dialog makes them wait; any other overlay closes
+    first, as for New Tab.
+  - `__mdrToggleExplorer()`, `__mdrToggleOutline()`, `__mdrToggleComments()`,
+    `__mdrToggleFocusMode()`, `__mdrOpenSettings(section?)` (`'about'` opens
+    Settings on About; it opens rather than toggles) and
+    `__mdrShowShortcuts()`: the same actions as `Cmd+B`, `Cmd+Shift+O`,
+    `Cmd+\`, `Cmd+.`, `Cmd+,` and `?`. Each does nothing (returns false) while
+    the Mermaid fullscreen view is open, because that is where those keys do
+    nothing in the page and the one place a menu accelerator for them reaches
+    the hook (see Desktop app below). Keep it that way when changing what those
+    keys do, or the macOS menu and the key will disagree.
+  - `__mdrJumpToComment(1 | -1)`: Next / Previous Comment (`N` / `P`), with the
+    same Mermaid fullscreen rule.
+  - `__mdrRevealActiveFile()`: Show in Finder for the active tab, through the
+    same `POST /api/reveal` as the tab menu; false with no tab open.
 - `[data-sidebar-panel]`: the expanded sidebar panel; `[data-sidebar-top]` is its
   top row (Explorer/Outline and close).
 - `--window-inset-left`: a CSS variable the shell sets to clear native window
@@ -2905,6 +2934,9 @@ stable. The active tab's top lines up with the sidebar's, with or without a revi
 | `Cmd+T`             | New tab: the file picker (desktop app only)                                           |
 | `Cmd+W`             | Close tab, or the overlay on top of it (desktop app only)                             |
 | `Cmd+Shift+T`       | Reopen closed tab (desktop app only)                                                  |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (desktop app only)                                      |
+| `Cmd+1`-`Cmd+8` / `Cmd+9` | Go to that tab / the last tab (desktop app only; `Ctrl+` on Windows and Linux) |
+| `Cmd+=` / `Cmd+-` / `Cmd+0` | Zoom in / out / actual size, 125% (macOS desktop app only)                  |
 | `?`                 | Keyboard shortcuts help                                                               |
 | `Esc`               | Close fullscreen modal (Mermaid diagrams)                                             |
 | `+` / `-`           | Zoom in / out (Mermaid fullscreen)                                                    |
@@ -2924,6 +2956,7 @@ stable. The active tab's top lines up with the sidebar's, with or without a revi
 - **Document width**: `'narrow' | 'default' | 'wide'` (520/672/860px column caps, `DOC_WIDTH_COLS` in `src/lib/page-geometry.ts`), default `'default'`. Feeds the page geometry's `colMax`; also settable from the command palette ("Document width: ..."). The rail threshold (888px) is width-setting independent since `COL_MIN` governs it.
 - **Prose size**: `'small' | 'default' | 'large'` (14px/16px/18px), default `'default'`. Controls the rendered document body font size (`[data-prose-size]` attribute plus `.prose` font-size rules in `src/index.css`); the typography plugin's em-based spacing scales proportionally with it. Set from the General tab; also settable from the command palette ("Prose size: ...").
 - **Keep line breaks**: boolean, default `false`. When on, `remark-breaks` (in `src/markdown/pipeline.ts`, via the `keepLineBreaks` render option) turns each single newline inside a paragraph into a `<br>`, the way Obsidian and GitHub comments render. Off follows CommonMark, where a soft break renders as a space, which is also what GitHub's file view does. The DOM text does not change (remark-rehype emits a `<br>` followed by a `"\n"` text node), so comment anchoring behaves the same either way. Applies to the rendered view and the rendered diff; fenced code is untouched. Set from the General tab; also togglable from the command palette ("Keep line breaks: On/Off").
+- **About** (last tab, `data-settings-about`): the mdr version from `GET /api/version`, fetched only while the tab shows ("Unknown" when it fails), the desktop app's own version when `desktopAppVersion()` has one, and links to GitHub, new issues and releases (`target="_blank"`, which the desktop app hands to the system browser). The palette's "About mdr" and `__mdrOpenSettings('about')` open Settings on it (`initialSection`, applied each time the dialog opens; without it the dialog keeps the last tab shown).
 
 The Prose typeface, Document width, and Prose size controls are each an accessible
 segmented control (`role="group"` with a label) whose segments show a crimson
@@ -3090,7 +3123,8 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 tabs (prev/next, new tab, close tab while one is open, reopen closed tab while one is left; their
 desktop keys show only inside the desktop app), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
-file ops (reload, open, mark reviewed), settings, keyboard help, undo (Undo delete /
+file ops (reload, open, mark reviewed, and Show in Finder for the active tab, labeled per platform as
+in the tab menu), settings, keyboard help, About mdr (Settings on its About tab), undo (Undo delete /
 Undo diff reset, while the open file has one), all themes,
 comment bulk ops (resolve all, clear resolved, delete all, hand off to agent),
 active comment ops
@@ -3297,9 +3331,32 @@ nothing builds or tests it there yet.
   the `.md` file association both arrive through `RunEvent::Opened`. Only `.md`
   is associated, because the server opens nothing else. Once the SPA is
   loaded, opens are delivered in place by eval'ing `window.__mdrOpenTarget`
-  (see Desktop shell hooks); the script falls back to full navigation when the
-  hook is absent (loading or error page). Bare activations never navigate away
-  from an open doc.
+  (see Desktop shell hooks). The script waits up to ~5s for the hook (it is
+  registered once React mounts, which can be after the page has loaded) and
+  then falls back to full navigation (an error page, an SPA that never
+  mounts). An open that arrives while the window is loading a page (a
+  navigation the shell started, or a reload) waits for that load to finish
+  (`PendingOpens`, fed by the window's `on_page_load`) and then runs, in
+  arrival order. While a navigation the shell started to the UI is loading,
+  opens count the window as on the UI even though its URL can still read as
+  the page it is leaving, and only the UI page finishing releases them. A load still unfinished after 15s (a navigation that failed
+  before it committed never reports finishing) releases what it held, whose
+  scripts then fall back to navigation, and stops holding later opens.
+  Before that, a second file from a multi-file Finder open on a cold launch
+  ran in the page being replaced and was lost. Bare activations never
+  navigate away from an open doc.
+- Dropping files on the window (Tauri's `DragDrop` window event) opens every
+  `.md` file among them in the order dropped, the first one active, through
+  `{files}`; with no `.md` file, the first folder is shown in the explorer as
+  `mdr <dir>` shows it; anything else is ignored (`drop_target`). A drop is a
+  user gesture like a Finder open, so it grants access the same way (each
+  path, through `/api/grant-access`); an `mdr://` link still never does. When
+  the window first has to load the app, it loads the app root and the files
+  follow through the hook, since a URL carries only one. The hook function
+  carries `acceptsFiles: true`; a page older than the shell, without it, is
+  sent the files one `{file}` at a time. A path outside the server's trusted
+  folders is not granted (`/api/grant-access` only grants inside them, for
+  Finder opens too) and lands on the access-request state.
 - The CLI side is described under "Desktop app hand-off" above. The MCP review
   callback sends `mdr://open?review=<id>`; the hook's `{review}` variant opens
   the session's files, and no filesystem grant is involved (the MCP handler
@@ -3312,9 +3369,38 @@ nothing builds or tests it there yet.
   sending them; a hostile or hand-typed link to an untrusted path lands on the
   SPA's access-denied tab state.
 - Window lifecycle on macOS: closing the window hides it, a Dock click reopens
-  it, Cmd-Q quits. The menu is Tauri's default with File > New Tab (Cmd-T),
-  Close Tab (Cmd-W), Reopen Closed Tab (Shift-Cmd-T) and Close Window
-  (Shift-Cmd-W). New Tab evals `window.__mdrNewTab()` and shows the window if
+  it, Cmd-Q quits. Size, position and the maximized state are saved on quit
+  and put back at launch (`tauri-plugin-window-state`, not visibility, so a
+  window closed at quit still comes back). The window is built hidden, put
+  where it was (the plugin's moves land on the main queue, so the check waits
+  for them, `place_and_show`), checked by `fix_placement` (a window whose title bar no screen
+  shows at least 100px of, say one saved on a monitor since unplugged, is
+  fitted to the main screen and centered), and only then shown. The plugin's
+  own check only wants one corner on a monitor.
+- Menus (macOS, `build_app_menu`): app menu (About with copyright and a
+  GitHub credit, Settings... `Cmd-,`), File (New Tab `Cmd-T`, Close Tab
+  `Cmd-W`, Reopen Closed Tab `Shift-Cmd-T`, Show in Finder, Close Window
+  `Shift-Cmd-W`), Edit, View (Toggle Explorer `Cmd-B`, Toggle Outline
+  `Shift-Cmd-O`, Toggle Comments `Cmd-\`, Toggle Focus Mode `Cmd-.`, Actual
+  Size `Cmd-0`, Zoom In `Cmd-=`, Zoom Out `Cmd--`, full screen), Go (Previous /
+  Next Tab `Ctrl-Shift-Tab` / `Ctrl-Tab`, Tab 1-8 and Last Tab `Cmd-1`-`Cmd-9`,
+  Next / Previous Comment), Window, Help (Keyboard Shortcuts, mdr on GitHub,
+  Report an Issue, Release Notes; the links go through the same `open` as
+  external links, the navigation rule unchanged). Items call the hooks in
+  Desktop shell hooks (`menu_action` maps ids to them); with the window
+  closed (hidden), all but Settings and Keyboard Shortcuts, which bring it
+  back, do nothing. How keys reach them,
+  measured in WKWebView: a menu key fires only when the page left the keydown
+  unhandled; a page `preventDefault` suppresses it. Core's own keys (`Cmd-B`,
+  `Shift-Cmd-O`, `Cmd-\`, `Cmd-.`, `Cmd-,`) are handled by the page
+  everywhere except while the Mermaid fullscreen view is open, where the
+  hooks do nothing too, so their accelerators change nothing the keys did.
+  `Cmd-1`-`Cmd-9` and the zoom keys are the menu's (the Mermaid fullscreen
+  view takes `Cmd-=` / `Cmd--` / `Cmd-0` first for its own zoom).
+  `Ctrl-Tab` never reaches the menu, so the page key script reads it and the
+  Go menu only shows it. Single-letter keys (`N`, `P`, `?`) are never
+  accelerators: a menu key fires inside text fields. New Tab evals
+  `window.__mdrNewTab()` and shows the window if
   closing the last tab hid it. Close Tab
   evals `window.__mdrCloseActiveTab()` and hides the window when it returns
   false or the hook is absent; Reopen Closed Tab evals
@@ -3323,14 +3409,27 @@ nothing builds or tests it there yet.
   installed in `setup`, after the first window is built: set on the builder,
   Reopen Closed Tab never showed, because Shift-Cmd-T is AppKit's Show Tab
   Bar shortcut and automatic window tabbing is only turned off when the first
-  window is built. On Windows and Linux there is no Dock to bring a hidden window back,
-  so closing the window quits the app, and `src-tauri/scripts/tab-keys.js`
-  (an init script, tested in jsdom by `tab-keys.test.ts`) maps Ctrl-T, Ctrl-W
-  and Ctrl-Shift-T to the same hooks; Ctrl-W with no tab open does nothing.
-  On every platform a one-line init script sets `window.__mdrDesktop` (see
+  window is built. Settings and Keyboard Shortcuts also bring a hidden window
+  back. On Windows and Linux there is no Dock to bring a hidden window back,
+  so closing the window quits the app. `src-tauri/scripts/tab-keys.js` (an
+  init script on every platform, tested in jsdom by `tab-keys.test.ts`) reads
+  `Ctrl-Tab` / `Ctrl-Shift-Tab` everywhere and, on Windows and Linux, which
+  have no app menu, maps Ctrl-T, Ctrl-W, Ctrl-Shift-T and Ctrl-1 to Ctrl-9 to
+  the same hooks; Ctrl-W with no tab open does nothing. On every platform an
+  init script sets `window.__mdrDesktop` and `window.__mdrDesktopVersion` (see
   Desktop shell hooks).
+- Zoom: the shell owns it. Tauri's zoom hotkeys are a page script that calls
+  a webview command the loopback page is not granted, so before the View
+  menu `Cmd-=` / `Cmd--` / `Cmd-0` did nothing and the page stayed at
+  DEFAULT_ZOOM (125%). Now Zoom In / Out step through `ZOOM_STEPS` (80% to
+  200%), Actual Size returns to 125%, and the level is saved to `zoom` in the
+  app config dir and applied when the window is built. The hotkeys script is
+  on only on Windows, where WebView2 zooms natively.
 - Overlay title bar (macOS): no native title strip; the traffic lights sit
-  on the top row, centered at DEFAULT_ZOOM (125%). An init script sets the
+  on the top row, centered at DEFAULT_ZOOM (125%). They stay at fixed window
+  points while the page zooms, so the init script converts the room they need
+  to CSS px at the current zoom: the shell calls its `__mdrShellZoom(z)` on
+  every zoom change and every page load. It sets the
   app's `--window-inset-left` / `--window-inset-top` hooks for the open
   sidebar, the collapsed rail plus tab strip, and focus mode, drops them in
   native full screen, and makes the top 44px drag the window (double-click
