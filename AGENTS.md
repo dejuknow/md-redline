@@ -3230,8 +3230,12 @@ nothing builds or tests it there yet.
   Reopen Closed Tab (Shift-Cmd-T) and Close Window (Shift-Cmd-W). Close Tab
   evals `window.__mdrCloseActiveTab()` and hides the window when it returns
   false or the hook is absent; Reopen Closed Tab evals
-  `window.__mdrReopenClosedTab()` and does nothing when there is nothing to
-  reopen. On Windows and Linux there is no Dock to bring a hidden window back,
+  `window.__mdrReopenClosedTab()` (a no-op when there is nothing to reopen)
+  and shows the window again if closing the last tab hid it. The menu is
+  installed in `setup`, after the first window is built: set on the builder,
+  Reopen Closed Tab never showed, because Shift-Cmd-T is AppKit's Show Tab
+  Bar shortcut and automatic window tabbing is only turned off when the first
+  window is built. On Windows and Linux there is no Dock to bring a hidden window back,
   so closing the window quits the app, and `src-tauri/scripts/tab-keys.js`
   (an init script, tested in jsdom by `tab-keys.test.ts`) maps Ctrl-W and
   Ctrl-Shift-T to the same hooks; Ctrl-W with no tab open does nothing.

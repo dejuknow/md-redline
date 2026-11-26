@@ -104,7 +104,8 @@ rather than taken for a filename.
   app window. Loopback and internal schemes (`tauri://`, `about:blank`) load
   in the app; any other `http(s)`, `mailto` or `tel` URL is handed to `open`.
 - **Tabs**: Cmd-W closes the active tab and Shift-Cmd-T reopens the last
-  closed one (File menu). Cmd-W with no tab open hides the window.
+  closed one (File menu). Cmd-W with no tab open hides the window, and
+  Shift-Cmd-T brings it back with the reopened tab.
 - **Window**: closing the window hides it and the app stays in the Dock;
   clicking the Dock icon brings it back, Cmd-Q quits.
 - **Zoom**: starts at 125% to match a typical browser zoom; Cmd +/- adjust it.

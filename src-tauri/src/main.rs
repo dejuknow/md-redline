@@ -232,12 +232,15 @@ const MENU_REOPEN_TAB: &str = "reopen-tab";
 #[cfg(target_os = "macos")]
 const MENU_CLOSE_WINDOW: &str = "close-window";
 
-/// Asks the app to reopen its last closed tab. Does nothing when none is left
-/// or the app is not loaded (loading or error page).
+/// Asks the app to reopen its last closed tab, bringing the window back when
+/// closing the last tab hid it (as browsers do). The app does nothing when no
+/// tab is left to reopen or it is not loaded (loading or error page).
 #[cfg(target_os = "macos")]
 fn reopen_closed_tab(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.eval("window.__mdrReopenClosedTab && window.__mdrReopenClosedTab()");
+        let _ = win.show();
+        let _ = win.set_focus();
     }
 }
 
@@ -923,10 +926,7 @@ mod tests {
 }
 
 fn main() {
-    let builder = tauri::Builder::default();
-    #[cfg(target_os = "macos")]
-    let builder = builder.menu(build_app_menu);
-    builder
+    tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle().clone();
             // Show the loading window immediately (main thread) so launch
@@ -934,6 +934,12 @@ fn main() {
             // window carries the external-link handlers. Then reconcile the
             // server and navigate it to the SPA on a worker thread.
             build_main_window(&handle, WebviewUrl::default());
+            // The menu goes in after the window. Set on the builder, before
+            // any window existed, Reopen Closed Tab never showed: Shift-Cmd-T
+            // is AppKit's Show Tab Bar shortcut, and automatic window tabbing
+            // is only turned off when the first window is built.
+            #[cfg(target_os = "macos")]
+            app.set_menu(build_app_menu(&handle)?)?;
             std::thread::spawn(move || {
                 reconcile_server_at_startup();
                 open_target(&handle, None, false);
