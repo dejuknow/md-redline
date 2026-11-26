@@ -1018,6 +1018,56 @@ describe('handleReviewToolCall (fire-and-forget)', () => {
     expect(client.waitForReview).not.toHaveBeenCalled();
   });
 
+  it('names only the files the batch wrote to, not every file the session declares (#80)', async () => {
+    const client = makeReviewClient({
+      postReview: vi.fn().mockResolvedValue({ commentsWritten: 1, repliesWritten: 0 }),
+    });
+
+    const result = await handleReviewToolCall(
+      {
+        filePaths: ['/abs/a.md', '/abs/b.md', '/abs/c.md'],
+        comments: [{ filePath: '/abs/a.md', anchor: 'foo', text: 'bar' }],
+      },
+      {
+        client,
+        openInBrowser: vi.fn().mockResolvedValue(undefined),
+        baseUrl: 'http://localhost:5188',
+      },
+    );
+
+    const text = result.content[0].text;
+    expect(text).toContain('posted 1 comment(s) and 0 reply(ies) to /abs/a.md.');
+    expect(text).not.toContain('/abs/b.md');
+    expect(text).not.toContain('/abs/c.md');
+  });
+
+  it('does not claim any file was written when an anchor fails (#80)', async () => {
+    const err = new Error('anchor not found') as Error & { failedComments?: number[] };
+    err.failedComments = [1];
+    const client = makeReviewClient({ postReview: vi.fn().mockRejectedValue(err) });
+
+    const result = await handleReviewToolCall(
+      {
+        filePaths: ['/abs/a.md', '/abs/b.md', '/abs/c.md'],
+        comments: [
+          { filePath: '/abs/a.md', anchor: 'foo', text: 'bar' },
+          { filePath: '/abs/b.md', anchor: 'missing', text: 'baz' },
+        ],
+      },
+      {
+        client,
+        openInBrowser: vi.fn().mockResolvedValue(undefined),
+        baseUrl: 'http://localhost:5188',
+      },
+    );
+
+    const text = result.content[0].text;
+    expect(result.isError).toBe(true);
+    expect(text).toContain('failedComments: [1]');
+    expect(text).not.toContain('posted');
+    expect(text).not.toContain('/abs/c.md');
+  });
+
   it('opens browser on first call, skips on dedupe', async () => {
     const openInBrowser = vi.fn().mockResolvedValue(undefined);
     const client = makeReviewClient({
