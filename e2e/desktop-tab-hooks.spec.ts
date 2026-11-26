@@ -15,6 +15,8 @@ import { resetTestAppState } from './helpers/test-state';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_1 = resolve(__dirname, 'fixtures/test-doc.md');
 const FIXTURE_2 = resolve(__dirname, 'fixtures/test-doc-2.md');
+// Opened and closed only, so Reopen Closed Tab has something to bring back.
+const FIXTURE_3 = resolve(__dirname, 'fixtures/toc-doc.md');
 const IS_MAC = process.platform === 'darwin';
 const MOD = IS_MAC ? '⌘' : 'Ctrl';
 
@@ -153,6 +155,12 @@ test.describe('Desktop Close Tab with an overlay open', () => {
 
   test('leaves the unsaved-changes dialog on the tab it asked about', async ({ page }) => {
     await openBoth(page);
+    // Something for Reopen Closed Tab to bring back.
+    await page.evaluate((path) => window.__mdrOpenTarget?.({ file: path }), FIXTURE_3);
+    await expect(tabClose(page, 'toc-doc.md')).toBeAttached();
+    await page.evaluate(() => window.__mdrCloseActiveTab?.());
+    await expect(tabClose(page, 'toc-doc.md')).toHaveCount(0);
+
     // Make test-doc.md unsaved: its write fails, so the tab stays dirty.
     await page
       .getByRole('button', { name: /^test-doc\.md/ })
@@ -181,13 +189,35 @@ test.describe('Desktop Close Tab with an overlay open', () => {
     expect(await page.evaluate(() => window.__mdrCloseActiveTab?.())).toBe(true);
     await expect(dialog).toBeVisible();
     await expect(tabClose(page, 'test-doc-2.md')).toBeAttached();
-    // New Tab waits for it too.
+    // New Tab and Reopen Closed Tab wait for it too.
     await page.evaluate(() => window.__mdrNewTab?.());
     await expect(page.getByPlaceholder('File path or name...')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__mdrReopenClosedTab?.())).toBe(false);
+    await expect(tabClose(page, 'toc-doc.md')).toHaveCount(0);
 
     // The dialog still closes the tab it asked about.
     await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(tabClose(page, 'test-doc.md')).toHaveCount(0);
     await expect(tabClose(page, 'test-doc-2.md')).toBeAttached();
+  });
+});
+
+test.describe('Desktop Close Tab over a comment popover', () => {
+  // Narrow enough that the rail never shows, so a comment opens in the
+  // highlight's popover (see comment-popover.spec.ts).
+  test.use({ viewport: { width: 800, height: 900 } });
+
+  test('closes the popover, with its reply field, not the document', async ({ page }) => {
+    await page.goto(`/?file=${FIXTURE_1}`);
+    await expect(page.getByRole('heading', { name: 'Test Document' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await addComment(page, 'valid credentials', 'Popover note');
+    const popover = page.locator('[data-comment-popover]');
+    await expect(popover).toBeVisible();
+
+    expect(await page.evaluate(() => window.__mdrCloseActiveTab?.())).toBe(true);
+    await expect(popover).toHaveCount(0);
+    await expect(tabClose(page, 'test-doc.md')).toBeAttached();
   });
 });

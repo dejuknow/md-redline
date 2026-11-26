@@ -136,6 +136,45 @@ describe('wrapText with a shared index', () => {
     for (const seed of [11, 12, 13, 14, 15, 16]) expectSameAsUnindexed(HAND_HTML, seed, 60);
   });
 
+  it('notices a wrap across top-level text that moves an empty node into its mark', () => {
+    // The first wrap, inside the paragraph, builds the index. The second runs
+    // across two top-level text runs: the <img> (or <br>, or comment) between
+    // them moves into the new mark, so the container keeps its child count
+    // while both runs change length. The third lands in the second run.
+    for (const html of [
+      '<p>First paragraph here.</p>\nHello <img src="x.png" alt=""> world, and more after it.',
+      '<p>First paragraph here.</p>Start here<br>then the second line<!-- note --> and the third.',
+    ]) {
+      const plain = fresh(html);
+      const fast = fresh(html);
+      const index = createWrapTextIndex(fast);
+      const text = getVisibleTextContent(plain);
+      const tail = text.slice('First paragraph here.'.length);
+      const anchors = ['paragraph', tail.slice(3, tail.length - 12), tail.slice(-10, -4)];
+      anchors.forEach((anchor, i) => {
+        const configure = (mark: HTMLElement) => {
+          mark.dataset.commentIds = `c${i}`;
+        };
+        const a = wrapText(plain, anchor, configure);
+        const b = wrapText(
+          fast,
+          anchor,
+          configure,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          index,
+        );
+        expect(b, `anchor ${JSON.stringify(anchor)}`).toBe(a);
+        expect(fast.innerHTML, `anchor ${JSON.stringify(anchor)}`).toBe(plain.innerHTML);
+      });
+      plain.remove();
+      fast.remove();
+    }
+  });
+
   it('paints overlapping and repeated anchors the same way', () => {
     const html = sanitizeRenderedMarkdown(renderMarkdown(MARKDOWN, '/tmp/notes.md'));
     const plain = fresh(html);

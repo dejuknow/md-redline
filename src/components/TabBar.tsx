@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useDismiss } from '../hooks/useDismiss';
 import { getPathBasename, tabDisambiguators } from '../lib/path-utils';
 
 interface Tab {
@@ -244,28 +245,11 @@ export function TabBar({
     return () => window.cancelAnimationFrame(frame);
   }, [activeFilePath, scrollActiveTabIntoView, updateTabOverflow]);
 
-  useEffect(() => {
-    if (!tabListOpen) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (tabListRef.current && !tabListRef.current.contains(event.target as Node)) {
-        setTabListOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setTabListOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [tabListOpen]);
+  // Closes on a press or focus outside, and on Escape, which it keeps to
+  // itself like the strip's other menus: an Escape that closes the list does
+  // not also close the find bar or clear a selection.
+  const closeTabList = useCallback(() => setTabListOpen(false), []);
+  useDismiss(tabListOpen, tabListRef, closeTabList);
 
   useEffect(() => {
     if (!isOverflowing) setTabListOpen(false);

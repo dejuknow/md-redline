@@ -118,7 +118,11 @@ import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 import { getEnabledHiddenCommentPrefixes } from './lib/settings';
 import { isDesktopApp } from './lib/desktop';
-import { shellOverlayAction, type ShellOverlayAction } from './lib/shell-overlay';
+import {
+  shellOverlayAction,
+  type ShellOverlayAction,
+  type ShellOverlayState,
+} from './lib/shell-overlay';
 
 /** Shared empty result for the "no replies arrived" case. */
 const NO_REPLY_IDS: ReadonlySet<string> = new Set<string>();
@@ -2523,26 +2527,28 @@ export default function App() {
   // Read through a ref so the window hooks below need not re-register on
   // every overlay change. The rail's and the list's own confirm dialogs, and
   // menus App does not own, are found in the DOM, as the Escape guard does.
+  const shellOverlayStateRef = useRef<() => ShellOverlayState | null>(() => null);
+  shellOverlayStateRef.current = () => ({
+    confirmOpen:
+      pendingClose !== null ||
+      confirmDeleteAll ||
+      document.querySelector('[role="alertdialog"]') !== null,
+    mermaidFullscreenOpen: mermaidFullscreen.isOpen,
+    activeModal,
+    drawerOpen,
+    contextMenuOpen:
+      viewerCtxMenu.isOpen || explorerCtxMenu.isOpen || tabCtxMenu.isOpen || sidebarCtxMenu.isOpen,
+    popupOpen:
+      document.querySelector(
+        '[role="menu"], [data-review-popover], [data-testid="tab-list-menu"]',
+      ) !== null,
+    commentPopoverOpen: document.querySelector('[data-comment-popover]') !== null,
+  });
   const shellOverlayActionRef = useRef<() => ShellOverlayAction>(() => null);
-  shellOverlayActionRef.current = () =>
-    shellOverlayAction({
-      confirmOpen:
-        pendingClose !== null ||
-        confirmDeleteAll ||
-        document.querySelector('[role="alertdialog"]') !== null,
-      mermaidFullscreenOpen: mermaidFullscreen.isOpen,
-      activeModal,
-      drawerOpen,
-      contextMenuOpen:
-        viewerCtxMenu.isOpen ||
-        explorerCtxMenu.isOpen ||
-        tabCtxMenu.isOpen ||
-        sidebarCtxMenu.isOpen,
-      popupOpen:
-        document.querySelector(
-          '[role="menu"], [data-review-popover], [data-testid="tab-list-menu"]',
-        ) !== null,
-    });
+  shellOverlayActionRef.current = () => {
+    const state = shellOverlayStateRef.current();
+    return state ? shellOverlayAction(state) : null;
+  };
   const mermaidFullscreenClose = mermaidFullscreen.close;
   const closeShellOverlay = useCallback(
     (action: Exclude<ShellOverlayAction, null>) => {
@@ -2554,6 +2560,9 @@ export default function App() {
           return;
         case 'close-modal':
           setActiveModal(null);
+          return;
+        case 'close-comment-popover':
+          setPopoverCommentId(null);
           return;
         case 'close-drawer':
           setDrawerOpen(false);
@@ -2584,21 +2593,41 @@ export default function App() {
     ],
   );
 
+  // Closes every overlay but a confirm dialog, for the shell's New Tab and
+  // Reopen Closed Tab, which bring a document forward: a menu opened over the
+  // drawer and the drawer both go. Returns false when a confirm dialog is up,
+  // which they wait for. Read once: the closes below land on the next render.
+  const clearOverlaysForShell = useCallback((): boolean => {
+    const state = shellOverlayStateRef.current();
+    if (!state) return true;
+    if (shellOverlayAction(state) === 'blocked') return false;
+    if (state.mermaidFullscreenOpen || state.activeModal === 'mermaidFullscreen') {
+      closeShellOverlay('close-mermaid');
+    }
+    if (state.activeModal !== null && state.activeModal !== 'search') {
+      closeShellOverlay('close-modal');
+    }
+    if (state.contextMenuOpen) closeShellOverlay('close-context-menu');
+    if (state.popupOpen) closeShellOverlay('dismiss-popup');
+    if (state.commentPopoverOpen) closeShellOverlay('close-comment-popover');
+    if (state.drawerOpen) closeShellOverlay('close-drawer');
+    return true;
+  }, [closeShellOverlay]);
+
   // The desktop shell's New Tab (Cmd+T, Ctrl+T): the tab strip's "+", which
   // opens the file picker. Browsers keep the key for their own tabs, so only
-  // the shell calls this. A confirm dialog waits for its answer first; the
-  // Mermaid fullscreen view, which owns the keyboard, makes way for the picker.
+  // the shell calls this. A confirm dialog waits for its answer first; any
+  // other overlay closes, so nothing is left open behind the picker (a modal
+  // the picker replaces anyway).
   useEffect(() => {
     window.__mdrNewTab = () => {
-      const action = shellOverlayActionRef.current();
-      if (action === 'blocked') return;
-      if (action === 'close-mermaid') mermaidFullscreenClose();
+      if (!clearOverlaysForShell()) return;
       openFilePicker();
     };
     return () => {
       delete window.__mdrNewTab;
     };
-  }, [openFilePicker, mermaidFullscreenClose]);
+  }, [openFilePicker, clearOverlaysForShell]);
 
   // The desktop shell's Close Tab (Cmd+W, Ctrl+W): browsers keep that key for
   // their own tabs, so only the shell calls this. With an overlay open it
@@ -2622,12 +2651,17 @@ export default function App() {
 
   // The desktop shell's Reopen Closed Tab (Cmd+Shift+T), which browsers also
   // keep for their own tabs. The palette and the tab menu reach it in a browser.
+  // Like New Tab, it waits for a confirm dialog (returning false, so the shell
+  // does nothing) and closes any other overlay before the tab comes back.
   useEffect(() => {
-    window.__mdrReopenClosedTab = reopenClosedTab;
+    window.__mdrReopenClosedTab = () => {
+      if (!clearOverlaysForShell()) return false;
+      return reopenClosedTab();
+    };
     return () => {
       delete window.__mdrReopenClosedTab;
     };
-  }, [reopenClosedTab]);
+  }, [reopenClosedTab, clearOverlaysForShell]);
 
   const revealInFinder = useCallback(
     (path: string) => {

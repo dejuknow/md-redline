@@ -8,6 +8,7 @@ const nothing: ShellOverlayState = {
   drawerOpen: false,
   contextMenuOpen: false,
   popupOpen: false,
+  commentPopoverOpen: false,
 };
 
 describe('shellOverlayAction', () => {
@@ -51,13 +52,19 @@ describe('shellOverlayAction', () => {
     );
   });
 
-  it('closes the drawer, then context menus, then other popups', () => {
-    expect(
-      shellOverlayAction({ ...nothing, drawerOpen: true, contextMenuOpen: true, popupOpen: true }),
-    ).toBe('close-drawer');
-    expect(shellOverlayAction({ ...nothing, contextMenuOpen: true, popupOpen: true })).toBe(
+  it('closes a menu before the drawer or popover it was opened over', () => {
+    const all = { ...nothing, drawerOpen: true, commentPopoverOpen: true };
+    expect(shellOverlayAction({ ...all, contextMenuOpen: true, popupOpen: true })).toBe(
       'close-context-menu',
     );
-    expect(shellOverlayAction({ ...nothing, popupOpen: true })).toBe('dismiss-popup');
+    expect(shellOverlayAction({ ...all, popupOpen: true })).toBe('dismiss-popup');
+    expect(shellOverlayAction(all)).toBe('close-comment-popover');
+    expect(shellOverlayAction({ ...nothing, drawerOpen: true })).toBe('close-drawer');
+  });
+
+  it('closes a comment popover rather than the document under it', () => {
+    expect(shellOverlayAction({ ...nothing, commentPopoverOpen: true })).toBe(
+      'close-comment-popover',
+    );
   });
 });

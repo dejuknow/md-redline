@@ -923,7 +923,9 @@ groups; keep its tests (`path-utils.test.ts`) when changing it. The "Show all
 open tabs" list shows the same labels. The strip is
 not inside an `overflow-clip` ancestor (only the page card below it clips),
 which is what lets the "Show all open tabs" menu (`tab-list-menu`) hang below it
-unclipped.
+unclipped. It closes like the strip's other menus (`useDismiss`): on a press or
+focus outside it, and on Escape, which it keeps to itself, so that Escape does
+not also close the find bar.
 
 Tabs shrink before they scroll. The tabs' scrollport is sized to their natural
 widths (flex-basis auto, no `flex-1`) and may shrink; inactive tabs shrink down
@@ -2839,23 +2841,25 @@ Keep them when restyling or refactoring:
   when it is set. Nothing else in the app looks at Tauri's own globals.
 - `window.__mdrNewTab()`: set by `App.tsx` while mounted, for the shell's New
   Tab (`Cmd+T`, `Ctrl+T`). Does what the tab strip's open-file button does:
-  opens the file picker. A confirm dialog makes it wait (nothing happens); the
-  Mermaid fullscreen view closes first.
+  opens the file picker. A confirm dialog makes it wait (nothing happens);
+  every other overlay closes first.
 - `window.__mdrCloseActiveTab()`: set by `App.tsx` while mounted, for the
   shell's Close Tab (`Cmd+W`, `Ctrl+W`). With something open on top of the
   document it acts on that instead and returns true (`shellOverlayAction`,
   `src/lib/shell-overlay.ts`, top down): a confirm dialog (unsaved changes,
-  delete all, the rail's own) is left waiting for its answer; the Mermaid
-  fullscreen view, a modal (palette, file opener, settings, shortcuts), the
-  comments drawer and App's context menus close; other menus and popovers
-  (the View menu, the tab list, a review popover) get an Escape. The find bar
-  does not count. Otherwise it closes the active tab through the
-  unsaved-changes guard and returns true; returns false with no tab open, so
-  the shell can close the window instead.
+  delete all, the rail's own) is left waiting for its answer; otherwise the
+  topmost of the Mermaid fullscreen view, a modal (palette, file opener,
+  settings, shortcuts), App's context menus, other menus (the View menu, the
+  tab list, a review popover, which get an Escape), the highlight's comment
+  popover and the comments drawer closes. The find bar does not count.
+  Otherwise it closes the active tab through the unsaved-changes guard and
+  returns true; returns false with no tab open, so the shell can close the
+  window instead.
 - `window.__mdrReopenClosedTab()`: set by `App.tsx` while mounted, for the
   shell's Reopen Closed Tab (`Cmd+Shift+T`). Reopens the most recently closed
   tab and returns true; returns false when none is left (see the tab strip
-  above).
+  above), or while a confirm dialog is up. Any other overlay closes first, as
+  for New Tab.
 - `[data-sidebar-panel]`: the expanded sidebar panel; `[data-sidebar-top]` is its
   top row (Explorer/Outline and close).
 - `--window-inset-left`: a CSS variable the shell sets to clear native window

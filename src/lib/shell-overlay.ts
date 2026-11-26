@@ -11,6 +11,8 @@ export interface ShellOverlayState {
   contextMenuOpen: boolean;
   /** A menu or popover App does not own (the View menu, the tab list, a review popover). */
   popupOpen: boolean;
+  /** The highlight's comment popover, which may hold a reply being typed. */
+  commentPopoverOpen: boolean;
 }
 
 /**
@@ -21,20 +23,22 @@ export interface ShellOverlayState {
  *   Cmd+W used to swap the unsaved-changes dialog over to the active tab, so
  *   the reader confirmed closing a tab they had not asked about.
  * - `close-*` / `dismiss-popup`: close that overlay and leave the document be.
- *   The palette, a dialog or a menu used to stay up while the document behind
- *   it closed.
+ *   The palette, a dialog, a menu or a comment popover (with a reply half
+ *   typed in it) used to stay up, or go, while the document behind it closed.
  * - `null`: nothing is open; close the tab. The find bar does not count: it
  *   is part of reading the document, as a browser's is.
  *
- * Checked top down, the order they stack in.
+ * Checked top down, the order they stack in: a menu opened from the drawer
+ * or a popover sits above it.
  */
 export type ShellOverlayAction =
   | 'blocked'
   | 'close-mermaid'
   | 'close-modal'
-  | 'close-drawer'
   | 'close-context-menu'
   | 'dismiss-popup'
+  | 'close-comment-popover'
+  | 'close-drawer'
   | null;
 
 export function shellOverlayAction(state: ShellOverlayState): ShellOverlayAction {
@@ -43,8 +47,9 @@ export function shellOverlayAction(state: ShellOverlayState): ShellOverlayAction
     return 'close-mermaid';
   }
   if (state.activeModal !== null && state.activeModal !== 'search') return 'close-modal';
-  if (state.drawerOpen) return 'close-drawer';
   if (state.contextMenuOpen) return 'close-context-menu';
   if (state.popupOpen) return 'dismiss-popup';
+  if (state.commentPopoverOpen) return 'close-comment-popover';
+  if (state.drawerOpen) return 'close-drawer';
   return null;
 }

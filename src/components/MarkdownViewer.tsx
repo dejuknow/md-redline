@@ -1282,6 +1282,13 @@ function settleIndexAfterWrap(index: WrapTextIndex, touched: WrapTextSegment[], 
       valid = false;
       continue;
     }
+    // A wrap across top-level text can leave the container's child count as
+    // it was (a mark goes in as an empty node between the runs moves into
+    // it), so a text segment's own length is checked as well.
+    if (seg.node.nodeType === Node.TEXT_NODE) {
+      if ((seg.node as Text).data.length !== seg.end - seg.start) valid = false;
+      continue;
+    }
     if (seg.node.nodeType !== Node.ELEMENT_NODE) continue;
     const el = seg.node as HTMLElement;
     if (tidy) pruneEmptyInlineFormatting(el);
