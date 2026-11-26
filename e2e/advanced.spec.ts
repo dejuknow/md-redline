@@ -672,6 +672,85 @@ test.describe('Session persistence', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Desktop app open hook (window.__mdrOpenTarget)
+// ---------------------------------------------------------------------------
+
+test.describe('Desktop app open hook', () => {
+  test('opens a file as a tab in place, keeping the tabs already open', async ({ page }) => {
+    await openFixture(page);
+
+    await page.evaluate((fixture2) => {
+      window.__mdrOpenTarget?.({ file: fixture2 });
+    }, FIXTURE_2);
+
+    const tabBar = page.locator('[data-doc-strip]');
+    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+    await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+  });
+
+  test('shows another folder in the explorer without touching the tabs', async ({ page }) => {
+    const notesDir = resolve(fixtureDir, 'open-hook-notes');
+    const note = resolve(notesDir, 'folder-note.md');
+    mkdirSync(notesDir, { recursive: true });
+    writeFileSync(note, '# Folder note\n');
+
+    await openFixture(page, FIXTURE_2);
+    const tabBar = page.locator('[data-doc-strip]');
+
+    // Start from the Outline view, so the open has to switch the panel back.
+    const sidebarTop = page.locator('[data-sidebar-top]');
+    await sidebarTop.getByRole('button', { name: 'Outline' }).click();
+    await expect(page.locator(`button.w-full.text-left[title="${FIXTURE_1}"]`)).toBeHidden();
+
+    await page.evaluate((dir) => {
+      window.__mdrOpenTarget?.({ dir });
+    }, notesDir);
+
+    await expect(page.locator(`button.w-full.text-left[title="${note}"]`)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+  });
+
+  test("opens a review session's files via the review target", async ({
+    page,
+    request,
+    baseURL,
+  }) => {
+    await openFixture(page);
+
+    const create = await request.post(`${baseURL}/api/review-sessions`, {
+      data: { filePaths: [FIXTURE_2], origin: 'agent' },
+    });
+    expect(create.status()).toBe(201);
+    const { sessionId } = (await create.json()) as { sessionId: string };
+
+    try {
+      // The MCP flow hands the app only the review id; the hook opens the
+      // session's files as tabs on top of what is already open.
+      await page.evaluate((id) => {
+        window.__mdrOpenTarget?.({ review: id });
+      }, sessionId);
+
+      const tabBar = page.locator('[data-doc-strip]');
+      await expect(tabBar.locator('button', { hasText: 'test-doc-2.md' })).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(page.getByRole('heading', { name: 'Second Test Document' })).toBeVisible();
+      await expect(tabBar.locator('button', { hasText: 'test-doc.md' }).first()).toBeVisible();
+    } finally {
+      await request.post(`${baseURL}/api/review-sessions/${sessionId}/abort`, {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 5. SSE file watching
 // ---------------------------------------------------------------------------
 

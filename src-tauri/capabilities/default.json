@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Loading window baseline. The mdr UI itself is remote (127.0.0.1) and gets no IPC access.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

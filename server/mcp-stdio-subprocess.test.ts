@@ -1,10 +1,32 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
-import { existsSync, readdirSync, statSync } from 'fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
+
+import { createBrowserStub } from '../bin/cli-browser-stub.js';
 
 const BIN = join(__dirname, '..', 'bin', 'md-redline');
 const DIST_MCP = join(__dirname, '..', 'dist', 'mcp-stdio.js');
+
+// A tool call that gets as far as opening a review hands it to the browser
+// launcher. A no-op stub there keeps these runs from opening a real browser or
+// the mdr desktop app (which the CLI skips whenever a browser override is set).
+// Made on first use, so a run that skips this file (stale bundle) leaves no
+// directory behind.
+let browserStubDir = '';
+function mcpEnv(): NodeJS.ProcessEnv {
+  if (!browserStubDir) browserStubDir = mkdtempSync(join(tmpdir(), 'mdr-mcp-browser-'));
+  return {
+    ...process.env,
+    NODE_ENV: 'test',
+    MDR_BROWSER: '',
+    MD_REDLINE_BROWSER: createBrowserStub(browserStubDir),
+  };
+}
+afterAll(() => {
+  if (browserStubDir) rmSync(browserStubDir, { recursive: true, force: true });
+});
 
 /**
  * Whether the built MCP bundle is current enough to spawn.
@@ -107,7 +129,7 @@ async function waitFor(
   it('exposes both mdr_request_review and mdr_ask in ListTools', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: mcpEnv(),
     });
 
     const stdoutRef = { current: '' };
@@ -160,7 +182,7 @@ async function waitFor(
   it('lists mdr_comment in tools list', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: mcpEnv(),
     });
 
     const stdoutRef = { current: '' };
@@ -199,7 +221,7 @@ async function waitFor(
     // exposed no way to name a session, so every reply batch minted one.
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: mcpEnv(),
     });
 
     const stdoutRef = { current: '' };
@@ -240,7 +262,7 @@ async function waitFor(
   it('dispatches mdr_comment to handleReviewToolCall', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: mcpEnv(),
     });
 
     const stdoutRef = { current: '' };
@@ -295,7 +317,7 @@ async function waitFor(
   it('still dispatches the old mdr_review name, which is unadvertised but accepted', async () => {
     const child = spawn('node', [BIN, 'mcp'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'test' },
+      env: mcpEnv(),
     });
 
     const stdoutRef = { current: '' };

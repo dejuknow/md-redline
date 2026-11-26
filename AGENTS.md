@@ -92,7 +92,10 @@ An optional MCP stdio server lets AI agents request human review and wait for fe
 - `src/hooks/useReviewSession.ts`: polling and heartbeat for active review sessions
 - `src/hooks/useAgentBaselines.ts`: polls `/api/baselines` and seeds diff references for open tabs from agent before copies
 - `src/hooks/useDiffLines.ts`: single source of diff state shared by raw view, rendered view, and the change count in the diff bar (`DiffBar`) and the strip's View options menu (`DocStrip`)
-- `bin/cli.js`: auto-start CLI and browser opener
+- `bin/cli.js`: auto-start CLI and browser opener (prefers the desktop app on macOS, see Desktop app)
+- `bin/cli-args.js`: `parseCliArgs`, the flag and target parser for a plain `mdr [target]` run
+- `bin/app-handoff.js`: `shouldPreferApp`, when an open may go to the desktop app instead of the browser
+- `src-tauri/`: the optional macOS desktop app (see Desktop app)
 - `eval/runner.ts`: eval harness; default adapter is currently `claude-cli`
 
 ## Comment format
@@ -612,6 +615,19 @@ The undocumented `mdr __port` prints the API port the CLI resolved and exits, wh
 is the only way to observe it: that value only seeds the fallback scan inside
 `findServerPort`, and `--stop` would kill whatever it found. The same test file uses
 it to prove the CLI agrees with the server and `vite.config.ts`.
+
+**Desktop app hand-off**: on macOS a plain `mdr [target]` (and the MCP review
+open) first tries the desktop app through `open mdr://open?...` and falls back
+to the browser launcher when that fails, which it does at once and without a
+prompt when no app has registered the scheme. `shouldPreferApp`
+(`bin/app-handoff.js`) allows the attempt only with no browser override, no
+named port (`MD_REDLINE_PORT` or `PORT`, even one inside the app's range), for
+the user's own home, and for a server port inside the app's scan range
+(6373-6382): the link carries only a path or review id, and the app finds its
+server on its own (port file, then scan), so any other instance stays on the
+browser with its exact URL. `--browser` skips the app, `--no-open` starts the server and opens
+nothing (the app boots the stack with it). `bin/app-open-cli.test.ts` drives
+the real CLI against a fake `open` on PATH (macOS only).
 
 The undocumented `mdr __find-server` prints which running server this invocation
 would act on (or `none`) and touches nothing, which is the only way to observe
@@ -2766,7 +2782,7 @@ with no Exit focus button present to explain why or restore them. Toggle the exp
 
 ### Desktop shell hooks
 
-The desktop shell (a separate private shell around this app) styles the window
+The desktop app (`src-tauri/`, see Desktop app below) styles the window
 chrome and drives a few app actions from outside, so these hooks are a contract.
 Keep them when restyling or refactoring:
 
@@ -2778,6 +2794,12 @@ Keep them when restyling or refactoring:
   controls sit over the collapsed rail's top; the rail's top padding adds it,
   pushing its icons below the controls. (There is no `data-sidebar-logo` any
   more: the rail has no logo.)
+- `window.__mdrOpenTarget({ file } | { dir } | { review })`: set by `App.tsx`
+  while mounted, for opens that arrive while the page is loaded. A file opens
+  as a tab on top of the open ones (the explorer moves to its folder, as with
+  `?file=`), a folder is shown in the explorer (`revealDirInExplorer`), and a
+  review id opens that session's files through the same code as the `?review=`
+  boot open. Only the boot open marks the URL's review as opened.
 - `window.__mdrCloseActiveTab()`: set by `App.tsx` while mounted, for the
   shell's Close Tab (`Cmd+W`, `Ctrl+W`). Closes the active tab through the
   unsaved-changes guard and returns true; returns false with no tab open, so
@@ -3177,6 +3199,102 @@ tsx scripts/simulate-agent.ts --reply-only path/to/file.md
 It edits content near each open comment's anchor, adds a canned reply, and
 optionally resolves the thread, useful for poking at the diff overlay,
 the "no content changes" empty state, and the diff-reference/handoff plumbing.
+
+## Desktop app (Tauri, `src-tauri/`)
+
+`src-tauri/` holds an optional macOS desktop app: a thin Tauri v2 shell around
+the same local server. It is built from source (`src-tauri/README.md`) and is
+not part of the npm package (`files` in `package.json` leaves it out). Only
+macOS is supported: the code has Windows and Linux branches, noted below, but
+nothing builds or tests it there yet.
+
+- The shell is a pure client: it discovers the running server (port file, then
+  a scan of 6373-6382) and points one webview window at it. Like `bin/cli.js`'s
+  `checkServer`, it accepts only a server whose `/api/config` `homeDir` matches
+  its own home (`MD_REDLINE_HOME`, else `$HOME`, compared by realpath), so the
+  e2e suite's server on 3101, which writes the same port file, is never
+  adopted. A Vite dev client counts only when its `/__mdr__` `x-mdr-api-port`
+  header names that server. If nothing is running it spawns
+  `mdr --no-open` through `$SHELL -lic` (fallback `/bin/zsh`). It must be
+  interactive, not just login: nvm puts PATH in `~/.zshrc`, which `-lc`
+  never reads, so a Finder or Dock launch could not find an nvm-linked `mdr`.
+  The spawn runs from the user's home (made absolute, and passed on as
+  `MD_REDLINE_HOME` when that is set): a Finder or Dock launch has `/` as its
+  cwd, and the server trusts the folder it starts in. In restricted mode that
+  still trusts the home, as `mdr` run from there would. Its output goes to
+  `~/Library/Logs/mdr/server-start.log`. A production server serves `/`
+  itself, so the shell skips the dev-mode wait for a Vite client there. Once
+  per launch it also runs `mdr --no-open` against a running production server
+  so the CLI can swap a stale one after an upgrade; opens wait for that to
+  finish (`RECONCILING`, then `ENSURE_LOCK`), so a launch-time Finder open is
+  neither loaded from nor granted on a server about to be replaced. A CLI
+  still running after 45s is stopped rather than left to swap later.
+- A window left on another origin (a dead server, or one on another port)
+  is re-navigated on the next open or Dock click instead of eval'ing into it.
+- The `mdr://open?file=...` link (registered via `src-tauri/Info.plist`) and
+  the `.md` file association both arrive through `RunEvent::Opened`. Only `.md`
+  is associated, because the server opens nothing else. Once the SPA is
+  loaded, opens are delivered in place by eval'ing `window.__mdrOpenTarget`
+  (see Desktop shell hooks); the script falls back to full navigation when the
+  hook is absent (loading or error page). Bare activations never navigate away
+  from an open doc.
+- The CLI side is described under "Desktop app hand-off" above. The MCP review
+  callback sends `mdr://open?review=<id>`; the hook's `{review}` variant opens
+  the session's files, and no filesystem grant is involved (the MCP handler
+  grants server-side first).
+- Finder "Open With" launches skip the CLI, so the shell POSTs
+  `/api/grant-access` itself before navigating, but ONLY for `file://` opens
+  (a real user gesture). `mdr://` links never auto-grant: any web page can fire
+  one (the OS shows a one-time open-in-app confirm), so granting there would
+  bypass restricted-mode consent. The CLI grants for its own links before
+  sending them; a hostile or hand-typed link to an untrusted path lands on the
+  SPA's access-denied tab state.
+- Window lifecycle on macOS: closing the window hides it, a Dock click reopens
+  it, Cmd-Q quits. The menu is Tauri's default with File > Close Tab (Cmd-W),
+  Reopen Closed Tab (Shift-Cmd-T) and Close Window (Shift-Cmd-W). Close Tab
+  evals `window.__mdrCloseActiveTab()` and hides the window when it returns
+  false or the hook is absent; Reopen Closed Tab evals
+  `window.__mdrReopenClosedTab()` (a no-op when there is nothing to reopen)
+  and shows the window again if closing the last tab hid it. The menu is
+  installed in `setup`, after the first window is built: set on the builder,
+  Reopen Closed Tab never showed, because Shift-Cmd-T is AppKit's Show Tab
+  Bar shortcut and automatic window tabbing is only turned off when the first
+  window is built. On Windows and Linux there is no Dock to bring a hidden window back,
+  so closing the window quits the app, and `src-tauri/scripts/tab-keys.js`
+  (an init script, tested in jsdom by `tab-keys.test.ts`) maps Ctrl-W and
+  Ctrl-Shift-T to the same hooks; Ctrl-W with no tab open does nothing.
+- Overlay title bar (macOS): no native title strip; the traffic lights sit
+  on the top row, centered at DEFAULT_ZOOM (125%). An init script sets the
+  app's `--window-inset-left` / `--window-inset-top` hooks for the open
+  sidebar, the collapsed rail plus tab strip, and focus mode, drops them in
+  native full screen, and makes the top 44px drag the window (double-click
+  zooms) outside interactive elements. The `window-drag` capability grants the
+  loopback UI only start-dragging and toggle-maximize.
+- External links (`<a target="_blank">` in rendered markdown) open in the
+  system browser, not the webview. An injected init script turns an
+  external-link click into a top-level navigation, and the window's
+  `on_navigation` handler (`classify_navigation`) sends every http(s)/mailto/tel
+  URL to `open` and cancels the in-webview load, except loopback on the one
+  port the shell picked for its UI (`UI_PORT`, set before it navigates there);
+  a link to another local service, such as a dev server on `localhost:3000`,
+  would otherwise replace the app. Internal schemes (tauri://, about:blank,
+  and Windows' http://tauri.localhost) are allowed through. The main
+  window is built in code (`build_main_window`), not declared in
+  tauri.conf.json, because init scripts and nav handlers are builder-only.
+
+Commands: `npm run app:dev` (tauri dev), `npm run app:build` (release bundle),
+`npx tauri build --debug` (fast bundle). Rust tests: `cargo test` in
+`src-tauri/`. Icons were generated with `npx tauri icon` from
+`public/favicon.svg` composited onto a red squircle. Nothing in CI builds the
+app: `scripts/release.mjs` gates `npm publish` on every GitHub Actions check of
+the commit, so an app job there would block npm releases on the app.
+
+Dev-mode gotcha: when the shell has to start the server it runs the
+globally-linked `mdr`, which picks prod vs dev solely by whether
+`dist/server.js` exists. A stale `dist/` (e.g. left by `npm test`) makes
+`npm run app:dev` silently boot the prod server with no HMR. Fix: `mdr
+--stop`, then start `npm run dev` yourself before (or instead of) relying
+on the shell's auto-start.
 
 ## Eval notes
 
