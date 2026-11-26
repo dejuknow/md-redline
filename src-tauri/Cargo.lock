@@ -1784,6 +1784,9 @@ dependencies = [
 name = "mdr-desktop"
 version = "0.6.0"
 dependencies = [
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde_json",
  "tauri",
  "tauri-build",
