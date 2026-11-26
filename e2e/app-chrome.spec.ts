@@ -444,18 +444,21 @@ test.describe('Review band and window chrome', () => {
     await top.evaluate((el) =>
       (el as HTMLElement).style.setProperty('--window-inset-left', '72px'),
     );
-    const fits = await top.evaluate((el) => {
-      const row = el.getBoundingClientRect();
-      const close = el.querySelector('[aria-label="Close panel"]')!.getBoundingClientRect();
-      const switches = [...el.querySelectorAll('button[title]')].filter(
-        (b) => b.getAttribute('aria-label') !== 'Close panel',
-      );
-      return switches.every((b) => {
-        const r = b.getBoundingClientRect();
-        return r.left >= row.left && r.right <= close.left;
+    // Polled: the switches drop to icons once the row's resize observer
+    // reports the narrower content box, a frame after the inset lands.
+    const fits = () =>
+      top.evaluate((el) => {
+        const row = el.getBoundingClientRect();
+        const close = el.querySelector('[aria-label="Close panel"]')!.getBoundingClientRect();
+        const switches = [...el.querySelectorAll('button[title]')].filter(
+          (b) => b.getAttribute('aria-label') !== 'Close panel',
+        );
+        return switches.every((b) => {
+          const r = b.getBoundingClientRect();
+          return r.left >= row.left && r.right <= close.left;
+        });
       });
-    });
-    expect(fits).toBe(true);
+    await expect.poll(fits).toBe(true);
     // The labels stay as the buttons' accessible names.
     await expect(top.getByRole('button', { name: 'Explorer' })).toBeVisible();
     await expect(top.getByRole('button', { name: 'Outline' })).toBeVisible();
