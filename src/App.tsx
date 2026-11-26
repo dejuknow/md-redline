@@ -143,6 +143,20 @@ const STARTUP_REVEAL_MS = 1000;
 // breadcrumb (28px tall) and an 8px gap below it.
 const HEADING_JUMP_OFFSET = 16 + 28 + 8;
 
+declare global {
+  interface Window {
+    /** Set while the app is mounted; called by the desktop shell for its
+     *  Close Tab shortcut (Cmd+W, Ctrl+W). Closes the active tab, through the
+     *  unsaved-changes guard, and returns true; returns false when no tab is
+     *  open, so the shell can close the window instead. */
+    __mdrCloseActiveTab?: () => boolean;
+    /** Set while the app is mounted; called by the desktop shell for its
+     *  Reopen Closed Tab shortcut (Cmd+Shift+T). Reopens the most recently
+     *  closed tab and returns true; returns false when none is left. */
+    __mdrReopenClosedTab?: () => boolean;
+  }
+}
+
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 const modKey = isMac ? '\u2318' : 'Ctrl';
 const prevTabShortcut = isMac ? '\u2318\u21e7[' : 'Ctrl+Shift+[';
@@ -199,6 +213,8 @@ export default function App() {
     closeOtherTabs: closeOtherTabsDirect,
     closeAllTabs: closeAllTabsDirect,
     closeTabsToRight: closeTabsToRightDirect,
+    reopenClosedTab,
+    canReopenClosedTab,
     switchTab,
     saveFile,
     getSaveState,
@@ -2429,6 +2445,28 @@ export default function App() {
     [openTab, addRecentFile],
   );
 
+  // The desktop shell's Close Tab (Cmd+W, Ctrl+W): browsers keep that key for
+  // their own tabs, so only the shell calls this.
+  useEffect(() => {
+    window.__mdrCloseActiveTab = () => {
+      if (!activeFilePath) return false;
+      closeTab(activeFilePath);
+      return true;
+    };
+    return () => {
+      delete window.__mdrCloseActiveTab;
+    };
+  }, [activeFilePath, closeTab]);
+
+  // The desktop shell's Reopen Closed Tab (Cmd+Shift+T), which browsers also
+  // keep for their own tabs. The palette and the tab menu reach it in a browser.
+  useEffect(() => {
+    window.__mdrReopenClosedTab = reopenClosedTab;
+    return () => {
+      delete window.__mdrReopenClosedTab;
+    };
+  }, [reopenClosedTab]);
+
   const revealInFinder = useCallback(
     (path: string) => {
       fetch('/api/reveal', {
@@ -2554,6 +2592,8 @@ export default function App() {
     closeOtherTabs,
     closeAllTabs,
     closeTabsToRight,
+    reopenClosedTab,
+    canReopenClosedTab,
     viewerCtxMenu,
     explorerCtxMenu,
     tabCtxMenu,
@@ -2865,8 +2905,8 @@ export default function App() {
   }, [viewMode]);
 
   // Command palette commands — split into categories for manageable dependency arrays
-  const navigationCommands = useMemo(
-    (): Command[] => [
+  const navigationCommands = useMemo((): Command[] => {
+    const cmds: Command[] = [
       {
         id: 'next-comment',
         label: 'Jump to next comment',
@@ -2905,9 +2945,28 @@ export default function App() {
           setSearchFocusTrigger((t) => t + 1);
         },
       },
-    ],
-    [handleJumpToNext, handleJumpToPrev, switchTabByOffset, setActiveModal, setSearchFocusTrigger],
-  );
+    ];
+    // No shortcut: browsers keep Cmd+Shift+T, so only the desktop shell binds it.
+    if (canReopenClosedTab) {
+      cmds.push({
+        id: 'reopen-closed-tab',
+        label: 'Reopen closed tab',
+        section: 'Tabs',
+        onExecute: () => {
+          reopenClosedTab();
+        },
+      });
+    }
+    return cmds;
+  }, [
+    handleJumpToNext,
+    handleJumpToPrev,
+    switchTabByOffset,
+    setActiveModal,
+    setSearchFocusTrigger,
+    canReopenClosedTab,
+    reopenClosedTab,
+  ]);
 
   const viewCommands = useMemo((): Command[] => {
     const cmds: Command[] = [

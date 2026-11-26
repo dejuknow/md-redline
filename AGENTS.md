@@ -900,6 +900,20 @@ truncating. Only past those floors does the scrollport overflow, which brings up
 the scroll arrows and the tab list. The open-file button sits right after the
 scrollport, not inside it, so a tab can never scroll under it.
 
+Closed tabs can come back. `useTabs` keeps the 20 most recently closed tabs
+(`closedTabs`, newest first, one entry per path, in memory only) with the
+index each had, filled by every close path: Close, Close Others, Close Tabs to
+the Right and Close All. A close cancelled at the unsaved-changes dialog
+records nothing. `reopenClosedTab()` takes the newest entry, opens it at its old
+index (clamped to the strip) and activates it, or just switches to it when that
+path is open again; a file deleted since loads into the usual missing-file
+error state. A batch close comes back one tab per call, leftmost first, so each
+lands back in its old slot. The entry points are the palette's **Reopen closed
+tab** (listed only while there is something to reopen) and the tab menu's
+**Reopen Closed Tab** (disabled when there is nothing). There is no browser
+shortcut: browsers keep `Cmd+Shift+T`, so the desktop shell binds it through
+`window.__mdrReopenClosedTab` (see Desktop shell hooks).
+
 The controls group on the right (`data-testid="panel-toolbar"`) is kept short
 so the tabs keep the width. In order:
 
@@ -2736,7 +2750,8 @@ with no Exit focus button present to explain why or restore them. Toggle the exp
 ### Desktop shell hooks
 
 The desktop shell (a separate private shell around this app) styles the window
-chrome from outside, so these hooks are a contract. Keep them when restyling:
+chrome and drives a few app actions from outside, so these hooks are a contract.
+Keep them when restyling or refactoring:
 
 - `data-app-root`: the root element that holds the frame background; its first
   child is the padded row of panels, its last the status bar.
@@ -2747,6 +2762,14 @@ chrome from outside, so these hooks are a contract. Keep them when restyling:
   controls sit over the collapsed rail's top; the rail's top padding adds it,
   pushing its icons below the controls. (There is no `data-sidebar-logo` any
   more: the rail has no logo.)
+- `window.__mdrCloseActiveTab()`: set by `App.tsx` while mounted, for the
+  shell's Close Tab (`Cmd+W`, `Ctrl+W`). Closes the active tab through the
+  unsaved-changes guard and returns true; returns false with no tab open, so
+  the shell can close the window instead.
+- `window.__mdrReopenClosedTab()`: set by `App.tsx` while mounted, for the
+  shell's Reopen Closed Tab (`Cmd+Shift+T`). Reopens the most recently closed
+  tab and returns true; returns false when none is left (see the tab strip
+  above).
 - `[data-sidebar-panel]`: the expanded sidebar panel; `[data-sidebar-top]` is its
   top row (Explorer/Outline and close).
 - `--window-inset-left`: a CSS variable the shell sets to clear native window
@@ -2965,7 +2988,7 @@ share a 140ms fade/scale enter motion via the `.overlay-backdrop-enter` and
 
 `Cmd+K`, or the status bar's Commands hint, opens the palette; both run App's
 `openCommandPalette()`. Commands include: navigation (next/prev comment, find),
-tabs (prev/next), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
+tabs (prev/next, reopen closed tab while one is left), view toggles (comments rail, file explorer, outline, raw/rendered, diff,
 inline edit mode),
 file ops (reload, open, mark reviewed), settings, keyboard help, undo (Undo delete /
 Undo diff reset, while the open file has one), all themes,
