@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react';
 
 // Mock preferences-client so SettingsContext doesn't try to hit the network
 const fetchPreferences = vi.fn();
@@ -210,5 +210,62 @@ describe('SettingsPanel: hidden HTML comments', () => {
     ).not.toBeNull();
     expand();
     expect(within(screen.getByText('Your own').parentElement!).getByText('TODO')).not.toBeNull();
+  });
+});
+
+describe('SettingsPanel: About', () => {
+  const mockVersion = (impl: () => Promise<unknown>) => {
+    const fetchMock = vi.fn((url: string) =>
+      url === '/api/version' ? impl() : Promise.reject(new Error(`unexpected ${url}`)),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+  const okVersion = () =>
+    mockVersion(async () => new Response(JSON.stringify({ version: '9.9.9' }), { status: 200 }));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete window.__mdrDesktop;
+    delete window.__mdrDesktopVersion;
+  });
+
+  it('lists About in the nav and shows the version and links', async () => {
+    okVersion();
+    renderPanel({ open: true });
+    fireEvent.click(screen.getByRole('button', { name: 'About' }));
+    expect(await screen.findByText('9.9.9')).not.toBeNull();
+    const about = document.querySelector('[data-settings-about]') as HTMLElement;
+    expect(about).not.toBeNull();
+    const href = (name: string) => within(about).getByRole('link', { name }).getAttribute('href');
+    expect(href('GitHub')).toBe('https://github.com/dejuknow/md-redline');
+    expect(href('Report an issue')).toBe(
+      'https://github.com/dejuknow/md-redline/issues/new/choose',
+    );
+    expect(href('Release notes')).toBe('https://github.com/dejuknow/md-redline/releases');
+    expect(within(about).queryByText('Desktop app')).toBeNull();
+  });
+
+  it('opens straight on About with initialSection', async () => {
+    okVersion();
+    renderPanel({ open: true, initialSection: 'about' });
+    expect(document.querySelector('[data-settings-about]')).not.toBeNull();
+    expect(await screen.findByText('9.9.9')).not.toBeNull();
+  });
+
+  it('shows the Desktop app row only in the desktop app', async () => {
+    okVersion();
+    window.__mdrDesktop = true;
+    window.__mdrDesktopVersion = '0.6.0';
+    renderPanel({ open: true, initialSection: 'about' });
+    expect(screen.getByText('Desktop app')).not.toBeNull();
+    expect(screen.getByText('0.6.0')).not.toBeNull();
+    await screen.findByText('9.9.9');
+  });
+
+  it('shows Unknown when the version fetch fails', async () => {
+    mockVersion(() => Promise.reject(new Error('offline')));
+    renderPanel({ open: true, initialSection: 'about' });
+    await waitFor(() => expect(screen.getByText('Unknown')).not.toBeNull());
   });
 });

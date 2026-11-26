@@ -5,8 +5,11 @@ import type { CommentTemplate } from '../lib/settings';
 import { DEFAULT_TEMPLATES, DEFAULT_HIDDEN_COMMENT_TOOLS } from '../lib/settings';
 import { LIGHT_THEMES, DARK_THEMES } from '../lib/themes';
 import { ThemePreview } from './ThemePreview';
+import { desktopAppVersion } from '../lib/desktop';
+import { readJsonResponse } from '../lib/http';
 
-type Section = 'templates' | 'general' | 'theme';
+export type SettingsSection = 'templates' | 'general' | 'theme' | 'about';
+type Section = SettingsSection;
 
 interface Props {
   open: boolean;
@@ -15,6 +18,8 @@ interface Props {
   onAuthorChange: (name: string) => void;
   /** Swaps this dialog for the keyboard shortcuts panel. */
   onOpenShortcuts?: () => void;
+  /** Section to show when the dialog opens; without it the dialog keeps the last section shown. */
+  initialSection?: SettingsSection;
 }
 
 /**
@@ -43,7 +48,14 @@ function PrefixWords({ words }: { words: string[] }) {
   );
 }
 
-export function SettingsPanel({ open, onClose, author, onAuthorChange, onOpenShortcuts }: Props) {
+export function SettingsPanel({
+  open,
+  onClose,
+  author,
+  onAuthorChange,
+  onOpenShortcuts,
+  initialSection,
+}: Props) {
   const {
     settings,
     updateTemplates,
@@ -93,9 +105,32 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange, onOpenSho
       setDraftMaxLength(String(settings.commentMaxLength));
       setEditingIndex(null);
       setAddingNew(false);
+      if (initialSection) setActiveSection(initialSection);
     }
     prevOpenRef.current = open;
-  }, [open, settings.templates, author, settings.commentMaxLength]);
+  }, [open, settings.templates, author, settings.commentMaxLength, initialSection]);
+
+  // The server's version, fetched only while the About section is showing.
+  const [serverVersion, setServerVersion] = useState<string | null | 'failed'>(null);
+  const aboutVisible = open && activeSection === 'about';
+  useEffect(() => {
+    if (!aboutVisible) return;
+    const controller = new AbortController();
+    setServerVersion(null);
+    (async () => {
+      try {
+        const res = await fetch('/api/version', { signal: controller.signal });
+        const data = res.ok ? await readJsonResponse<{ version?: string }>(res) : null;
+        if (controller.signal.aborted) return;
+        setServerVersion(
+          typeof data?.version === 'string' && data.version ? data.version : 'failed',
+        );
+      } catch {
+        if (!controller.signal.aborted) setServerVersion('failed');
+      }
+    })();
+    return () => controller.abort();
+  }, [aboutVisible]);
 
   // Focus new template label input when adding
   useEffect(() => {
@@ -314,6 +349,32 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange, onOpenSho
         </svg>
       ),
     },
+    {
+      key: 'about',
+      label: 'About',
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
+          />
+        </svg>
+      ),
+    },
+  ];
+
+  const desktopVersion = desktopAppVersion();
+  const aboutLinks = [
+    { label: 'GitHub', href: 'https://github.com/dejuknow/md-redline' },
+    { label: 'Report an issue', href: 'https://github.com/dejuknow/md-redline/issues/new/choose' },
+    { label: 'Release notes', href: 'https://github.com/dejuknow/md-redline/releases' },
   ];
 
   return (
@@ -1195,6 +1256,53 @@ export function SettingsPanel({ open, onClose, author, onAuthorChange, onOpenSho
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {activeSection === 'about' && (
+              <div className="space-y-6" data-settings-about>
+                <div>
+                  <h3 className="text-sm font-semibold text-content">mdr</h3>
+                  <p className="text-xs text-content-muted mt-0.5">
+                    md-redline: review markdown with comments your AI agent can read.
+                  </p>
+                </div>
+
+                <dl className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-content-secondary">Version</dt>
+                    <dd className="text-content">
+                      {serverVersion === null
+                        ? '...'
+                        : serverVersion === 'failed'
+                          ? 'Unknown'
+                          : serverVersion}
+                    </dd>
+                  </div>
+                  {desktopVersion && (
+                    <div className="flex items-center justify-between gap-4">
+                      <dt className="text-content-secondary">Desktop app</dt>
+                      <dd className="text-content">{desktopVersion}</dd>
+                    </div>
+                  )}
+                </dl>
+
+                <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                  {aboutLinks.map((l) => (
+                    <li key={l.href}>
+                      <a
+                        href={l.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary-text hover:underline"
+                      >
+                        {l.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+
+                <p className="text-xs text-content-muted">MIT License. © 2026 Dennis Ju.</p>
               </div>
             )}
           </div>

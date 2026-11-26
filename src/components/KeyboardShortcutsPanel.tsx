@@ -11,6 +11,8 @@ interface Props {
 
 const mod = isApplePlatform() ? '\u2318' : 'Ctrl+';
 const shift = isApplePlatform() ? '\u21e7' : 'Shift+';
+const ctrlTab = isApplePlatform() ? '\u2303\u21e5' : 'Ctrl+Tab';
+const ctrlShiftTab = isApplePlatform() ? '\u2303\u21e7\u21e5' : 'Ctrl+Shift+Tab';
 
 interface Shortcut {
   keys: string;
@@ -23,6 +25,8 @@ interface Section {
   shortcuts: Shortcut[];
   /** Listed only inside the desktop app, which binds keys browsers keep for their own tabs. */
   desktopOnly?: boolean;
+  /** Listed only inside the macOS desktop app, whose menus carry these keys. */
+  macDesktopOnly?: boolean;
 }
 
 const sections: Section[] = [
@@ -44,6 +48,19 @@ const sections: Section[] = [
       { keys: `${mod}T`, label: 'New tab' },
       { keys: `${mod}W`, label: 'Close tab' },
       { keys: `${mod}${shift}T`, label: 'Reopen closed tab' },
+      { keys: ctrlTab, label: 'Show next tab' },
+      { keys: ctrlShiftTab, label: 'Show previous tab' },
+      { keys: `${mod}1-8`, label: 'Go to tab by position' },
+      { keys: `${mod}9`, label: 'Go to last tab' },
+    ],
+  },
+  {
+    title: 'Zoom',
+    macDesktopOnly: true,
+    shortcuts: [
+      { keys: `${mod}=`, label: 'Zoom in' },
+      { keys: `${mod}-`, label: 'Zoom out' },
+      { keys: `${mod}0`, label: 'Actual size' },
     ],
   },
   {
@@ -127,6 +144,7 @@ export function KeyboardShortcutsPanel({ open, onClose, resolveEnabled }: Props)
         <div className="px-5 py-4 max-h-[70vh] overflow-y-auto space-y-5">
           {sections.map((section) => {
             if (section.desktopOnly && !desktopApp) return null;
+            if (section.macDesktopOnly && !(desktopApp && isApplePlatform())) return null;
             const visibleShortcuts = section.shortcuts.filter(
               (s) => !s.condition || (s.condition === 'resolve' && resolveEnabled),
             );

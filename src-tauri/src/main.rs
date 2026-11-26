@@ -1,16 +1,19 @@
 // Desktop shell for md-redline. A thin client: discovers (or starts) the
 // local mdr server and points a single webview window at it. All product
 // logic lives in the web app; this binary only handles window lifecycle,
-// the mdr:// deep link, and .md file associations.
+// the menus and keys browsers keep for themselves, page zoom, the mdr://
+// deep link, .md file associations and files dropped on the window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use url::Url;
 
@@ -19,10 +22,93 @@ use url::Url;
 const DEFAULT_SERVER_PORT: u16 = 6373;
 const DEFAULT_CLIENT_PORT: u16 = 5188;
 const MAX_PORT_SCAN: u16 = 10;
-/// Starting zoom for the webview; Cmd +/- adjusts from here at runtime
-/// (zoomHotkeysEnabled). Applied once so a manual zoom change is never
-/// clobbered by later doc opens.
+/// The webview's zoom out of the box, and what View > Actual Size (Cmd+0)
+/// returns to. The app's type and spacing are drawn for it.
 const DEFAULT_ZOOM: f64 = 1.25;
+/// The zoom levels Zoom In and Zoom Out step through.
+const ZOOM_STEPS: [f64; 9] = [0.8, 0.9, 1.0, 1.1, DEFAULT_ZOOM, 1.4, 1.6, 1.8, 2.0];
+/// The page zoom in effect, as f64 bits. The shell owns it: Tauri's own zoom
+/// hotkeys are a page script that calls a webview command the loopback page
+/// is not allowed, so before the View menu took over Cmd+= / Cmd+- / Cmd+0
+/// did nothing. Saved to ZOOM_FILE on every change and read back at launch.
+static ZOOM_BITS: AtomicU64 = AtomicU64::new(0);
+static ZOOM_FILE: OnceLock<PathBuf> = OnceLock::new();
+
+/// A zoom read back from disk, or anything else, as one of ZOOM_STEPS: the
+/// nearest one, DEFAULT_ZOOM for anything unreadable.
+fn snap_zoom(value: f64) -> f64 {
+    if !value.is_finite() || value <= 0.0 {
+        return DEFAULT_ZOOM;
+    }
+    ZOOM_STEPS
+        .iter()
+        .copied()
+        .min_by(|a, b| (a - value).abs().total_cmp(&(b - value).abs()))
+        .unwrap_or(DEFAULT_ZOOM)
+}
+
+/// The zoom one step in (`dir` > 0) or out (`dir` < 0) from `current`,
+/// staying at the ends of ZOOM_STEPS.
+#[cfg(any(target_os = "macos", test))]
+fn step_zoom(current: f64, dir: i32) -> f64 {
+    let at = ZOOM_STEPS.iter().position(|z| *z == snap_zoom(current)).unwrap_or(4);
+    let next = if dir > 0 { (at + 1).min(ZOOM_STEPS.len() - 1) } else if dir < 0 { at.saturating_sub(1) } else { at };
+    ZOOM_STEPS[next]
+}
+
+fn parse_saved_zoom(text: &str) -> f64 {
+    text.trim().parse::<f64>().map(snap_zoom).unwrap_or(DEFAULT_ZOOM)
+}
+
+fn current_zoom() -> f64 {
+    let bits = ZOOM_BITS.load(Ordering::SeqCst);
+    if bits == 0 { DEFAULT_ZOOM } else { f64::from_bits(bits) }
+}
+
+/// Reads the saved zoom (DEFAULT_ZOOM when there is none), once at launch.
+fn load_zoom(app: &AppHandle) {
+    let Ok(dir) = app.path().app_config_dir() else { return };
+    let file = dir.join("zoom");
+    let zoom = std::fs::read_to_string(&file).map(|t| parse_saved_zoom(&t)).unwrap_or(DEFAULT_ZOOM);
+    ZOOM_BITS.store(zoom.to_bits(), Ordering::SeqCst);
+    let _ = ZOOM_FILE.set(file);
+}
+
+/// The script that brings the shell's window chrome in line with `zoom`
+/// (see SHELL_CHROME_SCRIPT). Empty where there is no such chrome.
+fn chrome_zoom_script(zoom: f64) -> String {
+    if cfg!(target_os = "macos") {
+        format!("window.__mdrShellZoom && window.__mdrShellZoom({zoom});")
+    } else {
+        String::new()
+    }
+}
+
+/// Sets the page zoom and keeps the chrome's traffic-light room in step.
+#[cfg(target_os = "macos")]
+fn apply_zoom(win: &WebviewWindow, zoom: f64) {
+    let _ = win.set_zoom(zoom);
+    let script = chrome_zoom_script(zoom);
+    if !script.is_empty() {
+        let _ = win.eval(&script);
+    }
+}
+
+/// View > Zoom In / Zoom Out (`dir` 1 / -1) and Actual Size (0).
+#[cfg(target_os = "macos")]
+fn change_zoom(app: &AppHandle, dir: i32) {
+    let zoom = if dir == 0 { DEFAULT_ZOOM } else { step_zoom(current_zoom(), dir) };
+    ZOOM_BITS.store(zoom.to_bits(), Ordering::SeqCst);
+    if let Some(file) = ZOOM_FILE.get() {
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(file, zoom.to_string());
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        apply_zoom(&win, zoom);
+    }
+}
 
 /// Injected at document start on every navigation. The rendered markdown
 /// renders external links as `<a target="_blank">`, which a WKWebView
@@ -66,13 +152,19 @@ const SHELL_CHROME_SCRIPT: &str = r#"(function () {
   var root = document.documentElement;
   root.setAttribute('data-shell', 'mac');
   // The lights sit at fixed window points (traffic_light_position) while the
-  // page is zoomed to DEFAULT_ZOOM (filled in for __MDR_ZOOM__), so the room
-  // they need is kept in points and converted to CSS px: the right edge of
-  // the lights plus a gap, and their bottom plus a gap. WKWebView exposes
-  // no zoom to the page (outerWidth / innerWidth stays 1).
-  var Z = __MDR_ZOOM__, LIGHTS_RIGHT_PT = 98, LIGHTS_BOTTOM_PT = 43;
-  root.style.setProperty('--mdr-lights-r', (LIGHTS_RIGHT_PT / Z).toFixed(1) + 'px');
-  root.style.setProperty('--mdr-lights-b', (LIGHTS_BOTTOM_PT / Z).toFixed(1) + 'px');
+  // page is zoomed, so the room they need is kept in points and converted to
+  // CSS px at the page zoom: the right edge of the lights plus a gap, and
+  // their bottom plus a gap. WKWebView exposes no zoom to the page
+  // (outerWidth / innerWidth stays 1), so the shell passes it: the zoom at
+  // window build fills in __MDR_ZOOM__, and the shell calls __mdrShellZoom
+  // again on every zoom change and every page load.
+  var LIGHTS_RIGHT_PT = 98, LIGHTS_BOTTOM_PT = 43;
+  window.__mdrShellZoom = function (Z) {
+    if (!(Z > 0)) return;
+    root.style.setProperty('--mdr-lights-r', (LIGHTS_RIGHT_PT / Z).toFixed(1) + 'px');
+    root.style.setProperty('--mdr-lights-b', (LIGHTS_BOTTOM_PT / Z).toFixed(1) + 'px');
+  };
+  window.__mdrShellZoom(__MDR_ZOOM__);
   var on = 'html[data-shell="mac"]:not([data-fullscreen]) ';
   var css = [
     // Sidebar open: its top row starts at 8px and pads 4px past the inset.
@@ -123,14 +215,21 @@ const SHELL_CHROME_SCRIPT: &str = r#"(function () {
 /// Tells the web app it runs inside the desktop app, on every platform and
 /// before any of its scripts: it lists the desktop-only tab shortcuts in its
 /// palette and shortcuts panel only then (`isDesktopApp` in
-/// src/lib/desktop.ts). One flag, so nothing in the app sniffs Tauri internals.
-const DESKTOP_FLAG_SCRIPT: &str = "window.__mdrDesktop = true;";
+/// src/lib/desktop.ts), and its About section shows the app's own version,
+/// which is not the npm package's. One flag, so nothing in the app sniffs
+/// Tauri internals.
+fn desktop_flag_script(app_version: &str) -> String {
+    format!("window.__mdrDesktop = true; window.__mdrDesktopVersion = {};", json_escape(app_version))
+}
 
-/// New Tab (Ctrl+T), Close Tab (Ctrl+W) and Reopen Closed Tab (Ctrl+Shift+T)
-/// for Windows and Linux, which have no app menu to carry the shortcuts. See
-/// the script for the rules; macOS uses the File menu instead.
-#[cfg(not(target_os = "macos"))]
-const TAB_KEY_SCRIPT: &str = include_str!("../scripts/tab-keys.js");
+/// Tab keys no app menu can carry: Ctrl+Tab everywhere (WKWebView never hands
+/// it to the macOS menu), plus New Tab, Close Tab, Reopen Closed Tab and
+/// Ctrl+1 to Ctrl+9 on Windows and Linux, which have no app menu. See the
+/// script for the rules.
+fn tab_key_script() -> String {
+    include_str!("../scripts/tab-keys.js")
+        .replace("__MDR_MENU_KEYS__", if cfg!(target_os = "macos") { "true" } else { "false" })
+}
 
 /// Asks the app to close its active tab; falls back to hiding the window
 /// when no tab is open or the app is not loaded (loading or error page).
@@ -151,20 +250,88 @@ fn close_tab_or_window(app: &AppHandle) {
     }
 }
 
-/// The default macOS menu, except that Cmd+T opens a new tab (the file
-/// picker, as the tab strip's "+" does), Cmd+W closes the active tab, Close
-/// Window moves to Shift+Cmd+W and Shift+Cmd+T reopens the last closed tab (as
-/// in browsers).
+/// The macOS menu bar. Every item that acts on the document calls a hook core
+/// registers (AGENTS.md, "Desktop shell hooks"); the shell only owns what
+/// needs it: windows, zoom, and links out.
+///
+/// Keys, as measured in WKWebView: a menu accelerator fires only when the
+/// page leaves the keydown unhandled (a page `preventDefault` suppresses it).
+/// - Cmd+B, Cmd+Shift+O, Cmd+\, Cmd+. and Cmd+, are core's own keys. Core's
+///   handler takes them everywhere (text fields, dialogs, the palette), so
+///   they reach these items only while the Mermaid fullscreen view owns the
+///   keyboard, where the hooks do nothing, as the key does. Their
+///   accelerators therefore change nothing the keys did.
+/// - Cmd+1 to Cmd+9, Cmd+=, Cmd+- and Cmd+0 are not core keys (Cmd+= / Cmd+-
+///   / Cmd+0 zoom the diagram inside the Mermaid fullscreen view, which takes
+///   them first), so the accelerators carry them.
+/// - Ctrl+Tab never reaches the menu at all; the page key script
+///   (scripts/tab-keys.js) reads it, and the Go menu only shows it.
+/// - Single-letter keys (N, P, ?) never become accelerators: a menu key
+///   fires inside text fields, where those letters are typing.
+///
+/// Built in `setup`, after the first window: set on the builder, Reopen
+/// Closed Tab never showed, because Shift-Cmd-T is AppKit's Show Tab Bar
+/// shortcut and automatic window tabbing is only turned off when the first
+/// window is built.
 #[cfg(target_os = "macos")]
 fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
     let about = AboutMetadata {
         name: Some(app.package_info().name.clone()),
         version: Some(app.package_info().version.to_string()),
+        copyright: Some("\u{a9} 2026 Dennis Ju. MIT License.".into()),
+        credits: Some(format!("Review markdown with comments your AI agent can read.\n{GITHUB_URL}")),
         ..Default::default()
     };
     let sep = || PredefinedMenuItem::separator(app);
-    Menu::with_items(
+    let item = |id: &str, text: &str, accel: Option<&str>| MenuItem::with_id(app, id, text, true, accel);
+    let tab_items = (1..=9)
+        .map(|n| {
+            let text = if n == 9 { "Last Tab".to_string() } else { format!("Tab {n}") };
+            item(&format!("{MENU_SELECT_TAB_PREFIX}{n}"), &text, Some(&format!("CmdOrCtrl+{n}")))
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let mut go_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::new();
+    let prev_tab = item(MENU_PREV_TAB, "Previous Tab", Some("Ctrl+Shift+Tab"))?;
+    let next_tab = item(MENU_NEXT_TAB, "Next Tab", Some("Ctrl+Tab"))?;
+    let go_sep_1 = sep()?;
+    let go_sep_2 = sep()?;
+    let next_comment = item(MENU_NEXT_COMMENT, "Next Comment", None)?;
+    let prev_comment = item(MENU_PREV_COMMENT, "Previous Comment", None)?;
+    go_items.push(&prev_tab);
+    go_items.push(&next_tab);
+    go_items.push(&go_sep_1);
+    for tab in &tab_items {
+        go_items.push(tab);
+    }
+    go_items.push(&go_sep_2);
+    go_items.push(&next_comment);
+    go_items.push(&prev_comment);
+
+    let window_menu = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &sep()?,
+            &PredefinedMenuItem::bring_all_to_front(app, None)?,
+        ],
+    )?;
+    let help_menu = Submenu::with_items(
+        app,
+        "Help",
+        true,
+        &[
+            &item(MENU_HELP_SHORTCUTS, "Keyboard Shortcuts", None)?,
+            &sep()?,
+            &item(MENU_HELP_GITHUB, "mdr on GitHub", None)?,
+            &item(MENU_HELP_ISSUE, "Report an Issue", None)?,
+            &item(MENU_HELP_RELEASES, "Release Notes", None)?,
+        ],
+    )?;
+    let menu = Menu::with_items(
         app,
         &[
             &Submenu::with_items(
@@ -174,10 +341,13 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
                 &[
                     &PredefinedMenuItem::about(app, None, Some(about))?,
                     &sep()?,
+                    &item(MENU_SETTINGS, "Settings\u{2026}", Some("CmdOrCtrl+Comma"))?,
+                    &sep()?,
                     &PredefinedMenuItem::services(app, None)?,
                     &sep()?,
                     &PredefinedMenuItem::hide(app, None)?,
                     &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::show_all(app, None)?,
                     &sep()?,
                     &PredefinedMenuItem::quit(app, None)?,
                 ],
@@ -187,22 +357,13 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
                 "File",
                 true,
                 &[
-                    &MenuItem::with_id(app, MENU_NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
-                    &MenuItem::with_id(app, MENU_CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
-                    &MenuItem::with_id(
-                        app,
-                        MENU_REOPEN_TAB,
-                        "Reopen Closed Tab",
-                        true,
-                        Some("CmdOrCtrl+Shift+T"),
-                    )?,
-                    &MenuItem::with_id(
-                        app,
-                        MENU_CLOSE_WINDOW,
-                        "Close Window",
-                        true,
-                        Some("CmdOrCtrl+Shift+W"),
-                    )?,
+                    &item(MENU_NEW_TAB, "New Tab", Some("CmdOrCtrl+T"))?,
+                    &item(MENU_CLOSE_TAB, "Close Tab", Some("CmdOrCtrl+W"))?,
+                    &item(MENU_REOPEN_TAB, "Reopen Closed Tab", Some("CmdOrCtrl+Shift+T"))?,
+                    &sep()?,
+                    &item(MENU_REVEAL, "Show in Finder", None)?,
+                    &sep()?,
+                    &item(MENU_CLOSE_WINDOW, "Close Window", Some("CmdOrCtrl+Shift+W"))?,
                 ],
             )?,
             &Submenu::with_items(
@@ -219,19 +380,37 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry
                     &PredefinedMenuItem::select_all(app, None)?,
                 ],
             )?,
-            &Submenu::with_items(app, "View", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?,
             &Submenu::with_items(
                 app,
-                "Window",
+                "View",
                 true,
                 &[
-                    &PredefinedMenuItem::minimize(app, None)?,
-                    &PredefinedMenuItem::maximize(app, None)?,
+                    &item(MENU_TOGGLE_EXPLORER, "Toggle Explorer", Some("CmdOrCtrl+B"))?,
+                    &item(MENU_TOGGLE_OUTLINE, "Toggle Outline", Some("CmdOrCtrl+Shift+O"))?,
+                    &item(MENU_TOGGLE_COMMENTS, "Toggle Comments", Some("CmdOrCtrl+Backslash"))?,
+                    &item(MENU_TOGGLE_FOCUS, "Toggle Focus Mode", Some("CmdOrCtrl+Period"))?,
+                    &sep()?,
+                    &item(MENU_ZOOM_RESET, "Actual Size", Some("CmdOrCtrl+0"))?,
+                    &item(MENU_ZOOM_IN, "Zoom In", Some("CmdOrCtrl+Equal"))?,
+                    &item(MENU_ZOOM_OUT, "Zoom Out", Some("CmdOrCtrl+Minus"))?,
+                    &sep()?,
+                    &PredefinedMenuItem::fullscreen(app, None)?,
                 ],
             )?,
+            &Submenu::with_items(app, "Go", true, &go_items)?,
+            &window_menu,
+            &help_menu,
         ],
-    )
+    )?;
+    // AppKit lists open windows in the Window menu and adds its search field
+    // to the Help menu once they are marked as such.
+    window_menu.set_as_windows_menu_for_nsapp()?;
+    help_menu.set_as_help_menu_for_nsapp()?;
+    Ok(menu)
 }
+
+#[cfg(target_os = "macos")]
+const GITHUB_URL: &str = "https://github.com/dejuknow/md-redline";
 
 #[cfg(target_os = "macos")]
 const MENU_NEW_TAB: &str = "new-tab";
@@ -241,6 +420,135 @@ const MENU_CLOSE_TAB: &str = "close-tab";
 const MENU_REOPEN_TAB: &str = "reopen-tab";
 #[cfg(target_os = "macos")]
 const MENU_CLOSE_WINDOW: &str = "close-window";
+#[cfg(target_os = "macos")]
+const MENU_REVEAL: &str = "reveal";
+#[cfg(target_os = "macos")]
+const MENU_SETTINGS: &str = "settings";
+#[cfg(target_os = "macos")]
+const MENU_TOGGLE_EXPLORER: &str = "toggle-explorer";
+#[cfg(target_os = "macos")]
+const MENU_TOGGLE_OUTLINE: &str = "toggle-outline";
+#[cfg(target_os = "macos")]
+const MENU_TOGGLE_COMMENTS: &str = "toggle-comments";
+#[cfg(target_os = "macos")]
+const MENU_TOGGLE_FOCUS: &str = "toggle-focus";
+#[cfg(target_os = "macos")]
+const MENU_ZOOM_IN: &str = "zoom-in";
+#[cfg(target_os = "macos")]
+const MENU_ZOOM_OUT: &str = "zoom-out";
+#[cfg(target_os = "macos")]
+const MENU_ZOOM_RESET: &str = "zoom-reset";
+#[cfg(target_os = "macos")]
+const MENU_PREV_TAB: &str = "prev-tab";
+#[cfg(target_os = "macos")]
+const MENU_NEXT_TAB: &str = "next-tab";
+#[cfg(target_os = "macos")]
+const MENU_SELECT_TAB_PREFIX: &str = "select-tab-";
+#[cfg(target_os = "macos")]
+const MENU_NEXT_COMMENT: &str = "next-comment";
+#[cfg(target_os = "macos")]
+const MENU_PREV_COMMENT: &str = "prev-comment";
+#[cfg(target_os = "macos")]
+const MENU_HELP_SHORTCUTS: &str = "help-shortcuts";
+#[cfg(target_os = "macos")]
+const MENU_HELP_GITHUB: &str = "help-github";
+#[cfg(target_os = "macos")]
+const MENU_HELP_ISSUE: &str = "help-issue";
+#[cfg(target_os = "macos")]
+const MENU_HELP_RELEASES: &str = "help-releases";
+
+/// What a menu item does, by id. Kept apart from the menu so it can be tested.
+#[cfg(target_os = "macos")]
+#[derive(Debug, PartialEq, Eq)]
+enum MenuAction {
+    NewTab,
+    CloseTab,
+    ReopenTab,
+    CloseWindow,
+    Zoom(i32),
+    /// Run a core hook (JS that evaluates to the hook's boolean result);
+    /// `show` brings the window back first when it acted, for items whose
+    /// result is something to look at (Settings, Keyboard Shortcuts).
+    Hook { js: String, show: bool },
+    Open(&'static str),
+}
+
+#[cfg(target_os = "macos")]
+fn menu_action(id: &str) -> Option<MenuAction> {
+    let hook = |js: &str, show: bool| Some(MenuAction::Hook { js: js.to_string(), show });
+    match id {
+        MENU_NEW_TAB => Some(MenuAction::NewTab),
+        MENU_CLOSE_TAB => Some(MenuAction::CloseTab),
+        MENU_REOPEN_TAB => Some(MenuAction::ReopenTab),
+        MENU_CLOSE_WINDOW => Some(MenuAction::CloseWindow),
+        MENU_ZOOM_IN => Some(MenuAction::Zoom(1)),
+        MENU_ZOOM_OUT => Some(MenuAction::Zoom(-1)),
+        MENU_ZOOM_RESET => Some(MenuAction::Zoom(0)),
+        MENU_SETTINGS => hook("__mdrOpenSettings()", true),
+        MENU_HELP_SHORTCUTS => hook("__mdrShowShortcuts()", true),
+        MENU_REVEAL => hook("__mdrRevealActiveFile()", false),
+        MENU_TOGGLE_EXPLORER => hook("__mdrToggleExplorer()", false),
+        MENU_TOGGLE_OUTLINE => hook("__mdrToggleOutline()", false),
+        MENU_TOGGLE_COMMENTS => hook("__mdrToggleComments()", false),
+        MENU_TOGGLE_FOCUS => hook("__mdrToggleFocusMode()", false),
+        MENU_NEXT_TAB => hook("__mdrSwitchTab(1)", false),
+        MENU_PREV_TAB => hook("__mdrSwitchTab(-1)", false),
+        MENU_NEXT_COMMENT => hook("__mdrJumpToComment(1)", false),
+        MENU_PREV_COMMENT => hook("__mdrJumpToComment(-1)", false),
+        MENU_HELP_GITHUB => Some(MenuAction::Open(GITHUB_URL)),
+        MENU_HELP_ISSUE => Some(MenuAction::Open("https://github.com/dejuknow/md-redline/issues/new/choose")),
+        MENU_HELP_RELEASES => Some(MenuAction::Open("https://github.com/dejuknow/md-redline/releases")),
+        _ => {
+            let n: u8 = id.strip_prefix(MENU_SELECT_TAB_PREFIX)?.parse().ok()?;
+            (1..=9).contains(&n).then(|| MenuAction::Hook { js: format!("__mdrSelectTab({n})"), show: false })
+        }
+    }
+}
+
+/// The eval'd form of a hook call: false when the app is not loaded (loading
+/// or error page), where the hooks do not exist.
+#[cfg(any(target_os = "macos", test))]
+fn hook_call_script(call: &str) -> String {
+    let name = call.split('(').next().unwrap_or(call);
+    format!("window.{name} ? window.{call} === true : false")
+}
+
+/// Calls a core hook in the main window. With `show`, brings the window back
+/// (Close Window hides it) when the hook acted; without it, does nothing
+/// while the window is hidden, rather than switch tabs or toggle panes no one
+/// can see.
+#[cfg(target_os = "macos")]
+fn call_hook(app: &AppHandle, call: &str, show: bool) {
+    let Some(win) = app.get_webview_window("main") else { return };
+    if !show && !win.is_visible().unwrap_or(true) {
+        return;
+    }
+    let target = win.clone();
+    let _ = win.eval_with_callback(hook_call_script(call), move |result| {
+        if show && result.trim() == "true" {
+            let _ = target.show();
+            let _ = target.set_focus();
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn handle_menu(app: &AppHandle, id: &str) {
+    match menu_action(id) {
+        Some(MenuAction::NewTab) => new_tab(app),
+        Some(MenuAction::CloseTab) => close_tab_or_window(app),
+        Some(MenuAction::ReopenTab) => reopen_closed_tab(app),
+        Some(MenuAction::CloseWindow) => {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.hide();
+            }
+        }
+        Some(MenuAction::Zoom(dir)) => change_zoom(app, dir),
+        Some(MenuAction::Hook { js, show }) => call_hook(app, &js, show),
+        Some(MenuAction::Open(url)) => open_external(url),
+        None => {}
+    }
+}
 
 /// Asks the app for a new tab (it opens the file picker), bringing the window
 /// back first if closing the last tab hid it, so the picker is seen. Does
@@ -315,6 +623,9 @@ fn wait_for_reconcile() {
 
 enum Target {
     File(String),
+    /// Several files at once (a drop on the window), opened in order with the
+    /// first one active.
+    Files(Vec<String>),
     Dir(String),
     /// A review-session id (opaque token, not a path). Emitted by the CLI's
     /// MCP flow so agent-triggered reviews focus the app instead of opening
@@ -323,10 +634,12 @@ enum Target {
     Review(String),
 }
 
+#[cfg(test)]
 impl Target {
     fn value(&self) -> &str {
         match self {
             Target::File(v) | Target::Dir(v) | Target::Review(v) => v,
+            Target::Files(v) => v.first().map(String::as_str).unwrap_or(""),
         }
     }
 }
@@ -689,19 +1002,166 @@ fn is_on_ui_origin(current: Option<&Url>, ui_port: u16) -> bool {
 }
 
 /// JS handed to the running page for in-place opens. The SPA registers
-/// window.__mdrOpenTarget while mounted; when it is absent (loading page,
-/// error page, mid-reload) the script falls back to a full navigation.
+/// window.__mdrOpenTarget once mounted, which can be a moment after the page
+/// finishes loading, so the script waits for it (up to ~5s) before falling
+/// back to a full navigation (an error page, or an SPA that never mounts).
+/// It only ever runs in a loaded page: opens that arrive mid-load wait for
+/// the load to finish (see PendingOpens).
 fn build_open_script(target: &Option<Target>, url: &Url) -> String {
     let arg = match target {
         Some(Target::File(path)) => format!("{{file:{}}}", json_escape(path)),
+        Some(Target::Files(paths)) => {
+            let list: Vec<String> = paths.iter().map(|p| json_escape(p)).collect();
+            format!("{{files:[{}]}}", list.join(","))
+        }
         Some(Target::Dir(path)) => format!("{{dir:{}}}", json_escape(path)),
         Some(Target::Review(id)) => format!("{{review:{}}}", json_escape(id)),
         None => "{}".to_string(),
     };
     format!(
-        "window.__mdrOpenTarget ? window.__mdrOpenTarget({arg}) : (window.location.href = {});",
+        "(function (t, url, n) {{ (function go() {{ \
+var h = window.__mdrOpenTarget; \
+if (h && t.files && !h.acceptsFiles) t.files.forEach(function (f) {{ h({{file: f}}); }}); \
+else if (h) h(t); \
+else if (n-- > 0) setTimeout(go, 100); \
+else window.location.href = url; }})(); }})({arg}, {}, 50);",
         json_escape(url.as_str()),
     )
+}
+
+/// In-place opens wait while the window is loading a page (a navigation the
+/// shell started, or a reload), then run in order once it has loaded. Run
+/// mid-load, an open was lost with the page it ran in: two files opened
+/// from Finder at once, on a cold launch, opened only one.
+struct PendingOpens {
+    /// When the current load started; None once it finished.
+    loading_since: Option<Instant>,
+    /// The UI port of a navigation the shell started and that has not loaded
+    /// yet. Until it has, the window's URL can still read as the page it is
+    /// leaving (the loading page, on a cold launch), so opens decide by this
+    /// instead: a second Finder file used to navigate again and replace the
+    /// first.
+    shell_nav: Option<u16>,
+    scripts: Vec<String>,
+}
+
+/// A load that has not finished after this long is taken to have failed, so
+/// later opens stop waiting for it.
+const LOAD_WAIT: Duration = Duration::from_secs(15);
+
+impl PendingOpens {
+    const fn new() -> Self {
+        PendingOpens { loading_since: None, shell_nav: None, scripts: Vec::new() }
+    }
+
+    /// A page started loading (a reload, a link, or a navigation below).
+    fn load_started(&mut self, now: Instant) {
+        self.loading_since = Some(now);
+    }
+
+    /// The shell is navigating the window to the UI on `port`.
+    fn shell_navigation_started(&mut self, port: u16, now: Instant) {
+        self.loading_since = Some(now);
+        self.shell_nav = Some(port);
+    }
+
+    /// Whether a navigation the shell started to the UI on `port` is still
+    /// loading (and not yet given up on).
+    fn shell_navigating_to(&self, port: u16, now: Instant) -> bool {
+        self.shell_nav == Some(port)
+            && matches!(self.loading_since, Some(t) if now.duration_since(t) < LOAD_WAIT)
+    }
+
+    /// The scripts to run now that a page has loaded, in arrival order. A
+    /// page other than the UI finishing (the loading page, slow to report)
+    /// does not end a shell navigation to the UI: the held opens are for it.
+    fn page_finished(&mut self, ui_page: bool) -> Vec<String> {
+        if !ui_page && self.shell_nav.is_some() {
+            return Vec::new();
+        }
+        self.loading_since = None;
+        self.shell_nav = None;
+        std::mem::take(&mut self.scripts)
+    }
+
+    /// The held scripts, once the load they wait for has run past
+    /// LOAD_WAIT without finishing (a navigation that failed before it
+    /// committed never reports Finished). None held, or still in time: none.
+    fn take_if_stale(&mut self, now: Instant) -> Vec<String> {
+        match self.loading_since {
+            Some(t) if now.duration_since(t) >= LOAD_WAIT => {
+                self.loading_since = None;
+                self.shell_nav = None;
+                std::mem::take(&mut self.scripts)
+            }
+            // Nothing loading: nothing to wait for.
+            None => std::mem::take(&mut self.scripts),
+            Some(_) => Vec::new(),
+        }
+    }
+
+    /// The scripts to run now for a new open: none while a load is under
+    /// way (it is kept for load_finished), else any left from a load that
+    /// never finished, then this one.
+    fn submit(&mut self, script: String, now: Instant) -> Vec<String> {
+        if matches!(self.loading_since, Some(t) if now.duration_since(t) < LOAD_WAIT) {
+            self.scripts.push(script);
+            return Vec::new();
+        }
+        self.loading_since = None;
+        self.shell_nav = None;
+        let mut run = std::mem::take(&mut self.scripts);
+        run.push(script);
+        run
+    }
+
+    /// When the held opens run if the current load never finishes; None
+    /// with nothing held.
+    fn release_at(&self) -> Option<Instant> {
+        if self.scripts.is_empty() {
+            return None;
+        }
+        Some(self.loading_since.map(|t| t + LOAD_WAIT).unwrap_or_else(Instant::now))
+    }
+}
+
+/// Whether a thread is already watching the held opens (see deliver_open).
+static OPENS_WATCHED: AtomicBool = AtomicBool::new(false);
+
+static PENDING_OPENS: Mutex<PendingOpens> = Mutex::new(PendingOpens::new());
+
+/// Runs an in-place open now, or once the page loading in the window has
+/// loaded.
+fn deliver_open(win: &WebviewWindow, script: String) {
+    let run = PENDING_OPENS.lock().unwrap().submit(script, Instant::now());
+    if run.is_empty() && !OPENS_WATCHED.swap(true, Ordering::SeqCst) {
+        // Held for the load. Should it never finish, run them anyway once
+        // LOAD_WAIT is up: the script falls back to a full navigation when the
+        // page has no hook, so an open is never silently dropped. One watcher,
+        // kept up while anything is held, follows the current load's deadline
+        // (a newer load restarts it).
+        let win = win.clone();
+        std::thread::spawn(move || loop {
+            let Some(at) = PENDING_OPENS.lock().unwrap().release_at() else {
+                OPENS_WATCHED.store(false, Ordering::SeqCst);
+                // Something held since the check above gets a new watcher.
+                if PENDING_OPENS.lock().unwrap().release_at().is_none()
+                    || OPENS_WATCHED.swap(true, Ordering::SeqCst)
+                {
+                    return;
+                }
+                continue;
+            };
+            std::thread::sleep(at.saturating_duration_since(Instant::now()) + Duration::from_millis(100));
+            let run = PENDING_OPENS.lock().unwrap().take_if_stale(Instant::now());
+            for script in run {
+                let _ = win.eval(&script);
+            }
+        });
+    }
+    for script in run {
+        let _ = win.eval(&script);
+    }
 }
 
 fn build_ui_url(ui_port: u16, target: &Option<Target>) -> Url {
@@ -715,6 +1175,13 @@ fn build_ui_url(ui_port: u16, target: &Option<Target>) -> Url {
         }
         Some(Target::Review(id)) => {
             url.query_pairs_mut().append_pair("review", id);
+        }
+        // Only the fallback for a page whose SPA never mounts; the files
+        // themselves go through the open hook.
+        Some(Target::Files(paths)) => {
+            if let Some(first) = paths.first() {
+                url.query_pairs_mut().append_pair("file", first);
+            }
         }
         None => {}
     }
@@ -763,13 +1230,23 @@ fn open_external(url: &str) {
 /// links to the system browser. `url` is the loading page (WebviewUrl::
 /// default()) at startup, or the SPA URL when the window has to be rebuilt.
 fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> {
+    let zoom = current_zoom();
+    // Built hidden: the window-state plugin moves and sizes it to where it
+    // was last (in its window-ready hook, during build), keep_on_screen
+    // checks the result, and only then is it shown, so it never jumps.
     let builder = WebviewWindowBuilder::new(app, "main", url)
         .title("mdr")
         .inner_size(1360.0, 940.0)
         .min_inner_size(640.0, 480.0)
-        .zoom_hotkeys_enabled(true)
-        .initialization_script(DESKTOP_FLAG_SCRIPT)
-        .initialization_script(EXTERNAL_LINK_SCRIPT);
+        .visible(false)
+        .initialization_script(desktop_flag_script(&app.package_info().version.to_string()))
+        .initialization_script(EXTERNAL_LINK_SCRIPT)
+        .initialization_script(tab_key_script());
+    // WebView2 zooms on Ctrl+= / Ctrl+- / Ctrl+0 by itself. Elsewhere Tauri's
+    // zoom hotkeys are a page script calling a webview command the loopback
+    // page is not allowed, so they did nothing; macOS zooms from the View menu.
+    #[cfg(target_os = "windows")]
+    let builder = builder.zoom_hotkeys_enabled(true);
     // Traffic lights centered on the 34px top row (sidebar switch, tabs)
     // at DEFAULT_ZOOM: (8 + 17) * 1.25 = 31pt down. Tao's y is the title bar
     // container's extra height, which moves the lights down 1:1 (y 19 put
@@ -779,10 +1256,8 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
         .traffic_light_position(tauri::LogicalPosition::new(20.0, 33.0))
-        .initialization_script(SHELL_CHROME_SCRIPT.replace("__MDR_ZOOM__", &DEFAULT_ZOOM.to_string()));
-    #[cfg(not(target_os = "macos"))]
-    let builder = builder.initialization_script(TAB_KEY_SCRIPT);
-    builder
+        .initialization_script(SHELL_CHROME_SCRIPT.replace("__MDR_ZOOM__", &zoom.to_string()));
+    let win = builder
         .on_navigation(|url| match classify_navigation(url, UI_PORT.load(Ordering::SeqCst)) {
             NavDecision::Allow => true,
             NavDecision::External => {
@@ -790,8 +1265,140 @@ fn build_main_window(app: &AppHandle, url: WebviewUrl) -> Option<WebviewWindow> 
                 false
             }
         })
+        .on_page_load(|win, payload| match payload.event() {
+            PageLoadEvent::Started => PENDING_OPENS.lock().unwrap().load_started(Instant::now()),
+            PageLoadEvent::Finished => {
+                // The chrome script ran with the zoom the window was built
+                // at; a reload since a zoom change needs the current one.
+                let script = chrome_zoom_script(current_zoom());
+                if !script.is_empty() {
+                    let _ = win.eval(&script);
+                }
+                let ui = is_on_ui_origin(Some(payload.url()), UI_PORT.load(Ordering::SeqCst));
+                let run = PENDING_OPENS.lock().unwrap().page_finished(ui);
+                for script in run {
+                    let _ = win.eval(&script);
+                }
+            }
+        })
         .build()
-        .ok()
+        .ok()?;
+    let _ = win.set_zoom(zoom);
+    place_and_show(&win);
+    Some(win)
+}
+
+/// Shows the window once the window-state plugin's restore has landed and
+/// keep_on_screen has checked it. On macOS the plugin's moves and resizes are
+/// queued on the main queue, so reading the frame right after build reads the
+/// one it had before; this waits a moment and checks the restored one.
+fn place_and_show(win: &WebviewWindow) {
+    let win = win.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(120));
+        let w = win.clone();
+        let _ = win.run_on_main_thread(move || {
+            if keep_on_screen(&w) {
+                // Let the correction land before the window shows.
+                let w2 = w.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(120));
+                    let w3 = w2.clone();
+                    let _ = w2.run_on_main_thread(move || {
+                        let _ = w3.show();
+                    });
+                });
+            } else {
+                let _ = w.show();
+            }
+        });
+    });
+}
+
+/// A rectangle in physical pixels: a window's outer frame or a monitor's
+/// work area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rect {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+}
+
+/// Where a restored window should go instead, or None when it can be reached
+/// where it is. Reachable means some screen shows at least 100px of its top
+/// strip (the title bar, where it is dragged from); the window-state plugin
+/// only checks that a corner is on some monitor, so a window saved mostly
+/// off a screen that is now smaller, or on one since unplugged, could come
+/// back out of reach. Such a window is fitted to the first screen (the main
+/// one) and centered on it.
+fn fix_placement(win: Rect, screens: &[Rect]) -> Option<Rect> {
+    const STRIP: i64 = 40;
+    const MIN_VISIBLE: i64 = 100;
+    let (x, y, w) = (win.x as i64, win.y as i64, win.w as i64);
+    let strip_bottom = y + STRIP.min(win.h as i64);
+    let reachable = screens.iter().any(|s| {
+        let (sx, sy) = (s.x as i64, s.y as i64);
+        let overlap_x = (x + w).min(sx + s.w as i64) - x.max(sx);
+        let overlap_y = strip_bottom.min(sy + s.h as i64) - y.max(sy);
+        overlap_x >= MIN_VISIBLE && overlap_y > 0
+    });
+    if reachable {
+        return None;
+    }
+    let screen = screens.first()?;
+    let (fw, fh) = (win.w.min(screen.w), win.h.min(screen.h));
+    Some(Rect {
+        x: screen.x + ((screen.w - fw) / 2) as i32,
+        y: screen.y + ((screen.h - fh) / 2) as i32,
+        w: fw,
+        h: fh,
+    })
+}
+
+/// Brings a window restored out of reach back onto the main screen. True
+/// when it moved it.
+fn keep_on_screen(win: &WebviewWindow) -> bool {
+    let (Ok(pos), Ok(size)) = (win.outer_position(), win.outer_size()) else { return false };
+    let Ok(monitors) = win.available_monitors() else { return false };
+    let primary = win.primary_monitor().ok().flatten();
+    let area = |m: &tauri::Monitor| {
+        let a = m.work_area();
+        Rect { x: a.position.x, y: a.position.y, w: a.size.width, h: a.size.height }
+    };
+    // The main screen first: it is where an unreachable window goes.
+    let mut screens: Vec<Rect> = primary.as_ref().map(area).into_iter().collect();
+    screens.extend(monitors.iter().map(area).filter(|r| Some(*r) != primary.as_ref().map(area)));
+    let current = Rect { x: pos.x, y: pos.y, w: size.width, h: size.height };
+    match fix_placement(current, &screens) {
+        Some(fixed) => {
+            let _ = win.set_size(tauri::PhysicalSize::new(fixed.w, fixed.h));
+            let _ = win.set_position(tauri::PhysicalPosition::new(fixed.x, fixed.y));
+            true
+        }
+        None => false,
+    }
+}
+
+/// What a drop of `paths` on the window opens: every .md file, in the order
+/// dropped (the first one active), or with none, the first folder, shown in
+/// the explorer as `mdr <dir>` shows it. Anything else (an image, a .txt) is
+/// ignored, as the server would refuse it; so is a drop with nothing to open.
+fn drop_target(paths: &[PathBuf]) -> Option<Target> {
+    let is_md = |p: &Path| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    let files: Vec<String> = paths
+        .iter()
+        .filter(|p| p.is_file() && is_md(p))
+        .filter_map(|p| p.to_str().map(str::to_string))
+        .collect();
+    if !files.is_empty() {
+        return Some(Target::Files(files));
+    }
+    paths
+        .iter()
+        .find(|p| p.is_dir())
+        .and_then(|p| p.to_str())
+        .map(|p| Target::Dir(p.to_string()))
 }
 
 /// Focus-or-open, the whole point of the shell. With a target: navigate the
@@ -834,6 +1441,7 @@ fn open_target(app: &AppHandle, target: Option<Target>, grant: bool) {
     if grant {
         match &target {
             Some(Target::File(path)) | Some(Target::Dir(path)) => grant_access(path),
+            Some(Target::Files(paths)) => paths.iter().for_each(|path| grant_access(path)),
             Some(Target::Review(_)) | None => {}
         }
     }
@@ -843,6 +1451,10 @@ fn open_target(app: &AppHandle, target: Option<Target>, grant: bool) {
     let url = build_ui_url(ui_port, &target);
     let has_target = target.is_some();
     let open_script = build_open_script(&target, &url);
+    // Several files open through the hook even when the window has to load
+    // the app first: a URL carries only one.
+    let multi = matches!(target, Some(Target::Files(_)));
+    let root_url = build_ui_url(ui_port, &None);
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("main") {
@@ -850,24 +1462,37 @@ fn open_target(app: &AppHandle, target: Option<Target>, grant: bool) {
             // bare activation racing a file open cannot clobber the doc.
             let first = !NAVIGATED.swap(true, Ordering::SeqCst);
             let current = win.url().ok();
-            match open_action(first, is_on_ui_origin(current.as_ref(), ui_port), has_target) {
+            // Already on its way to the UI: the URL may still read as the
+            // page it is leaving.
+            let on_ui = PENDING_OPENS.lock().unwrap().shell_navigating_to(ui_port, Instant::now())
+                || is_on_ui_origin(current.as_ref(), ui_port);
+            match open_action(first, on_ui, has_target) {
                 OpenAction::Navigate => {
-                    let _ = win.navigate(url);
-                    let _ = win.set_zoom(DEFAULT_ZOOM);
+                    PENDING_OPENS.lock().unwrap().shell_navigation_started(ui_port, Instant::now());
+                    if multi {
+                        let _ = win.navigate(root_url);
+                        deliver_open(&win, open_script);
+                    } else {
+                        let _ = win.navigate(url);
+                    }
+                    let _ = win.set_zoom(current_zoom());
                 }
                 // In-place open: the SPA adds a tab (or re-roots the
                 // explorer) with no page reload, keeping existing tabs.
-                OpenAction::OpenInPlace => {
-                    let _ = win.eval(&open_script);
-                }
+                OpenAction::OpenInPlace => deliver_open(&win, open_script),
                 OpenAction::FocusOnly => {}
             }
             let _ = win.show();
             let _ = win.set_focus();
         } else {
             NAVIGATED.store(true, Ordering::SeqCst);
-            if let Some(win) = build_main_window(&app, WebviewUrl::External(url)) {
-                let _ = win.set_zoom(DEFAULT_ZOOM);
+            PENDING_OPENS.lock().unwrap().shell_navigation_started(ui_port, Instant::now());
+            if multi {
+                if let Some(win) = build_main_window(&app, WebviewUrl::External(root_url)) {
+                    deliver_open(&win, open_script);
+                }
+            } else {
+                build_main_window(&app, WebviewUrl::External(url));
             }
         }
     });
@@ -1020,11 +1645,231 @@ mod tests {
         let target = Some(Target::File("/tmp/a'b.md".into()));
         let url = build_ui_url(6373, &target);
         let script = build_open_script(&target, &url);
-        // Path is JSON-escaped into the hook call; the fallback assigns the
-        // full URL. No raw single quotes may survive JSON escaping that
-        // would break the eval'd expression.
-        assert!(script.starts_with("window.__mdrOpenTarget ? window.__mdrOpenTarget({file:\""));
-        assert!(script.contains("window.location.href = \"http://127.0.0.1:6373/?file="));
+        // Path is JSON-escaped into the hook's argument; the fallback
+        // assigns the full URL once the hook never shows up. No raw single
+        // quotes may survive JSON escaping that would break the eval'd
+        // expression.
+        assert!(script.contains("var h = window.__mdrOpenTarget;"));
+        assert!(script.contains("else if (h) h(t);"));
+        assert!(script.contains("setTimeout(go, 100)"));
+        assert!(script.contains("})({file:\"/tmp/a'b.md\"}, \"http://127.0.0.1:6373/?file="));
+        assert!(script.ends_with(", 50);"));
+    }
+
+    #[test]
+    fn open_script_passes_dropped_files_in_order() {
+        let target = Some(Target::Files(vec!["/tmp/b.md".into(), "/tmp/a \"q\".md".into()]));
+        let url = build_ui_url(6373, &target);
+        // The fallback URL can only carry the first file.
+        assert_eq!(url.as_str(), "http://127.0.0.1:6373/?file=%2Ftmp%2Fb.md");
+        let script = build_open_script(&target, &url);
+        assert!(script.contains(r#"({files:["/tmp/b.md","/tmp/a \"q\".md"]}, "#));
+        // A page older than the shell opens them one file at a time.
+        assert!(script.contains("t.files && !h.acceptsFiles"));
+    }
+
+    #[test]
+    fn zoom_steps_through_the_ladder_and_stops_at_its_ends() {
+        assert_eq!(step_zoom(DEFAULT_ZOOM, 1), 1.4);
+        assert_eq!(step_zoom(DEFAULT_ZOOM, -1), 1.1);
+        assert_eq!(step_zoom(2.0, 1), 2.0);
+        assert_eq!(step_zoom(0.8, -1), 0.8);
+        assert_eq!(step_zoom(1.0, 0), 1.0);
+        // Off the ladder: from the nearest step.
+        assert_eq!(step_zoom(1.27, 1), 1.4);
+        assert_eq!(ZOOM_STEPS.iter().filter(|z| **z == DEFAULT_ZOOM).count(), 1);
+    }
+
+    #[test]
+    fn saved_zoom_snaps_to_the_ladder_and_falls_back_to_the_default() {
+        assert_eq!(parse_saved_zoom("1.6\n"), 1.6);
+        assert_eq!(parse_saved_zoom("1.62"), 1.6);
+        assert_eq!(parse_saved_zoom("9"), 2.0);
+        assert_eq!(parse_saved_zoom("0.1"), 0.8);
+        assert_eq!(parse_saved_zoom(""), DEFAULT_ZOOM);
+        assert_eq!(parse_saved_zoom("big"), DEFAULT_ZOOM);
+        assert_eq!(parse_saved_zoom("NaN"), DEFAULT_ZOOM);
+        assert_eq!(parse_saved_zoom("-1"), DEFAULT_ZOOM);
+    }
+
+    #[test]
+    fn pending_opens_wait_for_the_load_and_run_in_order() {
+        let t0 = Instant::now();
+        let mut p = PendingOpens::new();
+        // Nothing loading: an open runs at once.
+        assert_eq!(p.submit("a".into(), t0), vec!["a".to_string()]);
+        // Mid-load: held, then run in arrival order when the page loads.
+        p.load_started(t0);
+        assert!(p.submit("b".into(), t0).is_empty());
+        assert!(p.submit("c".into(), t0 + Duration::from_secs(1)).is_empty());
+        assert_eq!(p.page_finished(true), vec!["b".to_string(), "c".to_string()]);
+        assert_eq!(p.submit("d".into(), t0), vec!["d".to_string()]);
+    }
+
+    #[test]
+    fn pending_opens_stop_waiting_for_a_load_that_never_finishes() {
+        let t0 = Instant::now();
+        let mut p = PendingOpens::new();
+        p.load_started(t0);
+        assert!(p.submit("a".into(), t0).is_empty());
+        // Past LOAD_WAIT the held open runs first, then the new one.
+        let later = t0 + LOAD_WAIT + Duration::from_millis(1);
+        assert_eq!(p.submit("b".into(), later), vec!["a".to_string(), "b".to_string()]);
+        assert!(p.page_finished(true).is_empty());
+    }
+
+    #[test]
+    fn a_shell_navigation_counts_as_the_ui_until_it_loads() {
+        let t0 = Instant::now();
+        let mut p = PendingOpens::new();
+        assert!(!p.shell_navigating_to(6373, t0));
+        p.shell_navigation_started(6373, t0);
+        assert!(p.shell_navigating_to(6373, t0 + Duration::from_secs(2)));
+        assert!(!p.shell_navigating_to(6374, t0));
+        assert!(!p.shell_navigating_to(6373, t0 + LOAD_WAIT));
+        // A second open is held, not navigated.
+        assert!(p.submit("b".into(), t0).is_empty());
+        assert_eq!(p.release_at(), Some(t0 + LOAD_WAIT));
+        // The loading page reporting late does not end it.
+        assert!(p.page_finished(false).is_empty());
+        assert!(p.shell_navigating_to(6373, t0));
+        // The UI loading does, and runs what waited.
+        assert_eq!(p.page_finished(true), vec!["b".to_string()]);
+        assert!(!p.shell_navigating_to(6373, t0));
+        assert_eq!(p.release_at(), None);
+        // With no shell navigation, any page finishing releases opens.
+        p.load_started(t0);
+        assert!(p.submit("c".into(), t0).is_empty());
+        assert_eq!(p.page_finished(false), vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn pending_opens_are_released_once_the_load_is_stale() {
+        let t0 = Instant::now();
+        let mut p = PendingOpens::new();
+        p.load_started(t0);
+        assert!(p.submit("a".into(), t0).is_empty());
+        // Still in time: kept for the load.
+        assert!(p.take_if_stale(t0 + Duration::from_secs(1)).is_empty());
+        // Past LOAD_WAIT: released, and the next open runs at once.
+        assert_eq!(p.take_if_stale(t0 + LOAD_WAIT), vec!["a".to_string()]);
+        assert!(p.take_if_stale(t0 + LOAD_WAIT * 2).is_empty());
+        assert_eq!(p.submit("b".into(), t0 + LOAD_WAIT), vec!["b".to_string()]);
+        // Nothing loading: nothing to release.
+        assert!(PendingOpens::new().take_if_stale(t0).is_empty());
+    }
+
+    #[test]
+    fn fix_placement_keeps_reachable_windows_and_recenters_lost_ones() {
+        let main = Rect { x: 0, y: 25, w: 1512, h: 920 };
+        let external = Rect { x: 1512, y: -300, w: 2560, h: 1415 };
+        let win = |x, y, w, h| Rect { x, y, w, h };
+        // On a screen, or partly off one with its title bar in reach: kept.
+        assert_eq!(fix_placement(win(100, 100, 1360, 800), &[main]), None);
+        assert_eq!(fix_placement(win(1300, 100, 1360, 800), &[main]), None);
+        assert_eq!(fix_placement(win(2000, 0, 1360, 940), &[main, external]), None);
+        // Saved on a monitor since unplugged: centered on the main screen.
+        assert_eq!(
+            fix_placement(win(2000, 0, 1360, 940), &[main]),
+            Some(win(76, 25, 1360, 920))
+        );
+        // Only a sliver (a corner) on screen: out of reach, so moved.
+        assert_eq!(
+            fix_placement(win(1450, 200, 1000, 600), &[main]),
+            Some(win(256, 185, 1000, 600))
+        );
+        // Title bar above the screen's top: moved.
+        assert!(fix_placement(win(100, -500, 1000, 600), &[main]).is_some());
+        // Bigger than the screen it lands on: fitted to it.
+        assert_eq!(
+            fix_placement(win(-5000, 0, 3000, 2000), &[main]),
+            Some(win(0, 25, 1512, 920))
+        );
+        // No screens known: left alone.
+        assert_eq!(fix_placement(win(-5000, 0, 100, 100), &[]), None);
+    }
+
+    #[test]
+    fn drop_target_opens_md_files_in_order_or_else_a_folder() {
+        let dir = std::env::temp_dir().join(format!("mdr-drop-test-{}", std::process::id()));
+        let sub = dir.join("notes");
+        std::fs::create_dir_all(&sub).unwrap();
+        let b = dir.join("b.md");
+        let a = dir.join("A.MD");
+        let txt = dir.join("c.txt");
+        let markdown = dir.join("d.markdown");
+        for f in [&b, &a, &txt, &markdown] {
+            std::fs::write(f, "# x\n").unwrap();
+        }
+        let s = |p: &PathBuf| p.to_str().unwrap().to_string();
+        // Files win over folders, keep the drop's order, and only .md opens.
+        match drop_target(&[sub.clone(), b.clone(), txt.clone(), a.clone(), markdown.clone()]) {
+            Some(Target::Files(files)) => assert_eq!(files, vec![s(&b), s(&a)]),
+            _ => panic!("expected the .md files"),
+        }
+        // No .md file: the first folder is shown.
+        match drop_target(&[txt.clone(), sub.clone(), dir.clone()]) {
+            Some(Target::Dir(d)) => assert_eq!(d, s(&sub)),
+            _ => panic!("expected the folder"),
+        }
+        // Nothing to open: ignored. A missing path is not a file.
+        assert!(drop_target(&[txt.clone(), markdown.clone()]).is_none());
+        assert!(drop_target(&[dir.join("gone.md")]).is_none());
+        assert!(drop_target(&[]).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn hook_calls_are_guarded_for_pages_without_the_hooks() {
+        assert_eq!(
+            hook_call_script("__mdrSelectTab(3)"),
+            "window.__mdrSelectTab ? window.__mdrSelectTab(3) === true : false"
+        );
+    }
+
+    #[test]
+    fn desktop_flag_script_sets_the_flag_and_the_app_version() {
+        assert_eq!(
+            desktop_flag_script("0.6.0"),
+            r#"window.__mdrDesktop = true; window.__mdrDesktopVersion = "0.6.0";"#
+        );
+    }
+
+    #[test]
+    fn tab_key_script_knows_which_keys_the_menus_carry() {
+        let script = tab_key_script();
+        assert!(!script.contains("__MDR_MENU_KEYS__"));
+        let expected = if cfg!(target_os = "macos") { "MENU_KEYS = true;" } else { "MENU_KEYS = false;" };
+        assert!(script.contains(expected));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn menu_items_map_to_their_actions() {
+        let hook = |js: &str, show: bool| Some(MenuAction::Hook { js: js.into(), show });
+        assert_eq!(menu_action(MENU_ZOOM_RESET), Some(MenuAction::Zoom(0)));
+        assert_eq!(menu_action(MENU_ZOOM_IN), Some(MenuAction::Zoom(1)));
+        assert_eq!(menu_action(MENU_ZOOM_OUT), Some(MenuAction::Zoom(-1)));
+        assert_eq!(menu_action(MENU_SETTINGS), hook("__mdrOpenSettings()", true));
+        assert_eq!(menu_action(MENU_HELP_SHORTCUTS), hook("__mdrShowShortcuts()", true));
+        assert_eq!(menu_action(MENU_TOGGLE_EXPLORER), hook("__mdrToggleExplorer()", false));
+        assert_eq!(menu_action(MENU_NEXT_TAB), hook("__mdrSwitchTab(1)", false));
+        assert_eq!(menu_action("select-tab-1"), hook("__mdrSelectTab(1)", false));
+        assert_eq!(menu_action("select-tab-9"), hook("__mdrSelectTab(9)", false));
+        assert_eq!(menu_action("select-tab-0"), None);
+        assert_eq!(menu_action("select-tab-10"), None);
+        assert_eq!(menu_action("select-tab-x"), None);
+        assert_eq!(menu_action(MENU_HELP_GITHUB), Some(MenuAction::Open(GITHUB_URL)));
+        // Help links stay on GitHub over https, the only place they go.
+        for id in [MENU_HELP_GITHUB, MENU_HELP_ISSUE, MENU_HELP_RELEASES] {
+            match menu_action(id) {
+                Some(MenuAction::Open(url)) => {
+                    assert!(url.starts_with("https://github.com/dejuknow/md-redline"))
+                }
+                other => panic!("{id}: {other:?}"),
+            }
+        }
+        assert_eq!(menu_action("unknown"), None);
     }
 
     #[test]
@@ -1063,9 +1908,19 @@ mod tests {
 }
 
 fn main() {
+    use tauri_plugin_window_state::StateFlags;
     tauri::Builder::default()
+        // Size, position and the maximized state, saved on quit and put back
+        // at launch. Not visibility: a window closed (hidden) at quit must
+        // still come back.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                .build(),
+        )
         .setup(|app| {
             let handle = app.handle().clone();
+            load_zoom(&handle);
             // Show the loading window immediately (main thread) so launch
             // isn't a blank screen while the server is discovered; the
             // window carries the external-link handlers. Then reconcile the
@@ -1085,21 +1940,19 @@ fn main() {
         })
         .on_menu_event(|app, event| {
             #[cfg(target_os = "macos")]
-            match event.id().as_ref() {
-                MENU_NEW_TAB => new_tab(app),
-                MENU_CLOSE_TAB => close_tab_or_window(app),
-                MENU_REOPEN_TAB => reopen_closed_tab(app),
-                MENU_CLOSE_WINDOW => {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.hide();
-                    }
-                }
-                _ => {}
-            }
+            handle_menu(app, event.id().as_ref());
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         })
         .on_window_event(|window, event| {
+            // A drop of files on the window is a user gesture, like a Finder
+            // open, so it grants access the same way (see open_target).
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                if let Some(target) = drop_target(paths) {
+                    let app = window.app_handle().clone();
+                    std::thread::spawn(move || open_target(&app, Some(target), true));
+                }
+            }
             // Mac convention: closing the window (Shift-Cmd-W, or Cmd-W
             // with no tab open) hides it, the app stays in the Dock, Cmd-Q
             // quits. Reopen (below) brings the window back. Windows and Linux
@@ -1118,14 +1971,12 @@ fn main() {
         .run(|app, event| match event {
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             RunEvent::Opened { urls } => {
-                // Multi-file Finder opens arrive as one batch here. Targets
-                // that land before the SPA has registered its hook fall back
-                // to full navigation inside build_open_script. On a cold
-                // launch that reliably means the last file wins; on a warm
-                // or mid-mount SPA the per-target hook check makes the
-                // outcome race-dependent (some tabs in place, some full
-                // navigations). Inherited limitation, roughly the pre-shell
-                // browser behavior; revisit if multi-select opens matter.
+                // Multi-file Finder opens arrive as one batch here and open
+                // one at a time, in order. On a cold launch the first one
+                // navigates the window to the app; the rest are held until
+                // that page has loaded (PendingOpens) and then wait for the
+                // SPA's hook (build_open_script), so every file opens as a
+                // tab and the last one is active.
                 let app = app.clone();
                 std::thread::spawn(move || {
                     for url in urls {

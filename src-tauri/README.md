@@ -104,14 +104,26 @@ rather than taken for a filename.
   app window, and so do links to other local services (a dev server on
   `localhost:3000`, say). Only mdr's own pages and internal schemes
   (`tauri://`, `about:blank`) load in the app.
-- **Tabs**: Cmd-W closes the active tab and Shift-Cmd-T reopens the last
-  closed one (File menu). Cmd-W with no tab open hides the window, and
-  Shift-Cmd-T brings it back with the reopened tab.
+- **Tabs**: Cmd-T opens a file in a new tab, Cmd-W closes the active tab and
+  Shift-Cmd-T reopens the last closed one (File menu). Cmd-W with no tab open
+  hides the window, and Shift-Cmd-T brings it back with the reopened tab.
+  Ctrl-Tab and Ctrl-Shift-Tab move to the next and previous tab, Cmd-1 to
+  Cmd-8 go to that tab and Cmd-9 to the last one (Go menu).
+- **Menus**: View toggles the explorer, outline, comments and focus mode with
+  the same keys as in the browser; Go also has Next and Previous Comment;
+  Settings is in the app menu (Cmd-,); Help has the keyboard shortcuts and
+  links to GitHub, issues and release notes; File > Show in Finder reveals
+  the active tab's file.
 - **Window**: closing the window hides it and the app stays in the Dock;
-  clicking the Dock icon brings it back, Cmd-Q quits.
-- **Zoom**: starts at 125% to match a typical browser zoom; Cmd +/- adjust it.
-  The default is applied once per launch so a manual change is not clobbered
-  by later opens. Zoom does not persist across restarts yet.
+  clicking the Dock icon brings it back, Cmd-Q quits. Its size and position
+  are kept across restarts; a window saved on a monitor that is gone comes
+  back on the main screen.
+- **Zoom**: View > Zoom In (Cmd-=) and Zoom Out (Cmd--) step from 80% to 200%;
+  Actual Size (Cmd-0) returns to 125%, the size the app is drawn for. The
+  level is kept across restarts.
+- **Drag and drop**: drop .md files on the window to open them as tabs (the
+  first one dropped is shown), or a folder to show it in the explorer. Other
+  files are ignored.
 - **MCP reviews**: agent-triggered reviews also prefer the app, through
   `mdr://open?review=<id>` (browser fallback as usual).
 - **Start log**: when the app starts the server, the output goes to
@@ -135,8 +147,8 @@ auto-start.
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.rs` | The whole shell: server discovery, window lifecycle, link and file-association handling, external-link routing. |
-| `scripts/tab-keys.js` | Ctrl+W and Ctrl+Shift+T for Windows and Linux, injected into the page (macOS uses the File menu). |
+| `src/main.rs` | The whole shell: server discovery, window lifecycle and placement, menus, zoom, link, file-association and drop handling, external-link routing. |
+| `scripts/tab-keys.js` | Tab keys injected into the page: Ctrl+Tab everywhere, plus Ctrl+T, Ctrl+W, Ctrl+Shift+T and Ctrl+1 to Ctrl+9 on Windows and Linux (macOS uses its menus). |
 | `tauri.conf.json` | Bundle config, identifier (`com.dejuknow.mdr`), file association. The main window is built in code, not declared here, because init scripts and navigation handlers are builder-only. |
 | `Info.plist` | Registers the `mdr://` URL scheme. |
 | `loading/index.html` | The spinner shown at launch while the server is found. |

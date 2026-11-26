@@ -55,7 +55,7 @@ import { UpdateNotice } from './components/UpdateNotice';
 
 import { CommandPalette, type Command } from './components/CommandPalette';
 import { ContextMenu } from './components/ContextMenu';
-import { SettingsPanel } from './components/SettingsPanel';
+import { SettingsPanel, type SettingsSection } from './components/SettingsPanel';
 import { SearchBar } from './components/SearchBar';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel';
@@ -118,6 +118,7 @@ import { usePageGeometry } from './hooks/usePageGeometry';
 import { PAD_L, DOC_WIDTH_COLS } from './lib/page-geometry';
 import { getEnabledHiddenCommentPrefixes } from './lib/settings';
 import { isDesktopApp } from './lib/desktop';
+import { useDesktopShellHooks } from './hooks/useDesktopShellHooks';
 import { DISMISS_POPUPS_EVENT } from './hooks/useDismiss';
 import {
   shellOverlayAction,
@@ -155,7 +156,9 @@ declare global {
     /** Set while the app is mounted; called by the desktop shell to open a
      *  file, folder or review session in place instead of navigating the page.
      *  Exactly one field, matching what the shell's build_open_script emits. */
-    __mdrOpenTarget?: (target: { file: string } | { dir: string } | { review: string }) => void;
+    __mdrOpenTarget?: ((
+      target: { file: string } | { files: string[] } | { dir: string } | { review: string },
+    ) => void) & { acceptsFiles?: true };
     /** Set while the app is mounted; called by the desktop shell for its New
      *  Tab shortcut (Cmd+T, Ctrl+T). Does what the tab strip's "+" does: opens
      *  the file picker. */
@@ -438,7 +441,7 @@ export default function App() {
   // re-render (that would scroll the panel a second time).
   const explorerRevealConsumedRef = useRef<number | null>(null);
   const [homeDir, setHomeDir] = useState<string>('');
-  const { recentFiles, addRecentFile, clearRecentFiles } = useRecentFiles();
+  const { recentFiles, addRecentFile, addRecentFiles, clearRecentFiles } = useRecentFiles();
   const { author, setAuthor } = useAuthor();
   const {
     settings,
@@ -564,6 +567,16 @@ export default function App() {
     setLeftPanelView,
   ]);
 
+  // Cmd+Shift+O, the palette and the desktop app's View menu.
+  const toggleOutlinePane = useCallback(() => {
+    if (explorerVisible && leftPanelView === 'outline') {
+      setExplorerVisibleGuarded(false);
+    } else {
+      setExplorerVisibleGuarded(true);
+      setLeftPanelView('outline');
+    }
+  }, [explorerVisible, leftPanelView, setExplorerVisibleGuarded, setLeftPanelView]);
+
   const toggleSidebarPane = useCallback(() => {
     if (focusMode) {
       exitFocusMode();
@@ -670,6 +683,20 @@ export default function App() {
 
   // Modal state — only one modal can be open at a time
   const { activeModal, setActiveModal, toggleModal, openFilePicker } = useModalState();
+  // The section Settings opens on: About from the palette or the desktop
+  // app's menu, else whatever was shown last. Cleared once the dialog closes,
+  // so Cmd+, keeps reopening the last section.
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>();
+  const openSettings = useCallback(
+    (section?: SettingsSection) => {
+      setSettingsSection(section);
+      setActiveModal('settings');
+    },
+    [setActiveModal],
+  );
+  useEffect(() => {
+    if (activeModal !== 'settings') setSettingsSection(undefined);
+  }, [activeModal]);
 
   const switchTabByOffset = useCallback(
     (offset: number) => {
@@ -2524,11 +2551,23 @@ export default function App() {
   // path (the explorer moves to the file's folder); a folder open shows that
   // folder in the explorer, switching to it and leaving focus mode.
   useEffect(() => {
-    window.__mdrOpenTarget = (target) => {
+    const openTarget: NonNullable<typeof window.__mdrOpenTarget> = (target) => {
       if ('file' in target) {
         openTab(target.file);
         addRecentFile(target.file);
         const parent = getParentDir(target.file);
+        if (parent) setExplorerDir(parent);
+      } else if ('files' in target) {
+        // Files dropped on the desktop app's window, in the order dropped:
+        // all open as tabs, the first one active (background opens never
+        // take activation), and the explorer moves beside it.
+        const [first, ...rest] = target.files;
+        if (!first) return;
+        openTab(first);
+        for (const path of rest) void openTabInBackground(path);
+        // One update, the active first file newest.
+        addRecentFiles(target.files);
+        const parent = getParentDir(first);
         if (parent) setExplorerDir(parent);
       } else if ('dir' in target) {
         revealDirInExplorer(target.dir);
@@ -2536,10 +2575,21 @@ export default function App() {
         void openReviewSessionTabs(target.review);
       }
     };
+    // Tells the shell this page takes { files }; a shell newer than the page
+    // opens them one { file } at a time instead.
+    window.__mdrOpenTarget = Object.assign(openTarget, { acceptsFiles: true as const });
     return () => {
       delete window.__mdrOpenTarget;
     };
-  }, [openTab, addRecentFile, setExplorerDir, revealDirInExplorer, openReviewSessionTabs]);
+  }, [
+    openTab,
+    openTabInBackground,
+    addRecentFile,
+    addRecentFiles,
+    setExplorerDir,
+    revealDirInExplorer,
+    openReviewSessionTabs,
+  ]);
 
   // What is on top of the document when a desktop shell shortcut arrives.
   // Read through a ref so the window hooks below need not re-register on
@@ -2697,6 +2747,35 @@ export default function App() {
     },
     [showToast],
   );
+
+  // The desktop app's View, Go, File and Help menus and its tab keys
+  // (Ctrl+Tab, Cmd+1 to Cmd+9). The keys core already binds (Cmd+B and the
+  // rest) reach these only when the page left them unhandled, which is only
+  // while the Mermaid fullscreen view owns the keyboard, so there they do
+  // nothing, as the key does.
+  useDesktopShellHooks({
+    mermaidFullscreenOpen: () => activeModal === 'mermaidFullscreen',
+    clearOverlays: clearOverlaysForShell,
+    tabCount: () => tabs.length,
+    activeTabIndex: () => tabs.findIndex((tab) => tab.filePath === activeFilePath),
+    switchTabByOffset,
+    selectTabAt: (index) => {
+      const tab = tabs[index];
+      if (tab) switchTab(tab.filePath);
+    },
+    toggleExplorer: toggleExplorerPane,
+    toggleOutline: toggleOutlinePane,
+    toggleComments: toggleCommentsSurface,
+    toggleFocusMode,
+    jumpToComment: (offset) => (offset > 0 ? handleJumpToNext() : handleJumpToPrev()),
+    openSettings,
+    showShortcuts: () => setActiveModal('shortcuts'),
+    revealActiveFile: () => {
+      if (!activeFilePath) return false;
+      revealInFinder(activeFilePath);
+      return true;
+    },
+  });
 
   const handleExplorerOpenFile = useCallback(
     (path: string) => {
@@ -2857,12 +2936,7 @@ export default function App() {
       // Cmd+Shift+O : Toggle outline (must come before Cmd+O)
       if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
-        if (explorerVisible && leftPanelView === 'outline') {
-          setExplorerVisibleGuarded(false);
-        } else {
-          setExplorerVisibleGuarded(true);
-          setLeftPanelView('outline');
-        }
+        toggleOutlinePane();
         return;
       }
 
@@ -3058,11 +3132,8 @@ export default function App() {
     activeModal,
     toggleModal,
     handleSearchClose,
-    explorerVisible,
-    leftPanelView,
+    toggleOutlinePane,
     openFilePicker,
-    setExplorerVisibleGuarded,
-    setLeftPanelView,
     switchTabByOffset,
     showSearch,
     setActiveModal,
@@ -3286,14 +3357,7 @@ export default function App() {
         label: 'Toggle document outline sidebar',
         shortcut: `${modKey}+Shift+O`,
         section: 'View',
-        onExecute: () => {
-          if (explorerVisible && leftPanelView === 'outline') {
-            setExplorerVisibleGuarded(false);
-          } else {
-            setExplorerVisibleGuarded(true);
-            setLeftPanelView('outline');
-          }
-        },
+        onExecute: toggleOutlinePane,
       },
     ];
     if (currentSnapshot != null) {
@@ -3337,10 +3401,7 @@ export default function App() {
     updateProseSize,
     updateKeepLineBreaks,
     settings.keepLineBreaks,
-    setExplorerVisibleGuarded,
-    setLeftPanelView,
-    explorerVisible,
-    leftPanelView,
+    toggleOutlinePane,
     currentSnapshot,
     diffEnabled,
     handleDiffToggle,
@@ -3361,6 +3422,15 @@ export default function App() {
         onExecute: openFilePicker,
       },
     ];
+    if (activeFilePath) {
+      cmds.push({
+        id: 'reveal-file',
+        // "Show in Finder" on macOS, as the tab and explorer menus say.
+        label: revealLabel,
+        section: 'File',
+        onExecute: () => revealInFinder(activeFilePath),
+      });
+    }
     if (diffChunkCount > 0) {
       cmds.push({
         id: 'mark-reviewed',
@@ -3370,7 +3440,15 @@ export default function App() {
       });
     }
     return cmds;
-  }, [reloadFile, openFilePicker, handleMarkReviewed, diffChunkCount]);
+  }, [
+    reloadFile,
+    openFilePicker,
+    handleMarkReviewed,
+    diffChunkCount,
+    activeFilePath,
+    revealLabel,
+    revealInFinder,
+  ]);
 
   const generalCommands = useMemo(
     (): Command[] => [
@@ -3389,6 +3467,12 @@ export default function App() {
         onExecute: () => setActiveModal('shortcuts'),
       },
       {
+        id: 'about',
+        label: 'About mdr',
+        section: 'General',
+        onExecute: () => openSettings('about'),
+      },
+      {
         id: 'theme-system',
         label: 'Theme: System',
         section: 'Theme',
@@ -3401,7 +3485,7 @@ export default function App() {
         onExecute: () => setTheme(t.key),
       })),
     ],
-    [setTheme, setActiveModal],
+    [setTheme, setActiveModal, openSettings],
   );
 
   const commentCommands = useMemo((): Command[] => {
@@ -4568,6 +4652,7 @@ export default function App() {
             author={author}
             onAuthorChange={setAuthor}
             onOpenShortcuts={() => setActiveModal('shortcuts')}
+            initialSection={settingsSection}
           />
           <KeyboardShortcutsPanel
             open={activeModal === 'shortcuts'}
