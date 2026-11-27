@@ -879,6 +879,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
       // same inode, preventing a TOCTOU race where an external write
       // between readFile and stat yields mismatched content/mtime.
       const fd = await open(resolved, 'r');
+      let content: string;
+      let mtime: number;
       try {
         const fileStat = await fd.stat();
         if (fileStat.size > MAX_FILE_BYTES) {
@@ -889,16 +891,18 @@ export function createAppFull(options: CreateAppOptions = {}) {
             413,
           );
         }
-        const content = await fd.readFile('utf-8');
-        // Restart recovery: clear pending-question flags whose session no
-        // longer exists, or whose ask a restore closed (#273), and answer
-        // with the cleared content when there was something to clear.
-        const swept = await sweepStrandedAskMarkers(resolved, content);
-        if (swept) return c.json({ content: swept.content, path: resolved, mtime: swept.mtime });
-        return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
+        content = await fd.readFile('utf-8');
+        mtime = fileStat.mtimeMs;
       } finally {
         await fd.close();
       }
+      // Restart recovery: clear pending-question flags whose session no
+      // longer exists, or whose ask a restore closed (#273), and answer with
+      // the cleared content when there was something to clear. After the
+      // descriptor is closed: Windows refuses to replace a file that is open.
+      const swept = await sweepStrandedAskMarkers(resolved, content);
+      if (swept) return c.json({ content: swept.content, path: resolved, mtime: swept.mtime });
+      return c.json({ content, path: resolved, mtime });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         return c.json({ error: err.message }, 403);
