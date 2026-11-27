@@ -24,7 +24,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer as createNetServer, connect } from 'net';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -426,6 +426,68 @@ describe('a review session survives a real server restart (#116)', () => {
     const getRes = await fetch(`${baseUrl}/api/review-sessions/${sessionId}`);
     expect(getRes.status).toBe(404);
     expect(existsSync(savedPath)).toBe(false);
+  }, 20_000);
+});
+
+describe('a restored review session is checked against the trusted folders it restarts with (#255)', () => {
+  it('leaves out a file the relaunched server no longer trusts, and never touches it', async () => {
+    const { homeDir } = makeHomeDir();
+    const trustedDir = join(homeDir, 'trusted');
+    const elsewhereDir = join(homeDir, 'elsewhere');
+    mkdirSync(trustedDir);
+    mkdirSync(elsewhereDir);
+    const inside = join(trustedDir, 'a.md');
+    const outside = join(elsewhereDir, 'b.md');
+    writeFileSync(inside, '# A\n\nInside text here.\n');
+    writeFileSync(outside, '# B\n\nOutside text here.\n');
+    const port = await pickTestPort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    // First boot trusts the whole home folder (the default seed).
+    const serverA = launchServer({ port, homeDir });
+    await waitForServerReady(serverA, 10_000);
+    const create = await fetch(`${baseUrl}/api/review-sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filePaths: [inside, outside], origin: 'agent' }),
+    });
+    expect(create.status).toBe(201);
+    const { sessionId } = (await create.json()) as { sessionId: string };
+    const ask = await fetch(`${baseUrl}/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        questions: [{ filePath: outside, anchor: 'Outside text', text: 'outside?' }],
+      }),
+    });
+    expect(ask.status).toBe(201);
+    const { askId } = (await ask.json()) as { askId: string };
+    await stopServer(serverA, 'SIGTERM');
+
+    // The user narrows trust to one folder before the next start.
+    const prefsPath = join(homeDir, '.md-redline.json');
+    const prefs = JSON.parse(readFileSync(prefsPath, 'utf8')) as Record<string, unknown>;
+    writeFileSync(prefsPath, JSON.stringify({ ...prefs, trustedRoots: [trustedDir] }));
+    const outsideBefore = readFileSync(outside, 'utf8');
+    expect(outsideBefore).toContain('"expectsReply":true');
+
+    const serverB = launchServer({ port, homeDir });
+    await waitForServerReady(serverB, 10_000);
+
+    const got = await fetch(`${baseUrl}/api/review-sessions/${sessionId}`);
+    expect(got.status).toBe(200);
+    expect(((await got.json()) as { filePaths: string[] }).filePaths).toEqual([inside]);
+    const wait = await fetch(`${baseUrl}/api/review-sessions/${sessionId}/asks/${askId}/wait`);
+    expect(await wait.json()).toEqual({ status: 'no_reply', reason: 'file_untrusted' });
+
+    const done = await fetch(`${baseUrl}/api/review-sessions/${sessionId}/agent-done`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(done.status).toBe(200);
+    await sleep(200);
+    expect(readFileSync(outside, 'utf8')).toBe(outsideBefore);
   }, 20_000);
 });
 

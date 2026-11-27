@@ -730,6 +730,20 @@ describe('handleAskToolCall', () => {
     expect(text).not.toContain('without replying without a reply');
   });
 
+  it('explains file_untrusted and hints re-reading the file (#255)', async () => {
+    const client = makeMockClient({
+      waitForAsk: vi.fn().mockResolvedValue({ status: 'no_reply', reason: 'file_untrusted' }),
+    });
+    const result = await handleAskToolCall(
+      { sessionId: 'rev_xyz', questions: [{ filePath: '/x', anchor: 'a', text: 'q?' }] },
+      { client, sendProgress: undefined, signal: undefined },
+    );
+    const text = result.content[0].text;
+    expect(result.isError).toBeFalsy();
+    expect(text).toContain('no longer trusts the folder');
+    expect(text).toContain('Re-read the file');
+  });
+
   it('surfaces postAgentComments failedComments in the error message', async () => {
     const err = new Error('one or more anchors could not be located') as Error & {
       failedComments?: number[];

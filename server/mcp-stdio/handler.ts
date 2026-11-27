@@ -554,6 +554,12 @@ export async function handleAskToolCall(
       text: 'the session was closed because no comments were posted in time',
       hintReadFile: false,
     },
+    file_untrusted: {
+      text:
+        'the mdr server restarted and no longer trusts the folder a question is in, ' +
+        'so it can no longer read the reply from that file',
+      hintReadFile: true,
+    },
   };
   const detail = reasonDetails[askResult.reason] ?? { text: askResult.reason, hintReadFile: true };
   const tail = detail.hintReadFile

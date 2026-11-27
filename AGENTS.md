@@ -313,11 +313,35 @@ restart is not revived with a fresh timeout. The server listens before it
 knows its port, so every request is held until the restore finishes
 (`holdRequestsUntilOpen` in `server/session-persistence.ts`), or an early
 heartbeat or reconnecting poll would 404 on a session about to exist. Nothing
-edits a markdown file at load. `ReviewSessionStore.exportState`/`restoreState`
+edits a markdown file at load, except clearing the flags of an ask the
+trusted-folder check below closes. `ReviewSessionStore.exportState`/`restoreState`
 hold the serialization; `setOnChange` fires on every saved-state change
 except heartbeats and wait-park bookkeeping. `MD_REDLINE_PERSIST_SESSIONS=0`
 turns it off (the Playwright web server sets it, so one run never restores
-into the next). Accepted gap: a batch handed to a parked waiter at the
+into the next). The restore is checked against the folders the server trusts
+now, not the ones it trusted when it saved (#255): they can shrink across a
+restart (a server started from another folder, or a desktop-app server in
+restricted mode). `restoreReviewSessions` in `server/index.ts` runs every saved
+path through the same check as `/api/file`, and `restoreState` takes the ones
+outside the roots out of each session (its files, `fileAddedAt` and queued
+counts; `originalFilePaths` stays whole, since it is only matched for dedupe and
+trimming it would let a smaller request join a session that started larger). A
+queued batch whose counted files were all taken out is dropped; its comment ids
+name no file, so one with a file left keeps them all. A path that cannot be
+resolved at boot (its folder missing, a volume not mounted yet) is kept only if
+it still sits under a trusted folder. An open session left with no file is not restored, the
+same as one past the window; an ended one is kept, emptied, for its late poll. A
+pending ask with a question outside the roots is settled as
+`no_reply`/`file_untrusted`, so the agent gets an answer instead of a 404, and
+its questions' `expectsReply` flags are cleared in the files still trusted, as
+when any other ask closes; the files outside the roots are left as they are.
+That clearing runs after the request gate opens, so a slow file cannot hold
+every request. Separately, every read or
+write a session drives rather than a request names (inline-reply delivery,
+clearing `expectsReply`, the abort and Done marker cleanup, the ask reply and
+release cleanup) checks the path against the current roots first
+(`checkSessionFile`), so a file outside them is never touched even if a session
+still names it. Accepted gap: a batch handed to a parked waiter at the
 instant the process dies is lost with the HTTP response, though
 `sentCommentIds` records it as sent.
 
@@ -858,7 +882,8 @@ type AskWaitResult =
         | 'cancelled'
         | 'done_without_reply'
         | 'timeout'
-        | 'agent_silent';
+        | 'agent_silent'
+        | 'file_untrusted';
     }
   | { status: 'pending' }; // a bounded poll ran out; the handler polls again and never returns it
 ```
@@ -876,7 +901,9 @@ design, unlike `mdr_wait`, which hands `pending` back to the agent.
 button produces this); `tab_closed` = browser disconnected; `cancelled` = user
 cancelled the review; `done_without_reply` = user clicked End review / Finish
 review without answering; `timeout` = session aged out; `agent_silent` = agent
-created a session but never posted comments (server GC fired). Comments already
+created a session but never posted comments (server GC fired); `file_untrusted` =
+the server restarted trusting fewer folders and a question sits in a file outside
+them (#255, see Restart recovery). Comments already
 written persist in the file; every reason except `agent_silent` tells the agent
 to re-read the file(s) since the user may have replied inline or edited the doc.
 
@@ -3055,37 +3082,37 @@ stable. The active tab's top lines up with the sidebar's, with or without a revi
 
 ### Keyboard shortcuts
 
-| Keys                | Action                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------- |
-| `E`                 | Toggle inline edit mode (rendered view)                                               |
-| `N` / `J`           | Next comment                                                                          |
-| `P` / `K`           | Previous comment                                                                      |
-| `Cmd+Enter`         | Start commenting on selection (or commit the open block when editing)                 |
-| `Cmd+Shift+M`       | Lock selection for commenting                                                         |
-| `D`                 | Delete active comment (undo from the toast or `Cmd+Z` while the file is unchanged)    |
-| `Cmd+Z`             | Undo what the last Undo toast offered: a delete or a diff reset (outside text fields) |
-| `A` / `X`           | Resolve active comment                                                                |
-| `U`                 | Reopen active comment                                                                 |
-| `Cmd+F`             | Find in document                                                                      |
-| `Cmd+K`             | Command palette                                                                       |
-| `Cmd+\`             | Toggle comments rail (drawer when the rail can't fit)                                 |
-| `Cmd+B`             | Toggle file explorer                                                                  |
-| `Cmd+Shift+O`       | Toggle document outline                                                               |
-| `Cmd+.`             | Toggle focus mode                                                                     |
-| `Cmd+O`             | Open file                                                                             |
-| `Cmd+,`             | Open settings                                                                         |
-| `Cmd+Shift+[` / `]` | Previous / next tab (outside text fields, and from the comment form's field)          |
-| `Cmd+T`             | New tab: the file picker (desktop app only)                                           |
-| `Cmd+W`             | Close tab, or the overlay on top of it (desktop app only)                             |
-| `Cmd+Shift+T`       | Reopen closed tab (desktop app only)                                                  |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (desktop app only)                                      |
-| `Cmd+1`-`Cmd+8` / `Cmd+9` | Go to that tab / the last tab (desktop app only; `Ctrl+` on Windows and Linux) |
-| `Cmd+=` / `Cmd+-` / `Cmd+0` | Zoom in / out / actual size, 125% (macOS desktop app only)                  |
-| `?`                 | Keyboard shortcuts help                                                               |
-| `Esc`               | Close fullscreen modal (Mermaid diagrams)                                             |
-| `+` / `-`           | Zoom in / out (Mermaid fullscreen)                                                    |
-| `0`                 | Fit to screen (Mermaid fullscreen)                                                    |
-| Arrow keys          | Pan diagram (Mermaid fullscreen)                                                      |
+| Keys                          | Action                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `E`                           | Toggle inline edit mode (rendered view)                                               |
+| `N` / `J`                     | Next comment                                                                          |
+| `P` / `K`                     | Previous comment                                                                      |
+| `Cmd+Enter`                   | Start commenting on selection (or commit the open block when editing)                 |
+| `Cmd+Shift+M`                 | Lock selection for commenting                                                         |
+| `D`                           | Delete active comment (undo from the toast or `Cmd+Z` while the file is unchanged)    |
+| `Cmd+Z`                       | Undo what the last Undo toast offered: a delete or a diff reset (outside text fields) |
+| `A` / `X`                     | Resolve active comment                                                                |
+| `U`                           | Reopen active comment                                                                 |
+| `Cmd+F`                       | Find in document                                                                      |
+| `Cmd+K`                       | Command palette                                                                       |
+| `Cmd+\`                       | Toggle comments rail (drawer when the rail can't fit)                                 |
+| `Cmd+B`                       | Toggle file explorer                                                                  |
+| `Cmd+Shift+O`                 | Toggle document outline                                                               |
+| `Cmd+.`                       | Toggle focus mode                                                                     |
+| `Cmd+O`                       | Open file                                                                             |
+| `Cmd+,`                       | Open settings                                                                         |
+| `Cmd+Shift+[` / `]`           | Previous / next tab (outside text fields, and from the comment form's field)          |
+| `Cmd+T`                       | New tab: the file picker (desktop app only)                                           |
+| `Cmd+W`                       | Close tab, or the overlay on top of it (desktop app only)                             |
+| `Cmd+Shift+T`                 | Reopen closed tab (desktop app only)                                                  |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (desktop app only)                                                |
+| `Cmd+1`-`Cmd+8` / `Cmd+9`     | Go to that tab / the last tab (desktop app only; `Ctrl+` on Windows and Linux)        |
+| `Cmd+=` / `Cmd+-` / `Cmd+0`   | Zoom in / out / actual size, 125% (macOS desktop app only)                            |
+| `?`                           | Keyboard shortcuts help                                                               |
+| `Esc`                         | Close fullscreen modal (Mermaid diagrams)                                             |
+| `+` / `-`                     | Zoom in / out (Mermaid fullscreen)                                                    |
+| `0`                           | Fit to screen (Mermaid fullscreen)                                                    |
+| Arrow keys                    | Pan diagram (Mermaid fullscreen)                                                      |
 
 ### Settings panel
 
