@@ -2093,6 +2093,37 @@ describe('restoring against the current trusted folders (#255)', () => {
     after.dispose();
   });
 
+  it('remembers the questions it closed, across another restart (#273)', () => {
+    let id = '';
+    const state = saved((store) => {
+      id = store.createSession({
+        filePaths: [TRUSTED, UNTRUSTED],
+        enableResolve: false,
+        origin: 'agent',
+      }).id;
+      store.recordAgentComments(id, 2);
+      store.addAsk(id, [
+        { commentId: 'q1', filePath: TRUSTED, anchor: 'a', text: 'one?' },
+        { commentId: 'q2', filePath: UNTRUSTED, anchor: 'b', text: 'two?' },
+      ]);
+    });
+
+    const after = new ReviewSessionStore();
+    after.restoreState(state, { now: new Date(), savedAt: Date.now(), isPathAllowed });
+    expect(after.isQuestionClosed(id, 'q1')).toBe(true);
+    expect(after.isQuestionClosed(id, 'q2')).toBe(true);
+    expect(after.isQuestionClosed(id, 'q3')).toBe(false);
+    expect(after.isQuestionClosed('rev_other', 'q1')).toBe(false);
+
+    // A later restart that trusts everything again still knows.
+    const again = JSON.parse(JSON.stringify(after.exportState())) as PersistedStoreState;
+    after.dispose();
+    const third = new ReviewSessionStore();
+    third.restoreState(again, { now: new Date(), savedAt: Date.now() });
+    expect(third.isQuestionClosed(id, 'q2')).toBe(true);
+    third.dispose();
+  });
+
   it('settles the ask even when its session is dropped with it', () => {
     let id = '';
     let askId = '';

@@ -520,19 +520,19 @@ export function createAppFull(options: CreateAppOptions = {}) {
   // expectsReply flag so the on-disk JSON accurately reflects "asked,
   // closed without reply" rather than "still pending."
   reviewSessions.setOnAsksClosedOnDone((_sessionId, asks) => {
-    void clearAskFlagsOnDisk(asks);
+    void clearAskFlagsOnDisk(asks.flatMap((ask) => ask.questions));
   });
 
-  /** Clear expectsReply on the asks' question markers, keeping the markers.
+  /** Clear expectsReply on these question markers, keeping the markers.
    * Best-effort per file: a failure, a refused path included, is logged. */
-  async function clearAskFlagsOnDisk(asks: PendingAsk[]): Promise<void> {
+  async function clearAskFlagsOnDisk(
+    questions: ReadonlyArray<{ filePath: string; commentId: string }>,
+  ): Promise<void> {
     const byFile = new Map<string, string[]>();
-    for (const ask of asks) {
-      for (const q of ask.questions) {
-        const ids = byFile.get(q.filePath) ?? [];
-        ids.push(q.commentId);
-        byFile.set(q.filePath, ids);
-      }
+    for (const q of questions) {
+      const ids = byFile.get(q.filePath) ?? [];
+      ids.push(q.commentId);
+      byFile.set(q.filePath, ids);
     }
     await Promise.all(
       Array.from(byFile, async ([filePath, commentIds]) => {
@@ -654,45 +654,78 @@ export function createAppFull(options: CreateAppOptions = {}) {
    * terminal retention) a marker can carry expectsReply:true with a dead
    * sessionId forever: it never surfaces in the UI (selectAgentAsks
    * filters by live session) and the agent that asked is gone, so the
-   * honest on-disk state is "asked, no answer." Fired on file read,
-   * async and best-effort: the read response is never delayed or failed
-   * by the sweep.
+   * honest on-disk state is "asked, no answer." Fired on file read and
+   * best-effort: a failure is logged and never fails the read. A read with
+   * nothing to clear is not delayed. One that has something waits for the
+   * rewrite and answers with the cleared content, since the page opens its
+   * watch connection only after the read, so a broadcast of the rewrite
+   * would reach no one and the page would keep the stale flag.
+   *
+   * Also clears a question whose session is still open but whose ask a
+   * restore closed because its file was outside the trusted folders then
+   * (#273): the server could not write the file at the time, and the agent
+   * already has its answer.
    */
-  function sweepStrandedAskMarkers(resolved: string, content: string): void {
+  function isStrandedAskMarker(sessionId: unknown, commentId: unknown): boolean {
+    const session =
+      typeof sessionId === 'string' ? reviewSessions.getSession(sessionId) : undefined;
+    if (!session || session.status !== 'open') return true;
+    return typeof commentId === 'string' && reviewSessions.isQuestionClosed(session.id, commentId);
+  }
+
+  function sweepStrandedAskMarkers(
+    resolved: string,
+    content: string,
+  ): Promise<{ content: string; mtime: number } | null> {
     let foundStranded = false;
     try {
       const { comments } = parseComments(content);
       for (const cm of comments) {
         if (cm.expectsReply !== true) continue;
-        const session = cm.sessionId ? reviewSessions.getSession(cm.sessionId) : undefined;
-        if (!session || session.status !== 'open') {
+        if (isStrandedAskMarker(cm.sessionId, cm.id)) {
           foundStranded = true;
           break;
         }
       }
     } catch {
-      return; // unparseable content — leave it alone
+      return Promise.resolve(null); // unparseable content — leave it alone
     }
-    if (!foundStranded) return;
-    void withFileLock(resolved, async () => {
-      // Re-read under the lock: the content we sniffed may be stale by now.
-      const current = await fsPromises.readFile(resolved, 'utf8');
-      const updated = transformCommentMarkers(current, (cm) => {
+    if (!foundStranded) return Promise.resolve(null);
+    return withFileLock(resolved, async () => {
+      // The content and mtime a read answers with must come from one version
+      // of the file (one descriptor, as the plain GET does): the page saves
+      // against that mtime, so a pair from two versions could let its next
+      // save overwrite a change it never saw.
+      const readVersion = async () => {
+        const fd = await open(resolved, 'r');
+        try {
+          const { mtimeMs } = await fd.stat();
+          return { content: await fd.readFile('utf-8'), mtime: mtimeMs };
+        } finally {
+          await fd.close();
+        }
+      };
+      // Re-read under the lock: the content we sniffed may be stale by now,
+      // for instance already cleared by another sweep or the boot cleanup.
+      // Either way the read answers with this version, not the sniffed one.
+      const current = await readVersion();
+      const updated = transformCommentMarkers(current.content, (cm) => {
         if (!cm?.expectsReply) return { type: 'keep' };
-        const sid = typeof cm.sessionId === 'string' ? cm.sessionId : undefined;
-        const session = sid ? reviewSessions.getSession(sid) : undefined;
-        if (session && session.status === 'open') return { type: 'keep' };
+        if (!isStrandedAskMarker(cm.sessionId, cm.id)) return { type: 'keep' };
         const cleared = { ...cm };
         delete cleared.expectsReply;
         return { type: 'replace', comment: cleared };
       });
-      if (updated !== current) {
-        await atomicWriteFile(resolved, updated);
-        notifyFileChanged(resolved);
-        console.log(`[review-session] cleared stranded expectsReply marker(s) in ${resolved}`);
-      }
+      if (updated === current.content) return current;
+      await atomicWriteFile(resolved, updated);
+      notifyFileChanged(resolved);
+      console.log(`[review-session] cleared stranded expectsReply marker(s) in ${resolved}`);
+      // Read back rather than pairing `updated` with a stat: a write from
+      // outside the server can land between the rename and the stat.
+      return readVersion();
     }).catch((err) => {
       console.warn(`[review-session] stranded-marker sweep failed for ${resolved}:`, err);
+      return null;
     });
   }
 
@@ -846,6 +879,8 @@ export function createAppFull(options: CreateAppOptions = {}) {
       // same inode, preventing a TOCTOU race where an external write
       // between readFile and stat yields mismatched content/mtime.
       const fd = await open(resolved, 'r');
+      let content: string;
+      let mtime: number;
       try {
         const fileStat = await fd.stat();
         if (fileStat.size > MAX_FILE_BYTES) {
@@ -856,15 +891,18 @@ export function createAppFull(options: CreateAppOptions = {}) {
             413,
           );
         }
-        const content = await fd.readFile('utf-8');
-        // Restart recovery: clear pending-question flags whose session no
-        // longer exists. Async; this response returns the as-read content
-        // and the SSE broadcast delivers the corrected version.
-        sweepStrandedAskMarkers(resolved, content);
-        return c.json({ content, path: resolved, mtime: fileStat.mtimeMs });
+        content = await fd.readFile('utf-8');
+        mtime = fileStat.mtimeMs;
       } finally {
         await fd.close();
       }
+      // Restart recovery: clear pending-question flags whose session no
+      // longer exists, or whose ask a restore closed (#273), and answer with
+      // the cleared content when there was something to clear. After the
+      // descriptor is closed: Windows refuses to replace a file that is open.
+      const swept = await sweepStrandedAskMarkers(resolved, content);
+      if (swept) return c.json({ content: swept.content, path: resolved, mtime: swept.mtime });
+      return c.json({ content, path: resolved, mtime });
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Access denied')) {
         return c.json({ error: err.message }, 403);
@@ -1598,6 +1636,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
       for (const p of s.originalFilePaths) paths.add(p);
       for (const p of Object.keys(s.fileAddedAt ?? {})) paths.add(p);
       for (const [p] of s.queuedBatch?.commentCountsByPath ?? []) paths.add(p);
+      for (const q of s.closedQuestions ?? []) paths.add(q.filePath);
     }
     for (const ask of state.pendingAsks) {
       for (const q of ask.questions) paths.add(q.filePath);
@@ -1635,12 +1674,13 @@ export function createAppFull(options: CreateAppOptions = {}) {
     // Those asks are closed now, so their questions in files the server still
     // trusts must stop reading as pending, as when any other ask closes. The
     // refused files are left alone.
-    const markersCleared = clearAskFlagsOnDisk(
-      untrustedAsks.map((ask) => ({
-        ...ask,
-        questions: ask.questions.filter((q) => !refused.has(q.filePath)),
-      })),
-    );
+    // Questions an earlier restore closed whose files are trusted again (#273)
+    // get the same cleanup, so their flags go even if nobody opens the file.
+    const closed = [
+      ...untrustedAsks.flatMap((ask) => ask.questions),
+      ...state.sessions.flatMap((s) => s.closedQuestions ?? []),
+    ];
+    const markersCleared = clearAskFlagsOnDisk(closed.filter((q) => !refused.has(q.filePath)));
     return { markersCleared };
   }
 

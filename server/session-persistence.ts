@@ -121,6 +121,15 @@ const STATUSES = new Set(['open', 'done', 'aborted']);
  * restoreState only assigns through without touching (like terminalResult's
  * inner union) get a lighter check.
  */
+function isClosedQuestions(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (q) => isRecord(q) && typeof q.commentId === 'string' && typeof q.filePath === 'string',
+    )
+  );
+}
+
 function isPersistedSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
@@ -140,6 +149,7 @@ function isPersistedSession(value: unknown): boolean {
     STATUSES.has(value.status) &&
     isStringArray(value.sentCommentIds) &&
     (value.sentReplyIds === undefined || isStringArray(value.sentReplyIds)) &&
+    (value.closedQuestions === undefined || isClosedQuestions(value.closedQuestions)) &&
     typeof value.waitingForAgent === 'boolean' &&
     isNullableString(value.waitingForAgentSince) &&
     typeof value.agentCommentCount === 'number' &&

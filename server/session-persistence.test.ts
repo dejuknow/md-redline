@@ -263,6 +263,29 @@ describe('loadPersistedState', () => {
     expect(warnSpy).toHaveBeenCalledOnce();
   });
 
+  it('accepts a session that carries closedQuestions (#273)', async () => {
+    const path = join(testDir, 'sessions-1.json');
+    const session = { ...makeSession(), closedQuestions: [{ commentId: 'c', filePath: '/a.md' }] };
+    const state = { sessions: [session], pendingAsks: [], settledAsks: [] };
+    const now = new Date();
+    await writeRawFile(path, { version: 1, savedAt: now.getTime(), ...state });
+
+    const result = await loadPersistedState(path, now);
+    expect(result).toEqual({ state, savedAt: now.getTime() });
+  });
+
+  it('rejects a file whose closedQuestions are not { commentId, filePath }', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const path = join(testDir, 'sessions-1.json');
+    const badSession = { ...makeSession(), closedQuestions: [{ commentId: 'c' }] };
+    const badState = { sessions: [badSession], pendingAsks: [], settledAsks: [] };
+    await writeRawFile(path, { version: 1, savedAt: Date.now(), ...badState });
+
+    const result = await loadPersistedState(path, new Date());
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledOnce();
+  });
+
   it('rejects a file whose queuedBatch commentCountsByPath is not [path, count] pairs', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const path = join(testDir, 'sessions-1.json');
