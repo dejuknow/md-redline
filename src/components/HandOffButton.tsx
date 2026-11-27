@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconButton } from './IconButton';
 import { Tooltip } from './Tooltip';
 import { getPathBasename } from '../lib/path-utils';
 
@@ -97,35 +96,43 @@ export function HandOffButton({ activeFilePath, commentCounts, onCopyAgentPrompt
     });
   };
 
-  // Disabled rendering: quiet icon-only variant, no dropdown, no click.
-  // Tooltip explains how to enable.
+  // Disabled rendering: the labeled button, outlined like the comments button
+  // beside it and faded to the 40% every disabled control uses (IconButton),
+  // with no dropdown and no click. It fills in crimson once there is something
+  // to hand off. Tooltip explains how.
   if (disabled) {
     return (
-      <div className="relative flex items-center justify-end" data-testid="handoff-group">
-        {/* An invisible copy of the labeled button (with a count of 1, and the
-            chevron when another tab already has comments) holds the width the
-            button takes once the first comment lands, so the tabs beside it
-            do not shrink then. */}
-        <span aria-hidden="true" className="invisible flex items-center">
-          <span className={`${LABELED_CLASS} rounded-md`}>
-            <span className="block w-3.5 h-3.5 shrink-0" />
-            <span>Hand off</span>
-            <span className="tabular-nums">1</span>
-          </span>
-          {hasOtherFiles && <span className={CHEVRON_CLASS}>{chevronIcon}</span>}
-        </span>
-        <span className="absolute right-0 inset-y-0 flex items-center">
-          <Tooltip text="Add comments first to hand off to an agent">
-            <IconButton
-              variant="neutral"
-              disabled
-              title="Add comments first to hand off to an agent"
-              data-testid="handoff-button"
+      <div className="relative flex items-center" data-testid="handoff-group">
+        <Tooltip text="Add comments first to hand off to an agent">
+          <button
+            type="button"
+            disabled
+            title="Add comments first to hand off to an agent"
+            data-testid="handoff-button"
+            className="h-6 grid items-center rounded-md ring-1 ring-inset ring-border text-content-muted opacity-40 cursor-not-allowed"
+          >
+            {/* An invisible copy of the enabled button (a count of 1, plus the
+                chevron when another tab already has comments) sets the width,
+                so the slot keeps it when the first comment lands and the tabs
+                beside it do not shrink. The visible label sits centered over
+                it in the same grid cell. */}
+            <span
+              aria-hidden="true"
+              className="invisible col-start-1 row-start-1 flex items-center"
             >
-              {handOffIcon}
-            </IconButton>
-          </Tooltip>
-        </span>
+              <span className={LABELED_CLASS}>
+                <span className="block w-3.5 h-3.5 shrink-0" />
+                <span>Hand off</span>
+                <span className="tabular-nums">1</span>
+              </span>
+              {hasOtherFiles && <span className={CHEVRON_CLASS}>{chevronIcon}</span>}
+            </span>
+            <span className="col-start-1 row-start-1 justify-self-center flex items-center gap-1.5 text-[13px] font-medium whitespace-nowrap">
+              <span className="block w-3.5 h-3.5 shrink-0">{handOffIcon}</span>
+              <span>Hand off</span>
+            </span>
+          </button>
+        </Tooltip>
       </div>
     );
   }

@@ -96,7 +96,7 @@ export function CommentsButton({
             and a Tooltip stashes it while hovered. */}
         <button
           type="button"
-          className={`min-w-[40px] pl-2 pr-1.5 flex items-center justify-center gap-1.5 text-[13px] font-medium transition-colors ${
+          className={`min-w-[46px] pl-2 pr-1.5 flex items-center justify-center gap-1.5 text-[13px] font-medium transition-colors ${
             surfaceVisible ? '' : 'hover:text-content hover:bg-tint'
           }`}
           onClick={onToggle}
