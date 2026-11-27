@@ -263,9 +263,9 @@ describe('loadPersistedState', () => {
     expect(warnSpy).toHaveBeenCalledOnce();
   });
 
-  it('accepts a session that carries closedQuestionIds (#273)', async () => {
+  it('accepts a session that carries closedQuestions (#273)', async () => {
     const path = join(testDir, 'sessions-1.json');
-    const session = { ...makeSession(), closedQuestionIds: ['cmt_a'] };
+    const session = { ...makeSession(), closedQuestions: [{ commentId: 'c', filePath: '/a.md' }] };
     const state = { sessions: [session], pendingAsks: [], settledAsks: [] };
     const now = new Date();
     await writeRawFile(path, { version: 1, savedAt: now.getTime(), ...state });
@@ -274,10 +274,10 @@ describe('loadPersistedState', () => {
     expect(result).toEqual({ state, savedAt: now.getTime() });
   });
 
-  it('rejects a file whose closedQuestionIds is not an array of strings', async () => {
+  it('rejects a file whose closedQuestions are not { commentId, filePath }', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const path = join(testDir, 'sessions-1.json');
-    const badSession = { ...makeSession(), closedQuestionIds: [1] as unknown as string[] };
+    const badSession = { ...makeSession(), closedQuestions: [{ commentId: 'c' }] };
     const badState = { sessions: [badSession], pendingAsks: [], settledAsks: [] };
     await writeRawFile(path, { version: 1, savedAt: Date.now(), ...badState });
 

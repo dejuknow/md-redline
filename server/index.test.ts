@@ -7,6 +7,7 @@ import {
   realpath,
   rename,
   rm,
+  stat,
   symlink,
   utimes,
   writeFile,
@@ -5751,49 +5752,71 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
     after.reviewSessions.dispose();
   });
 
-  it('clears a question it closed once its folder is trusted again (#273)', async () => {
-    const { after, state, savedAt, sessionId, inside, outside } = await shrunkRestart({
-      origin: 'agent',
-      answerOutside: false,
-    });
-    const { markersCleared } = await after.restoreReviewSessions(state, {
-      now: new Date(),
-      savedAt,
-    });
-    await markersCleared;
-    expect(await readFile(outside, 'utf8')).toContain('"expectsReply":true');
-
-    // The next restart trusts the parent folder again.
-    const saved = JSON.parse(JSON.stringify(after.reviewSessions.exportState()));
-    after.reviewSessions.dispose();
-    const parent = join(outside, '..', '..');
-    const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-retrust-home-')));
-    const again = createAppFull({ cwd: parent, homeDir: home, platformName: 'linux' });
-    await (
-      await again.restoreReviewSessions(saved, { now: new Date(), savedAt: Date.now() })
-    ).markersCleared;
-
-    // A question asked after the restart is genuinely pending and keeps its flag.
-    const ask = await again.app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ questions: [{ filePath: inside, anchor: 'here', text: 'new?' }] }),
-    });
-    expect(ask.status).toBe(201);
-
-    for (const path of [outside, inside]) {
-      const read = await again.app.request(`/api/file?path=${encodeURIComponent(path)}`);
-      expect(read.status).toBe(200);
+  describe('a question restore closed, once its folder is trusted again (#273)', () => {
+    // Restart 1 trusts only `trusted/` and closes the ask; restart 2 trusts
+    // the parent folder again.
+    async function retrusted() {
+      const ctx = await shrunkRestart({ origin: 'agent', answerOutside: false });
+      await (
+        await ctx.after.restoreReviewSessions(ctx.state, { now: new Date(), savedAt: ctx.savedAt })
+      ).markersCleared;
+      expect(await readFile(ctx.outside, 'utf8')).toContain('"expectsReply":true');
+      const saved = JSON.parse(JSON.stringify(ctx.after.reviewSessions.exportState()));
+      ctx.after.reviewSessions.dispose();
+      const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-retrust-home-')));
+      const again = createAppFull({
+        cwd: join(ctx.outside, '..', '..'),
+        homeDir: home,
+        platformName: 'linux',
+      });
+      return { ...ctx, saved, again };
     }
-    await settle();
 
-    const outsideMarkers = parseComments(await readFile(outside, 'utf8')).comments;
-    expect(outsideMarkers.map((c) => c.expectsReply)).toEqual([undefined]);
-    const pending = parseComments(await readFile(inside, 'utf8')).comments.filter(
-      (c) => c.expectsReply === true,
-    );
-    expect(pending.map((c) => c.text)).toEqual(['new?']);
-    again.reviewSessions.dispose();
+    it('the next restore clears it on disk, with nobody opening the file', async () => {
+      const { saved, again, outside } = await retrusted();
+      await (
+        await again.restoreReviewSessions(saved, { now: new Date(), savedAt: Date.now() })
+      ).markersCleared;
+      const markers = parseComments(await readFile(outside, 'utf8')).comments;
+      expect(markers.map((c) => c.expectsReply)).toEqual([undefined]);
+      again.reviewSessions.dispose();
+    });
+
+    it('reading the file clears it and answers with the cleared content', async () => {
+      const { saved, again, sessionId, inside, outside } = await retrusted();
+      // Restored without the boot cleanup (as if it failed), so the read
+      // is what has to clear it.
+      again.reviewSessions.restoreState(saved, { now: new Date(), savedAt: Date.now() });
+
+      // A question asked after the restart is genuinely pending and keeps its flag.
+      const ask = await again.app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ questions: [{ filePath: inside, anchor: 'here', text: 'new?' }] }),
+      });
+      expect(ask.status).toBe(201);
+
+      const read = async (path: string) => {
+        const res = await again.app.request(`/api/file?path=${encodeURIComponent(path)}`);
+        expect(res.status).toBe(200);
+        return (await res.json()) as { content: string; mtime: number };
+      };
+      // The response itself carries the cleared content and its mtime: the
+      // page opens its watch only after this read, so it would miss a
+      // broadcast of the rewrite.
+      const outsideRead = await read(outside);
+      expect(parseComments(outsideRead.content).comments.map((c) => c.expectsReply)).toEqual([
+        undefined,
+      ]);
+      expect(await readFile(outside, 'utf8')).toBe(outsideRead.content);
+      expect(outsideRead.mtime).toBe((await stat(outside)).mtimeMs);
+
+      const pending = parseComments((await read(inside)).content).comments.filter(
+        (c) => c.expectsReply === true,
+      );
+      expect(pending.map((c) => c.text)).toEqual(['new?']);
+      again.reviewSessions.dispose();
+    });
   });
 
   describe('a session that still names an untrusted file never reads or writes it', () => {

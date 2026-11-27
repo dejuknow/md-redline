@@ -121,6 +121,12 @@ interface InternalPendingAsk extends PendingAsk {
 
 export type SessionOrigin = 'user' | 'agent';
 
+/** A question marker whose ask a restore closed as file_untrusted (#273). */
+export interface ClosedQuestion {
+  commentId: string;
+  filePath: string;
+}
+
 export interface ReviewSession {
   id: string;
   filePaths: string[];
@@ -199,9 +205,10 @@ interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt' | 'h
    * Question markers whose ask restoreState closed as file_untrusted (#273).
    * Their files could not be written then, so the expectsReply flag can still
    * be on disk, and the session is open, so the stranded-marker sweep would
-   * keep it. The sweep clears these ids once it may read the file.
+   * keep it. The sweep clears them once it may read the file, and a later
+   * restore clears them in the files it trusts.
    */
-  closedQuestionIds: string[];
+  closedQuestions: ClosedQuestion[];
   /**
    * User-origin: a batch went to the agent and it has not come back to /wait
    * since. Its return is what finishes a round (agentRounds).
@@ -358,7 +365,7 @@ export interface PersistedSession {
   agentPostSeq?: number;
   agentPostSeqAtRound?: number;
   /** Optional: only written when a restore closed a question (#273). */
-  closedQuestionIds?: string[];
+  closedQuestions?: ClosedQuestion[];
 }
 
 /**
@@ -450,7 +457,7 @@ export class ReviewSessionStore {
       awaitingAgentReturn: false,
       agentPostSeq: 0,
       agentPostSeqAtRound: 0,
-      closedQuestionIds: [],
+      closedQuestions: [],
     };
 
     this.sessions.set(id, session);
@@ -1263,7 +1270,9 @@ export class ReviewSessionStore {
 
   /** Whether restore closed this question marker's ask in this session (#273). */
   isQuestionClosed(sessionId: string, commentId: string): boolean {
-    return this.sessions.get(sessionId)?.closedQuestionIds.includes(commentId) ?? false;
+    return (
+      this.sessions.get(sessionId)?.closedQuestions.some((q) => q.commentId === commentId) ?? false
+    );
   }
 
   getPendingAsks(sessionId: string): PendingAsk[] {
@@ -1416,7 +1425,9 @@ export class ReviewSessionStore {
         awaitingAgentReturn: s.awaitingAgentReturn,
         agentPostSeq: s.agentPostSeq,
         agentPostSeqAtRound: s.agentPostSeqAtRound,
-        ...(s.closedQuestionIds.length > 0 ? { closedQuestionIds: [...s.closedQuestionIds] } : {}),
+        ...(s.closedQuestions.length > 0
+          ? { closedQuestions: s.closedQuestions.map((q) => ({ ...q })) }
+          : {}),
         sessionDoneAt: s.sessionDoneAt ? s.sessionDoneAt.toISOString() : null,
         terminalReason: s.terminalReason,
         terminalAt: s.terminalAt ? s.terminalAt.toISOString() : null,
@@ -1605,7 +1616,7 @@ export class ReviewSessionStore {
         awaitingAgentReturn: persisted.awaitingAgentReturn === true,
         agentPostSeq: countOrZero(persisted.agentPostSeq),
         agentPostSeqAtRound: countOrZero(persisted.agentPostSeqAtRound),
-        closedQuestionIds: [...(persisted.closedQuestionIds ?? [])],
+        closedQuestions: (persisted.closedQuestions ?? []).map((q) => ({ ...q })),
       };
 
       this.sessions.set(session.id, session);
@@ -1660,8 +1671,8 @@ export class ReviewSessionStore {
     for (const ask of untrustedAsks) {
       const session = this.sessions.get(ask.sessionId);
       for (const q of ask.questions) {
-        if (session && !session.closedQuestionIds.includes(q.commentId)) {
-          session.closedQuestionIds.push(q.commentId);
+        if (session && !session.closedQuestions.some((c) => c.commentId === q.commentId)) {
+          session.closedQuestions.push({ commentId: q.commentId, filePath: q.filePath });
         }
       }
       this.rememberSettledAsk(ask.askId, ask.sessionId, {

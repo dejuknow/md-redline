@@ -238,7 +238,8 @@ open for clients that send no Fetch Metadata.
 
 One existing GET does write: `GET /api/file` calls `sweepStrandedAskMarkers`,
 which can rewrite the file to clear an `expectsReply` flag whose review session
-has already closed. That stays a GET deliberately. It is idempotent self-healing
+has already closed, or whose ask a restore closed (#273). That stays a GET
+deliberately. It is idempotent self-healing
 triggered by server-side session state, the caller cannot direct what it writes,
 and it only ever removes a stale flag. The rule above is about writes a caller
 chooses, not about every byte that can reach disk during a request.
@@ -335,7 +336,8 @@ pending ask with a question outside the roots is settled as
 `no_reply`/`file_untrusted`, so the agent gets an answer instead of a 404, and
 its questions' `expectsReply` flags are cleared in the files still trusted, as
 when any other ask closes; the files outside the roots are left as they are
-until the `GET /api/file` sweep may read them (see below).
+until a later restore trusts them again or the `GET /api/file` sweep reads
+them (see below).
 That clearing runs after the request gate opens, so a slow file cannot hold
 every request. Separately, every read or
 write a session drives rather than a request names (inline-reply delivery,
@@ -378,10 +380,15 @@ starts again keeps its directory, as it keeps its sessions file.
 Markers persist on disk regardless. `GET /api/file` sweeps markers whose
 `expectsReply` flag references a session that is no longer open and clears
 the flag (marker preserved). It also clears a question whose ask a restore
-closed as `file_untrusted` while its session stays open (#273): the session
-keeps those ids in `closedQuestionIds`, saved with it, so the flag goes the
-first time the server may read the file again, even after another restart. A post-restart `mdr_wait` on an unknown session
-gets a graceful "re-read the file(s)" result instead of an error.
+closed as `file_untrusted` while its session stays open (#273). The session
+keeps those questions in `closedQuestions` (comment id and file), saved with
+it: a later restore clears their flags in the files it trusts again, and the
+sweep clears any it meets on a read. A read with something to clear waits
+for the rewrite and answers with the cleared content and its mtime, since
+the page opens its watch only after the read and would miss the broadcast; a
+read with nothing to clear is not delayed. A post-restart `mdr_wait` on an
+unknown session gets a graceful "re-read the file(s)" result instead of an
+error.
 A call that loses the server itself gets `ServerUnreachableError` from
 `server/mcp-stdio/client.ts` instead of Node's bare `fetch failed` (#116): either
 nothing is listening (`ECONNREFUSED`), or the connection dropped mid-request or
