@@ -5751,6 +5751,51 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
     after.reviewSessions.dispose();
   });
 
+  it('clears a question it closed once its folder is trusted again (#273)', async () => {
+    const { after, state, savedAt, sessionId, inside, outside } = await shrunkRestart({
+      origin: 'agent',
+      answerOutside: false,
+    });
+    const { markersCleared } = await after.restoreReviewSessions(state, {
+      now: new Date(),
+      savedAt,
+    });
+    await markersCleared;
+    expect(await readFile(outside, 'utf8')).toContain('"expectsReply":true');
+
+    // The next restart trusts the parent folder again.
+    const saved = JSON.parse(JSON.stringify(after.reviewSessions.exportState()));
+    after.reviewSessions.dispose();
+    const parent = join(outside, '..', '..');
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'mdr-retrust-home-')));
+    const again = createAppFull({ cwd: parent, homeDir: home, platformName: 'linux' });
+    await (
+      await again.restoreReviewSessions(saved, { now: new Date(), savedAt: Date.now() })
+    ).markersCleared;
+
+    // A question asked after the restart is genuinely pending and keeps its flag.
+    const ask = await again.app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ questions: [{ filePath: inside, anchor: 'here', text: 'new?' }] }),
+    });
+    expect(ask.status).toBe(201);
+
+    for (const path of [outside, inside]) {
+      const read = await again.app.request(`/api/file?path=${encodeURIComponent(path)}`);
+      expect(read.status).toBe(200);
+    }
+    await settle();
+
+    const outsideMarkers = parseComments(await readFile(outside, 'utf8')).comments;
+    expect(outsideMarkers.map((c) => c.expectsReply)).toEqual([undefined]);
+    const pending = parseComments(await readFile(inside, 'utf8')).comments.filter(
+      (c) => c.expectsReply === true,
+    );
+    expect(pending.map((c) => c.text)).toEqual(['new?']);
+    again.reviewSessions.dispose();
+  });
+
   describe('a session that still names an untrusted file never reads or writes it', () => {
     // Restored without the filter, as if a path slipped past it: the cleanup
     // reads and writes must refuse the file on their own.

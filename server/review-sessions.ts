@@ -196,6 +196,13 @@ export type SessionTerminalReason =
 // hasQueuedBatch is derived from queuedBatch in toPublic, never stored.
 interface InternalSession extends Omit<ReviewSession, 'lastAgentActivityAt' | 'hasQueuedBatch'> {
   /**
+   * Question markers whose ask restoreState closed as file_untrusted (#273).
+   * Their files could not be written then, so the expectsReply flag can still
+   * be on disk, and the session is open, so the stranded-marker sweep would
+   * keep it. The sweep clears these ids once it may read the file.
+   */
+  closedQuestionIds: string[];
+  /**
    * User-origin: a batch went to the agent and it has not come back to /wait
    * since. Its return is what finishes a round (agentRounds).
    */
@@ -350,6 +357,8 @@ export interface PersistedSession {
   awaitingAgentReturn?: boolean;
   agentPostSeq?: number;
   agentPostSeqAtRound?: number;
+  /** Optional: only written when a restore closed a question (#273). */
+  closedQuestionIds?: string[];
 }
 
 /**
@@ -441,6 +450,7 @@ export class ReviewSessionStore {
       awaitingAgentReturn: false,
       agentPostSeq: 0,
       agentPostSeqAtRound: 0,
+      closedQuestionIds: [],
     };
 
     this.sessions.set(id, session);
@@ -1251,6 +1261,11 @@ export class ReviewSessionStore {
     }
   }
 
+  /** Whether restore closed this question marker's ask in this session (#273). */
+  isQuestionClosed(sessionId: string, commentId: string): boolean {
+    return this.sessions.get(sessionId)?.closedQuestionIds.includes(commentId) ?? false;
+  }
+
   getPendingAsks(sessionId: string): PendingAsk[] {
     const result: PendingAsk[] = [];
     for (const ask of this.pendingAsks.values()) {
@@ -1401,6 +1416,7 @@ export class ReviewSessionStore {
         awaitingAgentReturn: s.awaitingAgentReturn,
         agentPostSeq: s.agentPostSeq,
         agentPostSeqAtRound: s.agentPostSeqAtRound,
+        ...(s.closedQuestionIds.length > 0 ? { closedQuestionIds: [...s.closedQuestionIds] } : {}),
         sessionDoneAt: s.sessionDoneAt ? s.sessionDoneAt.toISOString() : null,
         terminalReason: s.terminalReason,
         terminalAt: s.terminalAt ? s.terminalAt.toISOString() : null,
@@ -1589,6 +1605,7 @@ export class ReviewSessionStore {
         awaitingAgentReturn: persisted.awaitingAgentReturn === true,
         agentPostSeq: countOrZero(persisted.agentPostSeq),
         agentPostSeqAtRound: countOrZero(persisted.agentPostSeqAtRound),
+        closedQuestionIds: [...(persisted.closedQuestionIds ?? [])],
       };
 
       this.sessions.set(session.id, session);
@@ -1641,6 +1658,12 @@ export class ReviewSessionStore {
     // After the saved results: they are the newest, and the map evicts in
     // insertion order once it reaches its cap.
     for (const ask of untrustedAsks) {
+      const session = this.sessions.get(ask.sessionId);
+      for (const q of ask.questions) {
+        if (session && !session.closedQuestionIds.includes(q.commentId)) {
+          session.closedQuestionIds.push(q.commentId);
+        }
+      }
       this.rememberSettledAsk(ask.askId, ask.sessionId, {
         status: 'no_reply',
         reason: 'file_untrusted',

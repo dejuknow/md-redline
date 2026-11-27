@@ -657,15 +657,26 @@ export function createAppFull(options: CreateAppOptions = {}) {
    * honest on-disk state is "asked, no answer." Fired on file read,
    * async and best-effort: the read response is never delayed or failed
    * by the sweep.
+   *
+   * Also clears a question whose session is still open but whose ask a
+   * restore closed because its file was outside the trusted folders then
+   * (#273): the server could not write the file at the time, and the agent
+   * already has its answer.
    */
+  function isStrandedAskMarker(sessionId: unknown, commentId: unknown): boolean {
+    const session =
+      typeof sessionId === 'string' ? reviewSessions.getSession(sessionId) : undefined;
+    if (!session || session.status !== 'open') return true;
+    return typeof commentId === 'string' && reviewSessions.isQuestionClosed(session.id, commentId);
+  }
+
   function sweepStrandedAskMarkers(resolved: string, content: string): void {
     let foundStranded = false;
     try {
       const { comments } = parseComments(content);
       for (const cm of comments) {
         if (cm.expectsReply !== true) continue;
-        const session = cm.sessionId ? reviewSessions.getSession(cm.sessionId) : undefined;
-        if (!session || session.status !== 'open') {
+        if (isStrandedAskMarker(cm.sessionId, cm.id)) {
           foundStranded = true;
           break;
         }
@@ -679,9 +690,7 @@ export function createAppFull(options: CreateAppOptions = {}) {
       const current = await fsPromises.readFile(resolved, 'utf8');
       const updated = transformCommentMarkers(current, (cm) => {
         if (!cm?.expectsReply) return { type: 'keep' };
-        const sid = typeof cm.sessionId === 'string' ? cm.sessionId : undefined;
-        const session = sid ? reviewSessions.getSession(sid) : undefined;
-        if (session && session.status === 'open') return { type: 'keep' };
+        if (!isStrandedAskMarker(cm.sessionId, cm.id)) return { type: 'keep' };
         const cleared = { ...cm };
         delete cleared.expectsReply;
         return { type: 'replace', comment: cleared };

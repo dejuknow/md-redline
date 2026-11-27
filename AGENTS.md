@@ -334,7 +334,8 @@ same as one past the window; an ended one is kept, emptied, for its late poll. A
 pending ask with a question outside the roots is settled as
 `no_reply`/`file_untrusted`, so the agent gets an answer instead of a 404, and
 its questions' `expectsReply` flags are cleared in the files still trusted, as
-when any other ask closes; the files outside the roots are left as they are.
+when any other ask closes; the files outside the roots are left as they are
+until the `GET /api/file` sweep may read them (see below).
 That clearing runs after the request gate opens, so a slow file cannot hold
 every request. Separately, every read or
 write a session drives rather than a request names (inline-reply delivery,
@@ -376,7 +377,10 @@ starts again keeps its directory, as it keeps its sessions file.
 
 Markers persist on disk regardless. `GET /api/file` sweeps markers whose
 `expectsReply` flag references a session that is no longer open and clears
-the flag (marker preserved). A post-restart `mdr_wait` on an unknown session
+the flag (marker preserved). It also clears a question whose ask a restore
+closed as `file_untrusted` while its session stays open (#273): the session
+keeps those ids in `closedQuestionIds`, saved with it, so the flag goes the
+first time the server may read the file again, even after another restart. A post-restart `mdr_wait` on an unknown session
 gets a graceful "re-read the file(s)" result instead of an error.
 A call that loses the server itself gets `ServerUnreachableError` from
 `server/mcp-stdio/client.ts` instead of Node's bare `fetch failed` (#116): either
