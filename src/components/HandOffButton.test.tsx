@@ -96,7 +96,7 @@ describe('HandOffButton look', () => {
     expect(screen.getByTestId('handoff-button').className).toMatch(/\btext-\[13px\]/);
   });
 
-  it('stays the quiet icon button when disabled', () => {
+  it('shows the labeled button outlined and faded when disabled', () => {
     render(
       <HandOffButton
         activeFilePath="/a.md"
@@ -107,6 +107,11 @@ describe('HandOffButton look', () => {
     const button = screen.getByTestId('handoff-button');
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.className).not.toMatch(/\bbg-primary\b/);
-    expect(button.textContent).not.toContain('Hand off');
+    expect(button.className).toMatch(/\bring-border\b/);
+    expect(button.className).toMatch(/\btext-content-muted\b/);
+    expect(button.className).toMatch(/\bopacity-40\b/);
+    // The visible label, with no count: the "1" belongs to the hidden width copy.
+    const visible = Array.from(button.children).find((el) => !el.hasAttribute('aria-hidden'));
+    expect(visible?.textContent).toBe('Hand off');
   });
 });
