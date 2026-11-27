@@ -692,22 +692,37 @@ export function createAppFull(options: CreateAppOptions = {}) {
     }
     if (!foundStranded) return Promise.resolve(null);
     return withFileLock(resolved, async () => {
-      // Re-read under the lock: the content we sniffed may be stale by now.
-      const current = await fsPromises.readFile(resolved, 'utf8');
-      const updated = transformCommentMarkers(current, (cm) => {
+      // The content and mtime a read answers with must come from one version
+      // of the file (one descriptor, as the plain GET does): the page saves
+      // against that mtime, so a pair from two versions could let its next
+      // save overwrite a change it never saw.
+      const readVersion = async () => {
+        const fd = await open(resolved, 'r');
+        try {
+          const { mtimeMs } = await fd.stat();
+          return { content: await fd.readFile('utf-8'), mtime: mtimeMs };
+        } finally {
+          await fd.close();
+        }
+      };
+      // Re-read under the lock: the content we sniffed may be stale by now,
+      // for instance already cleared by another sweep or the boot cleanup.
+      // Either way the read answers with this version, not the sniffed one.
+      const current = await readVersion();
+      const updated = transformCommentMarkers(current.content, (cm) => {
         if (!cm?.expectsReply) return { type: 'keep' };
         if (!isStrandedAskMarker(cm.sessionId, cm.id)) return { type: 'keep' };
         const cleared = { ...cm };
         delete cleared.expectsReply;
         return { type: 'replace', comment: cleared };
       });
-      if (updated === current) return null;
+      if (updated === current.content) return current;
       await atomicWriteFile(resolved, updated);
-      // Inside the lock, so the mtime is this write's and not a later one's.
-      const mtime = (await stat(resolved)).mtimeMs;
       notifyFileChanged(resolved);
       console.log(`[review-session] cleared stranded expectsReply marker(s) in ${resolved}`);
-      return { content: updated, mtime };
+      // Read back rather than pairing `updated` with a stat: a write from
+      // outside the server can land between the rename and the stat.
+      return readVersion();
     }).catch((err) => {
       console.warn(`[review-session] stranded-marker sweep failed for ${resolved}:`, err);
       return null;

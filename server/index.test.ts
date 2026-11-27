@@ -5783,16 +5783,23 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
     });
 
     it('reading the file clears it and answers with the cleared content', async () => {
-      const { saved, again, sessionId, inside, outside } = await retrusted();
+      const { saved, again, sessionId, outside } = await retrusted();
       // Restored without the boot cleanup (as if it failed), so the read
       // is what has to clear it.
       again.reviewSessions.restoreState(saved, { now: new Date(), savedAt: Date.now() });
 
-      // A question asked after the restart is genuinely pending and keeps its flag.
+      // The file joins the review again, and a question asked in it now is
+      // genuinely pending: the sweep must clear only the closed one.
+      const add = await again.app.request(`/api/review-sessions/${sessionId}/files`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filePaths: [outside] }),
+      });
+      expect(add.status).toBe(200);
       const ask = await again.app.request(`/api/review-sessions/${sessionId}/agent-comments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ questions: [{ filePath: inside, anchor: 'here', text: 'new?' }] }),
+        body: JSON.stringify({ questions: [{ filePath: outside, anchor: 'here', text: 'new?' }] }),
       });
       expect(ask.status).toBe(201);
 
@@ -5804,17 +5811,17 @@ describe('review sessions restored after the trusted folders shrank (#255)', () 
       // The response itself carries the cleared content and its mtime: the
       // page opens its watch only after this read, so it would miss a
       // broadcast of the rewrite.
-      const outsideRead = await read(outside);
-      expect(parseComments(outsideRead.content).comments.map((c) => c.expectsReply)).toEqual([
-        undefined,
-      ]);
-      expect(await readFile(outside, 'utf8')).toBe(outsideRead.content);
-      expect(outsideRead.mtime).toBe((await stat(outside)).mtimeMs);
-
-      const pending = parseComments((await read(inside)).content).comments.filter(
-        (c) => c.expectsReply === true,
-      );
-      expect(pending.map((c) => c.text)).toEqual(['new?']);
+      // Two reads at once: whichever clears the flag, both answer with the
+      // cleared version rather than the one they read before the lock.
+      const [first, second] = await Promise.all([read(outside), read(outside)]);
+      for (const answer of [first, second]) {
+        const pending = parseComments(answer.content).comments.filter(
+          (c) => c.expectsReply === true,
+        );
+        expect(pending.map((c) => c.text)).toEqual(['new?']);
+        expect(answer.content).toBe(await readFile(outside, 'utf8'));
+        expect(answer.mtime).toBe((await stat(outside)).mtimeMs);
+      }
       again.reviewSessions.dispose();
     });
   });
