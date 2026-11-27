@@ -4,6 +4,7 @@ import { useElementNarrowerThan } from '../hooks/useElementNarrowerThan';
 import { useDismiss } from '../hooks/useDismiss';
 import { getPrimaryModifierLabel, isApplePlatform } from '../lib/platform';
 import type { ViewMode } from '../lib/view-mode';
+import { TAB_ROW_MIN_WIDTH } from './TabBar';
 
 export interface DocStripProps {
   /** The tab bar, rendered in its strip look. */
@@ -350,91 +351,111 @@ export function DocStrip({
   );
 
   return (
+    // Wraps in reverse: when the tabs' floor and the controls don't fit on one
+    // row, the controls move to a row of their own above the tabs, so the
+    // tabs stay on the page's top edge and keep room for at least one tab.
     <div
       ref={rootRef}
       data-doc-strip
-      className="relative z-10 h-[34px] flex items-end gap-0.5 pr-0.5 shrink-0"
+      className="relative z-10 min-h-[34px] flex flex-wrap-reverse items-end gap-x-0.5 pr-0.5 shrink-0"
       // No inset of its own: the first tab sits flush with the page's left
       // edge. A desktop shell's window inset still applies.
       style={{ paddingLeft: 'var(--window-inset-left, 0px)' }}
     >
-      <div className="min-w-0 flex-1 self-stretch flex items-end">{tabs}</div>
+      <div
+        data-strip-tabs
+        className="flex-1 basis-0 h-[34px] flex items-end"
+        style={{ minWidth: `min(${TAB_ROW_MIN_WIDTH}px, 100%)` }}
+      >
+        {tabs}
+      </div>
 
-      {hasDocument && (
-        <div
-          className="self-center flex items-center gap-1 shrink-0 pl-2"
-          data-testid="panel-toolbar"
-        >
-          {!narrow && (
-            <div role="group" aria-label="View" className="flex bg-surface-inset rounded-md p-0.5">
-              <Tooltip text={renderedLabel}>
-                <button
-                  type="button"
-                  className={segmentClass(!isRaw)}
-                  onClick={() => setView('rendered')}
-                  aria-label={renderedLabel}
-                  aria-pressed={!isRaw}
-                  title={renderedLabel}
-                >
-                  <RenderedIcon />
-                </button>
-              </Tooltip>
-              <Tooltip text={rawLabel}>
-                <button
-                  type="button"
-                  className={segmentClass(isRaw)}
-                  onClick={() => setView('raw')}
-                  aria-label={rawLabel}
-                  aria-pressed={isRaw}
-                  title={rawLabel}
-                >
-                  <RawIcon />
-                </button>
-              </Tooltip>
-            </div>
-          )}
-          {narrow ? (
-            <>
-              {viewMenu}
-              {searchButton}
-            </>
-          ) : (
-            <>
-              {searchButton}
-              {viewMenu}
-            </>
-          )}
+      <div
+        data-strip-controls
+        className="ml-auto max-w-full min-h-[34px] shrink-0 flex flex-wrap items-center justify-end"
+      >
+        {hasDocument && (
+          <div
+            // Wraps its own buttons only when even a row to itself is too
+            // narrow for them.
+            className="min-w-0 max-w-full flex flex-wrap items-center justify-end gap-1 pl-2"
+            data-testid="panel-toolbar"
+          >
+            {!narrow && (
+              <div
+                role="group"
+                aria-label="View"
+                className="flex bg-surface-inset rounded-md p-0.5"
+              >
+                <Tooltip text={renderedLabel}>
+                  <button
+                    type="button"
+                    className={segmentClass(!isRaw)}
+                    onClick={() => setView('rendered')}
+                    aria-label={renderedLabel}
+                    aria-pressed={!isRaw}
+                    title={renderedLabel}
+                  >
+                    <RenderedIcon />
+                  </button>
+                </Tooltip>
+                <Tooltip text={rawLabel}>
+                  <button
+                    type="button"
+                    className={segmentClass(isRaw)}
+                    onClick={() => setView('raw')}
+                    aria-label={rawLabel}
+                    aria-pressed={isRaw}
+                    title={rawLabel}
+                  >
+                    <RawIcon />
+                  </button>
+                </Tooltip>
+              </div>
+            )}
+            {narrow ? (
+              <>
+                {viewMenu}
+                {searchButton}
+              </>
+            ) : (
+              <>
+                {searchButton}
+                {viewMenu}
+              </>
+            )}
 
-          {/* No rule here: the outlined comments button and Hand off mark
+            {/* No rule here: the outlined comments button and Hand off mark
               where the view tools end. An empty cell doubles the row's gap
               (4px to 8px) so the two groups still read apart. */}
-          <span aria-hidden="true" />
-          {comments}
-          {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
-        </div>
-      )}
+            <span aria-hidden="true" />
+            {comments}
+            {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
+          </div>
+        )}
 
-      {/* Outside the document's controls, so it is there with no file open
+        {/* Outside the document's controls, so it is there with no file open
           too: focus mode hides both panels, and this is the only button that
           says how to get them back. */}
-      {focusMode && onExitFocus && (
-        <button
-          type="button"
-          data-focus-chip
-          onClick={onExitFocus}
-          aria-label="Exit focus"
-          title="Exit focus mode"
-          className="self-center ml-1 h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-md border border-border text-[12px] font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        >
-          Exit focus
-          <kbd
-            aria-hidden="true"
-            className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-muted"
+        {focusMode && onExitFocus && (
+          <button
+            type="button"
+            data-focus-chip
+            onClick={onExitFocus}
+            aria-label="Exit focus"
+            title="Exit focus mode"
+            className="ml-1 h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-md border border-border text-[12px] font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
-            {isApplePlatform() ? '⌘.' : 'Ctrl+.'}
-          </kbd>
-        </button>
-      )}
+            Exit focus
+            <kbd
+              aria-hidden="true"
+              className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-muted"
+            >
+              {isApplePlatform() ? '⌘.' : 'Ctrl+.'}
+            </kbd>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

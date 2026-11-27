@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useDismiss } from '../hooks/useDismiss';
+import { useElementNarrowerThan } from '../hooks/useElementNarrowerThan';
 import { getPathBasename, tabDisambiguators } from '../lib/path-utils';
 
 interface Tab {
@@ -72,6 +73,15 @@ interface Props {
   onOpenFile: () => void;
   onTabContextMenu?: (info: TabContextMenuInfo) => void;
 }
+
+/**
+ * The narrowest the tab row gets before the strip moves its controls to a row
+ * of their own: one shortened tab (112px) beside the row's own buttons (scroll
+ * left and right, open file, show all tabs: 114px). Below it, which only a
+ * strip narrower than this can force, the scroll arrows step aside and the
+ * tab list does their job.
+ */
+export const TAB_ROW_MIN_WIDTH = 226;
 
 const tabControlButtonClassStrip =
   'self-center flex h-[26px] w-[26px] items-center justify-center shrink-0 rounded-md text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
@@ -149,6 +159,9 @@ export function TabBar({
   const folderLabels = useMemo(() => tabDisambiguators(tabs.map((t) => t.filePath)), [tabs]);
   const [tabListOpen, setTabListOpen] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const cramped = useElementNarrowerThan(rootRef, TAB_ROW_MIN_WIDTH);
+  const showScrollArrows = isOverflowing && !cramped;
   // Whether the strip starts on the page's left edge. A desktop shell pads it
   // (--window-inset-left) to clear its window controls in focus mode and on
   // the collapsed rail, and then the first tab no longer stands on the page's
@@ -278,12 +291,13 @@ export function TabBar({
 
   return (
     <div
+      ref={rootRef}
       // -mb-px lays the row over the strip's bottom rule, so the active
       // tab can cover it and join the page below.
       className="flex-1 self-stretch -mb-px flex items-stretch min-w-0"
     >
       <div className="min-w-0 flex-1 flex items-stretch">
-        {isOverflowing && (
+        {showScrollArrows && (
           <button
             type="button"
             onClick={() => scrollTabsBy('left')}
@@ -445,24 +459,30 @@ export function TabBar({
 
         {isOverflowing && (
           <>
-            <button
-              type="button"
-              onClick={() => scrollTabsBy('right')}
-              disabled={!canScrollRight}
-              className={tabControlButtonClass}
-              title="Scroll tabs right"
-              aria-label="Scroll tabs right"
-            >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+            {showScrollArrows && (
+              <button
+                type="button"
+                onClick={() => scrollTabsBy('right')}
+                disabled={!canScrollRight}
+                className={tabControlButtonClass}
+                title="Scroll tabs right"
+                aria-label="Scroll tabs right"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                  />
+                </svg>
+              </button>
+            )}
 
             <div ref={tabListRef} className="relative flex items-stretch shrink-0">
               <button

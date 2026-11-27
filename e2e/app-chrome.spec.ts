@@ -156,6 +156,77 @@ test.describe('Document panel strip', () => {
     await expect(page.getByRole('heading', { name: 'Overflow Tab 1' })).toBeVisible();
     await expect(menu).not.toBeVisible();
   });
+
+  test('a narrow strip moves its controls above the tabs instead of over them', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(
+      (tabs) => {
+        localStorage.setItem(
+          'md-redline-session',
+          JSON.stringify({ openTabs: tabs, activeFilePath: tabs[1] }),
+        );
+      },
+      OVERFLOW_FIXTURES.slice(0, 3),
+    );
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Overflow Tab 2' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const tabsRow = page.locator('[data-strip-tabs]');
+    const controls = page.locator('[data-strip-controls]');
+
+    // Wide: one row, as before.
+    const wideTabs = (await tabsRow.boundingBox())!;
+    const wideControls = (await controls.boundingBox())!;
+    expect(Math.abs(wideControls.y - wideTabs.y)).toBeLessThan(1);
+
+    // 617px is a narrow window with the Explorer open; 400px leaves the
+    // document panel about as narrow as the desktop app allows.
+    for (const width of [617, 400]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect
+        .poll(async () => {
+          const t = (await tabsRow.boundingBox())!;
+          const c = (await controls.boundingBox())!;
+          return c.y + c.height <= t.y + 0.5;
+        })
+        .toBe(true);
+
+      // Every control takes its own click: nothing paints over it.
+      const covered = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-strip-controls] button')]
+          .filter((b) => {
+            const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !(top && b.contains(top));
+          })
+          .map((b) => b.getAttribute('aria-label') ?? b.getAttribute('title')),
+      );
+      expect(covered, `covered controls at ${width}px`).toEqual([]);
+
+      // The active tab shows inside the tabs' scrollport, not scrolled away or
+      // squeezed to nothing. Polled: the strip scrolls it back into view once
+      // the resize settles.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const strip = document.querySelector('[data-doc-strip]')!;
+              const port = strip.querySelector('.overflow-x-auto')!.getBoundingClientRect();
+              const active = [...strip.querySelectorAll('.overflow-x-auto button')].find((b) =>
+                b.textContent?.includes('overflow-tab-2.md'),
+              )!;
+              const a = active.getBoundingClientRect();
+              return Math.min(a.right, port.right) - Math.max(a.left, port.left);
+            }),
+          { message: `visible active tab at ${width}px` },
+        )
+        .toBeGreaterThan(60);
+    }
+  });
 });
 
 const band = (page: Page) => page.locator('[data-review-band]');
