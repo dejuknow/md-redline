@@ -9,24 +9,33 @@ import { useLayoutEffect, useState, type RefObject } from 'react';
 export function useElementNarrowerThan<T extends HTMLElement>(
   ref: RefObject<T | null>,
   px: number,
+  /** 'content' leaves out the element's horizontal padding, for an element
+   * whose padding is space its children cannot use. */
+  box: 'border' | 'content' = 'border',
 ): boolean {
   const [narrow, setNarrow] = useState(false);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    // Border-box width, read the same way on mount and on every resize, so the
-    // threshold compares against what the user sees rather than the content
-    // box. A width of 0 is "not measured yet", not narrow.
+    // Read the same way on mount and on every resize. By default the border
+    // box, so the threshold compares against what the user sees; with 'content',
+    // less the horizontal padding. A border box of 0 is "not measured yet",
+    // not narrow; a laid-out element whose padding leaves no content is.
     const measure = () => {
-      const w = el.getBoundingClientRect().width;
-      setNarrow(w > 0 && w < px);
+      const border = el.getBoundingClientRect().width;
+      let w = border;
+      if (box === 'content') {
+        const style = getComputedStyle(el);
+        w -= (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      }
+      setNarrow(border > 0 && w < px);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref, px]);
+  }, [ref, px, box]);
 
   return narrow;
 }

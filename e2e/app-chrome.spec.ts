@@ -156,6 +156,122 @@ test.describe('Document panel strip', () => {
     await expect(page.getByRole('heading', { name: 'Overflow Tab 1' })).toBeVisible();
     await expect(menu).not.toBeVisible();
   });
+
+  test('a narrow strip moves its controls above the tabs instead of over them', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(
+      (tabs) => {
+        localStorage.setItem(
+          'md-redline-session',
+          JSON.stringify({ openTabs: tabs, activeFilePath: tabs[1] }),
+        );
+      },
+      OVERFLOW_FIXTURES.slice(0, 3),
+    );
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Overflow Tab 2' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const tabsRow = page.locator('[data-strip-tabs]');
+    const controls = page.locator('[data-strip-controls]');
+
+    // Wide: one row, as before.
+    const wideTabs = (await tabsRow.boundingBox())!;
+    const wideControls = (await controls.boundingBox())!;
+    expect(Math.abs(wideControls.y - wideTabs.y)).toBeLessThan(1);
+
+    // 617px is a narrow window with the Explorer open; 400px leaves the
+    // document panel about as narrow as the desktop app allows.
+    for (const width of [617, 400]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect
+        .poll(async () => {
+          const t = (await tabsRow.boundingBox())!;
+          const c = (await controls.boundingBox())!;
+          return c.y + c.height <= t.y + 0.5;
+        })
+        .toBe(true);
+
+      // Every control takes its own click: nothing paints over it.
+      const covered = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-strip-controls] button')]
+          .filter((b) => {
+            const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !(top && b.contains(top));
+          })
+          .map((b) => b.getAttribute('aria-label') ?? b.getAttribute('title')),
+      );
+      expect(covered, `covered controls at ${width}px`).toEqual([]);
+
+      // The active tab shows inside the tabs' scrollport, not scrolled away or
+      // squeezed to nothing. Polled: the strip scrolls it back into view once
+      // the resize settles.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const strip = document.querySelector('[data-doc-strip]')!;
+              const port = strip.querySelector('.overflow-x-auto')!.getBoundingClientRect();
+              const active = [...strip.querySelectorAll('.overflow-x-auto button')].find((b) =>
+                b.textContent?.includes('overflow-tab-2.md'),
+              )!;
+              const a = active.getBoundingClientRect();
+              return Math.min(a.right, port.right) - Math.max(a.left, port.left);
+            }),
+          { message: `visible active tab at ${width}px` },
+        )
+        .toBeGreaterThan(60);
+    }
+  });
+
+  test('a long-named active tab shortens in a narrow strip and grows back when it widens', async ({
+    page,
+  }) => {
+    const longName = resolve(fixtureDir, 'quarterly-planning-notes-with-a-long-name.md');
+    writeFileSync(longName, TEST_DOC_BASELINE);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/?file=${encodeURIComponent(longName)}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+
+    const tab = strip(page).getByTitle(longName);
+    const width = async () => (await tab.boundingBox())!.width;
+    // Wide, it takes the tabs' full 200px.
+    await expect.poll(width).toBeGreaterThan(195);
+
+    // Narrow, it fits the scrollport and its name ends in an ellipsis.
+    await page.setViewportSize({ width: 400, height: 800 });
+    await expect.poll(width).toBeLessThan(150);
+    const port = (await strip(page).locator('.overflow-x-auto').boundingBox())!;
+    expect(await width()).toBeLessThanOrEqual(port.width + 0.5);
+    const ellipsized = await tab
+      .locator('.truncate')
+      .evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(ellipsized).toBe(true);
+
+    // Wide again, it is back to full width rather than stuck at the narrow one.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect.poll(width).toBeGreaterThan(195);
+  });
+
+  test('a wrapped strip lets its tabs reach back over a desktop window inset', async ({ page }) => {
+    await page.setViewportSize({ width: 617, height: 800 });
+    await page.goto(`/?file=${encodeURIComponent(FIXTURE)}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+    // What a desktop shell sets to clear its window controls on the top row.
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty('--window-inset-left', '70px'),
+    );
+
+    await expect(strip(page)).toHaveAttribute('data-wrapped', 'true');
+    const pageEdge = (await page.locator('[data-doc-page-surface]').boundingBox())!.x;
+    const firstTab = strip(page).getByTitle(FIXTURE);
+    await expect.poll(async () => (await firstTab.boundingBox())!.x).toBeCloseTo(pageEdge, 0);
+    await expect(firstTab).toHaveAttribute('data-tab-flush', '');
+  });
 });
 
 const band = (page: Page) => page.locator('[data-review-band]');

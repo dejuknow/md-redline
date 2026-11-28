@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useDismiss } from '../hooks/useDismiss';
+import { useElementNarrowerThan } from '../hooks/useElementNarrowerThan';
 import { getPathBasename, tabDisambiguators } from '../lib/path-utils';
 
 interface Tab {
@@ -72,6 +73,17 @@ interface Props {
   onOpenFile: () => void;
   onTabContextMenu?: (info: TabContextMenuInfo) => void;
 }
+
+/**
+ * The narrowest the tab row gets before the strip moves its controls to a row
+ * of their own: one tab at its 112px floor beside the row's own buttons
+ * (scroll left and right, open file, show all tabs: 114px). The active tab,
+ * which is up to 200px and does not shrink with the others, caps itself at
+ * the scrollport instead (--tabs-port). Below this width, which only a strip
+ * narrower than it can force, the scroll arrows step aside and the tab list
+ * does their job.
+ */
+export const TAB_ROW_MIN_WIDTH = 226;
 
 const tabControlButtonClassStrip =
   'self-center flex h-[26px] w-[26px] items-center justify-center shrink-0 rounded-md text-content-muted transition-colors hover:bg-tint hover:text-content-secondary disabled:pointer-events-none disabled:opacity-35';
@@ -149,6 +161,9 @@ export function TabBar({
   const folderLabels = useMemo(() => tabDisambiguators(tabs.map((t) => t.filePath)), [tabs]);
   const [tabListOpen, setTabListOpen] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const cramped = useElementNarrowerThan(rootRef, TAB_ROW_MIN_WIDTH);
+  const showScrollArrows = isOverflowing && !cramped;
   // Whether the strip starts on the page's left edge. A desktop shell pads it
   // (--window-inset-left) to clear its window controls in focus mode and on
   // the collapsed rail, and then the first tab no longer stands on the page's
@@ -160,6 +175,20 @@ export function TabBar({
   const updateTabOverflow = useCallback(() => {
     const viewport = tabsViewportRef.current;
     if (!viewport) return;
+    // The room the scrollport has, for the active tab to cap itself at: it
+    // does not shrink with the others, so in a scrollport narrower than it, a
+    // long name would be cut mid-word instead of ending in an ellipsis. The
+    // row less its buttons, not the scrollport's own width: the scrollport is
+    // sized to the tabs, so its width would follow the capped tab down and
+    // never let it grow back. Not laid out yet (0) leaves the last value.
+    const row = viewport.parentElement;
+    if (row) {
+      let room = row.getBoundingClientRect().width;
+      for (const child of row.children) {
+        if (child !== viewport) room -= child.getBoundingClientRect().width;
+      }
+      if (room > 0) tabsContentRef.current?.style.setProperty('--tabs-port', `${room}px`);
+    }
 
     const maxScrollLeft = Math.max(viewport.scrollWidth - viewport.clientWidth, 0);
     setIsOverflowing(maxScrollLeft > 1);
@@ -169,11 +198,13 @@ export function TabBar({
 
   // The inset only changes with a resize, which the observer below reports,
   // so this stays off the scroll path. A value that does not parse (no strip
-  // around the bar) counts as no inset.
+  // around the bar) counts as no inset. A wrapped strip (data-wrapped) has its
+  // controls on the row above, and the tab bar reaches back over the inset to
+  // the page's edge, so the inset no longer counts.
   const updatePageEdge = useCallback(() => {
-    const strip = tabsViewportRef.current?.closest('[data-doc-strip]');
+    const strip = tabsViewportRef.current?.closest<HTMLElement>('[data-doc-strip]');
     const inset = strip ? parseFloat(getComputedStyle(strip).paddingLeft) : 0;
-    setAtPageEdge(!(inset > 0.5));
+    setAtPageEdge(!(inset > 0.5) || strip?.dataset.wrapped !== undefined);
   }, []);
 
   // Bring the active tab into view. The open-file button sits after the
@@ -241,6 +272,10 @@ export function TabBar({
     // updatePageEdge re-reads the inset from it.
     const strip = viewport.closest('[data-doc-strip]');
     if (strip) resizeObserver?.observe(strip);
+    // And the bar itself: it widens over the inset when the strip wraps, which
+    // moves its left edge without resizing the strip or, if the tabs fit
+    // either way, the scrollport.
+    if (rootRef.current) resizeObserver?.observe(rootRef.current);
 
     return () => {
       viewport.removeEventListener('scroll', handleScroll);
@@ -278,12 +313,13 @@ export function TabBar({
 
   return (
     <div
+      ref={rootRef}
       // -mb-px lays the row over the strip's bottom rule, so the active
       // tab can cover it and join the page below.
       className="flex-1 self-stretch -mb-px flex items-stretch min-w-0"
     >
       <div className="min-w-0 flex-1 flex items-stretch">
-        {isOverflowing && (
+        {showScrollArrows && (
           <button
             type="button"
             onClick={() => scrollTabsBy('left')}
@@ -336,14 +372,14 @@ export function TabBar({
                       onTabContextMenu({ filePath: tab.filePath, x: e.clientX, y: e.clientY });
                     }
                   }}
-                  className={`group relative flex items-center gap-1.5 px-3 leading-none max-w-[200px] text-[13px] rounded-t-lg transition-colors ${
+                  className={`group relative flex items-center gap-1.5 px-3 leading-none text-[13px] rounded-t-lg transition-colors ${
                     index > 0 && !isActive && tabs[index - 1].filePath !== activeFilePath
                       ? tabSeparatorClass
                       : ''
                   } ${inReview ? tabInReviewClass : ''} ${
                     isActive
-                      ? 'h-[35px] shrink-0 min-w-[112px] bg-surface border border-border border-b-0 text-content font-medium'
-                      : 'h-[34px] shrink min-w-[112px] border border-transparent border-b-0 text-content-muted hover:text-content'
+                      ? 'h-[35px] shrink-0 min-w-[min(112px,var(--tabs-port,112px))] max-w-[min(200px,var(--tabs-port,200px))] bg-surface border border-border border-b-0 text-content font-medium'
+                      : 'h-[34px] shrink min-w-[112px] max-w-[200px] border border-transparent border-b-0 text-content-muted hover:text-content'
                   }`}
                   title={tabTitle(tab)}
                   data-tab-in-review={inReview ? '' : undefined}
@@ -445,24 +481,30 @@ export function TabBar({
 
         {isOverflowing && (
           <>
-            <button
-              type="button"
-              onClick={() => scrollTabsBy('right')}
-              disabled={!canScrollRight}
-              className={tabControlButtonClass}
-              title="Scroll tabs right"
-              aria-label="Scroll tabs right"
-            >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+            {showScrollArrows && (
+              <button
+                type="button"
+                onClick={() => scrollTabsBy('right')}
+                disabled={!canScrollRight}
+                className={tabControlButtonClass}
+                title="Scroll tabs right"
+                aria-label="Scroll tabs right"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                  />
+                </svg>
+              </button>
+            )}
 
             <div ref={tabListRef} className="relative flex items-stretch shrink-0">
               <button
