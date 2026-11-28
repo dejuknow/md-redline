@@ -264,6 +264,7 @@ export default function App() {
     whenSaved,
     getTabSnapshot,
     reloadFile,
+    readSettled,
     retryAllAccessDenied,
   } = useTabs({ onSaveError, onExternalContent: onReloadedContent, onPathResolved });
   // The active tab has no content to show yet. A reload keeps the old content
@@ -2350,9 +2351,10 @@ export default function App() {
   // newer change arrived, so an older read never lands over it.
   const onWatcherReconnect = useCallback(
     (path: string, isCurrent: () => boolean) => {
-      fetch(`/api/file?path=${encodeURIComponent(path)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { content?: string; mtime?: number } | null) => {
+      // After this tab's own writes land, for the reason given at readSettled.
+      readSettled(path)
+        .then((read) => (read?.res.ok ? read.data : null))
+        .then((data) => {
           if (typeof data?.content !== 'string' || !isCurrent()) return;
           if (data.content === rawMarkdownRef.current) return;
           if (getTabSnapshot(path)?.dirty === true) {
@@ -2363,7 +2365,7 @@ export default function App() {
         })
         .catch(() => {});
     },
-    [getTabSnapshot, reportAgentFileChange],
+    [getTabSnapshot, reportAgentFileChange, readSettled],
   );
   useFileWatcher({
     filePath: activeFilePath,
@@ -2487,24 +2489,33 @@ export default function App() {
     if (wasHiddenRef.current && activeFilePath) {
       wasHiddenRef.current = false;
       const controller = new AbortController();
-      fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`, {
-        signal: controller.signal,
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: { content?: string; mtime?: number } | null) => {
+      // Read once this tab's own writes to the file have landed (#270): read
+      // while one is out, the old text would come back with the old mtime,
+      // the write's answer would move the mtime forward, and the next comment
+      // would save over the write.
+      readSettled(activeFilePath, { signal: controller.signal })
+        .then((read) => (read?.res.ok ? read.data : null))
+        .then((data) => {
           if (!data?.content) return;
-          if (data.content !== rawMarkdownRef.current) {
-            onExternalChangeRef.current(data.content, data.mtime, activeFilePath);
+          if (data.content === rawMarkdownRef.current) return;
+          // Edits this tab could not save stay until the reader reloads on
+          // purpose: replacing them here would clear the failure a hand-off
+          // checks for. An agent's reply in the file still notifies.
+          if (getTabSnapshot(activeFilePath)?.dirty === true) {
+            reportAgentFileChange(activeFilePath, rawMarkdownRef.current, data.content);
+            return;
           }
+          onExternalChangeRef.current(data.content, data.mtime, activeFilePath);
         })
         .catch((err) => {
           if (err instanceof DOMException && err.name === 'AbortError') return;
-          // Network error — fall back to silent reload
-          reloadFile();
+          // Network error: fall back to a silent reload, unless that would
+          // replace edits the tab could not save.
+          if (getTabSnapshot(activeFilePath)?.dirty !== true) reloadFile();
         });
       return () => controller.abort();
     }
-  }, [pageVisible, activeFilePath, reloadFile]);
+  }, [pageVisible, activeFilePath, reloadFile, readSettled, getTabSnapshot, reportAgentFileChange]);
 
   // Fetch the server's homeDir on mount so the trust prompt can show paths
   // in tilde-shortened form. Independent of the initial-file effect below

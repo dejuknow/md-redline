@@ -249,6 +249,13 @@ export function useTabs(options?: {
   // content was read at, and nothing else, so a change on disk from anywhere
   // else leaves it on its old mtime and the server refuses it.
   const ownWritesRef = useRef(new Map<string, Map<number | undefined, number>>());
+  // Per path: how many writes were ever queued, and how many failed. A read
+  // compares them across its own wait and round trip (see readSettled).
+  const saveSeqRef = useRef(new Map<string, number>());
+  const saveFailuresRef = useRef(new Map<string, number>());
+  // Per path: the newest write queued for it, so a read waits for the file's
+  // own writes and not for every file's.
+  const lastSaveRef = useRef(new Map<string, Promise<void>>());
 
   const setTabDataState = useCallback(
     (updater: Map<string, TabState> | ((prev: Map<string, TabState>) => Map<string, TabState>)) => {
@@ -722,6 +729,9 @@ export function useTabs(options?: {
       const baseMtime = tabDataRef.current.get(path)?.mtime;
       const pending = pendingSavesRef.current;
       pending.set(path, (pending.get(path) ?? 0) + 1);
+      saveSeqRef.current.set(path, (saveSeqRef.current.get(path) ?? 0) + 1);
+      const countFailure = () =>
+        saveFailuresRef.current.set(path, (saveFailuresRef.current.get(path) ?? 0) + 1);
       saveQueueRef.current = saveQueueRef.current.then(async () => {
         let currentMtime = baseMtime;
         const moves = ownWritesRef.current.get(path);
@@ -742,6 +752,7 @@ export function useTabs(options?: {
           if (res.status === 409) {
             const conflict = await readJsonResponse<ConflictResponse>(res);
             const msg = conflict?.error || 'File was modified externally. Reload to see changes.';
+            countFailure();
             updateTab(path, { error: msg });
             onSaveError?.(msg);
             return;
@@ -763,6 +774,7 @@ export function useTabs(options?: {
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Failed to save file';
+          countFailure();
           updateTab(path, { error: msg });
           onSaveError?.(msg);
         } finally {
@@ -771,9 +783,11 @@ export function useTabs(options?: {
           else {
             pending.delete(path);
             ownWritesRef.current.delete(path);
+            lastSaveRef.current.delete(path);
           }
         }
       });
+      lastSaveRef.current.set(path, saveQueueRef.current);
     },
     [updateTab, onSaveError, noteOwnWrite],
   );
@@ -800,13 +814,64 @@ export function useTabs(options?: {
     return tabDataRef.current.get(path);
   }, []);
 
+  /**
+   * Reads `path` from disk once none of this tab's own writes to it are queued
+   * or in flight, so the text and mtime that come back include them (#270). A
+   * read sent while one was still out could land before it wrote: the tab got
+   * the old text with the old mtime, the write's answer then moved that mtime
+   * forward, and the next comment saved over the write without a conflict.
+   *
+   * A write queued during the round trip may have landed after the read, so
+   * the read is made again once it settles. Resolves null when one of the
+   * file's writes failed while this waited: the tab still holds that edit and
+   * its error, and a read asked for before the failure was known is no reason
+   * to replace them. Waiting on the queue does not join it, so other files'
+   * saves never wait on this read.
+   */
+  const readSettled = useCallback(
+    async (
+      path: string,
+      { signal, onRead }: { signal?: AbortSignal; onRead?: () => void } = {},
+    ): Promise<{ res: Response; data: FileResponse | null; priorContent: string } | null> => {
+      const failuresAtStart = saveFailuresRef.current.get(path) ?? 0;
+      // Taken when the first read goes out and kept across passes. A watcher
+      // change that lands while the tab is loading skips reply marking, so a
+      // reply it installs during an earlier pass must still be new against
+      // this text. The cost: a reply the reader adds between passes reads as
+      // arriving too, which is the smaller miss.
+      let priorContent: string | undefined;
+      // Bounded so a reader who keeps commenting cannot hold the read forever;
+      // each pass waits for the writes that interrupted the one before.
+      for (let pass = 0; pass < 5; pass++) {
+        while (pendingSavesRef.current.get(path)) {
+          await (lastSaveRef.current.get(path) ?? saveQueueRef.current);
+        }
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        if ((saveFailuresRef.current.get(path) ?? 0) !== failuresAtStart) return null;
+        const seq = saveSeqRef.current.get(path) ?? 0;
+        onRead?.();
+        priorContent ??= tabDataRef.current.get(path)?.rawMarkdown ?? '';
+        const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`, { signal });
+        const data = await readJsonResponse<FileResponse>(res);
+        if ((saveSeqRef.current.get(path) ?? 0) === seq) return { res, data, priorContent };
+      }
+      return null;
+    },
+    [],
+  );
+
   const reloadFile = useCallback(async () => {
     if (!activeFilePath) return;
-    updateTab(activeFilePath, { isLoading: true, error: null });
+    const path = activeFilePath;
     try {
-      const priorContent = tabDataRef.current.get(activeFilePath)?.rawMarkdown ?? '';
-      const res = await fetch(`/api/file?path=${encodeURIComponent(activeFilePath)}`);
-      const data = await readJsonResponse<FileResponse>(res);
+      const read = await readSettled(path, {
+        onRead: () => updateTab(path, { isLoading: true, error: null }),
+      });
+      if (!read) {
+        updateTab(path, { isLoading: false });
+        return;
+      }
+      const { res, data, priorContent } = read;
       if (!res.ok || !data) {
         throw new Error(getApiErrorMessage(res, data, 'Failed to reload file'));
       }
@@ -814,9 +879,9 @@ export function useTabs(options?: {
       // hidden, and both the SSE stream and the visibility-restore fetch
       // missed it. Without this hook that reply would never be marked unread.
       const content =
-        onExternalContentRef.current?.(activeFilePath, priorContent, data.content, data.mtime) ??
+        onExternalContentRef.current?.(path, priorContent, data.content, data.mtime) ??
         data.content;
-      updateTab(activeFilePath, {
+      updateTab(path, {
         rawMarkdown: content,
         isLoading: false,
         lastSaved: new Date(),
@@ -828,13 +893,13 @@ export function useTabs(options?: {
         dirty: false,
       });
     } catch (err) {
-      updateTab(activeFilePath, {
+      updateTab(path, {
         isLoading: false,
         error: err instanceof Error ? err.message : 'Failed to reload file',
         errorKind: isAccessDeniedError(err) ? 'access-denied' : 'generic',
       });
     }
-  }, [activeFilePath, updateTab]);
+  }, [activeFilePath, updateTab, readSettled]);
 
   const retryAllAccessDenied = useCallback(async () => {
     const paths = findAccessDeniedTabs(tabDataRef.current);
@@ -909,6 +974,7 @@ export function useTabs(options?: {
     whenSaved,
     getTabSnapshot,
     reloadFile,
+    readSettled,
     retryAllAccessDenied,
   };
 }
