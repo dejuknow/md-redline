@@ -505,7 +505,11 @@ describe('useTabs: a queued save and the file on disk', () => {
   // 409 when its expectedMtime is more than 1ms off the file's, the same rule
   // the real one applies. Each write moves the mtime by 100 so the tolerance
   // never blurs two writes together. A PUT to `slowPath` waits for `release`.
+  // After `holdGet(path)`, a GET of that path reads the file at once but
+  // answers only after `releaseGet`, like a read that reaches the server
+  // before a write and comes back after it.
   function stubDisk(slowPath: string, afterWrite?: (path: string) => void) {
+    let slowGetPath: string | undefined;
     const disk = new Map<string, { content: string; mtime: number }>([
       [A, { content: '# A\n', mtime: 1000 }],
       [B, { content: '# B\n', mtime: 2000 }],
@@ -515,6 +519,11 @@ describe('useTabs: a queued save and the file on disk', () => {
     const slowGate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let releaseGet: () => void = () => {};
+    const getGate = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    const gets: string[] = [];
     const json = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), {
         status,
@@ -546,11 +555,22 @@ describe('useTabs: a queued save and the file on disk', () => {
           return json(200, { success: true, path: body.path, mtime });
         }
         const path = decodeURIComponent(String(url).split('path=')[1] ?? '');
-        const file = disk.get(path)!;
+        gets.push(path);
+        const file = { ...disk.get(path)! };
+        if (path === slowGetPath) await getGate;
         return json(200, { path, content: file.content, mtime: file.mtime });
       }),
     );
-    return { disk, puts, release: () => release() };
+    return {
+      disk,
+      puts,
+      gets,
+      release: () => release(),
+      holdGet: (path: string) => {
+        slowGetPath = path;
+      },
+      releaseGet: () => releaseGet(),
+    };
   }
 
   async function openBoth(onSaveError?: (msg: string) => void) {
@@ -700,6 +720,244 @@ describe('useTabs: a queued save and the file on disk', () => {
     });
     expect(puts.filter((p) => p.path === A).map((p) => p.expectedMtime)).toEqual([1000, 1200]);
     expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it('keeps a save that was in flight when the file was reloaded (#270)', async () => {
+    // The reload's read used to go out at once, land before the save wrote,
+    // and hand the tab the old text with the old mtime. The save's answer
+    // then moved that mtime forward, so the next comment saved over the
+    // first one without a conflict.
+    const { disk, puts, release } = stubDisk(A);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    await act(async () => {
+      result.current.updateTab(A, { rawMarkdown: '# A\nfirst\n', dirty: true });
+      result.current.saveFileAt(A, '# A\nfirst\n');
+    });
+    // The write has reached the server and is held there, unanswered.
+    expect(puts.map((p) => p.path)).toEqual([A]);
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    await act(async () => {
+      release();
+      await reload;
+    });
+    expect(result.current.getTabSnapshot(A)?.rawMarkdown).toBe('# A\nfirst\n');
+
+    await act(async () => {
+      const shown = result.current.getTabSnapshot(A)!.rawMarkdown;
+      result.current.saveFileAt(A, `${shown}second\n`);
+      await result.current.whenSaved();
+    });
+    expect(disk.get(A)!.content).toBe('# A\nfirst\nsecond\n');
+    expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it('keeps a comment saved while a reload waited behind an earlier save', async () => {
+    // The reload waits for the first save, but the second comment is queued
+    // before its read goes out, so it waits for that one too and shows both.
+    const { disk, release } = stubDisk(A);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    act(() => {
+      result.current.updateTab(A, { rawMarkdown: '# A\nfirst\n', dirty: true });
+      result.current.saveFileAt(A, '# A\nfirst\n');
+    });
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    act(() => {
+      result.current.updateTab(A, { rawMarkdown: '# A\nfirst\nsecond\n', dirty: true });
+      result.current.saveFileAt(A, '# A\nfirst\nsecond\n');
+    });
+    await act(async () => {
+      release();
+      await reload;
+    });
+    expect(result.current.getTabSnapshot(A)?.rawMarkdown).toBe('# A\nfirst\nsecond\n');
+    expect(result.current.getTabSnapshot(A)?.isLoading).toBe(false);
+
+    await act(async () => {
+      const shown = result.current.getTabSnapshot(A)!.rawMarkdown;
+      result.current.saveFileAt(A, `${shown}third\n`);
+      await result.current.whenSaved();
+    });
+    expect(disk.get(A)!.content).toBe('# A\nfirst\nsecond\nthird\n');
+    expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it('keeps a comment whose save failed while a reload waited for it', async () => {
+    // The user reloads while a comment is saving, and the file moved on, so
+    // the save is refused. The reload was asked for before that was known, so
+    // it leaves the comment and its error in the tab rather than replacing
+    // them with the file: a hand-off then sees the failure, and a second
+    // reload is the explicit way to discard it.
+    const { disk, release } = stubDisk(A);
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+
+    act(() => {
+      result.current.updateTab(A, { rawMarkdown: '# A\nfirst\n', dirty: true });
+      result.current.saveFileAt(A, '# A\nfirst\n');
+    });
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    disk.set(A, { content: '# A rewritten by the agent\n', mtime: 1050 });
+    await act(async () => {
+      release();
+      await reload;
+    });
+
+    expect(disk.get(A)!.content).toBe('# A rewritten by the agent\n');
+    expect(onSaveError).toHaveBeenCalledTimes(1);
+    const tab = result.current.getTabSnapshot(A)!;
+    expect(tab.rawMarkdown).toBe('# A\nfirst\n');
+    expect(tab.dirty).toBe(true);
+    expect(tab.error).toBe('File was modified externally. Reload to see the latest version.');
+    expect(tab.isLoading).toBe(false);
+
+    await act(() => result.current.reloadFile());
+    expect(result.current.getTabSnapshot(A)?.rawMarkdown).toBe('# A rewritten by the agent\n');
+    expect(result.current.getTabSnapshot(A)?.error).toBeNull();
+  });
+
+  it('reads again when a comment is saved while the reload is out', async () => {
+    // The read reached the server before the comment's write did. Shown, its
+    // text would lack the comment while the write's answer moved the mtime.
+    const { disk, gets, holdGet, releaseGet } = stubDisk('');
+    const onSaveError = vi.fn();
+    const { result } = await openBoth(onSaveError);
+    holdGet(A);
+    gets.length = 0;
+
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    await act(async () => {
+      result.current.updateTab(A, { rawMarkdown: '# A\nfirst\n', dirty: true });
+      result.current.saveFileAt(A, '# A\nfirst\n');
+      await result.current.whenSaved();
+    });
+    await act(async () => {
+      releaseGet();
+      await reload;
+    });
+
+    expect(gets).toEqual([A, A]);
+    expect(result.current.getTabSnapshot(A)?.rawMarkdown).toBe('# A\nfirst\n');
+    await act(async () => {
+      const shown = result.current.getTabSnapshot(A)!.rawMarkdown;
+      result.current.saveFileAt(A, `${shown}second\n`);
+      await result.current.whenSaved();
+    });
+    expect(disk.get(A)!.content).toBe('# A\nfirst\nsecond\n');
+    expect(onSaveError).not.toHaveBeenCalled();
+  });
+
+  it("never holds another file's save while a reload is out", async () => {
+    const { disk, holdGet, releaseGet } = stubDisk('');
+    const { result } = await openBoth();
+    holdGet(A);
+
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    await act(async () => {
+      result.current.saveFileAt(B, '# B edited\n');
+      await result.current.whenSaved();
+    });
+    expect(disk.get(B)!.content).toBe('# B edited\n');
+
+    await act(async () => {
+      releaseGet();
+      await reload;
+    });
+  });
+
+  it('judges replies against the text the tab held when the reload went out', async () => {
+    // A watcher change that lands during the read skips reply marking because
+    // the tab is loading, so the reload must still see the reply as new.
+    const onExternalContent = vi.fn((_p: string, _prior: string, next: string) => next);
+    const { disk, holdGet, releaseGet } = stubDisk('');
+    const { result } = renderHook(() => useTabs({ onExternalContent }));
+    await act(() => result.current.openTab(A));
+    holdGet(A);
+
+    disk.set(A, { content: '# A\nreply\n', mtime: 1100 });
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    act(() =>
+      result.current.updateTab(A, { rawMarkdown: '# A\nreply\n', mtime: 1100, dirty: false }),
+    );
+    await act(async () => {
+      releaseGet();
+      await reload;
+    });
+
+    expect(onExternalContent).toHaveBeenLastCalledWith(A, '# A\n', '# A\nreply\n', 1100);
+  });
+
+  it("keeps the first read's text as the reply baseline when the reload reads again", async () => {
+    // Pass one goes out and the tab is loading. A watcher installs an agent
+    // reply, which it does not mark while the tab loads, and the reader saves
+    // a comment, so pass one is thrown away. Pass two must still judge the
+    // reply against the text from before it arrived.
+    const onExternalContent = vi.fn((_p: string, _prior: string, next: string) => next);
+    const { disk, holdGet, releaseGet } = stubDisk('');
+    const { result } = renderHook(() => useTabs({ onExternalContent }));
+    await act(() => result.current.openTab(A));
+    holdGet(A);
+
+    let reload: Promise<void> = Promise.resolve();
+    act(() => {
+      reload = result.current.reloadFile();
+    });
+    disk.set(A, { content: '# A\nreply\n', mtime: 1100 });
+    act(() =>
+      result.current.updateTab(A, { rawMarkdown: '# A\nreply\n', mtime: 1100, dirty: false }),
+    );
+    await act(async () => {
+      result.current.saveFileAt(A, '# A\nreply\nmine\n');
+      await result.current.whenSaved();
+    });
+    await act(async () => {
+      releaseGet();
+      await reload;
+    });
+
+    expect(onExternalContent).toHaveBeenLastCalledWith(A, '# A\n', '# A\nreply\nmine\n', 1200);
+  });
+
+  it("waits only for the reloaded file's own writes", async () => {
+    // A's write lands, then B's is held. The reload of A must not wait on B.
+    const { disk, gets, release } = stubDisk(B);
+    const { result } = await openBoth();
+    gets.length = 0;
+
+    act(() => {
+      result.current.saveFileAt(A, '# A\nfirst\n');
+      result.current.saveFileAt(B, '# B edited\n');
+    });
+    await act(() => result.current.reloadFile());
+    expect(gets).toEqual([A]);
+    expect(result.current.getTabSnapshot(A)?.rawMarkdown).toBe('# A\nfirst\n');
+    expect(disk.get(B)!.content).toBe('# B\n');
+
+    await act(async () => {
+      release();
+      await result.current.whenSaved();
+    });
   });
 
   it('moves the tab to a write outside the queue only from the mtime it was made against', async () => {
