@@ -227,6 +227,51 @@ test.describe('Document panel strip', () => {
         .toBeGreaterThan(60);
     }
   });
+
+  test('a long-named active tab shortens in a narrow strip and grows back when it widens', async ({
+    page,
+  }) => {
+    const longName = resolve(fixtureDir, 'quarterly-planning-notes-with-a-long-name.md');
+    writeFileSync(longName, TEST_DOC_BASELINE);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/?file=${encodeURIComponent(longName)}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+
+    const tab = strip(page).getByTitle(longName);
+    const width = async () => (await tab.boundingBox())!.width;
+    // Wide, it takes the tabs' full 200px.
+    await expect.poll(width).toBeGreaterThan(195);
+
+    // Narrow, it fits the scrollport and its name ends in an ellipsis.
+    await page.setViewportSize({ width: 400, height: 800 });
+    await expect.poll(width).toBeLessThan(150);
+    const port = (await strip(page).locator('.overflow-x-auto').boundingBox())!;
+    expect(await width()).toBeLessThanOrEqual(port.width + 0.5);
+    const ellipsized = await tab
+      .locator('.truncate')
+      .evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(ellipsized).toBe(true);
+
+    // Wide again, it is back to full width rather than stuck at the narrow one.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect.poll(width).toBeGreaterThan(195);
+  });
+
+  test('a wrapped strip lets its tabs reach back over a desktop window inset', async ({ page }) => {
+    await page.setViewportSize({ width: 617, height: 800 });
+    await page.goto(`/?file=${encodeURIComponent(FIXTURE)}`);
+    await page.locator('.prose').waitFor({ timeout: 10_000 });
+    // What a desktop shell sets to clear its window controls on the top row.
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty('--window-inset-left', '70px'),
+    );
+
+    await expect(strip(page)).toHaveAttribute('data-wrapped', 'true');
+    const pageEdge = (await page.locator('[data-doc-page-surface]').boundingBox())!.x;
+    const firstTab = strip(page).getByTitle(FIXTURE);
+    await expect.poll(async () => (await firstTab.boundingBox())!.x).toBeCloseTo(pageEdge, 0);
+    await expect(firstTab).toHaveAttribute('data-tab-flush', '');
+  });
 });
 
 const band = (page: Page) => page.locator('[data-review-band]');

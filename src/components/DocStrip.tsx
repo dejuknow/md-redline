@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Tooltip } from './Tooltip';
 import { useElementNarrowerThan } from '../hooks/useElementNarrowerThan';
 import { useDismiss } from '../hooks/useDismiss';
@@ -160,7 +160,39 @@ export function DocStrip({
 }: DocStripProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   // Not measured yet counts as wide: render the wide layout until we know better.
-  const narrow = useElementNarrowerThan(rootRef, NARROW_STRIP_WIDTH);
+  // The content box: a desktop shell's inset is padding the controls can't
+  // use, and counting it would fold the view switch at a different width from
+  // the one where the controls wrap, so a few px of resize could unwrap them.
+  const narrow = useElementNarrowerThan(rootRef, NARROW_STRIP_WIDTH, 'content');
+  const tabsRowRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const showControls = hasDocument || (focusMode && !!onExitFocus);
+  // Whether the controls sit on a row above the tabs. Read off the layout
+  // rather than predicted, and used only inside the tabs row (see below), so
+  // it can never feed back into where the row breaks.
+  const [wrapped, setWrapped] = useState(false);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const tabsRow = tabsRowRef.current;
+      const controls = controlsRef.current;
+      setWrapped(
+        !!tabsRow &&
+          !!controls &&
+          tabsRow.getBoundingClientRect().top > controls.getBoundingClientRect().top + 1,
+      );
+    };
+    measure();
+    // The rows too: the controls can move onto or off the tabs' row at the
+    // same total height (when they had wrapped their own buttons), which
+    // resizes the rows but not the strip.
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    if (tabsRowRef.current) observer.observe(tabsRowRef.current);
+    if (controlsRef.current) observer.observe(controlsRef.current);
+    return () => observer.disconnect();
+  }, [showControls]);
 
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
@@ -357,105 +389,117 @@ export function DocStrip({
     <div
       ref={rootRef}
       data-doc-strip
+      data-wrapped={wrapped || undefined}
       className="relative z-10 min-h-[34px] flex flex-wrap-reverse items-end gap-x-0.5 pr-0.5 shrink-0"
       // No inset of its own: the first tab sits flush with the page's left
       // edge. A desktop shell's window inset still applies.
       style={{ paddingLeft: 'var(--window-inset-left, 0px)' }}
     >
       <div
+        ref={tabsRowRef}
         data-strip-tabs
-        className="flex-1 basis-0 h-[34px] flex items-end"
+        // A desktop shell's inset clears its window controls on the top row.
+        // Once the controls take that row, the tabs below have nothing to
+        // clear, so the tab bar reaches back over the inset to the page's
+        // edge. The row itself keeps the inset, so where the strip breaks
+        // never depends on whether it has broken.
+        className={`flex-1 basis-0 h-[34px] flex items-end ${
+          wrapped ? '[&>*]:ml-[calc(var(--window-inset-left,0px)*-1)]' : ''
+        }`}
         style={{ minWidth: `min(${TAB_ROW_MIN_WIDTH}px, 100%)` }}
       >
         {tabs}
       </div>
 
-      <div
-        data-strip-controls
-        className="ml-auto max-w-full min-h-[34px] shrink-0 flex flex-wrap items-center justify-end"
-      >
-        {hasDocument && (
-          <div
-            // Wraps its own buttons only when even a row to itself is too
-            // narrow for them.
-            className="min-w-0 max-w-full flex flex-wrap items-center justify-end gap-1 pl-2"
-            data-testid="panel-toolbar"
-          >
-            {!narrow && (
-              <div
-                role="group"
-                aria-label="View"
-                className="flex bg-surface-inset rounded-md p-0.5"
-              >
-                <Tooltip text={renderedLabel}>
-                  <button
-                    type="button"
-                    className={segmentClass(!isRaw)}
-                    onClick={() => setView('rendered')}
-                    aria-label={renderedLabel}
-                    aria-pressed={!isRaw}
-                    title={renderedLabel}
-                  >
-                    <RenderedIcon />
-                  </button>
-                </Tooltip>
-                <Tooltip text={rawLabel}>
-                  <button
-                    type="button"
-                    className={segmentClass(isRaw)}
-                    onClick={() => setView('raw')}
-                    aria-label={rawLabel}
-                    aria-pressed={isRaw}
-                    title={rawLabel}
-                  >
-                    <RawIcon />
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-            {narrow ? (
-              <>
-                {viewMenu}
-                {searchButton}
-              </>
-            ) : (
-              <>
-                {searchButton}
-                {viewMenu}
-              </>
-            )}
+      {showControls && (
+        <div
+          ref={controlsRef}
+          data-strip-controls
+          className="ml-auto max-w-full min-h-[34px] shrink-0 flex flex-wrap items-center justify-end"
+        >
+          {hasDocument && (
+            <div
+              // Wraps its own buttons only when even a row to itself is too
+              // narrow for them.
+              className="min-w-0 max-w-full flex flex-wrap items-center justify-end gap-1 pl-2"
+              data-testid="panel-toolbar"
+            >
+              {!narrow && (
+                <div
+                  role="group"
+                  aria-label="View"
+                  className="flex bg-surface-inset rounded-md p-0.5"
+                >
+                  <Tooltip text={renderedLabel}>
+                    <button
+                      type="button"
+                      className={segmentClass(!isRaw)}
+                      onClick={() => setView('rendered')}
+                      aria-label={renderedLabel}
+                      aria-pressed={!isRaw}
+                      title={renderedLabel}
+                    >
+                      <RenderedIcon />
+                    </button>
+                  </Tooltip>
+                  <Tooltip text={rawLabel}>
+                    <button
+                      type="button"
+                      className={segmentClass(isRaw)}
+                      onClick={() => setView('raw')}
+                      aria-label={rawLabel}
+                      aria-pressed={isRaw}
+                      title={rawLabel}
+                    >
+                      <RawIcon />
+                    </button>
+                  </Tooltip>
+                </div>
+              )}
+              {narrow ? (
+                <>
+                  {viewMenu}
+                  {searchButton}
+                </>
+              ) : (
+                <>
+                  {searchButton}
+                  {viewMenu}
+                </>
+              )}
 
-            {/* No rule here: the outlined comments button and Hand off mark
+              {/* No rule here: the outlined comments button and Hand off mark
               where the view tools end. An empty cell doubles the row's gap
               (4px to 8px) so the two groups still read apart. */}
-            <span aria-hidden="true" />
-            {comments}
-            {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
-          </div>
-        )}
+              <span aria-hidden="true" />
+              {comments}
+              {handOff && <div className="ml-1 flex items-center">{handOff}</div>}
+            </div>
+          )}
 
-        {/* Outside the document's controls, so it is there with no file open
+          {/* Outside the document's controls, so it is there with no file open
           too: focus mode hides both panels, and this is the only button that
           says how to get them back. */}
-        {focusMode && onExitFocus && (
-          <button
-            type="button"
-            data-focus-chip
-            onClick={onExitFocus}
-            aria-label="Exit focus"
-            title="Exit focus mode"
-            className="ml-1 h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-md border border-border text-[12px] font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            Exit focus
-            <kbd
-              aria-hidden="true"
-              className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-muted"
+          {focusMode && onExitFocus && (
+            <button
+              type="button"
+              data-focus-chip
+              onClick={onExitFocus}
+              aria-label="Exit focus"
+              title="Exit focus mode"
+              className="ml-1 h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-md border border-border text-[12px] font-medium text-content-secondary hover:text-content hover:bg-tint transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
-              {isApplePlatform() ? '⌘.' : 'Ctrl+.'}
-            </kbd>
-          </button>
-        )}
-      </div>
+              Exit focus
+              <kbd
+                aria-hidden="true"
+                className="px-1 rounded border border-border-subtle bg-surface font-sans text-[11px] leading-[16px] text-content-muted"
+              >
+                {isApplePlatform() ? '⌘.' : 'Ctrl+.'}
+              </kbd>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -309,9 +309,9 @@ describe('TabBar: the strip look', () => {
 });
 
 describe('TabBar: the flush first tab', () => {
-  function renderInStrip(paddingLeft: string) {
+  function renderInStrip(paddingLeft: string, wrapped = false) {
     return render(
-      <div data-doc-strip style={{ paddingLeft }}>
+      <div data-doc-strip data-wrapped={wrapped || undefined} style={{ paddingLeft }}>
         <TabBar
           tabs={TABS}
           activeFilePath="/docs/one.md"
@@ -335,6 +335,13 @@ describe('TabBar: the flush first tab', () => {
     // stands on the page's corner.
     const { getByTitle } = renderInStrip('22px');
     expect(getByTitle('/docs/one.md').hasAttribute('data-tab-flush')).toBe(false);
+  });
+
+  it('marks it flush again when a wrapped strip puts its controls above the tabs', () => {
+    // The inset clears the window controls on the top row. Wrapped, that row
+    // is the strip's controls, and the tab bar below reaches back to the edge.
+    const { getByTitle } = renderInStrip('22px', true);
+    expect(getByTitle('/docs/one.md').hasAttribute('data-tab-flush')).toBe(true);
   });
 });
 

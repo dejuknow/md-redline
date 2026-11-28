@@ -4013,8 +4013,9 @@ export default function App() {
                   data-sidebar-panel
                 >
                   {/* Top row: the Explorer and Outline switch, and close. Its
-                    34px matches the tab strip, so the two rows share a center
-                    line. Its left padding reads
+                    34px matches the tab strip's top row (the tabs, or the
+                    strip's controls when a narrow strip moves them above the
+                    tabs), so the two rows share a center line. Its left padding reads
                     --window-inset-left, which a desktop shell sets here to clear
                     its window controls; when that leaves the row too narrow,
                     the two switches drop to icons (useLabelsFit, measured). */}
@@ -4165,7 +4166,7 @@ export default function App() {
                   className="absolute inset-y-0 left-0 w-10 flex flex-col items-center pb-1 gap-1.5"
                   // The collapsed form of the open panel, item for item: its
                   // first icon sits on the 34px row the panel's Explorer and
-                  // Outline switch (and the tabs) share, and no logo. A desktop
+                  // Outline switch (and the strip's top row) share, and no logo. A desktop
                   // shell whose window controls sit over this corner sets
                   // --window-inset-top to push the icons below them.
                   style={{ paddingTop: 'calc(var(--window-inset-top, 0px) + 5px)' }}
